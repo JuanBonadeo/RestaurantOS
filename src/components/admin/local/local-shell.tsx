@@ -9,6 +9,7 @@ import { FichajeTab } from "@/components/admin/local/fichaje-tab";
 import { RendicionMozosTab } from "@/components/admin/local/rendicion-mozos-tab";
 import { SalonDesktop } from "@/components/admin/local/salon-desktop";
 import { OrdersRealtimeBoard } from "@/components/admin/orders-realtime-board";
+import { AdminDayList } from "@/components/reservations/admin-day-list";
 import { ErrorBoundary } from "@/components/shared/error-boundary";
 import {
   SalonBoardSkeleton,
@@ -20,6 +21,7 @@ import {
   countPedidosNuevos,
   countPresentes,
   countRendicionesPendientes,
+  countReservasPorSentar,
   countSalonOcupadas,
 } from "@/app/[business_slug]/admin/(authed)/operacion/counts";
 import type {
@@ -28,18 +30,27 @@ import type {
   FichajeData,
   PedidosData,
   RendicionData,
+  ReservasData,
   SalonData,
 } from "@/app/[business_slug]/admin/(authed)/operacion/data";
 import type { BusinessRole } from "@/lib/admin/context";
 import { cn } from "@/lib/utils";
 
-type Tab = "pedidos" | "comandas" | "salon" | "caja" | "rendicion" | "fichaje";
+type Tab =
+  | "pedidos"
+  | "comandas"
+  | "salon"
+  | "reservas"
+  | "caja"
+  | "rendicion"
+  | "fichaje";
 
 function isTab(v: string | null | undefined): v is Tab {
   return (
     v === "pedidos" ||
     v === "comandas" ||
     v === "salon" ||
+    v === "reservas" ||
     v === "caja" ||
     v === "rendicion" ||
     v === "fichaje"
@@ -58,6 +69,7 @@ type ShellProps = {
   caja: Promise<CajaData>;
   rendicion: Promise<RendicionData>;
   fichaje: Promise<FichajeData>;
+  reservas: Promise<ReservasData>;
 };
 
 // ─── Pills: nunca un "0" provisional (FR-006) ────────────────────────────────
@@ -251,6 +263,31 @@ function RendicionPanel({
   );
 }
 
+function ReservasPanel({
+  promise,
+  slug,
+  timezone,
+}: {
+  promise: Promise<ReservasData>;
+  slug: string;
+  timezone: string;
+}) {
+  const { date, rows, floorPlans, activeTables } = use(promise);
+  return (
+    <AdminDayList
+      slug={slug}
+      date={date}
+      rows={rows}
+      timezone={timezone}
+      floorPlans={floorPlans}
+      activeTables={activeTables}
+      // Embebida en el operativo: el navegador de fechas se queda acá
+      // (`?tab=reservas&date=…`) en vez de saltar a /admin/reservas.
+      datePath={`/${slug}/admin/operacion`}
+    />
+  );
+}
+
 function FichajePanel({
   promise,
   slug,
@@ -280,6 +317,7 @@ function TabsInner({
   caja,
   rendicion,
   fichaje,
+  reservas,
 }: ShellProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -315,6 +353,13 @@ function TabsInner({
         count={<Pill promise={salon} compute={(d) => countSalonOcupadas(d.floorPlans)} />}
       >
         Mesas
+      </TabButton>
+      <TabButton
+        active={active === "reservas"}
+        onClick={() => setTab("reservas")}
+        count={<Pill promise={reservas} compute={(d) => countReservasPorSentar(d.rows)} />}
+      >
+        Reservas
       </TabButton>
       <TabButton
         active={active === "comandas"}
@@ -390,6 +435,17 @@ function TabsInner({
             </Suspense>
           </ErrorBoundary>
         </div>
+        {active === "reservas" && (
+          <ErrorBoundary fallback={<TabLoadError />}>
+            <Suspense fallback={<TabContentSkeleton />}>
+              <ReservasPanel
+                promise={reservas}
+                slug={slug}
+                timezone={timezone}
+              />
+            </Suspense>
+          </ErrorBoundary>
+        )}
         {active === "comandas" && (
           <ErrorBoundary fallback={<TabLoadError />}>
             <Suspense fallback={<TabContentSkeleton />}>

@@ -4,6 +4,7 @@ import type {
   SalonOrderRef,
   SalonReservationRef,
 } from "@/components/admin/local/salon-desktop";
+import type { AdminRow } from "@/components/reservations/admin-day-list";
 import { getFloorPlansForBusiness } from "@/lib/admin/floor-plan/queries";
 import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
 import {
@@ -28,6 +29,7 @@ import type {
 } from "@/lib/caja/types";
 import { getMozosByBusiness } from "@/lib/mozo/queries";
 import type { MozoMember } from "@/lib/mozo/queries";
+import type { FloorTable } from "@/lib/reservations/types";
 import { getCurrentPresent } from "@/lib/rrhh/clock-actions";
 import type { PresentEmployee } from "@/lib/rrhh/clock-actions";
 import { getTodaySummary } from "@/lib/rrhh/clock-queries";
@@ -82,6 +84,17 @@ export type RendicionData = {
 export type FichajeData = {
   initialPresent: PresentEmployee[];
   todaySummary?: TodaySummary;
+};
+
+/**
+ * Libro de reservas del día elegido (`?date=`, default hoy en la TZ del negocio).
+ * Es el MISMO dato que sirve `/admin/reservas`: la tab reusa `AdminDayList`.
+ */
+export type ReservasData = {
+  date: string;
+  rows: AdminRow[];
+  floorPlans: Array<{ id: string; name: string }>;
+  activeTables: FloorTable[];
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -260,6 +273,51 @@ export async function loadRendicion(
       user_id: string;
       full_name: string | null;
     }[],
+  };
+}
+
+export async function loadReservas(
+  businessId: string,
+  service: SupabaseClient,
+  window: { date: string; dayStart: Date; dayEnd: Date },
+): Promise<ReservasData> {
+  const [rowsRes, fpRes] = await Promise.all([
+    service
+      .from("reservations")
+      .select("*, tables(label, floor_plans(id, name))")
+      .eq("business_id", businessId)
+      .gte("starts_at", window.dayStart.toISOString())
+      .lt("starts_at", window.dayEnd.toISOString())
+      .order("starts_at", { ascending: true }),
+    service
+      .from("floor_plans")
+      .select("id, name")
+      .eq("business_id", businessId)
+      .order("created_at", { ascending: true }),
+  ]);
+
+  const floorPlans = (fpRes.data ?? []) as Array<{ id: string; name: string }>;
+
+  // Mesas activas: sólo para el modal "Nueva reserva". Sin salones no hay mesas
+  // que buscar (y el `.in()` con lista vacía sería una query al vacío).
+  let activeTables: FloorTable[] = [];
+  if (floorPlans.length > 0) {
+    const { data } = await service
+      .from("tables")
+      .select("*")
+      .in(
+        "floor_plan_id",
+        floorPlans.map((fp) => fp.id),
+      )
+      .eq("status", "active");
+    activeTables = (data ?? []) as FloorTable[];
+  }
+
+  return {
+    date: window.date,
+    rows: (rowsRes.data ?? []) as AdminRow[],
+    floorPlans,
+    activeTables,
   };
 }
 

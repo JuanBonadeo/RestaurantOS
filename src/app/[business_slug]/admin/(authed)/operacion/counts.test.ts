@@ -6,6 +6,7 @@ import {
   countPedidosNuevos,
   countPresentes,
   countRendicionesPendientes,
+  countReservasPorSentar,
   countSalonOcupadas,
 } from "./counts";
 import type { LocalComanda } from "@/lib/admin/local-query";
@@ -67,6 +68,18 @@ describe("operacion/counts — predicados de pills (FR-012)", () => {
     expect(countRendicionesPendientes(pendientes)).toBe(2);
   });
 
+  it("countReservasPorSentar: solo las confirmadas (las sentadas ya están en mesa)", () => {
+    const rows = [
+      { status: "confirmed" as const },
+      { status: "seated" as const },
+      { status: "confirmed" as const },
+      { status: "cancelled" as const },
+      { status: "no_show" as const },
+      { status: "completed" as const },
+    ];
+    expect(countReservasPorSentar(rows)).toBe(2);
+  });
+
   it("countCajas y countPresentes son el largo de su lista", () => {
     expect(countCajas([{}, {}] as unknown as CajaConEstado[])).toBe(2);
     expect(countPresentes([{}] as unknown as PresentEmployee[])).toBe(1);
@@ -77,5 +90,6 @@ describe("operacion/counts — predicados de pills (FR-012)", () => {
     expect(countComandasActivas([])).toBe(0);
     expect(countSalonOcupadas([])).toBe(0);
     expect(countRendicionesPendientes([])).toBe(0);
+    expect(countReservasPorSentar([])).toBe(0);
   });
 });

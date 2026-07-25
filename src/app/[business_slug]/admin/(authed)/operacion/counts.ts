@@ -2,6 +2,7 @@ import type { LocalComanda } from "@/lib/admin/local-query";
 import type { AdminOrder } from "@/lib/admin/orders-query";
 import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
 import type { CajaConEstado, RendicionMozoPendiente } from "@/lib/caja/types";
+import type { ReservationStatus } from "@/lib/reservations/types";
 import type { PresentEmployee } from "@/lib/rrhh/clock-actions";
 
 /**
@@ -51,6 +52,17 @@ export function countRendicionesPendientes(
   pendientes: RendicionMozoPendiente[],
 ): number {
   return pendientes.filter((p) => p.pagos_count > 0).length;
+}
+
+/**
+ * Reservas del día que todavía esperan mesa = `confirmed` (las `seated` ya están
+ * en el salón y las canceladas / no-show no requieren acción). Es el número que
+ * le importa al encargado: cuánta gente falta sentar.
+ */
+export function countReservasPorSentar(
+  rows: { status: ReservationStatus }[],
+): number {
+  return rows.filter((r) => r.status === "confirmed").length;
 }
 
 /** Personal presente ahora (fichados sin salida). */

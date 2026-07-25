@@ -36,6 +36,15 @@ describe("sectionAccess / canSee", () => {
       expect(canSee("configuracion", "encargado")).toBe(false);
     });
 
+    it("NO ve el Dashboard (analítica del negocio, admin-only desde 2026-07-25)", () => {
+      expect(canSee("dashboard", "encargado")).toBe(false);
+    });
+
+    it("sí ve Operación y Reservas (su turno)", () => {
+      expect(sectionAccess("operacion", "encargado")).toBe("full");
+      expect(canSee("reservas", "encargado")).toBe(true);
+    });
+
     it("NO ve las secciones admin de Cajas ni Facturación (sus acciones viven en Operación/cobro)", () => {
       expect(canSee("cajas", "encargado")).toBe(false);
       expect(canSee("facturacion", "encargado")).toBe(false);

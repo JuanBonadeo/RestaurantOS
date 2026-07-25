@@ -91,6 +91,16 @@ function buildNav(
               !p.startsWith(`${adminBase}/pedidos/historial`)),
         },
         {
+          // Reservas vive en Operación (no en Catálogo): es agenda del turno,
+          // no configuración. La misma vista existe como tab del operativo
+          // (`operacion?tab=reservas`); este item abre la página completa.
+          section: "reservas",
+          href: `${adminBase}/reservas`,
+          label: "Reservas",
+          icon: icon(CalendarDays),
+          match: (p) => p.startsWith(`${adminBase}/reservas`),
+        },
+        {
           section: "pedidos",
           href: `${adminBase}/pedidos/historial`,
           label: "Pedidos",
@@ -125,13 +135,6 @@ function buildNav(
           label: "Salones",
           icon: icon(LayoutGrid),
           match: (p) => p.startsWith(`${adminBase}/salones`),
-        },
-        {
-          section: "reservas",
-          href: `${adminBase}/reservas`,
-          label: "Reservas",
-          icon: icon(CalendarDays),
-          match: (p) => p.startsWith(`${adminBase}/reservas`),
         },
       ],
     },

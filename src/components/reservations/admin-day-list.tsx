@@ -150,6 +150,7 @@ export function AdminDayList({
   timezone,
   floorPlans,
   activeTables,
+  datePath,
 }: {
   slug: string;
   date: string;
@@ -157,6 +158,12 @@ export function AdminDayList({
   timezone: string;
   floorPlans: Array<{ id: string; name: string }>;
   activeTables: FloorTable[];
+  /**
+   * Ruta a la que apunta el navegador de fechas. Default: la página
+   * `/admin/reservas`. La tab de Operación pasa `/admin/operacion` para que
+   * cambiar de día no la expulse del operativo (`?tab` se preserva solo).
+   */
+  datePath?: string;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -176,7 +183,8 @@ export function AdminDayList({
   function setDate(next: string) {
     const params = new URLSearchParams(searchParams);
     params.set("date", next);
-    router.push(`/${slug}/admin/reservas?${params.toString()}`);
+    const base = datePath ?? `/${slug}/admin/reservas`;
+    router.push(`${base}?${params.toString()}`);
   }
 
   // ── Actions ──

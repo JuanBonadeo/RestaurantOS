@@ -1,4 +1,5 @@
 import { notFound, redirect } from "next/navigation";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { LocalShell } from "@/components/admin/local/local-shell";
@@ -13,15 +14,19 @@ import {
   loadFichaje,
   loadPedidos,
   loadRendicion,
+  loadReservas,
   loadSalon,
 } from "./data";
 
 export default async function LocalEnVivoPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ business_slug: string }>;
+  searchParams: Promise<{ tab?: string; date?: string }>;
 }) {
   const { business_slug } = await params;
+  const { date: dateQuery } = await searchParams;
   const business = await getBusiness(business_slug);
   if (!business) notFound();
 
@@ -43,6 +48,21 @@ export default async function LocalEnVivoPage({
   const todayStart = startOfTodayUtc(business.timezone);
   const tomorrowStart = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
 
+  // Tab Reservas: el día se elige por `?date=` (el navegador de fechas de
+  // `AdminDayList` lo escribe sin perder `tab`). Default = hoy en la TZ del
+  // negocio, mismo criterio que la página `/admin/reservas`.
+  const reservasDate =
+    dateQuery && /^\d{4}-\d{2}-\d{2}$/.test(dateQuery)
+      ? dateQuery
+      : formatInTimeZone(new Date(), business.timezone, "yyyy-MM-dd");
+  const reservasDayStart = fromZonedTime(
+    `${reservasDate}T00:00:00`,
+    business.timezone,
+  );
+  const reservasDayEnd = new Date(
+    reservasDayStart.getTime() + 24 * 60 * 60 * 1000,
+  );
+
   // Una promesa por grupo de tab. NO se hace `await`: se pasan a LocalShell,
   // que las lee con `use()` dentro de un `<Suspense>` por tab. Salón (default)
   // pinta apenas resuelve `salon`, sin esperar a las demás.
@@ -52,6 +72,11 @@ export default async function LocalEnVivoPage({
   const caja = loadCaja(business.id);
   const rendicion = loadRendicion(business.id, service);
   const fichaje = loadFichaje(business.id, business_slug);
+  const reservas = loadReservas(business.id, service, {
+    date: reservasDate,
+    dayStart: reservasDayStart,
+    dayEnd: reservasDayEnd,
+  });
 
   // /admin/operacion toma full viewport (overlay sobre el sidebar) — sin
   // PageShell/PageHeader: el header con tabs ya vive dentro de LocalShell.
@@ -68,6 +93,7 @@ export default async function LocalEnVivoPage({
       caja={caja}
       rendicion={rendicion}
       fichaje={fichaje}
+      reservas={reservas}
     />
   );
 }

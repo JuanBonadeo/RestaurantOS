@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowUpRight,
@@ -36,6 +36,7 @@ import { getTodayOrders } from "@/lib/admin/orders-query";
 import { getSalonStats } from "@/lib/admin/reports-query";
 import { currentDayOfWeek } from "@/lib/day-of-week";
 import { formatCurrency } from "@/lib/currency";
+import { canSee } from "@/lib/permissions/sections";
 import { getBusiness } from "@/lib/tenant";
 
 function trend(
@@ -66,6 +67,13 @@ export default async function AdminDashboardPage({
   if (!business) notFound();
 
   const ctx = await ensureAdminAccess(business.id, business_slug);
+
+  // Dashboard = analítica del negocio (ingresos, márgenes, CMV): admin/dueño.
+  // Quien no lo ve arranca en Operación — y ese gate resuelve el resto
+  // (mozo/personal caen de ahí a /mozo). Ver matriz en sections.ts.
+  if (!canSee("dashboard", ctx.role, { isPlatformAdmin: ctx.isPlatformAdmin })) {
+    redirect(`/${business_slug}/admin/operacion`);
+  }
 
   const [overview, heatmap, menus, orders, salon, profit, paymentMix] =
     await Promise.all([

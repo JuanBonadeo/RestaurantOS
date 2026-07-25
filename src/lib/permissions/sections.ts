@@ -45,8 +45,13 @@ export type SectionAccess = "full" | "limited" | "none";
 //     sección Cajas (que es config de caja, admin). Por eso `cajas` = none p/ encargado.
 //   - emitir factura → en el flujo de cobro (mozo/encargado), no en la sección
 //     Facturación (config AFIP, admin). Por eso `facturacion` = none p/ encargado.
+//   - reservas del día → también viven como tab dentro de Operación
+//     (`operacion?tab=reservas`); la sección sigue disponible para el encargado.
 const MATRIX: Record<AdminSection, Record<BusinessRole, SectionAccess>> = {
-  dashboard: { admin: "full", encargado: "full", mozo: "none", personal: "none" },
+  // Dashboard: admin-only (decisión 2026-07-25, Juan). Es analítica del negocio
+  // (ingresos, márgenes, CMV, merma) — mismo criterio que Reportes. El encargado
+  // entra directo a Operación: su turno se mide ahí (mesas, caja, rendición).
+  dashboard: { admin: "full", encargado: "none", mozo: "none", personal: "none" },
   operacion: { admin: "full", encargado: "full", mozo: "limited", personal: "none" },
   pedidos: { admin: "full", encargado: "full", mozo: "none", personal: "none" },
   cajas: { admin: "full", encargado: "none", mozo: "none", personal: "none" },
