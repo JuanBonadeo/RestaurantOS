@@ -1,0 +1,9 @@
+{
+  "name": "print-agent-build",
+  "private": true,
+  "type": "module",
+  "description": "Tooling de build/deploy del print-agent (dev-side, no se publica).",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.110.7"
+  }
+}

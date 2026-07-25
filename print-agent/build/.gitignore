@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.exe
+*.zip
+*.backup
+.DS_Store
+.pkg-cache/
