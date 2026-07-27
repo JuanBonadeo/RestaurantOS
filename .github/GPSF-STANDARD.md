@@ -1,82 +1,48 @@
 # Estándar GPSF — cómo se trabaja en este repo
 
-> Canónico. Generado desde `gachetponzellini/claude-dev-kit`. No editar a mano acá:
-> se corrige en el dev-kit y se re-propaga a toda la flota.
+> **La convención completa vive en un solo lugar:**
+> **[`gachetponzellini/claude-dev-kit` → `DESARROLLO.md`](https://github.com/gachetponzellini/claude-dev-kit/blob/main/DESARROLLO.md)**
+>
+> Ese documento es la wiki canónica. Si algo acá lo contradice, gana ese documento.
 
-## 1. Regla de oro
+## Lo mínimo que no se negocia
 
-**El trabajo se ve en GitHub. Si no está en issues y commits, no existe.**
+1. **El trabajo se ve en GitHub.** Si no está en una issue, no existe: no suma progreso,
+   no aparece en tu perfil y no cuenta en la velocidad del proyecto.
 
-El progreso de cada desarrollo se lee de sus **issues**. No de un Excel, no de un mensaje
-de Discord, no de "ya lo hice". Del panel se mira: issues cerradas, abiertas, bloqueadas
-y backlog. Eso es el avance real.
+2. **Las issues, los milestones y las specs viven en el repo `-brain`.** No en los repos
+   de código. Una sola cola, una sola secuencia de sprints, una sola secuencia de specs.
 
-## 2. Dónde vive cada cosa
+3. **Milestones = sprints**: `Sprint NN`, **siempre con due date**.
 
-| Qué | Dónde |
-|---|---|
-| **Issues, milestones, progreso** | **Este repo (el de CÓDIGO)** |
-| Contexto, decisiones, reuniones, errores | El repo `-brain` del cliente |
-| Tracking / vista de PM | `gpsf-command-center.vercel.app` |
+4. **Dos tipos de ítem:**
+   - Spec: título `NN · descripción`, label `sdd`, archivo `specs/NNN-slug/spec.md`
+   - Tarea: título `[área] descripción` — área ∈ `dev · bug · setup · ops · research ·
+     deploy · design · seguridad` (lista cerrada)
 
-Las issues **no** van en el brain. El brain es memoria; el repo de código es trabajo.
+5. **Labels canónicos, únicos:** `sdd` · `status:blocked` · `prio:high|med|low`.
+   El estado **se deriva solo** (cerrada = hecha · `status:blocked` = bloqueada ·
+   abierta tocada ≤7 días = en curso · >7 días = backlog). **No se declara con labels.**
 
-## 3. Nomenclatura de repos
+6. **Commits atómicos** `tipo: descripción`, con `Closes #N` al terminar la issue o
+   `refs #N` si es avance parcial.
 
-Formato: `<slug>-<tipo>`
+7. **Cada uno abre sus propias issues.** El panel atribuye el trabajo al **autor** de la
+   issue, no al assignee: si la abrís vos, el score es tuyo y el de la otra persona queda
+   en cero.
 
-- **Guion medio (`-`) separa el TIPO.** Tipos: `-app` (producto/dev), `-brain` (cerebro
-  del cliente, uno por cliente), `-mock` (maqueta/demo), `-web` (sitio), `-catalog`,
-  `-brief`, `-propuesta`, `-presupuesto`.
-- **Guion bajo (`_`) es un espacio dentro del slug.** Ej: `cam_presupuestador-app`
-  = proyecto "cam presupuestador", tipo app.
-- Todo en minúsculas.
+8. **Nunca** credenciales en commits, issues o comments. Viven en Bitwarden (vault GPSF).
 
-## 4. Issues
+## Nomenclatura de repos
 
-Una issue por bloque de trabajo. Con labels canónicos (ver `.github/labels.yml`):
+`<slug>-<tipo>` — el **guion medio** separa el tipo (`-app`, `-brain`, `-mock`, `-web`,
+`-catalog`), el **guion bajo** es un espacio dentro del slug
+(`cam_presupuestador-app` = proyecto "cam presupuestador", tipo app).
 
-- `status:active` — en progreso
-- `status:blocked` — bloqueada (el body explica por qué y quién destraba)
-- `status:review` — esperando revisión
-- `status:backlog` — identificada pero **todavía no en desarrollo**
-- `prio:high|med|low` · `type:bug|feature|research|ops`
+## Panel
 
-Los 4 estados de la barra de progreso salen de acá:
-**cerradas** (avance) · **abiertas** (en curso) · **bloqueadas** · **backlog**.
-
-```bash
-gh issue create --title "[feature] descripción corta" \
-  --label "type:feature,status:active,prio:high" --milestone "Sprint N"
-```
-
-## 5. Commits
-
-Commits atómicos: `tipo: descripción` (feat/fix/docs/chore), **siempre referenciando su
-issue**:
-
-- `Closes #N` si el commit termina la issue
-- `refs #N` si es avance parcial
-
-Cada commit pega en una issue y marca su nivel de progreso. Un commit sin issue asociada
-es trabajo invisible.
-
-## 6. Proyectos sin issues previas → backfill
-
-Si este repo tiene commits pero no tiene issues, hay que **reconstruir las issues desde
-los commits** antes de seguir: milestones = etapas ya recorridas, issues de lo hecho
-creadas y cerradas en su milestone, y el sprint actual abierto.
-
-Procedimiento completo: `BACKFILL-PROYECTOS.md` en `gachetponzellini/claude-dev-kit`.
-
-## 7. Reglas duras
-
-1. **Nunca hablar directo al cliente.** El output va a Pacho o al dev asignado.
-2. **Nunca exponer credenciales** en commits, issues o comments. Viven en Bitwarden
-   (vault GPSF) y en env vars del VPS.
-3. **Nunca borrar** `errors/`, `meetings/` ni `progress/` en los brains — son append-only.
-4. **Nunca cambiar los labels canónicos** a mano en la UI. Se editan en
-   `.github/labels.yml` y se commitean.
+Los PMs y devs trabajan sobre **`gpsf-command-center.vercel.app`** (login con GitHub).
+`hermes.gachetponzellini.com/tasks` está **dado de baja** — no usar.
 
 ---
 
