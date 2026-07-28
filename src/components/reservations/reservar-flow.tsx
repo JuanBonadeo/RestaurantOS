@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { I, ImageTile } from "@/components/delivery/primitives";
-import { fetchAvailability, fetchFlexibleAvailability } from "@/lib/reservations/availability-actions";
+import { fetchAvailability } from "@/lib/reservations/availability-actions";
 import { arrivalSlots } from "@/lib/reservations/flexible-availability";
 import {
   createFlexibleReservation,
@@ -20,7 +20,6 @@ import type {
 } from "@/lib/reservations/types";
 
 type Slot = { slot: string; starts_at: string; ends_at: string };
-type FreeTable = { id: string; label: string; seats: number };
 
 type Salon = { id: string; name: string };
 
@@ -156,9 +155,6 @@ export function ReservarFlow({
   // Flexible (spec 059): servicio + hora de llegada opcional + mesa opcional.
   const [service, setService] = useState<string>("");
   const [arrivalTime, setArrivalTime] = useState<string>("");
-  const [flexTables, setFlexTables] = useState<FreeTable[]>([]);
-  const [tableId, setTableId] = useState<string | undefined>(undefined);
-  const [loadingFlex, setLoadingFlex] = useState(false);
   const [name, setName] = useState(user.name ?? "");
   const [phone, setPhone] = useState(user.phone ?? "");
   const [notes, setNotes] = useState("");
@@ -243,7 +239,7 @@ export function ReservarFlow({
       });
     }, 120);
     return () => clearTimeout(t);
-  }, [date, partySize, slug, salonId, multiSalon]);
+  }, [isFlexible, date, partySize, slug, salonId, multiSalon]);
 
   // Flexible: elegir el primer servicio disponible cuando cambia la lista.
   useEffect(() => {
@@ -252,29 +248,6 @@ export function ReservarFlow({
       setService(serviceNames[0]);
     }
   }, [isFlexible, serviceNames, service]);
-
-  // Flexible: mesas libres del servicio (para elegir mesa, opcional).
-  useEffect(() => {
-    if (!isFlexible || !service || (multiSalon && !salonId)) {
-      setFlexTables([]);
-      return;
-    }
-    setLoadingFlex(true);
-    setTableId(undefined);
-    const t = setTimeout(() => {
-      fetchFlexibleAvailability({
-        business_slug: slug,
-        date,
-        service,
-        party_size: partySize,
-        ...(salonId ? { floor_plan_id: salonId } : {}),
-      }).then((r) => {
-        setLoadingFlex(false);
-        setFlexTables(r.ok ? r.data.freeTables : []);
-      });
-    }, 120);
-    return () => clearTimeout(t);
-  }, [isFlexible, slug, date, service, partySize, salonId, multiSalon]);
 
   useEffect(() => {
     if (!selectedSlot) return;
@@ -319,7 +292,6 @@ export function ReservarFlow({
             notes,
             source: "web",
             ...(arrivalTime ? { arrival_time: arrivalTime } : {}),
-            ...(tableId ? { table_id: tableId } : {}),
             ...(salonId ? { floor_plan_id: salonId } : {}),
           })
         : await createReservationFromCustomer({
@@ -791,40 +763,6 @@ export function ReservarFlow({
                 </div>
               ) : null}
 
-              {flexTables.length > 0 ? (
-                <div>
-                  <label
-                    htmlFor="flex-table"
-                    style={{ display: "block", fontSize: 12, color: "var(--ink-2)", marginBottom: 6 }}
-                  >
-                    Mesa (opcional)
-                  </label>
-                  <select
-                    id="flex-table"
-                    value={tableId ?? ""}
-                    onChange={(e) => setTableId(e.target.value || undefined)}
-                    disabled={loadingFlex}
-                    style={{
-                      height: 44,
-                      width: "100%",
-                      padding: "0 12px",
-                      borderRadius: 12,
-                      border: "1px solid var(--hairline-2)",
-                      background: "var(--bg)",
-                      color: "var(--ink)",
-                      fontSize: 15,
-                      fontFamily: "inherit",
-                    }}
-                  >
-                    <option value="">Sin preferencia (nos sentamos al llegar)</option>
-                    {flexTables.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.label} ({t.seats})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ) : null}
             </div>
           )}
         </Section>
