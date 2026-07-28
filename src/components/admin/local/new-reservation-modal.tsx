@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarPlus, Loader2, Minus, Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -13,11 +13,19 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { fetchAvailability } from "@/lib/reservations/availability-actions";
-import { createReservationFromAdmin } from "@/lib/reservations/booking-actions";
-import type { FloorTable } from "@/lib/reservations/types";
+import {
+  fetchAvailability,
+  fetchFlexibleAvailability,
+  fetchReservationContext,
+} from "@/lib/reservations/availability-actions";
+import {
+  createFlexibleReservation,
+  createReservationFromAdmin,
+} from "@/lib/reservations/booking-actions";
+import type { FloorTable, ReservationMode, ReservationService } from "@/lib/reservations/types";
 
 type Slot = { slot: string; starts_at: string; ends_at: string };
+type FreeTable = { id: string; label: string; seats: number };
 
 type Props = {
   slug: string;
@@ -25,6 +33,10 @@ type Props = {
   floorPlanId: string | null;
   onClose: () => void;
 };
+
+const INPUT_CLS =
+  "mt-1 h-12 w-full rounded-xl border border-zinc-200 bg-white px-3 text-base focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100";
+const LABEL_CLS = "text-[11px] font-bold uppercase tracking-wider text-zinc-500";
 
 function todayISO(): string {
   return new Intl.DateTimeFormat("en-CA", {
@@ -39,31 +51,72 @@ function maxDateISO(days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-export function NewReservationModal({
-  slug,
-  tables,
-  floorPlanId,
-  onClose,
-}: Props) {
+export function NewReservationModal({ slug, tables, floorPlanId, onClose }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
-  // Form state
+  // Datos compartidos.
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [partySize, setPartySize] = useState(2);
   const [date, setDate] = useState(todayISO());
-  const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
-  const [tableId, setTableId] = useState<string | undefined>(undefined);
   const [notes, setNotes] = useState("");
+  const [tableId, setTableId] = useState<string | undefined>(undefined);
 
-  // Slots
+  // Modo + servicios (spec 059). mode=null → cargando.
+  const [mode, setMode] = useState<ReservationMode | null>(null);
+  const [services, setServices] = useState<ReservationService[]>([]);
+
+  // Estricto: slots.
+  const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
   const [slots, setSlots] = useState<Slot[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
 
-  // Fetch slots when date or partySize changes.
+  // Flexible: servicio + hora opcional + mesas libres + cubiertos.
+  const [service, setService] = useState<string>("");
+  const [arrivalTime, setArrivalTime] = useState<string>("");
+  const [flexTables, setFlexTables] = useState<FreeTable[]>([]);
+  const [flexInfo, setFlexInfo] = useState<{
+    reservedCovers: number;
+    softCapacity: number | null;
+    overCapacity: boolean;
+  } | null>(null);
+  const [loadingFlex, setLoadingFlex] = useState(false);
+
+  // Contexto de modo al abrir.
   useEffect(() => {
-    if (!date || partySize < 1) return;
+    fetchReservationContext({ business_slug: slug }).then((r) => {
+      if (r.ok) {
+        setMode(r.data.mode);
+        setServices(r.data.services);
+      } else {
+        setMode("estricto");
+      }
+    });
+  }, [slug]);
+
+  // Servicios aplicables a la fecha elegida (día exacto o "todos los días").
+  const serviceNames = useMemo(() => {
+    const dow = new Date(
+      Date.UTC(
+        Number(date.slice(0, 4)),
+        Number(date.slice(5, 7)) - 1,
+        Number(date.slice(8, 10)),
+      ),
+    ).getUTCDay();
+    const applicable = services.filter((s) => s.day_of_week == null || s.day_of_week === dow);
+    return Array.from(new Set(applicable.map((s) => s.name)));
+  }, [services, date]);
+
+  useEffect(() => {
+    if (mode === "flexible" && serviceNames.length > 0 && !serviceNames.includes(service)) {
+      setService(serviceNames[0]);
+    }
+  }, [mode, serviceNames, service]);
+
+  // Estricto: slots por fecha + party.
+  useEffect(() => {
+    if (mode !== "estricto" || !date || partySize < 1) return;
     setLoadingSlots(true);
     setSelectedSlot(null);
     fetchAvailability({
@@ -73,34 +126,74 @@ export function NewReservationModal({
       ...(floorPlanId ? { floor_plan_id: floorPlanId } : {}),
     }).then((r) => {
       setLoadingSlots(false);
+      setSlots(r.ok ? r.data : []);
+    });
+  }, [mode, slug, date, partySize, floorPlanId]);
+
+  // Flexible: mesas libres + cubiertos del servicio.
+  useEffect(() => {
+    if (mode !== "flexible" || !service) {
+      setFlexTables([]);
+      setFlexInfo(null);
+      return;
+    }
+    setLoadingFlex(true);
+    setTableId(undefined);
+    fetchFlexibleAvailability({
+      business_slug: slug,
+      date,
+      service,
+      party_size: partySize,
+      ...(floorPlanId ? { floor_plan_id: floorPlanId } : {}),
+    }).then((r) => {
+      setLoadingFlex(false);
       if (r.ok) {
-        setSlots(r.data);
+        setFlexTables(r.data.freeTables);
+        setFlexInfo({
+          reservedCovers: r.data.reservedCovers,
+          softCapacity: r.data.softCapacity,
+          overCapacity: r.data.overCapacity,
+        });
       } else {
-        setSlots([]);
+        setFlexTables([]);
+        setFlexInfo(null);
       }
     });
-  }, [slug, date, partySize, floorPlanId]);
+  }, [mode, slug, date, service, partySize, floorPlanId]);
 
+  const baseValid = name.trim().length > 0 && phone.trim().length >= 4 && !pending;
   const canSubmit =
-    name.trim().length > 0 &&
-    phone.trim().length >= 4 &&
-    selectedSlot !== null &&
-    !pending;
+    mode === "flexible" ? baseValid && service.length > 0 : baseValid && selectedSlot !== null;
 
   const handleSubmit = () => {
-    if (!canSubmit || !selectedSlot) return;
+    if (!canSubmit) return;
     startTransition(async () => {
-      const result = await createReservationFromAdmin({
-        business_slug: slug,
-        date,
-        slot: selectedSlot,
-        party_size: partySize,
-        customer_name: name.trim(),
-        customer_phone: phone.trim(),
-        notes: notes.trim() || undefined,
-        ...(floorPlanId ? { floor_plan_id: floorPlanId } : {}),
-        ...(tableId ? { table_id: tableId } : {}),
-      });
+      const result =
+        mode === "flexible"
+          ? await createFlexibleReservation({
+              business_slug: slug,
+              date,
+              service,
+              party_size: partySize,
+              customer_name: name.trim(),
+              customer_phone: phone.trim(),
+              notes: notes.trim() || undefined,
+              source: "admin",
+              ...(arrivalTime ? { arrival_time: arrivalTime } : {}),
+              ...(tableId ? { table_id: tableId } : {}),
+              ...(floorPlanId ? { floor_plan_id: floorPlanId } : {}),
+            })
+          : await createReservationFromAdmin({
+              business_slug: slug,
+              date,
+              slot: selectedSlot!,
+              party_size: partySize,
+              customer_name: name.trim(),
+              customer_phone: phone.trim(),
+              notes: notes.trim() || undefined,
+              ...(floorPlanId ? { floor_plan_id: floorPlanId } : {}),
+              ...(tableId ? { table_id: tableId } : {}),
+            });
       if (!result.ok) {
         toast.error(result.error);
         return;
@@ -111,8 +204,7 @@ export function NewReservationModal({
     });
   };
 
-  // Only libre tables.
-  const freeTables = tables.filter(
+  const freeTablesEstricto = tables.filter(
     (t) => t.status === "active" && (t.operational_status ?? "libre") === "libre",
   );
 
@@ -123,17 +215,16 @@ export function NewReservationModal({
         if (!o) onClose();
       }}
     >
-      <SheetContent
-        side="bottom"
-        className="max-h-[90vh] rounded-t-3xl sm:mx-auto sm:max-w-lg"
-      >
+      <SheetContent side="bottom" className="max-h-[90vh] rounded-t-3xl sm:mx-auto sm:max-w-lg">
         <SheetHeader>
           <SheetTitle className="font-heading flex items-center gap-2 text-lg font-bold">
             <CalendarPlus className="h-5 w-5 text-blue-600" />
             Nueva reserva
           </SheetTitle>
           <SheetDescription>
-            Crea una reserva manual desde el admin.
+            {mode === "flexible"
+              ? "Libro de reservas — mesa y hora opcionales."
+              : "Crea una reserva manual desde el admin."}
           </SheetDescription>
         </SheetHeader>
 
@@ -144,150 +235,204 @@ export function NewReservationModal({
           }}
           className="flex min-h-0 flex-1 flex-col"
         >
-          {/* Scrollable content */}
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-4">
-          {/* Name */}
-          <div>
-            <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
-              Nombre *
-            </label>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="mt-1 h-12 w-full rounded-xl border border-zinc-200 bg-white px-3 text-base focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-              placeholder="Ej: Pedro García"
-            />
-          </div>
-
-          {/* Phone */}
-          <div>
-            <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
-              Teléfono *
-            </label>
-            <input
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              className="mt-1 h-12 w-full rounded-xl border border-zinc-200 bg-white px-3 text-base focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-              placeholder="+54 9 …"
-              inputMode="tel"
-            />
-          </div>
-
-          {/* Party size stepper */}
-          <div>
-            <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
-              Personas
-            </label>
-            <div className="mt-2 flex items-center justify-between rounded-2xl bg-zinc-50 p-2 ring-1 ring-zinc-200">
-              <button
-                type="button"
-                className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-zinc-700 ring-1 ring-zinc-200 transition active:scale-95 disabled:opacity-30"
-                disabled={partySize <= 1}
-                onClick={() => setPartySize((v) => Math.max(1, v - 1))}
-              >
-                <Minus className="h-4 w-4" />
-              </button>
-              <span className="font-heading text-2xl font-extrabold tabular-nums text-zinc-900">
-                {partySize}
-              </span>
-              <button
-                type="button"
-                className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-zinc-700 ring-1 ring-zinc-200 transition active:scale-95 disabled:opacity-30"
-                disabled={partySize >= 20}
-                onClick={() => setPartySize((v) => Math.min(20, v + 1))}
-              >
-                <Plus className="h-4 w-4" />
-              </button>
+            <div>
+              <label className={LABEL_CLS}>Nombre *</label>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className={INPUT_CLS}
+                placeholder="Ej: Pedro García"
+              />
             </div>
-          </div>
 
-          {/* Date */}
-          <div>
-            <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
-              Fecha
-            </label>
-            <input
-              type="date"
-              value={date}
-              min={todayISO()}
-              max={maxDateISO(60)}
-              onChange={(e) => setDate(e.target.value)}
-              className="mt-1 h-12 w-full rounded-xl border border-zinc-200 bg-white px-3 text-base focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-            />
-          </div>
+            <div>
+              <label className={LABEL_CLS}>Teléfono *</label>
+              <input
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                className={INPUT_CLS}
+                placeholder="+54 9 …"
+                inputMode="tel"
+              />
+            </div>
 
-          {/* Slot grid */}
-          <div>
-            <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
-              Horario
-            </label>
-            {loadingSlots ? (
-              <div className="mt-2 flex items-center justify-center py-6 text-zinc-400">
+            <div>
+              <label className={LABEL_CLS}>Personas</label>
+              <div className="mt-2 flex items-center justify-between rounded-2xl bg-zinc-50 p-2 ring-1 ring-zinc-200">
+                <button
+                  type="button"
+                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-zinc-700 ring-1 ring-zinc-200 transition active:scale-95 disabled:opacity-30"
+                  disabled={partySize <= 1}
+                  onClick={() => setPartySize((v) => Math.max(1, v - 1))}
+                >
+                  <Minus className="h-4 w-4" />
+                </button>
+                <span className="font-heading text-2xl font-extrabold tabular-nums text-zinc-900">
+                  {partySize}
+                </span>
+                <button
+                  type="button"
+                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-zinc-700 ring-1 ring-zinc-200 transition active:scale-95 disabled:opacity-30"
+                  disabled={partySize >= 20}
+                  onClick={() => setPartySize((v) => Math.min(20, v + 1))}
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className={LABEL_CLS}>Fecha</label>
+              <input
+                type="date"
+                value={date}
+                min={todayISO()}
+                max={maxDateISO(60)}
+                onChange={(e) => setDate(e.target.value)}
+                className={INPUT_CLS}
+              />
+            </div>
+
+            {mode === null ? (
+              <div className="flex items-center justify-center py-6 text-zinc-400">
                 <Loader2 className="h-5 w-5 animate-spin" />
               </div>
-            ) : slots.length === 0 ? (
-              <p className="mt-2 text-center text-sm text-zinc-400">
-                Sin horarios disponibles para esta fecha.
-              </p>
-            ) : (
-              <div className="mt-2 grid grid-cols-4 gap-1.5 sm:grid-cols-5">
-                {slots.map((s) => (
-                  <button
-                    key={s.slot}
-                    type="button"
-                    onClick={() => setSelectedSlot(s.slot)}
-                    className={`rounded-xl px-2 py-2.5 text-sm font-semibold transition active:scale-95 ${
-                      selectedSlot === s.slot
-                        ? "bg-blue-600 text-white shadow-sm"
-                        : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
+            ) : mode === "flexible" ? (
+              <>
+                {/* Servicio */}
+                <div>
+                  <label className={LABEL_CLS}>Servicio</label>
+                  {serviceNames.length === 0 ? (
+                    <p className="mt-2 text-center text-sm text-zinc-400">
+                      No hay servicios configurados para esta fecha.
+                    </p>
+                  ) : (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {serviceNames.map((s) => (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => setService(s)}
+                          className={`rounded-xl px-3 py-2 text-sm font-semibold transition active:scale-95 ${
+                            service === s
+                              ? "bg-blue-600 text-white shadow-sm"
+                              : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
+                          }`}
+                        >
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Hora de llegada opcional */}
+                <div>
+                  <label className={LABEL_CLS}>Hora de llegada (opcional)</label>
+                  <input
+                    type="time"
+                    value={arrivalTime}
+                    onChange={(e) => setArrivalTime(e.target.value)}
+                    className={INPUT_CLS}
+                  />
+                </div>
+
+                {/* Cupo blando */}
+                {flexInfo && flexInfo.softCapacity != null ? (
+                  <p
+                    className={`text-sm ${
+                      flexInfo.overCapacity ? "font-semibold text-amber-600" : "text-zinc-500"
                     }`}
                   >
-                    {s.slot}
-                  </button>
-                ))}
-              </div>
+                    {flexInfo.reservedCovers}/{flexInfo.softCapacity} cubiertos reservados
+                    {flexInfo.overCapacity ? " — te pasás del cupo (igual podés reservar)" : ""}
+                  </p>
+                ) : null}
+
+                {/* Mesa opcional */}
+                <div>
+                  <label className={LABEL_CLS}>Mesa (opcional)</label>
+                  <select
+                    value={tableId ?? ""}
+                    onChange={(e) => setTableId(e.target.value || undefined)}
+                    className={INPUT_CLS}
+                    disabled={loadingFlex}
+                  >
+                    <option value="">Sin mesa (se sienta al llegar)</option>
+                    {flexTables.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.label} ({t.seats} sillas)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Estricto: grilla de horarios */}
+                <div>
+                  <label className={LABEL_CLS}>Horario</label>
+                  {loadingSlots ? (
+                    <div className="mt-2 flex items-center justify-center py-6 text-zinc-400">
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                    </div>
+                  ) : slots.length === 0 ? (
+                    <p className="mt-2 text-center text-sm text-zinc-400">
+                      Sin horarios disponibles para esta fecha.
+                    </p>
+                  ) : (
+                    <div className="mt-2 grid grid-cols-4 gap-1.5 sm:grid-cols-5">
+                      {slots.map((s) => (
+                        <button
+                          key={s.slot}
+                          type="button"
+                          onClick={() => setSelectedSlot(s.slot)}
+                          className={`rounded-xl px-2 py-2.5 text-sm font-semibold transition active:scale-95 ${
+                            selectedSlot === s.slot
+                              ? "bg-blue-600 text-white shadow-sm"
+                              : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
+                          }`}
+                        >
+                          {s.slot}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {freeTablesEstricto.length > 0 && (
+                  <div>
+                    <label className={LABEL_CLS}>Mesa (opcional)</label>
+                    <select
+                      value={tableId ?? ""}
+                      onChange={(e) => setTableId(e.target.value || undefined)}
+                      className={INPUT_CLS}
+                    >
+                      <option value="">Auto-asignar</option>
+                      {freeTablesEstricto.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.label} ({t.seats} sillas)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </>
             )}
-          </div>
 
-          {/* Table (optional) */}
-          {freeTables.length > 0 && (
             <div>
-              <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
-                Mesa (opcional)
-              </label>
-              <select
-                value={tableId ?? ""}
-                onChange={(e) =>
-                  setTableId(e.target.value || undefined)
-                }
-                className="mt-1 h-12 w-full rounded-xl border border-zinc-200 bg-white px-3 text-base focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-              >
-                <option value="">Auto-asignar</option>
-                {freeTables.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.label} ({t.seats} sillas)
-                  </option>
-                ))}
-              </select>
+              <label className={LABEL_CLS}>Notas (opcional)</label>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={2}
+                className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-base focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                placeholder="Ej: cumpleaños, alérgico a maní…"
+              />
             </div>
-          )}
-
-          {/* Notes */}
-          <div>
-            <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
-              Notas (opcional)
-            </label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={2}
-              className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-base focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-              placeholder="Ej: cumpleaños, alérgico a maní…"
-            />
           </div>
-        </div>
 
-          {/* Footer — submit button */}
           <SheetFooter className="border-t border-zinc-200">
             <button
               type="submit"

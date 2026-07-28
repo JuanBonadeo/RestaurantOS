@@ -198,6 +198,15 @@ export const ListSalonesQuerySchema = z.object({
   business_slug: z.string().min(1),
 });
 
+/** Spec 059 — disponibilidad del modo flexible: mesas libres + cubiertos de un servicio. */
+export const FlexibleAvailabilityQuerySchema = z.object({
+  business_slug: z.string().min(1),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida (YYYY-MM-DD)"),
+  service: z.string().trim().min(1).max(40),
+  party_size: z.coerce.number().int().min(1).max(100),
+  floor_plan_id: z.string().uuid().optional(),
+});
+
 export type ListSalonesQuery = z.infer<typeof ListSalonesQuerySchema>;
 
 export type AvailabilityQuery = z.infer<typeof AvailabilityQuerySchema>;
