@@ -1500,17 +1500,20 @@ function ActiveTablesList({
 
   return (
     <>
-      <header className="border-border/60 flex items-center justify-between gap-2 border-b px-4 py-3">
-        <div className="min-w-0">
+      {/* Título y acciones van en filas separadas: en 360px de sidebar los tres
+          CTAs no entran al lado del título sin machacarlo (spec 058 sumó el
+          tercero). El `flex-wrap` cubre labels más largos o zoom del navegador. */}
+      <header className="border-border/60 space-y-2 border-b px-4 py-3">
+        <div className="flex items-baseline justify-between gap-2">
           <h3 className="text-foreground text-sm font-bold tracking-tight">
             Mesas
           </h3>
-          <p className="text-muted-foreground text-[11px]">
+          <p className="text-muted-foreground shrink-0 text-[11px]">
             {totalActivas} {totalActivas === 1 ? "activa" : "activas"} · {tables.length} totales
           </p>
         </div>
         {canVentaRapida || canDistribuir || editPlanHref ? (
-          <div className="flex flex-shrink-0 items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             {canVentaRapida && (
               <button
                 type="button"
@@ -1532,20 +1535,22 @@ function ActiveTablesList({
               </button>
             )}
             {editPlanHref && (
+              // Icon-only: es la acción menos frecuente de las tres y así las
+              // otras dos entran en un solo renglón.
               <Link
                 href={editPlanHref}
-                className="inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-3 py-1.5 text-[11px] font-semibold text-zinc-700 ring-1 ring-zinc-200 transition hover:bg-zinc-200 active:scale-[0.97]"
+                className="inline-flex items-center justify-center rounded-full bg-zinc-100 p-2 text-zinc-700 ring-1 ring-zinc-200 transition hover:bg-zinc-200 active:scale-[0.97]"
                 aria-label="Editar mesas del salón"
+                title="Editar mesas del salón"
               >
                 <Pencil className="size-3" />
-                Editar mesas
               </Link>
             )}
           </div>
         ) : (
-          <span className="text-muted-foreground shrink-0 text-[11px]">
-            Tocá para ver
-          </span>
+          <p className="text-muted-foreground text-[11px]">
+            Tocá una mesa para ver el detalle
+          </p>
         )}
       </header>
       <div className="flex-1 overflow-y-auto pb-3">
