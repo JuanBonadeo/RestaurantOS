@@ -64,10 +64,15 @@ const failCounts = new Map(); // comanda_id → fallos consecutivos
 const ESC = "\x1b";
 const GS = "\x1d";
 
-// Tamaño de carácter (GS ! n): nibble alto = ancho, nibble bajo = alto. Solo
-// usamos doble ALTO (0x01) para agrandar; el ancho NO se duplica (GS ! es
-// entero, no hay ×1.3). El plus de ancho se logra con el espaciado lateral.
-const CHAR_SIZE = { sm: "\x00", tall: "\x01" };
+// Tamaño de carácter (GS ! n): nibble alto = ancho, nibble bajo = alto.
+//   sm   → normal          tall → doble alto (0x01)
+//   xl   → doble alto Y doble ancho (0x11), reservado para los ítems.
+const CHAR_SIZE = { sm: "\x00", tall: "\x01", xl: "\x11" };
+
+// Ancho útil en columnas por tamaño (58mm ≈ 384 pt). Celda Font A = 12 pt +
+// CHAR_RIGHT_SPACING → 16 pt ⇒ 24 col; en doble ancho se duplica (32 pt) ⇒ 12
+// col, usamos 11 para dejar margen. Sirve para cortar por palabra.
+const COLS = { sm: 24, tall: 24, xl: 11 };
 
 // Espaciado lateral por carácter (ESC SP n, en puntos). Ensancha el texto sin
 // duplicarlo: celda Font A ≈ 12pt, así que 4 ≈ +33% de ancho. Subir/bajar acá.
@@ -79,6 +84,32 @@ const CHAR_RIGHT_SPACING = 4;
 const LINE_SPACING = 64;
 
 const RULE = "------------------------"; // 24 col (≈ ancho útil 58mm con el espaciado)
+
+/** Corta `text` por palabra a `cols` columnas (palabra más larga → corte duro). */
+function wrap(text, cols) {
+  const out = [];
+  let line = "";
+  for (const word of String(text).split(/\s+/).filter(Boolean)) {
+    let w = word;
+    while (w.length > cols) {
+      if (line) {
+        out.push(line);
+        line = "";
+      }
+      out.push(w.slice(0, cols));
+      w = w.slice(cols);
+    }
+    if (!w) continue;
+    if (!line) line = w;
+    else if (line.length + 1 + w.length <= cols) line += ` ${w}`;
+    else {
+      out.push(line);
+      line = w;
+    }
+  }
+  if (line) out.push(line);
+  return out.length ? out : [""];
+}
 
 /** Arma el ticket como líneas con formato (tamaño/negrita/alineación). */
 function ticketLines(c) {
@@ -115,15 +146,22 @@ function ticketLines(c) {
   if (c.cancelled && c.cancelled_reason) push(`Motivo: ${c.cancelled_reason}`, { bold: true });
 
   push(RULE);
+  push(""); // aire entre el encabezado y el primer ítem
 
-  // Ítems: el corazón de la comanda, en el tamaño más grande.
-  for (const it of c.items ?? []) {
+  // Ítems: el corazón de la comanda. Doble alto Y doble ancho, con un renglón
+  // en blanco entre ítem e ítem — se lee de lejos, se prioriza legibilidad.
+  const items = c.items ?? [];
+  items.forEach((it, i) => {
+    if (i > 0) push(""); // padding entre ítems
     const prefix = c.cancelled ? "ANULADO " : "";
-    push(`${prefix}${it.quantity}x ${it.product_name}`, { size: "tall", bold: true });
-    if (it.modifiers && it.modifiers.length) push(`+ ${it.modifiers.join(", ")}`, { size: "sm" });
-    if (it.notes) push(`obs: ${it.notes}`, { size: "sm", bold: true });
-  }
-  if (!c.items || c.items.length === 0) push("(sin items)");
+    for (const l of wrap(`${prefix}${it.quantity}x ${it.product_name}`, COLS.xl))
+      push(l, { size: "xl", bold: true });
+    if (it.modifiers && it.modifiers.length)
+      for (const l of wrap(`+ ${it.modifiers.join(", ")}`, COLS.tall)) push(l, { size: "tall" });
+    if (it.notes)
+      for (const l of wrap(`obs: ${it.notes}`, COLS.tall)) push(l, { size: "tall", bold: true });
+  });
+  if (items.length === 0) push("(sin items)");
 
   if (c.cancelled) {
     push(RULE);

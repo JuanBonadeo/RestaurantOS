@@ -22,9 +22,17 @@
 const ESC = "\x1b";
 const GS = "\x1d";
 
-// Tamaño de carácter (GS ! n): nibble alto = ancho, nibble bajo = alto. Solo
-// doble ALTO (0x01); el ancho no se duplica (el plus de ancho va por ESC SP).
-const CHAR_SIZE: Record<Size, string> = { sm: "\x00", tall: "\x01" };
+// Tamaño de carácter (GS ! n): nibble alto = ancho, nibble bajo = alto.
+//   sm   → normal          tall → doble alto (0x01)
+//   xl   → doble alto Y doble ancho (0x11), reservado para los ítems.
+const CHAR_SIZE: Record<Size, string> = { sm: "\x00", tall: "\x01", xl: "\x11" };
+
+// Ancho útil en columnas por tamaño (58mm ≈ 384 pt de ancho de cabezal).
+// Celda Font A = 12 pt + CHAR_RIGHT_SPACING → 16 pt ⇒ 24 col. En doble ancho la
+// celda y el espaciado se duplican (24 + 8 = 32 pt) ⇒ 12 col; usamos 11 para
+// dejar margen. Se usa para cortar por palabra en vez de que la impresora parta
+// el nombre del producto a la mitad.
+const COLS: Record<Size, number> = { sm: 24, tall: 24, xl: 11 };
 
 // Espaciado lateral por carácter (ESC SP n) ≈ +33% de ancho sin duplicarlo.
 const CHAR_RIGHT_SPACING = 4;
@@ -56,9 +64,39 @@ export type TicketComanda = {
   items?: TicketItem[] | null;
 };
 
-type Size = "sm" | "tall";
+type Size = "sm" | "tall" | "xl";
 type Align = "left" | "center" | "right";
 type Line = { text: string; size?: Size; bold?: boolean; align?: Align };
+
+/**
+ * Corta `text` por palabra a `cols` columnas. Una palabra más larga que el
+ * ancho se parte a lo bruto (mejor cortada que desbordada). Devuelve al menos
+ * una línea para no perder el renglón.
+ */
+function wrap(text: string, cols: number): string[] {
+  const out: string[] = [];
+  let line = "";
+  for (const word of String(text).split(/\s+/).filter(Boolean)) {
+    let w = word;
+    while (w.length > cols) {
+      if (line) {
+        out.push(line);
+        line = "";
+      }
+      out.push(w.slice(0, cols));
+      w = w.slice(cols);
+    }
+    if (!w) continue;
+    if (!line) line = w;
+    else if (line.length + 1 + w.length <= cols) line += ` ${w}`;
+    else {
+      out.push(line);
+      line = w;
+    }
+  }
+  if (line) out.push(line);
+  return out.length ? out : [""];
+}
 
 /** Arma el ticket como líneas con formato (tamaño/negrita/alineación). */
 export function buildTicketLines(c: TicketComanda): Line[] {
@@ -93,15 +131,23 @@ export function buildTicketLines(c: TicketComanda): Line[] {
   if (c.cancelled && c.cancelled_reason) push(`Motivo: ${c.cancelled_reason}`, { bold: true });
 
   push(RULE);
+  push(""); // aire entre el encabezado y el primer ítem
 
-  // Ítems: el corazón de la comanda, en el tamaño más grande.
-  for (const it of c.items ?? []) {
+  // Ítems: el corazón de la comanda. Doble alto Y doble ancho, con un renglón
+  // en blanco entre ítem e ítem — la cocina los lee de lejos y de un vistazo,
+  // así que se prioriza legibilidad sobre ahorro de papel.
+  const items = c.items ?? [];
+  items.forEach((it, i) => {
+    if (i > 0) push(""); // padding entre ítems
     const prefix = c.cancelled ? "ANULADO " : "";
-    push(`${prefix}${it.quantity}x ${it.product_name}`, { size: "tall", bold: true });
-    if (it.modifiers && it.modifiers.length) push(`+ ${it.modifiers.join(", ")}`, { size: "sm" });
-    if (it.notes) push(`obs: ${it.notes}`, { size: "sm", bold: true });
-  }
-  if (!c.items || c.items.length === 0) push("(sin items)");
+    for (const l of wrap(`${prefix}${it.quantity}x ${it.product_name}`, COLS.xl))
+      push(l, { size: "xl", bold: true });
+    if (it.modifiers && it.modifiers.length)
+      for (const l of wrap(`+ ${it.modifiers.join(", ")}`, COLS.tall)) push(l, { size: "tall" });
+    if (it.notes)
+      for (const l of wrap(`obs: ${it.notes}`, COLS.tall)) push(l, { size: "tall", bold: true });
+  });
+  if (items.length === 0) push("(sin items)");
 
   if (c.cancelled) {
     push(RULE);

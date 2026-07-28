@@ -13,9 +13,15 @@ import fixtures from "./__fixtures__/tickets.json";
 // los mismos bytes → red de seguridad contra una regresión de formato sobre la
 // impresión de golf al mover el render al server (spec 051, D3 · FR-006/SC-003).
 //
-// La comanda base coincide 1:1 con la del harness `freeze-fixtures.mjs` que
-// generó `__fixtures__/tickets.json`. Si cambia el formato a propósito, hay que
-// regenerar los fixtures (y verificar en golf) — no editar a mano.
+// La comanda base coincide 1:1 con la del harness que genera
+// `__fixtures__/tickets.json` (`scripts/freeze-ticket-fixtures.ts`). Si cambia
+// el formato a propósito: actualizar el módulo del server Y el fallback de
+// `print-agent/agent.mjs` en el mismo commit, regenerar los fixtures con el
+// harness y verificar en golf — nunca editar el JSON a mano.
+//
+// 2026-07-28: los ítems pasaron a doble ancho + doble alto, con corte por
+// palabra y un renglón en blanco entre ítems (comandas más largas y legibles).
+// Fixtures regenerados en ese commit; el agente se actualizó en paralelo.
 
 const base: TicketComanda = {
   comanda_id: "ab12cd34-0000-0000-0000-000000000000",
@@ -52,6 +58,42 @@ describe("buildComandaContent · paridad byte-a-byte con el agente", () => {
       expect(plain).toBe(fixtures[name].plain);
     });
   }
+});
+
+describe("buildTicketLines · ítems grandes y espaciados", () => {
+  it("cada ítem va en doble ancho + doble alto (size xl)", () => {
+    const lines = buildTicketLines(base);
+    const item = lines.find((l) => l.text.startsWith("1x Milanesa"));
+    expect(item).toMatchObject({ size: "xl", bold: true });
+  });
+
+  it("corta el nombre por palabra a 11 col en vez de desbordar", () => {
+    const lines = buildTicketLines(base).filter((l) => l.size === "xl");
+    expect(lines.map((l) => l.text)).toEqual([
+      "1x Milanesa",
+      "napolitana",
+      "2x Ñoquis",
+      "1x Café con",
+      "leche",
+    ]);
+    for (const l of lines) expect(l.text.length).toBeLessThanOrEqual(11);
+  });
+
+  it("mete un renglón en blanco entre ítem e ítem (padding)", () => {
+    const texts = buildTicketLines(base).map((l) => l.text);
+    // Después del encabezado y entre los 3 ítems: 1 + 2 renglones vacíos.
+    expect(texts.filter((t) => t === "")).toHaveLength(3);
+    expect(texts[texts.indexOf("2x Ñoquis") - 1]).toBe("");
+  });
+
+  it("una palabra más larga que el ancho se corta duro, no se pierde", () => {
+    const lines = buildTicketLines({
+      ...base,
+      items: [{ quantity: 1, product_name: "Supercalifragilistico", modifiers: [], notes: null }],
+    }).filter((l) => l.size === "xl");
+    expect(lines.map((l) => l.text).join("")).toContain("Supercalifragilistico");
+    for (const l of lines) expect(l.text.length).toBeLessThanOrEqual(11);
+  });
 });
 
 describe("buildComandaContent · base64", () => {
