@@ -97,13 +97,27 @@ export type MenuData = {
 };
 
 /**
+ * Superficie pública que pide el catálogo. Define qué menús del día entran:
+ * - `delivery` (/menu, con carrito) → los marcados `delivery` o `both`.
+ * - `salon` (/carta, el QR de la mesa) → los marcados `salon` o `both`.
+ *
+ * El comensal que escanea el QR está sentado en el salón, así que ve lo mismo
+ * que le ofrecería el mozo — no la oferta de pedidos online.
+ */
+export type MenuSurface = "delivery" | "salon";
+
+/**
  * Catálogo público. `todayDow` es el día de la semana actual (0..6) en el
  * TZ del negocio y se usa para filtrar los menús del día. Se pasa desde el
  * server component para evitar hydration mismatch — nunca calculamos `Date`
  * en el cliente acá.
  */
 export const getMenu = cache(
-  async (businessId: string, todayDow: number): Promise<MenuData> => {
+  async (
+    businessId: string,
+    todayDow: number,
+    surface: MenuSurface = "delivery",
+  ): Promise<MenuData> => {
     const supabase = createSupabaseServiceClient();
 
     const [
@@ -143,7 +157,7 @@ export const getMenu = cache(
         .eq("is_active", true)
         .eq("is_available", true)
         .contains("available_days", [todayDow])
-        .in("display_context", ["delivery", "both"])
+        .in("display_context", [surface, "both"])
         .order("sort_order"),
       supabase
         .from("super_categories")

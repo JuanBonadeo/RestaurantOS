@@ -28,7 +28,9 @@ export default async function CartaPage({
     { locale: es },
   );
 
-  const menu = await getMenu(business.id, todayDow);
+  // Contexto `salon`: quien escanea el QR está sentado en la mesa, así que ve
+  // los menús del día del salón — no los de pedidos online.
+  const menu = await getMenu(business.id, todayDow, "salon");
   const isOpen =
     (business.is_active ?? true) && computeIsOpen(menu.hours, business.timezone);
   const tagline =
