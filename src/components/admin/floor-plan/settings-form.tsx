@@ -7,8 +7,14 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { saveReservationSettings } from "@/lib/reservations/settings-actions";
-import type { ReservationSettings, WeeklySchedule } from "@/lib/reservations/types";
+import { saveReservationSettings, setReservationMode } from "@/lib/reservations/settings-actions";
+import type {
+  ReservationMode,
+  ReservationService,
+  ReservationSettings,
+  WeeklySchedule,
+} from "@/lib/reservations/types";
+import { FlexibleServicesEditor } from "@/components/admin/floor-plan/flexible-services-editor";
 
 const DAYS: Array<{ key: "0" | "1" | "2" | "3" | "4" | "5" | "6"; label: string }> = [
   { key: "1", label: "Lunes" },
@@ -45,12 +51,33 @@ function fromInitial(s: ReservationSettings): FormState {
 export function ReservationSettingsForm({
   slug,
   initial,
+  services,
+  salones,
 }: {
   slug: string;
   initial: ReservationSettings;
+  services: ReservationService[];
+  salones: Array<{ id: string; name: string }>;
 }) {
   const [state, setState] = useState<FormState>(() => fromInitial(initial));
+  const [mode, setMode] = useState<ReservationMode>(initial.mode ?? "estricto");
   const [pending, startTransition] = useTransition();
+  const [modePending, startModeTransition] = useTransition();
+
+  function changeMode(next: ReservationMode) {
+    if (next === mode) return;
+    const prev = mode;
+    setMode(next);
+    startModeTransition(async () => {
+      const result = await setReservationMode({ business_slug: slug, mode: next });
+      if (result.ok) {
+        toast.success(`Modo de reservas: ${next === "flexible" ? "flexible" : "estricto"}`);
+      } else {
+        toast.error(result.error);
+        setMode(prev);
+      }
+    });
+  }
 
   function patch<K extends keyof FormState>(key: K, value: FormState[K]) {
     setState((s) => ({ ...s, [key]: value }));
@@ -99,6 +126,30 @@ export function ReservationSettingsForm({
 
   return (
     <form onSubmit={onSubmit} className="space-y-6">
+      <section className="space-y-3 rounded-2xl border bg-card p-5">
+        <header>
+          <h2 className="text-lg font-semibold">Modo de reservas</h2>
+          <p className="text-sm text-muted-foreground">
+            <strong>Estricto</strong>: turnos fijos con mesa asignada (rotación).{" "}
+            <strong>Flexible</strong>: libro de reservas — mesa opcional, una por mesa por
+            servicio; la hora reserva la mesa hasta el cierre. Sin desalojos.
+          </p>
+        </header>
+        <div className="flex gap-2">
+          {(["estricto", "flexible"] as const).map((m) => (
+            <Button
+              key={m}
+              type="button"
+              variant={mode === m ? "default" : "outline"}
+              onClick={() => changeMode(m)}
+              disabled={modePending}
+            >
+              {m === "estricto" ? "Estricto" : "Flexible"}
+            </Button>
+          ))}
+        </div>
+      </section>
+
       <section className="grid grid-cols-1 gap-4 rounded-2xl border bg-card p-5 sm:grid-cols-2 lg:grid-cols-3">
         <div className="space-y-1.5">
           <Label htmlFor="slot_duration_min">Duración del turno (min)</Label>
@@ -171,6 +222,7 @@ export function ReservationSettingsForm({
         </div>
       </section>
 
+      {mode === "estricto" ? (
       <section className="space-y-3 rounded-2xl border bg-card p-5">
         <header>
           <h2 className="text-lg font-semibold">Horarios y turnos</h2>
@@ -234,6 +286,9 @@ export function ReservationSettingsForm({
           })}
         </div>
       </section>
+      ) : (
+        <FlexibleServicesEditor slug={slug} initialServices={services} salones={salones} />
+      )}
 
       <div className="flex justify-end">
         <Button type="submit" disabled={pending}>
