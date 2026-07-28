@@ -85,6 +85,10 @@ const LINE_SPACING = 64;
 
 const RULE = "------------------------"; // 24 col (≈ ancho útil 58mm con el espaciado)
 
+// Renglones en blanco arriba y abajo del bloque de ítems (entre ítem e ítem va
+// uno solo). Despega la lista de la línea separadora y del corte del papel.
+const EDGE_PADDING = 3;
+
 /** Corta `text` por palabra a `cols` columnas (palabra más larga → corte duro). */
 function wrap(text, cols) {
   const out = [];
@@ -115,6 +119,9 @@ function wrap(text, cols) {
 function ticketLines(c) {
   const L = [];
   const push = (text, opts = {}) => L.push({ text, ...opts });
+  const pad = (n) => {
+    for (let i = 0; i < n; i++) push("");
+  };
 
   // Spec 049: comanda anulada → ticket ANULADA destacado para que cocina
   // descarte lo que ya tenía impreso. Campo aditivo: un agente viejo no recibe
@@ -146,7 +153,7 @@ function ticketLines(c) {
   if (c.cancelled && c.cancelled_reason) push(`Motivo: ${c.cancelled_reason}`, { bold: true });
 
   push(RULE);
-  push(""); // aire entre el encabezado y el primer ítem
+  pad(EDGE_PADDING); // aire entre la línea y el primer ítem
 
   // Ítems: el corazón de la comanda. Doble alto Y doble ancho, con un renglón
   // en blanco entre ítem e ítem — se lee de lejos, se prioriza legibilidad.
@@ -162,6 +169,8 @@ function ticketLines(c) {
       for (const l of wrap(`obs: ${it.notes}`, COLS.tall)) push(l, { size: "tall", bold: true });
   });
   if (items.length === 0) push("(sin items)");
+
+  pad(EDGE_PADDING); // aire entre el último ítem y el corte (o la línea del pie)
 
   if (c.cancelled) {
     push(RULE);

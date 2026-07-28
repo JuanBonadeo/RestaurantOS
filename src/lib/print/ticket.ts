@@ -42,6 +42,10 @@ const LINE_SPACING = 64;
 
 const RULE = "------------------------"; // 24 col (≈ ancho útil 58mm con el espaciado)
 
+// Renglones en blanco arriba y abajo del bloque de ítems (entre ítem e ítem va
+// uno solo). Despega la lista de la línea separadora y del corte del papel.
+const EDGE_PADDING = 3;
+
 const TIMEZONE = "America/Argentina/Buenos_Aires";
 
 export type TicketItem = {
@@ -102,6 +106,9 @@ function wrap(text: string, cols: number): string[] {
 export function buildTicketLines(c: TicketComanda): Line[] {
   const L: Line[] = [];
   const push = (text: string, opts: Omit<Line, "text"> = {}) => L.push({ text, ...opts });
+  const pad = (n: number) => {
+    for (let i = 0; i < n; i++) push("");
+  };
 
   // Spec 049: comanda anulada → ticket ANULADA destacado para que cocina
   // descarte lo que ya tenía impreso.
@@ -131,7 +138,7 @@ export function buildTicketLines(c: TicketComanda): Line[] {
   if (c.cancelled && c.cancelled_reason) push(`Motivo: ${c.cancelled_reason}`, { bold: true });
 
   push(RULE);
-  push(""); // aire entre el encabezado y el primer ítem
+  pad(EDGE_PADDING); // aire entre la línea y el primer ítem
 
   // Ítems: el corazón de la comanda. Doble alto Y doble ancho, con un renglón
   // en blanco entre ítem e ítem — la cocina los lee de lejos y de un vistazo,
@@ -148,6 +155,8 @@ export function buildTicketLines(c: TicketComanda): Line[] {
       for (const l of wrap(`obs: ${it.notes}`, COLS.tall)) push(l, { size: "tall", bold: true });
   });
   if (items.length === 0) push("(sin items)");
+
+  pad(EDGE_PADDING); // aire entre el último ítem y el corte (o la línea del pie)
 
   if (c.cancelled) {
     push(RULE);

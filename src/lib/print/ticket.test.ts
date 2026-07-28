@@ -81,9 +81,17 @@ describe("buildTicketLines · ítems grandes y espaciados", () => {
 
   it("mete un renglón en blanco entre ítem e ítem (padding)", () => {
     const texts = buildTicketLines(base).map((l) => l.text);
-    // Después del encabezado y entre los 3 ítems: 1 + 2 renglones vacíos.
-    expect(texts.filter((t) => t === "")).toHaveLength(3);
     expect(texts[texts.indexOf("2x Ñoquis") - 1]).toBe("");
+    expect(texts[texts.indexOf("2x Ñoquis") - 2]).not.toBe("");
+  });
+
+  it("deja 3 renglones entre la línea separadora y el primer ítem, y 3 al final", () => {
+    const texts = buildTicketLines(base).map((l) => l.text);
+    const rule = texts.lastIndexOf("------------------------");
+    expect(texts.slice(rule + 1, rule + 4)).toEqual(["", "", ""]);
+    expect(texts[rule + 4]).toBe("1x Milanesa");
+    expect(texts.slice(-3)).toEqual(["", "", ""]);
+    expect(texts.at(-4)).toBe("leche");
   });
 
   it("una palabra más larga que el ancho se corta duro, no se pierde", () => {
