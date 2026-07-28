@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-28
 
-**Status**: 🚧 **En progreso (2026-07-28)** — Juan aprobó implementar. **P1 (fundaciones) hecho y commiteado**: motor de disponibilidad flexible puro + 20 tests verdes (`81d764a`) + migración `0022` escrita (`e419ee0`, **pendiente aplicar al cloud**). Clarifications #1/#3/#5 **resueltas** (abajo). **Pendiente**: aplicar migración al cloud + regenerar tipos + wiring (dispatch en `getAvailability`, `createReservation` flexible, `settings-actions`) + UI (config de modo/servicios, panel, flujo cliente) + P3 (no-show relacional, chatbot) + verify en vivo. Milestone: Post-demo · Growth & hardening.
+**Status**: 🚧 **En progreso (2026-07-28)** — Juan aprobó implementar. **P1 (fundaciones) hecho y commiteado**: motor de disponibilidad flexible puro + 20 tests verdes (`81d764a`) + migración `0022` **aplicada al cloud**. Clarifications #1/#3/#5 **resueltas** (abajo). **Hecho también**: server completo (`createFlexibleReservation`, `getFlexibleAvailability`, `setReservationMode` + CRUD `reservation_services`, sentar genérico), config UI (toggle de modo + editor de servicios) y **modal del encargado mode-aware**. `typecheck` + 61 tests + `build` **verdes**. **Pendiente**: flujo cliente web `/reservar` en flexible, totales de cubiertos en el panel admin, P3 (no-show relacional, chatbot), verify en vivo con rol real. Milestone: Post-demo · Growth & hardening.
 
 > **Nota de ejecución (2026-07-28):** se avanza por commits chicos en `master` (el árbol del submódulo lo comparten sesiones paralelas que hacen `git clean`; commitear blinda el trabajo). La **aplicación de la migración al cloud + regen de `database.types.ts`** se difiere hasta que baje el churn paralelo (ese archivo lo están reescribiendo otras sesiones).
 
