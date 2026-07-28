@@ -391,6 +391,11 @@ export async function createFlexibleReservation(
   if (Number.isNaN(starts.getTime())) return actionError("Hora inválida.");
   const ends = window.ends;
 
+  // No se puede reservar para un horario que ya pasó (gracia de 5 min por skew).
+  if (starts.getTime() < Date.now() - 5 * 60_000) {
+    return actionError("Ese horario ya pasó, elegí uno más tarde.");
+  }
+
   // Mesa opcional. Con mesa: valida y deriva la zona. Genérica: usa la zona pedida.
   let tableId: string | null = null;
   let floorPlanId: string | null = data.floor_plan_id ?? null;

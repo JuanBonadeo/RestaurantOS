@@ -206,6 +206,17 @@ export function ReservarFlow({
     [selectedServiceRow],
   );
 
+  // Oculta los horarios ya pasados cuando la fecha elegida es hoy.
+  const shownArrivalOptions = useMemo(() => {
+    if (date !== todayInTz()) return arrivalOptions;
+    const now = new Date();
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    return arrivalOptions.filter((t) => {
+      const [h, m] = t.split(":").map(Number);
+      return h * 60 + m >= nowMin;
+    });
+  }, [arrivalOptions, date]);
+
   useEffect(() => {
     if (isFlexible) return;
     setSelectedSlot(null);
@@ -743,7 +754,7 @@ export function ReservarFlow({
                 })}
               </div>
 
-              {arrivalOptions.length > 0 ? (
+              {shownArrivalOptions.length > 0 ? (
                 <div>
                   <div style={{ fontSize: 12, color: "var(--ink-2)", marginBottom: 8 }}>Horario</div>
                   <div
@@ -753,7 +764,7 @@ export function ReservarFlow({
                       gap: 6,
                     }}
                   >
-                    {arrivalOptions.map((t) => {
+                    {shownArrivalOptions.map((t) => {
                       const active = arrivalTime === t;
                       return (
                         <button

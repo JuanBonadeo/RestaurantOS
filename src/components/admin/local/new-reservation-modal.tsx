@@ -157,6 +157,17 @@ export function NewReservationModal({ slug, tables, floorPlanId, onClose }: Prop
     [selectedServiceRow],
   );
 
+  // Oculta los horarios ya pasados cuando la fecha elegida es hoy.
+  const shownArrivalOptions = useMemo(() => {
+    if (date !== todayISO()) return arrivalOptions;
+    const now = new Date();
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    return arrivalOptions.filter((t) => {
+      const [h, m] = t.split(":").map(Number);
+      return h * 60 + m >= nowMin;
+    });
+  }, [arrivalOptions, date]);
+
   useEffect(() => {
     if (mode === "flexible" && serviceNames.length > 0 && !serviceNames.includes(service)) {
       setService(serviceNames[0]);
@@ -210,7 +221,10 @@ export function NewReservationModal({ slug, tables, floorPlanId, onClose }: Prop
     });
   }, [mode, slug, date, service, partySize, floorPlanId]);
 
-  const baseValid = name.trim().length > 0 && phone.trim().length >= 4 && !pending;
+  // El teléfono es obligatorio en estricto; en flexible es opcional (el libro
+  // del club suele no tenerlo).
+  const baseValid =
+    name.trim().length > 0 && !pending && (mode === "flexible" || phone.trim().length >= 4);
   const canSubmit =
     mode === "flexible"
       ? baseValid && service.length > 0 && arrivalTime.length > 0
@@ -413,11 +427,15 @@ export function NewReservationModal({ slug, tables, floorPlanId, onClose }: Prop
                 {/* Hora de llegada (obligatoria) — chips cada 15 min */}
                 <div>
                   <label className={LABEL_CLS}>Horario</label>
-                  {arrivalOptions.length === 0 ? (
+                  {!service ? (
                     <p className="mt-2 text-sm text-zinc-400">Elegí un servicio primero.</p>
+                  ) : shownArrivalOptions.length === 0 ? (
+                    <p className="mt-2 text-sm text-zinc-400">
+                      No quedan horarios disponibles para este servicio.
+                    </p>
                   ) : (
                     <div className="mt-2 grid grid-cols-4 gap-1.5 sm:grid-cols-5">
-                      {arrivalOptions.map((t) => (
+                      {shownArrivalOptions.map((t) => (
                         <button
                           key={t}
                           type="button"
