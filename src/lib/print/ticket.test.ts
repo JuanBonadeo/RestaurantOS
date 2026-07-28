@@ -72,8 +72,8 @@ describe("buildTicketLines · ítems grandes y espaciados", () => {
     expect(lines.map((l) => l.text)).toEqual([
       "1x Milanesa",
       "napolitana",
-      "2x Ñoquis",
-      "1x Café con",
+      "2x Noquis",
+      "1x Cafe con",
       "leche",
     ]);
     for (const l of lines) expect(l.text.length).toBeLessThanOrEqual(11);
@@ -81,8 +81,8 @@ describe("buildTicketLines · ítems grandes y espaciados", () => {
 
   it("mete un renglón en blanco entre ítem e ítem (padding)", () => {
     const texts = buildTicketLines(base).map((l) => l.text);
-    expect(texts[texts.indexOf("2x Ñoquis") - 1]).toBe("");
-    expect(texts[texts.indexOf("2x Ñoquis") - 2]).not.toBe("");
+    expect(texts[texts.indexOf("2x Noquis") - 1]).toBe("");
+    expect(texts[texts.indexOf("2x Noquis") - 2]).not.toBe("");
   });
 
   it("deja 3 renglones entre la línea separadora y el primer ítem, y 3 al final", () => {
@@ -101,6 +101,37 @@ describe("buildTicketLines · ítems grandes y espaciados", () => {
     }).filter((l) => l.size === "xl");
     expect(lines.map((l) => l.text).join("")).toContain("Supercalifragilistico");
     for (const l of lines) expect(l.text.length).toBeLessThanOrEqual(11);
+  });
+});
+
+describe("buildTicketLines · solo ASCII imprimible", () => {
+  it("saca tildes y eñes: la térmica no las imprime", () => {
+    const texts = buildTicketLines({
+      ...base,
+      items: [
+        {
+          quantity: 1,
+          product_name: "Ñoquis a la püttanesca",
+          modifiers: ["sin cebolla"],
+          notes: "¡rápido!",
+        },
+      ],
+    }).map((l) => l.text);
+    expect(texts.join(" ")).toContain("1x Noquis a la puttanesca");
+    expect(texts).toContain("obs: rapido!");
+  });
+
+  it("traduce los símbolos comunes y descarta el resto", () => {
+    const texts = buildTicketLines({
+      ...base,
+      items: [{ quantity: 1, product_name: "Cafe", modifiers: [], notes: "50° — ok • 🔥 “ya”" }],
+    }).map((l) => l.text);
+    expect(texts.find((t) => t.startsWith("obs:"))).toBe('obs: 50o - ok * "ya"');
+  });
+
+  it("ninguna línea de ningún ticket sale fuera de 0x20–0x7e", () => {
+    for (const c of Object.values(cases))
+      for (const l of buildTicketLines(c)) expect(l.text).toMatch(/^[\x20-\x7e]*$/);
   });
 });
 

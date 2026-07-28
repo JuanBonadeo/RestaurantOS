@@ -72,6 +72,57 @@ type Size = "sm" | "tall" | "xl";
 type Align = "left" | "center" | "right";
 type Line = { text: string; size?: Size; bold?: boolean; align?: Align };
 
+// Reemplazos de los caracteres no-ASCII más comunes. La térmica no recibe
+// codepage, así que todo lo que pase de 0x7e sale como el símbolo que tenga
+// cargado la impresora en su tabla — o sea, basura.
+const ASCII_MAP: Record<string, string> = {
+  "\u00a0": " ", // nbsp / espacio fino / narrow-nbsp (los mete el formato de hora)
+  "\u202f": " ",
+  "\u2009": " ",
+  "\u2013": "-", // – — ‒ −
+  "\u2014": "-",
+  "\u2012": "-",
+  "\u2212": "-",
+  "\u201c": '"', // “ ” „ « »
+  "\u201d": '"',
+  "\u201e": '"',
+  "\u00ab": '"',
+  "\u00bb": '"',
+  "\u2018": "'", // ‘ ’ ‚
+  "\u2019": "'",
+  "\u201a": "'",
+  "\u2026": "...",
+  "\u2022": "*", // •
+  "\u00b7": "-", // ·
+  "\u00b0": "o", // ° º ª
+  "\u00ba": "o",
+  "\u00aa": "a",
+  "\u00bf": "", // ¿ ¡
+  "\u00a1": "",
+  "\u20ac": "EUR",
+  "\u00d7": "x",
+  "\u00df": "ss",
+  "\u00c6": "AE",
+  "\u00e6": "ae",
+  "\u0152": "OE",
+  "\u0153": "oe",
+  "\u00d8": "O",
+  "\u00f8": "o",
+};
+
+/**
+ * Deja el texto en ASCII imprimible: traduce los símbolos del mapa, saca
+ * tildes y diéresis vía NFD (Ñoquis → Noquis, Café → Cafe) y descarta
+ * cualquier resto fuera de 0x20–0x7e (emoji, alfabetos no latinos).
+ */
+function toAscii(text: string): string {
+  return String(text)
+    .replace(/[^\x20-\x7e]/g, (ch) => ASCII_MAP[ch] ?? ch)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // diacríticos sueltos que dejó el NFD
+    .replace(/[^\x20-\x7e]/g, "");
+}
+
 /**
  * Corta `text` por palabra a `cols` columnas. Una palabra más larga que el
  * ancho se parte a lo bruto (mejor cortada que desbordada). Devuelve al menos
@@ -80,7 +131,9 @@ type Line = { text: string; size?: Size; bold?: boolean; align?: Align };
 function wrap(text: string, cols: number): string[] {
   const out: string[] = [];
   let line = "";
-  for (const word of String(text).split(/\s+/).filter(Boolean)) {
+  // Se traduce acá también (es idempotente con el `push`): algunos reemplazos
+  // cambian el largo (… → ...), así que hay que contar los caracteres finales.
+  for (const word of toAscii(text).split(/\s+/).filter(Boolean)) {
     let w = word;
     while (w.length > cols) {
       if (line) {
@@ -105,7 +158,9 @@ function wrap(text: string, cols: number): string[] {
 /** Arma el ticket como líneas con formato (tamaño/negrita/alineación). */
 export function buildTicketLines(c: TicketComanda): Line[] {
   const L: Line[] = [];
-  const push = (text: string, opts: Omit<Line, "text"> = {}) => L.push({ text, ...opts });
+  // Todo el texto del ticket pasa por `toAscii`: la térmica solo imprime ASCII.
+  const push = (text: string, opts: Omit<Line, "text"> = {}) =>
+    L.push({ text: toAscii(text), ...opts });
   const pad = (n: number) => {
     for (let i = 0; i < n; i++) push("");
   };
