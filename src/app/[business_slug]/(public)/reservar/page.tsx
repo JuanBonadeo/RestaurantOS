@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { ReservarFlow } from "@/components/reservations/reservar-flow";
 import {
   getBusinessSalones,
+  getReservationServices,
   getReservationSettings,
 } from "@/lib/reservations/queries";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -45,9 +46,10 @@ export default async function ReservarPage({
     business.address ??
     null;
 
-  const [reservationSettings, salones] = await Promise.all([
+  const [reservationSettings, salones, services] = await Promise.all([
     getReservationSettings(business.id, { useService: true }),
     getBusinessSalones(business.id, { useService: true }),
+    getReservationServices(business.id, { useService: true }),
   ]);
 
   // SPEC 25 (PENDING) — gate suave desactivado:
@@ -74,6 +76,8 @@ export default async function ReservarPage({
         schedule: reservationSettings.schedule,
       }}
       salones={salones}
+      mode={reservationSettings.mode ?? "estricto"}
+      services={services}
       user={{ isLoggedIn: !!user, name, phone, email }}
     />
   );

@@ -7,11 +7,19 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { I, ImageTile } from "@/components/delivery/primitives";
-import { fetchAvailability } from "@/lib/reservations/availability-actions";
-import { createReservationFromCustomer } from "@/lib/reservations/booking-actions";
-import type { ReservationSettings } from "@/lib/reservations/types";
+import { fetchAvailability, fetchFlexibleAvailability } from "@/lib/reservations/availability-actions";
+import {
+  createFlexibleReservation,
+  createReservationFromCustomer,
+} from "@/lib/reservations/booking-actions";
+import type {
+  ReservationMode,
+  ReservationService,
+  ReservationSettings,
+} from "@/lib/reservations/types";
 
 type Slot = { slot: string; starts_at: string; ends_at: string };
+type FreeTable = { id: string; label: string; seats: number };
 
 type Salon = { id: string; name: string };
 
@@ -26,6 +34,8 @@ type Props = {
     "advance_days_max" | "max_party_size" | "slot_duration_min" | "schedule"
   >;
   salones: Salon[];
+  mode: ReservationMode;
+  services: ReservationService[];
   user: {
     isLoggedIn: boolean;
     name: string | null;
@@ -123,9 +133,12 @@ export function ReservarFlow({
   logoUrl,
   settings,
   salones,
+  mode,
+  services,
   user,
 }: Props) {
   const router = useRouter();
+  const isFlexible = mode === "flexible";
   const multiSalon = salones.length > 1;
   // Con un único salón (o ninguno), el flujo legacy se mantiene: no se
   // muestra picker y el server filtra por el primer floor_plan del negocio.
@@ -139,6 +152,12 @@ export function ReservarFlow({
   const [, startSlotsTransition] = useTransition();
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<Slot | null>(null);
+  // Flexible (spec 059): servicio + hora de llegada opcional + mesa opcional.
+  const [service, setService] = useState<string>("");
+  const [arrivalTime, setArrivalTime] = useState<string>("");
+  const [flexTables, setFlexTables] = useState<FreeTable[]>([]);
+  const [tableId, setTableId] = useState<string | undefined>(undefined);
+  const [loadingFlex, setLoadingFlex] = useState(false);
   const [name, setName] = useState(user.name ?? "");
   const [phone, setPhone] = useState(user.phone ?? "");
   const [notes, setNotes] = useState("");
@@ -155,7 +174,17 @@ export function ReservarFlow({
     [minDate, settings.advance_days_max],
   );
 
+  // Flexible: servicios aplicables a la fecha (día exacto o "todos los días").
+  const serviceNames = useMemo(() => {
+    if (!isFlexible) return [];
+    const [y, m, d] = date.split("-").map(Number);
+    const dow = new Date(Date.UTC(y ?? 1970, (m ?? 1) - 1, d ?? 1)).getUTCDay();
+    const applicable = services.filter((s) => s.day_of_week == null || s.day_of_week === dow);
+    return Array.from(new Set(applicable.map((s) => s.name)));
+  }, [isFlexible, services, date]);
+
   useEffect(() => {
+    if (isFlexible) return;
     setSelectedSlot(null);
     // Sin salón elegido en modo multi-salón, no tiene sentido pegarle al
     // server: dejamos slots=null para mostrar el placeholder de "elegí salón".
@@ -182,6 +211,37 @@ export function ReservarFlow({
     return () => clearTimeout(t);
   }, [date, partySize, slug, salonId, multiSalon]);
 
+  // Flexible: elegir el primer servicio disponible cuando cambia la lista.
+  useEffect(() => {
+    if (!isFlexible) return;
+    if (serviceNames.length > 0 && !serviceNames.includes(service)) {
+      setService(serviceNames[0]);
+    }
+  }, [isFlexible, serviceNames, service]);
+
+  // Flexible: mesas libres del servicio (para elegir mesa, opcional).
+  useEffect(() => {
+    if (!isFlexible || !service || (multiSalon && !salonId)) {
+      setFlexTables([]);
+      return;
+    }
+    setLoadingFlex(true);
+    setTableId(undefined);
+    const t = setTimeout(() => {
+      fetchFlexibleAvailability({
+        business_slug: slug,
+        date,
+        service,
+        party_size: partySize,
+        ...(salonId ? { floor_plan_id: salonId } : {}),
+      }).then((r) => {
+        setLoadingFlex(false);
+        setFlexTables(r.ok ? r.data.freeTables : []);
+      });
+    }, 120);
+    return () => clearTimeout(t);
+  }, [isFlexible, slug, date, service, partySize, salonId, multiSalon]);
+
   useEffect(() => {
     if (!selectedSlot) return;
     const id = window.setTimeout(() => {
@@ -191,13 +251,14 @@ export function ReservarFlow({
   }, [selectedSlot]);
 
   function onConfirm() {
-    if (!selectedSlot) return;
+    const done = isFlexible ? service.length > 0 : selectedSlot !== null;
+    if (!done) return;
 
     if (!user.isLoggedIn) {
-      const next = encodeURIComponent(
-        `/${slug}/reservar?date=${date}&party=${partySize}&slot=${selectedSlot.slot}`,
-      );
-      router.push(`/${slug}/login?next=${next}`);
+      const q = isFlexible
+        ? `date=${date}&party=${partySize}&service=${encodeURIComponent(service)}`
+        : `date=${date}&party=${partySize}&slot=${selectedSlot!.slot}`;
+      router.push(`/${slug}/login?next=${encodeURIComponent(`/${slug}/reservar?${q}`)}`);
       return;
     }
 
@@ -208,16 +269,30 @@ export function ReservarFlow({
 
     setSubmitting(true);
     (async () => {
-      const result = await createReservationFromCustomer({
-        business_slug: slug,
-        date,
-        slot: selectedSlot.slot,
-        party_size: partySize,
-        customer_name: name.trim(),
-        customer_phone: phone.trim(),
-        notes,
-        ...(salonId ? { floor_plan_id: salonId } : {}),
-      });
+      const result = isFlexible
+        ? await createFlexibleReservation({
+            business_slug: slug,
+            date,
+            service,
+            party_size: partySize,
+            customer_name: name.trim(),
+            customer_phone: phone.trim(),
+            notes,
+            source: "web",
+            ...(arrivalTime ? { arrival_time: arrivalTime } : {}),
+            ...(tableId ? { table_id: tableId } : {}),
+            ...(salonId ? { floor_plan_id: salonId } : {}),
+          })
+        : await createReservationFromCustomer({
+            business_slug: slug,
+            date,
+            slot: selectedSlot!.slot,
+            party_size: partySize,
+            customer_name: name.trim(),
+            customer_phone: phone.trim(),
+            notes,
+            ...(salonId ? { floor_plan_id: salonId } : {}),
+          });
       if (result.ok) {
         router.push(`/${slug}/reservar/confirmacion?id=${result.data.id}`);
       } else {
@@ -228,7 +303,8 @@ export function ReservarFlow({
   }
 
   const grouped = slots ? groupSlotsByService(slots) : null;
-  const hasFooter = !!selectedSlot;
+  const selectionDone = isFlexible ? service.length > 0 : !!selectedSlot;
+  const hasFooter = selectionDone;
   const initials = getInitial(user);
   const firstName = getFirstName(user);
 
@@ -599,38 +675,137 @@ export function ReservarFlow({
         </Section>
       ) : null}
 
-      {/* Section: Horarios */}
-      <Section label={`Horarios — ${formatLongDate(date)}`}>
-        {multiSalon && !salonId ? (
-          <PickSalonHint />
-        ) : loadingSlots ? (
-          <SlotsSkeleton />
-        ) : slots && slots.length === 0 ? (
-          <EmptySlots />
-        ) : grouped ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            {grouped.lunch.length > 0 && (
-              <SlotGroup
-                label="Almuerzo"
-                slots={grouped.lunch}
-                selectedSlot={selectedSlot}
-                onSelect={setSelectedSlot}
-              />
-            )}
-            {grouped.dinner.length > 0 && (
-              <SlotGroup
-                label="Cena"
-                slots={grouped.dinner}
-                selectedSlot={selectedSlot}
-                onSelect={setSelectedSlot}
-              />
-            )}
-          </div>
-        ) : null}
-      </Section>
+      {/* Section: Servicio (flexible) / Horarios (estricto) */}
+      {isFlexible ? (
+        <Section label={`Servicio — ${formatLongDate(date)}`}>
+          {multiSalon && !salonId ? (
+            <PickSalonHint />
+          ) : serviceNames.length === 0 ? (
+            <EmptySlots />
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {serviceNames.map((s) => {
+                  const active = service === s;
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setService(s)}
+                      style={{
+                        height: 44,
+                        padding: "0 18px",
+                        borderRadius: 12,
+                        border: active ? "none" : "1px solid var(--hairline-2)",
+                        background: active ? "var(--primary)" : "var(--bg)",
+                        color: active ? "var(--primary-foreground)" : "var(--ink)",
+                        fontSize: 14,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                      }}
+                    >
+                      {s}
+                    </button>
+                  );
+                })}
+              </div>
 
-      {/* Section: Datos (only when slot picked) */}
-      {selectedSlot ? (
+              <div>
+                <label
+                  htmlFor="flex-arrival"
+                  style={{ display: "block", fontSize: 12, color: "var(--ink-2)", marginBottom: 6 }}
+                >
+                  Hora de llegada (opcional)
+                </label>
+                <input
+                  id="flex-arrival"
+                  type="time"
+                  value={arrivalTime}
+                  onChange={(e) => setArrivalTime(e.target.value)}
+                  style={{
+                    height: 44,
+                    padding: "0 12px",
+                    borderRadius: 12,
+                    border: "1px solid var(--hairline-2)",
+                    background: "var(--bg)",
+                    color: "var(--ink)",
+                    fontSize: 15,
+                    fontFamily: "inherit",
+                  }}
+                />
+              </div>
+
+              {flexTables.length > 0 ? (
+                <div>
+                  <label
+                    htmlFor="flex-table"
+                    style={{ display: "block", fontSize: 12, color: "var(--ink-2)", marginBottom: 6 }}
+                  >
+                    Mesa (opcional)
+                  </label>
+                  <select
+                    id="flex-table"
+                    value={tableId ?? ""}
+                    onChange={(e) => setTableId(e.target.value || undefined)}
+                    disabled={loadingFlex}
+                    style={{
+                      height: 44,
+                      width: "100%",
+                      padding: "0 12px",
+                      borderRadius: 12,
+                      border: "1px solid var(--hairline-2)",
+                      background: "var(--bg)",
+                      color: "var(--ink)",
+                      fontSize: 15,
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    <option value="">Sin preferencia (nos sentamos al llegar)</option>
+                    {flexTables.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.label} ({t.seats})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+            </div>
+          )}
+        </Section>
+      ) : (
+        <Section label={`Horarios — ${formatLongDate(date)}`}>
+          {multiSalon && !salonId ? (
+            <PickSalonHint />
+          ) : loadingSlots ? (
+            <SlotsSkeleton />
+          ) : slots && slots.length === 0 ? (
+            <EmptySlots />
+          ) : grouped ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              {grouped.lunch.length > 0 && (
+                <SlotGroup
+                  label="Almuerzo"
+                  slots={grouped.lunch}
+                  selectedSlot={selectedSlot}
+                  onSelect={setSelectedSlot}
+                />
+              )}
+              {grouped.dinner.length > 0 && (
+                <SlotGroup
+                  label="Cena"
+                  slots={grouped.dinner}
+                  selectedSlot={selectedSlot}
+                  onSelect={setSelectedSlot}
+                />
+              )}
+            </div>
+          ) : null}
+        </Section>
+      )}
+
+      {/* Section: Datos (only when selection done) */}
+      {selectionDone ? (
         <Section label="Tus datos" refEl={detailsRef}>
           {user.isLoggedIn ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -669,7 +844,7 @@ export function ReservarFlow({
       ) : null}
 
       {/* Sticky bottom CTA */}
-      {selectedSlot ? (
+      {selectionDone ? (
         <div
           style={{
             position: "fixed",
@@ -707,7 +882,11 @@ export function ReservarFlow({
                 className="d-display"
                 style={{ fontSize: 20, lineHeight: 1.1, color: "var(--ink)" }}
               >
-                {selectedSlot.slot} hs
+                {isFlexible
+                  ? arrivalTime
+                    ? `${service} · ${arrivalTime} hs`
+                    : service
+                  : `${selectedSlot!.slot} hs`}
               </div>
             </div>
             <button
