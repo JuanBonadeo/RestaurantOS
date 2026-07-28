@@ -67,7 +67,7 @@ export function TransferTableModal({
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-zinc-300 sm:hidden" />
         <div className="flex items-start justify-between gap-3">
           <h3 className="font-heading text-lg font-bold leading-tight">
-            Transferir mesa {tableLabel}
+            Transferir mozo · Mesa {tableLabel}
           </h3>
           <button
             type="button"
@@ -147,7 +147,7 @@ export function TransferTableModal({
           onClick={onSubmit}
           className="mt-5 flex h-14 w-full items-center justify-center rounded-2xl bg-sky-600 text-base font-bold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-50"
         >
-          {submitting ? "Transferiendo…" : "Transferir"}
+          {submitting ? "Transferiendo…" : "Transferir mozo"}
         </button>
       </div>
     </div>

@@ -2079,9 +2079,9 @@ function TableDetail({
           if (showCargarMas)
             menuItems.push({ key: "cargar-mas", icon: ClipboardList, label: "Cargar más", onClick: onCargarPedido });
           if (canTransfer)
-            menuItems.push({ key: "transferir", icon: ArrowLeftRight, label: "Transferir", onClick: onTransfer });
+            menuItems.push({ key: "transferir", icon: ArrowLeftRight, label: "Transferir mozo", onClick: onTransfer });
           if (canTrasladar)
-            menuItems.push({ key: "trasladar", icon: MoveRight, label: "Trasladar", onClick: onTrasladar });
+            menuItems.push({ key: "trasladar", icon: MoveRight, label: "Trasladar mesa", onClick: onTrasladar });
 
           const hasMenu = menuItems.length > 0 || canAnular;
           if (!primary && !hasMenu) return null;

@@ -713,7 +713,7 @@ export function MozoClient({
                     <MesaActionTile
                       key="transferir"
                       icon={ArrowLeftRight}
-                      label={isOtherMozosTable ? "Tomar mesa" : "Transferir"}
+                      label={isOtherMozosTable ? "Tomar mesa" : "Transferir mozo"}
                       tone="sky"
                       disabled={loading}
                       onClick={() => {
@@ -738,7 +738,7 @@ export function MozoClient({
                     <MesaActionTile
                       key="trasladar"
                       icon={MoveRight}
-                      label="Trasladar"
+                      label="Trasladar mesa"
                       tone="violet"
                       disabled={loading}
                       onClick={() => setTrasladarTableId(selectedSync.id)}

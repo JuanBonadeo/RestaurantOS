@@ -130,7 +130,7 @@ export function TrasladarMesaModal({
           className="mt-5 flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-sky-600 text-base font-bold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-50"
         >
           <MoveRight className="h-5 w-5" />
-          {submitting ? "Trasladando…" : "Trasladar"}
+          {submitting ? "Trasladando…" : "Trasladar mesa"}
         </button>
       </div>
     </div>
