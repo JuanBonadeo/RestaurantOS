@@ -108,8 +108,10 @@ export const CreateFlexibleReservationInputSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida (YYYY-MM-DD)"),
   /** Nombre del servicio (matchea reservation_services.name). */
   service: z.string().trim().min(1).max(40),
-  /** Hora de llegada opcional (HH:MM). Si no viene, se usa la apertura del servicio. */
-  arrival_time: z.string().regex(TIME_HHMM, "Hora inválida").optional(),
+  /** Hora de llegada (HH:MM). Obligatoria: el local siempre carga la reserva con horario. */
+  arrival_time: z
+    .string({ error: "Elegí un horario de llegada." })
+    .regex(TIME_HHMM, "Hora inválida"),
   party_size: z.coerce.number().int().min(1).max(100),
   /** Mesa puntual (opcional). Si no viene, la reserva es genérica. */
   table_id: z.string().uuid().optional(),

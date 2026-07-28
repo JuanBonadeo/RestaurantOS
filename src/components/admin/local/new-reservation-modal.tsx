@@ -163,7 +163,9 @@ export function NewReservationModal({ slug, tables, floorPlanId, onClose }: Prop
 
   const baseValid = name.trim().length > 0 && phone.trim().length >= 4 && !pending;
   const canSubmit =
-    mode === "flexible" ? baseValid && service.length > 0 : baseValid && selectedSlot !== null;
+    mode === "flexible"
+      ? baseValid && service.length > 0 && arrivalTime.length > 0
+      : baseValid && selectedSlot !== null;
 
   const handleSubmit = () => {
     if (!canSubmit) return;
@@ -327,9 +329,9 @@ export function NewReservationModal({ slug, tables, floorPlanId, onClose }: Prop
                   )}
                 </div>
 
-                {/* Hora de llegada opcional */}
+                {/* Hora de llegada (obligatoria) */}
                 <div>
-                  <label className={LABEL_CLS}>Hora de llegada (opcional)</label>
+                  <label className={LABEL_CLS}>Hora de llegada</label>
                   <input
                     type="time"
                     value={arrivalTime}

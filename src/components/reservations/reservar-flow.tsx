@@ -254,6 +254,11 @@ export function ReservarFlow({
     const done = isFlexible ? service.length > 0 : selectedSlot !== null;
     if (!done) return;
 
+    if (isFlexible && !arrivalTime) {
+      toast.error("Elegí un horario de llegada.");
+      return;
+    }
+
     if (!user.isLoggedIn) {
       const q = isFlexible
         ? `date=${date}&party=${partySize}&service=${encodeURIComponent(service)}`
@@ -305,6 +310,7 @@ export function ReservarFlow({
   const grouped = slots ? groupSlotsByService(slots) : null;
   const selectionDone = isFlexible ? service.length > 0 : !!selectedSlot;
   const hasFooter = selectionDone;
+  const ctaDisabled = submitting || (isFlexible && !arrivalTime);
   const initials = getInitial(user);
   const firstName = getFirstName(user);
 
@@ -716,7 +722,7 @@ export function ReservarFlow({
                   htmlFor="flex-arrival"
                   style={{ display: "block", fontSize: 12, color: "var(--ink-2)", marginBottom: 6 }}
                 >
-                  Hora de llegada (opcional)
+                  Hora de llegada
                 </label>
                 <input
                   id="flex-arrival"
@@ -892,7 +898,7 @@ export function ReservarFlow({
             <button
               type="button"
               onClick={onConfirm}
-              disabled={submitting}
+              disabled={ctaDisabled}
               style={{
                 height: 48,
                 padding: "0 22px",
@@ -903,8 +909,8 @@ export function ReservarFlow({
                 fontWeight: 600,
                 letterSpacing: -0.1,
                 border: "none",
-                cursor: submitting ? "default" : "pointer",
-                opacity: submitting ? 0.6 : 1,
+                cursor: ctaDisabled ? "default" : "pointer",
+                opacity: ctaDisabled ? 0.6 : 1,
                 transition: "opacity 200ms",
                 whiteSpace: "nowrap",
                 fontFamily: "inherit",
