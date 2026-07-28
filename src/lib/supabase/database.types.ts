@@ -2631,6 +2631,7 @@ export type Database = {
           name: string
           prep_time_minutes: number | null
           price_cents: number
+          show_online: boolean
           slug: string
           sort_order: number
           station_id: string | null
@@ -2649,6 +2650,7 @@ export type Database = {
           name: string
           prep_time_minutes?: number | null
           price_cents: number
+          show_online?: boolean
           slug: string
           sort_order?: number
           station_id?: string | null
@@ -2667,6 +2669,7 @@ export type Database = {
           name?: string
           prep_time_minutes?: number | null
           price_cents?: number
+          show_online?: boolean
           slug?: string
           sort_order?: number
           station_id?: string | null

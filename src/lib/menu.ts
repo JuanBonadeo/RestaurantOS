@@ -126,6 +126,9 @@ export const getMenu = cache(
         )
         .eq("business_id", businessId)
         .eq("is_active", true)
+        // spec 0021 — la carta online muestra un subconjunto curado del catálogo.
+        // El mozo (mozo/catalog-query.ts) NO filtra por acá: sigue viendo todo.
+        .eq("show_online", true)
         .order("sort_order"),
       supabase
         .from("business_hours")
