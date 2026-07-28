@@ -2807,6 +2807,60 @@ export type Database = {
           },
         ]
       }
+      reservation_services: {
+        Row: {
+          business_id: string
+          closes_at: string
+          created_at: string
+          day_of_week: number | null
+          floor_plan_id: string | null
+          id: string
+          name: string
+          opens_at: string
+          soft_capacity: number | null
+          updated_at: string
+        }
+        Insert: {
+          business_id: string
+          closes_at: string
+          created_at?: string
+          day_of_week?: number | null
+          floor_plan_id?: string | null
+          id?: string
+          name: string
+          opens_at: string
+          soft_capacity?: number | null
+          updated_at?: string
+        }
+        Update: {
+          business_id?: string
+          closes_at?: string
+          created_at?: string
+          day_of_week?: number | null
+          floor_plan_id?: string | null
+          id?: string
+          name?: string
+          opens_at?: string
+          soft_capacity?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reservation_services_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reservation_services_floor_plan_id_fkey"
+            columns: ["floor_plan_id"]
+            isOneToOne: false
+            referencedRelation: "floor_plans"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       reservation_settings: {
         Row: {
           advance_days_max: number
@@ -2814,6 +2868,7 @@ export type Database = {
           business_id: string
           lead_time_min: number
           max_party_size: number
+          mode: string
           no_show_grace_min: number
           schedule: Json
           slot_duration_min: number
@@ -2825,6 +2880,7 @@ export type Database = {
           business_id: string
           lead_time_min?: number
           max_party_size?: number
+          mode?: string
           no_show_grace_min?: number
           schedule?: Json
           slot_duration_min?: number
@@ -2836,6 +2892,7 @@ export type Database = {
           business_id?: string
           lead_time_min?: number
           max_party_size?: number
+          mode?: string
           no_show_grace_min?: number
           schedule?: Json
           slot_duration_min?: number
@@ -2854,6 +2911,8 @@ export type Database = {
       reservations: {
         Row: {
           business_id: string
+          floor_plan_id: string | null
+          service: string | null
           client_confirmed_at: string | null
           confirm_token: string
           created_at: string
@@ -2873,6 +2932,8 @@ export type Database = {
         }
         Insert: {
           business_id: string
+          floor_plan_id?: string | null
+          service?: string | null
           client_confirmed_at?: string | null
           confirm_token?: string
           created_at?: string
@@ -2892,6 +2953,8 @@ export type Database = {
         }
         Update: {
           business_id?: string
+          floor_plan_id?: string | null
+          service?: string | null
           client_confirmed_at?: string | null
           confirm_token?: string
           created_at?: string

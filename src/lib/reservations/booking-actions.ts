@@ -10,15 +10,19 @@ import { notifyReservationConfirmed } from "@/lib/notifications/reservation-noti
 import { canManageReservations } from "@/lib/permissions/can";
 import { isTableAvailableForReservation, pickTableExcluding } from "@/lib/reservations/assign-table";
 import {
+  getAllReservableTables,
   getBusinessBySlug,
   getBusinessTables,
   getReservationActor,
+  getReservationServiceByName,
   getReservationSettings,
   getReservationsInRange,
 } from "@/lib/reservations/queries";
+import { flexibleServiceWindow } from "@/lib/reservations/flexible-availability";
 import {
   AdminCreateReservationInputSchema,
   CancelOwnReservationInputSchema,
+  CreateFlexibleReservationInputSchema,
   CreateReservationInputSchema,
   SentarReservaInputSchema,
   UpdateReservationDetailsInputSchema,
@@ -324,6 +328,137 @@ export async function createReservationFromAdmin(
   return result;
 }
 
+/**
+ * Spec 059 — crear una reserva en MODO FLEXIBLE (libro de reservas).
+ * La mesa es opcional (genérica → se sienta al llegar), la hora es opcional
+ * (sin hora → apertura del servicio). Regla dura: una reserva por (mesa,
+ * servicio, fecha) — la garantiza el GIST con `ends_at = cierre del servicio`.
+ * NO usa `pickTable`. Los 3 canales (web/chatbot/admin) entran acá cuando el
+ * negocio está en modo flexible.
+ */
+export async function createFlexibleReservation(
+  input: unknown,
+): Promise<ActionResult<{ id: string }>> {
+  const parsed = CreateFlexibleReservationInputSchema.safeParse(input);
+  if (!parsed.success) {
+    return actionError(parsed.error.issues[0]?.message ?? "Datos inválidos.");
+  }
+  const data = parsed.data;
+
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const business = await getBusinessBySlug(data.business_slug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  // Auth por canal: admin exige permiso de gestión; cliente exige login.
+  if (data.source === "admin") {
+    if (!user) return actionError("No autenticado.");
+    if (!(await canManage(business.id, user.id))) return actionError("Permiso denegado.");
+  } else if (!user) {
+    return actionError("Necesitás iniciar sesión para reservar.");
+  }
+
+  const settings = await getReservationSettings(business.id, { useService: true });
+  if (settings.mode !== "flexible") {
+    return actionError("Este negocio no usa el modo de reservas flexible.");
+  }
+  if (data.party_size < 1 || data.party_size > settings.max_party_size) {
+    return actionError(`El máximo es ${settings.max_party_size} comensales.`);
+  }
+
+  // Servicio + ventana [apertura, cierre].
+  const dow = new Date(
+    Date.UTC(
+      Number(data.date.slice(0, 4)),
+      Number(data.date.slice(5, 7)) - 1,
+      Number(data.date.slice(8, 10)),
+    ),
+  ).getUTCDay();
+  const svc = await getReservationServiceByName(business.id, data.service, dow, {
+    useService: true,
+  });
+  if (!svc) return actionError("Ese servicio no está disponible ese día.");
+  const window = flexibleServiceWindow(data.date, svc, business.timezone);
+  if (!window) return actionError("El horario del servicio es inválido.");
+
+  // starts = llegada (si viene) o apertura del servicio; ends = cierre del servicio.
+  const starts = data.arrival_time
+    ? fromZonedTime(`${data.date}T${data.arrival_time}:00`, business.timezone)
+    : window.starts;
+  if (Number.isNaN(starts.getTime())) return actionError("Hora inválida.");
+  const ends = window.ends;
+
+  // Mesa opcional. Con mesa: valida y deriva la zona. Genérica: usa la zona pedida.
+  let tableId: string | null = null;
+  let floorPlanId: string | null = data.floor_plan_id ?? null;
+  if (data.table_id) {
+    const tables = await getAllReservableTables(business.id, { useService: true });
+    const target = tables.find((t) => t.id === data.table_id);
+    if (!target) return actionError("La mesa seleccionada no existe.");
+    if (target.status !== "active") return actionError("La mesa está deshabilitada.");
+    if (target.seats < data.party_size) {
+      return actionError(
+        `La mesa "${target.label}" no tiene capacidad para ${data.party_size} personas.`,
+      );
+    }
+    tableId = target.id;
+    floorPlanId = target.floor_plan_id;
+  }
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+  const { data: inserted, error } = await service
+    .from("reservations")
+    .insert({
+      business_id: business.id,
+      table_id: tableId,
+      floor_plan_id: floorPlanId,
+      service: svc.name,
+      user_id: data.source === "admin" ? null : user?.id ?? null,
+      customer_name: data.customer_name,
+      customer_phone: data.customer_phone,
+      customer_email: data.source === "admin" ? null : user?.email ?? null,
+      party_size: data.party_size,
+      starts_at: starts.toISOString(),
+      ends_at: ends.toISOString(),
+      status: "confirmed",
+      notes: data.notes,
+      source: data.source,
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    // GIST con ends_at=cierre → dos en la misma mesa/servicio se pisan (23P01).
+    if ((error as { code?: string }).code === EXCLUSION_VIOLATION) {
+      return actionError("La mesa ya está reservada en ese servicio.");
+    }
+    console.error("createFlexibleReservation", error);
+    return actionError("No pudimos crear la reserva.");
+  }
+  const id = (inserted as { id: string }).id;
+
+  revalidatePath(`/${data.business_slug}/reservar`);
+  revalidatePath(`/${data.business_slug}/admin/reservas`);
+  await createNotification({
+    businessId: business.id,
+    targetRole: "encargado",
+    type: "reserva.nueva",
+    payload: {
+      fecha: data.date,
+      hora: data.arrival_time ?? svc.name,
+      personas: data.party_size,
+      nombre: data.customer_name,
+    },
+  });
+  if (data.source !== "admin") {
+    await notifyReservationConfirmed({ reservationId: id });
+  }
+  return actionOk({ id });
+}
+
 export async function updateReservationStatus(
   input: unknown,
 ): Promise<ActionResult<null>> {
@@ -391,15 +526,18 @@ export async function sentarReserva(
   if (reservation.status !== "confirmed") {
     return actionError("Solo se pueden sentar reservas confirmadas.");
   }
-  if (!reservation.table_id) {
-    return actionError("La reserva no tiene mesa asignada.");
+  // Spec 059 — reserva GENÉRICA (sin mesa fija, modo flexible): el encargado
+  // elige la mesa al sentar (`parsed.data.table_id`). Con mesa fija usa la suya.
+  const seatTableId = reservation.table_id ?? parsed.data.table_id ?? null;
+  if (!seatTableId) {
+    return actionError("Elegí una mesa para sentar la reserva.");
   }
 
   // Fetch table con cross-tenant validation.
   const { data: tableRow } = await service
     .from("tables")
     .select("id, operational_status, opened_at, mozo_id, floor_plans!inner(business_id)")
-    .eq("id", reservation.table_id)
+    .eq("id", seatTableId)
     .maybeSingle();
   if (!tableRow) return actionError("Mesa no encontrada.");
   const fpRaw = (tableRow as unknown as { floor_plans: unknown }).floor_plans;
@@ -451,10 +589,10 @@ export async function sentarReserva(
   });
   if (!openResult.ok) return openResult;
 
-  // Marcar reserva como seated.
+  // Marcar reserva como seated. En genéricas, registra la mesa donde se sentó.
   const { error: resErr } = await service
     .from("reservations")
-    .update({ status: "seated" })
+    .update({ status: "seated", table_id: seatTableId })
     .eq("id", reservation.id)
     .eq("business_id", business.id);
   if (resErr) console.error("sentarReserva status update", resErr);

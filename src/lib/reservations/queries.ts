@@ -7,6 +7,7 @@ import type { BusinessRole } from "@/lib/admin/context";
 import type {
   FloorTable,
   Reservation,
+  ReservationService,
   ReservationSettings,
 } from "@/lib/reservations/types";
 import { DEFAULT_RESERVATION_SETTINGS } from "@/lib/reservations/types";
@@ -15,6 +16,12 @@ import {
   computeAvailableSlots,
   type AvailableSlot,
 } from "@/lib/reservations/availability";
+import {
+  computeFlexibleAvailability,
+  flexibleServiceWindow,
+  type FlexibleAvailability,
+  type ReservationForFlexible,
+} from "@/lib/reservations/flexible-availability";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
@@ -249,6 +256,132 @@ export async function getAvailability(
     tables,
     reservations,
     timezone,
+  });
+}
+
+// ── Spec 059 · modo flexible ────────────────────────────────────────────────
+
+const FLEX_DAY_MS = 24 * 60 * 60 * 1000;
+
+function dayOfWeekFromDate(date: string): number | null {
+  const [y, m, d] = date.split("-").map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
+export async function getReservationServices(
+  businessId: string,
+  options: { useService?: boolean } = {},
+): Promise<ReservationService[]> {
+  const supabase = options.useService
+    ? (createSupabaseServiceClient() as unknown as GenericClient)
+    : ((await createSupabaseServerClient()) as unknown as GenericClient);
+  const { data } = await supabase
+    .from("reservation_services")
+    .select("*")
+    .eq("business_id", businessId)
+    .order("opens_at", { ascending: true });
+  return (data ?? []) as ReservationService[];
+}
+
+/**
+ * Resuelve el servicio por nombre para una fecha: prioriza la fila del día de
+ * semana exacto, cae a la fila `day_of_week = null` (todos los días).
+ */
+export async function getReservationServiceByName(
+  businessId: string,
+  name: string,
+  dayOfWeek: number | null,
+  options: { useService?: boolean } = {},
+): Promise<ReservationService | null> {
+  const services = await getReservationServices(businessId, options);
+  const matches = services.filter((s) => s.name === name);
+  return (
+    matches.find((s) => s.day_of_week === dayOfWeek) ??
+    matches.find((s) => s.day_of_week === null) ??
+    null
+  );
+}
+
+/**
+ * Todas las mesas reservables del negocio (todas las zonas, sin barra). El modo
+ * flexible no asume un único salón, a diferencia del legacy `getBusinessTables`.
+ */
+export async function getAllReservableTables(
+  businessId: string,
+  options: { useService?: boolean } = {},
+): Promise<FloorTable[]> {
+  const supabase = options.useService
+    ? (createSupabaseServiceClient() as unknown as GenericClient)
+    : ((await createSupabaseServerClient()) as unknown as GenericClient);
+  const { data: plans } = await supabase
+    .from("floor_plans")
+    .select("id")
+    .eq("business_id", businessId);
+  const planIds = ((plans ?? []) as Array<{ id: string }>).map((p) => p.id);
+  if (planIds.length === 0) return [];
+  const { data } = await supabase
+    .from("tables")
+    .select("*")
+    .in("floor_plan_id", planIds)
+    .eq("is_bar", false);
+  return (data ?? []) as FloorTable[];
+}
+
+/**
+ * Disponibilidad del MODO FLEXIBLE (spec 059) para una fecha + servicio.
+ * Devuelve mesas libres del servicio + cubiertos reservados (capacidad blanda),
+ * y si se pide `tableId`, si esa mesa puntual está disponible. `null` si el
+ * negocio no tiene ese servicio configurado / la ventana es inválida.
+ */
+export async function getFlexibleAvailability(
+  businessId: string,
+  timezone: string,
+  params: {
+    date: string;
+    service: string;
+    partySize: number;
+    tableId?: string | null;
+    floorPlanId?: string | null;
+  },
+  options: { useService?: boolean } = {},
+): Promise<FlexibleAvailability | null> {
+  const dow = dayOfWeekFromDate(params.date);
+  const svc = await getReservationServiceByName(businessId, params.service, dow, options);
+  if (!svc) return null;
+  const window = flexibleServiceWindow(params.date, svc, timezone);
+  if (!window) return null;
+
+  const tables = await getAllReservableTables(businessId, options);
+  const reservations = await getReservationsInRange(
+    businessId,
+    new Date(window.starts.getTime() - FLEX_DAY_MS).toISOString(),
+    new Date(window.ends.getTime() + FLEX_DAY_MS).toISOString(),
+    options,
+  );
+
+  // Cubiertos por zona: las reservas con mesa derivan su zona de la mesa; las
+  // genéricas ya traen floor_plan_id. Se resuelve acá para reservedCovers(zona).
+  const tableZone = new Map(tables.map((t) => [t.id, t.floor_plan_id]));
+  const forFlex: ReservationForFlexible[] = (reservations as Reservation[]).map((r) => ({
+    table_id: r.table_id,
+    starts_at: r.starts_at,
+    party_size: r.party_size,
+    status: r.status,
+    floor_plan_id: r.table_id
+      ? tableZone.get(r.table_id) ?? r.floor_plan_id ?? null
+      : r.floor_plan_id ?? null,
+  }));
+
+  return computeFlexibleAvailability({
+    date: params.date,
+    service: svc,
+    partySize: params.partySize,
+    tables,
+    reservations: forFlex,
+    timezone,
+    tableId: params.tableId ?? null,
+    floorPlanId: params.floorPlanId ?? null,
   });
 }
 

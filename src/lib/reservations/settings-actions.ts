@@ -6,7 +6,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { canConfigureReservations } from "@/lib/permissions/can";
 import { getReservationActor } from "@/lib/reservations/queries";
-import { ReservationSettingsInputSchema } from "@/lib/reservations/schema";
+import {
+  DeleteReservationServiceInputSchema,
+  ReservationServiceInputSchema,
+  ReservationSettingsInputSchema,
+  SetReservationModeInputSchema,
+} from "@/lib/reservations/schema";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
@@ -59,6 +64,7 @@ export async function saveReservationSettings(input: unknown): Promise<ActionRes
       max_party_size: parsed.data.max_party_size,
       no_show_grace_min: parsed.data.no_show_grace_min,
       schedule: parsed.data.schedule,
+      ...(parsed.data.mode ? { mode: parsed.data.mode } : {}),
     },
     { onConflict: "business_id" },
   );
@@ -70,5 +76,101 @@ export async function saveReservationSettings(input: unknown): Promise<ActionRes
   revalidatePath(`/${parsed.data.business_slug}/admin/reservas/configuracion`);
   revalidatePath(`/${parsed.data.business_slug}/admin/reservas`);
   revalidatePath(`/${parsed.data.business_slug}/reservar`);
+  return actionOk(null);
+}
+
+// ── Spec 059 · modo flexible: toggle de modo + CRUD de servicios ─────────────
+
+/** Cambiar el modo de reservas del negocio (estricto ↔ flexible). */
+export async function setReservationMode(input: unknown): Promise<ActionResult<null>> {
+  const parsed = SetReservationModeInputSchema.safeParse(input);
+  if (!parsed.success) return actionError("Datos inválidos.");
+  const guard = await assertCanConfigure(parsed.data.business_slug);
+  if (!guard.ok) return actionError(guard.error);
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+  const { error } = await service
+    .from("reservation_settings")
+    .upsert({ business_id: guard.businessId, mode: parsed.data.mode }, { onConflict: "business_id" });
+  if (error) {
+    console.error("setReservationMode", error);
+    return actionError("No pudimos cambiar el modo de reservas.");
+  }
+  revalidatePath(`/${parsed.data.business_slug}/admin/reservas`);
+  revalidatePath(`/${parsed.data.business_slug}/admin/reservas/configuracion`);
+  revalidatePath(`/${parsed.data.business_slug}/reservar`);
+  return actionOk(null);
+}
+
+/** Crear o editar un servicio (Mediodía/Cena…) del modo flexible. */
+export async function saveReservationService(
+  input: unknown,
+): Promise<ActionResult<{ id: string }>> {
+  const parsed = ReservationServiceInputSchema.safeParse(input);
+  if (!parsed.success) {
+    return actionError(parsed.error.issues[0]?.message ?? "Datos inválidos.");
+  }
+  const guard = await assertCanConfigure(parsed.data.business_slug);
+  if (!guard.ok) return actionError(guard.error);
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+  const row = {
+    business_id: guard.businessId,
+    name: parsed.data.name,
+    day_of_week: parsed.data.day_of_week ?? null,
+    opens_at: parsed.data.opens_at,
+    closes_at: parsed.data.closes_at,
+    soft_capacity: parsed.data.soft_capacity ?? null,
+    floor_plan_id: parsed.data.floor_plan_id ?? null,
+  };
+
+  let id = parsed.data.id ?? null;
+  if (id) {
+    const { error } = await service
+      .from("reservation_services")
+      .update({ ...row, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .eq("business_id", guard.businessId);
+    if (error) {
+      console.error("saveReservationService/update", error);
+      return actionError("No pudimos guardar el servicio.");
+    }
+  } else {
+    const { data, error } = await service
+      .from("reservation_services")
+      .insert(row)
+      .select("id")
+      .single();
+    if (error || !data) {
+      console.error("saveReservationService/insert", error);
+      return actionError("No pudimos crear el servicio.");
+    }
+    id = (data as { id: string }).id;
+  }
+
+  revalidatePath(`/${parsed.data.business_slug}/admin/reservas/configuracion`);
+  revalidatePath(`/${parsed.data.business_slug}/admin/reservas`);
+  revalidatePath(`/${parsed.data.business_slug}/reservar`);
+  return actionOk({ id });
+}
+
+/** Eliminar un servicio del modo flexible. */
+export async function deleteReservationService(input: unknown): Promise<ActionResult<null>> {
+  const parsed = DeleteReservationServiceInputSchema.safeParse(input);
+  if (!parsed.success) return actionError("Datos inválidos.");
+  const guard = await assertCanConfigure(parsed.data.business_slug);
+  if (!guard.ok) return actionError(guard.error);
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+  const { error } = await service
+    .from("reservation_services")
+    .delete()
+    .eq("id", parsed.data.id)
+    .eq("business_id", guard.businessId);
+  if (error) {
+    console.error("deleteReservationService", error);
+    return actionError("No pudimos eliminar el servicio.");
+  }
+  revalidatePath(`/${parsed.data.business_slug}/admin/reservas/configuracion`);
   return actionOk(null);
 }

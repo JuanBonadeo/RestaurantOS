@@ -62,9 +62,70 @@ export const ReservationSettingsInputSchema = z.object({
   max_party_size: z.coerce.number().int().min(1).max(100),
   no_show_grace_min: z.coerce.number().int().min(0).max(600),
   schedule: WeeklyScheduleSchema,
+  /** Spec 059 — modo de reservas del negocio. Opcional: si no viene, no se toca. */
+  mode: z.enum(["estricto", "flexible"]).optional(),
 });
 
 export type ReservationSettingsInput = z.infer<typeof ReservationSettingsInputSchema>;
+
+// ── Spec 059 · modo flexible ────────────────────────────────────────────────
+
+/** Cambiar solo el modo de reservas del negocio (toggle en la config). */
+export const SetReservationModeInputSchema = z.object({
+  business_slug: z.string().min(1),
+  mode: z.enum(["estricto", "flexible"]),
+});
+export type SetReservationModeInput = z.infer<typeof SetReservationModeInputSchema>;
+
+/** Crear/editar un servicio (Mediodía/Cena…) del modo flexible. */
+export const ReservationServiceInputSchema = z.object({
+  business_slug: z.string().min(1),
+  id: z.string().uuid().optional(),
+  name: z.string().trim().min(1).max(40),
+  /** 0..6 (0=Domingo); null/omitido = todos los días. */
+  day_of_week: z.coerce.number().int().min(0).max(6).nullable().optional(),
+  opens_at: z.string().regex(TIME_HHMM, "Hora inválida"),
+  closes_at: z.string().regex(TIME_HHMM, "Hora inválida"),
+  /** Cupo blando (cubiertos) — advisory, no bloquea. null = sin umbral. */
+  soft_capacity: z.coerce.number().int().min(1).max(100000).nullable().optional(),
+  /** Zona a la que aplica el cupo; null = servicio entero. */
+  floor_plan_id: z.string().uuid().nullable().optional(),
+});
+export type ReservationServiceInput = z.infer<typeof ReservationServiceInputSchema>;
+
+export const DeleteReservationServiceInputSchema = z.object({
+  business_slug: z.string().min(1),
+  id: z.string().uuid(),
+});
+
+/**
+ * Crear una reserva en modo flexible. La mesa es opcional (genérica → se sienta
+ * al llegar), la hora es opcional (sin hora → inicio del servicio). El servicio
+ * es obligatorio.
+ */
+export const CreateFlexibleReservationInputSchema = z.object({
+  business_slug: z.string().min(1),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida (YYYY-MM-DD)"),
+  /** Nombre del servicio (matchea reservation_services.name). */
+  service: z.string().trim().min(1).max(40),
+  /** Hora de llegada opcional (HH:MM). Si no viene, se usa la apertura del servicio. */
+  arrival_time: z.string().regex(TIME_HHMM, "Hora inválida").optional(),
+  party_size: z.coerce.number().int().min(1).max(100),
+  /** Mesa puntual (opcional). Si no viene, la reserva es genérica. */
+  table_id: z.string().uuid().optional(),
+  /** Zona/salón (para genéricas). */
+  floor_plan_id: z.string().uuid().optional(),
+  customer_name: z.string().trim().min(1).max(80),
+  customer_phone: z.string().trim().min(4).max(40),
+  notes: z
+    .string()
+    .trim()
+    .max(500)
+    .optional()
+    .transform((v) => (!v ? null : v)),
+  source: z.enum(["web", "chatbot", "admin"]).default("web"),
+});
+export type CreateFlexibleReservationInput = z.infer<typeof CreateFlexibleReservationInputSchema>;
 
 export const CreateReservationInputSchema = z.object({
   business_slug: z.string().min(1),
@@ -105,6 +166,9 @@ export const UpdateReservationStatusInputSchema = z.object({
 export const SentarReservaInputSchema = z.object({
   business_slug: z.string().min(1),
   reservation_id: z.string().uuid(),
+  /** Spec 059 — mesa elegida al sentar una reserva GENÉRICA (sin mesa fija).
+   *  Las reservas con mesa fija la ignoran (usan la suya). */
+  table_id: z.string().uuid().optional(),
 });
 
 export type UpdateReservationStatusInput = z.infer<typeof UpdateReservationStatusInputSchema>;
