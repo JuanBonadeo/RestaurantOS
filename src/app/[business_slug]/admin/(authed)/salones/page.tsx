@@ -2,8 +2,9 @@ import { notFound } from "next/navigation";
 
 import { SalonesList } from "@/components/admin/salones/salones-list";
 import { PageHeader, PageShell } from "@/components/admin/shell/page-shell";
-import { ensureAdminAccess, canManageBusiness } from "@/lib/admin/context";
+import { ensureAdminAccess } from "@/lib/admin/context";
 import { getFloorPlansForBusiness } from "@/lib/admin/floor-plan/queries";
+import { sectionAccess } from "@/lib/permissions/sections";
 import { getBusiness } from "@/lib/tenant";
 
 export default async function SalonesPage({
@@ -16,7 +17,12 @@ export default async function SalonesPage({
   if (!business) notFound();
 
   const ctx = await ensureAdminAccess(business.id, business_slug);
-  const canManage = canManageBusiness(ctx);
+  // Gestionar el plano (crear/editar/borrar salones) = acceso "full" a la
+  // sección. Admin y encargado; el mozo ni entra al panel admin.
+  const canManage =
+    sectionAccess("salones", ctx.role, {
+      isPlatformAdmin: ctx.isPlatformAdmin,
+    }) === "full";
 
   const plans = await getFloorPlansForBusiness(business.id);
 

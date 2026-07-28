@@ -61,8 +61,8 @@ describe("sectionAccess / canSee", () => {
       expect(canSee("campanas", "encargado")).toBe(true);
     });
 
-    it("ve Salones en versión recortada (asignar mesas)", () => {
-      expect(sectionAccess("salones", "encargado")).toBe("limited");
+    it("gestiona Salones completo (layout del local, desde 2026-07-28)", () => {
+      expect(sectionAccess("salones", "encargado")).toBe("full");
     });
 
     it("NO ve RRHH (admin-only desde 2026-06-15)", () => {

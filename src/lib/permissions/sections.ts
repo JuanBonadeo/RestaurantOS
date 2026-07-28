@@ -12,7 +12,7 @@ import type { BusinessRole } from "@/lib/admin/context";
 // `wiki/specs/14-multi-local-y-deploy-onsite/dashboard-y-permisos.md` (§B).
 //
 // "full"    → ve/usa la sección completa.
-// "limited" → versión recortada (ej: chatbot solo on/off; salones solo asignar).
+// "limited" → versión recortada (ej: chatbot solo on/off).
 // "none"    → sin acceso (ni en el sidebar ni por URL).
 // ============================================
 
@@ -56,7 +56,11 @@ const MATRIX: Record<AdminSection, Record<BusinessRole, SectionAccess>> = {
   pedidos: { admin: "full", encargado: "full", mozo: "none", personal: "none" },
   cajas: { admin: "full", encargado: "none", mozo: "none", personal: "none" },
   catalogo: { admin: "full", encargado: "full", mozo: "none", personal: "none" },
-  salones: { admin: "full", encargado: "limited", mozo: "none", personal: "none" },
+  // Salones: encargado full (decisión 2026-07-28, Juan). Es layout del local —
+  // crear/renombrar salones y dibujar mesas es trabajo de piso, no config
+  // sensible del negocio: el encargado arma el salón cuando cambia el mobiliario
+  // (eventos, temporada) sin depender del dueño.
+  salones: { admin: "full", encargado: "full", mozo: "none", personal: "none" },
   reservas: { admin: "full", encargado: "full", mozo: "none", personal: "none" },
   clientes: { admin: "full", encargado: "full", mozo: "none", personal: "none" },
   promociones: { admin: "full", encargado: "full", mozo: "none", personal: "none" },

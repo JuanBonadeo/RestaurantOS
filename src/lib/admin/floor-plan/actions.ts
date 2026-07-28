@@ -40,8 +40,11 @@ async function assertCanManage(businessSlug: string) {
   ]);
 
   const isPlatformAdmin = (profile as { is_platform_admin?: boolean } | null)?.is_platform_admin ?? false;
-  const isAdmin = (membership as { role?: string } | null)?.role === "admin";
-  if (!isPlatformAdmin && !isAdmin) {
+  const role = (membership as { role?: string } | null)?.role ?? null;
+  // Espejo de `sectionAccess("salones", role)`: admin y encargado gestionan el
+  // plano del salón (decisión 2026-07-28). Mozo/personal no.
+  const canManage = role === "admin" || role === "encargado";
+  if (!isPlatformAdmin && !canManage) {
     return { ok: false as const, error: "Permiso denegado." };
   }
   return { ok: true as const, businessId: business.id as string };
