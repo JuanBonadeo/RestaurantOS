@@ -589,26 +589,19 @@ export function MozoClient({
               )}
               {/* Acción primaria: jerarquía según estado + items.
                   - libre → Sentar walk-in (arriba).
-                  - pidio_cuenta → Cobrar mesa.
-                  - ocupada CON items → Pedir cuenta (flujo natural).
-                  - ocupada SIN items → Cargar pedido. */}
-              {selectedStatus === "pidio_cuenta" && canShowCuentaButton && (
-                <button
-                  disabled={loading}
-                  onClick={() =>
-                    router.push(
-                      `/${businessSlug}/mozo/mesa/${selectedSync.id}/cobrar`,
-                    )
-                  }
-                  className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 text-base font-semibold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-60"
-                >
-                  <Receipt className="h-5 w-5" />
-                  Cobrar
-                </button>
-              )}
-              {selectedStatus === "ocupada" &&
-                selectedHasItems &&
-                canShowCuentaButton && (
+                  - pidio_cuenta u ocupada CON items → Cobrar (paso cuenta).
+                  - ocupada SIN items → Cargar pedido.
+
+                  «Cobrar» entra SIEMPRE por el paso cuenta, nunca directo a
+                  /cobrar: dividir, propina y descuento viven ahí (`CuentaClient`
+                  → `DividirModal`). El atajo `pidio_cuenta → /cobrar` de
+                  `947f41c` dejaba al mozo sin acceso al dividir justo en el
+                  estado donde el cliente lo pide (#92). Es el mismo criterio
+                  que el drawer del encargado (`salon-desktop.tsx`), que ya lo
+                  había revertido en spec 23. */}
+              {canShowCuentaButton &&
+                (selectedStatus === "pidio_cuenta" ||
+                  (selectedStatus === "ocupada" && selectedHasItems)) && (
                   <button
                     disabled={loading}
                     onClick={() =>
