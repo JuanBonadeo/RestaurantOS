@@ -12,7 +12,7 @@ import type { BusinessHourSlot } from "@/lib/business-hours/schema";
 
 import { resolveComboUpcharge } from "./combo-pricing";
 import { validateScheduledOrder } from "./scheduled";
-import type { CreateOrderInput } from "./schema";
+import type { PersistableOrderInput } from "./schema";
 
 export type CreateOrderResult = {
   order_id: string;
@@ -34,7 +34,7 @@ function getSiteUrl(): string {
 }
 
 export async function persistOrder(
-  data: CreateOrderInput,
+  data: PersistableOrderInput,
   userId?: string | null,
   options?: {
     /**
@@ -83,7 +83,10 @@ export async function persistOrder(
       .eq("business_id", business.id);
     const validation = validateScheduledOrder({
       scheduledAt,
-      deliveryType: data.delivery_type,
+      // `dine_in` (venta de mostrador, spec 058) nunca programa. Lo mapeamos a
+      // "delivery" para que caiga en el mismo rechazo que ya da el validador
+      // ("solo se pueden programar pedidos de retiro") en vez de colarse.
+      deliveryType: data.delivery_type === "pickup" ? "pickup" : "delivery",
       paymentMethod,
       businessHours: (hoursRows ?? []) as BusinessHourSlot[],
       timezone: business.timezone,
@@ -713,18 +716,25 @@ export async function persistOrder(
   // Notif al encargado: hay un pedido nuevo esperando confirmación. Best
   // effort — si falla el insert, el pedido sigue OK; el encargado lo verá
   // igual al recargar la lista de `/admin/pedidos`.
-  await createNotification({
-    businessId: business.id,
-    targetRole: "encargado",
-    type: "order.pending",
-    payload: {
-      orderId: order.id,
-      orderNumber: order.order_number,
-      customerName: data.customer_name,
-      deliveryType: data.delivery_type,
-      totalCents,
-    },
-  });
+  //
+  // La venta de mostrador (`dine_in`, spec 058) no notifica: la carga el propio
+  // encargado, nace cobrada y ni siquiera aparece en el board — avisarle de su
+  // propia venta es el ruido que el principio "no notificar al actor" (spec 27)
+  // viene evitando.
+  if (data.delivery_type !== "dine_in") {
+    await createNotification({
+      businessId: business.id,
+      targetRole: "encargado",
+      type: "order.pending",
+      payload: {
+        orderId: order.id,
+        orderNumber: order.order_number,
+        customerName: data.customer_name,
+        deliveryType: data.delivery_type,
+        totalCents,
+      },
+    });
+  }
 
   // Auto-march (spec 047): ningún pedido marcha a cocina al crearse. Nace en
   // `pending` (columna «Nuevos») con la notif `order.pending` de arriba.

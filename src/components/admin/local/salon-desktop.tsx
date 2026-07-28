@@ -12,6 +12,7 @@ import {
   MoveRight,
   Pencil,
   Receipt,
+  Store,
   UserCheck,
   UserPlus,
   Users,
@@ -22,6 +23,7 @@ import { toast } from "sonner";
 import { NewReservationModal } from "@/components/admin/local/new-reservation-modal";
 import { ReservationsPanel } from "@/components/admin/local/reservations-panel";
 import { SegmentedSelector } from "@/components/admin/local/segmented-selector";
+import { VentaRapidaPanel } from "@/components/admin/local/venta-rapida-panel";
 import { AsignarMozosPanel } from "@/components/mozo/asignar-mozos-panel";
 import { FloorPlanViewer, type TableExtra } from "@/components/mozo/floor-plan-viewer";
 import { OrderSummaryCard } from "@/components/mozo/order-summary-card";
@@ -74,6 +76,7 @@ import { type OperationalStatus } from "@/lib/mozo/state-machine";
 import { useTablesRealtime } from "@/lib/mozo/use-tables-realtime";
 import {
   canAssignMozo,
+  canCargarPedido,
   canMoveTable,
   canTransitionMesa,
 } from "@/lib/permissions/can";
@@ -224,6 +227,8 @@ export function SalonDesktop({
   } | null>(null);
   const [anularReason, setAnularReason] = useState("");
   const [showNewReservation, setShowNewReservation] = useState(false);
+  // Venta rápida de mostrador (spec 058): modo del sidebar, no de una mesa.
+  const [ventaRapidaOpen, setVentaRapidaOpen] = useState(false);
   // Overlay optimista por mesa: patch parcial (estado / opened_at / mozo).
   // Da feedback inmediato a TODAS las acciones de mesa (abrir, walk-in, sentar
   // reserva, anular, transferir) sin esperar el refetch. Se reconcilia abajo
@@ -895,7 +900,7 @@ export function SalonDesktop({
           // (KPI + cajas + splits + form de pago) → el más ancho.
           cobroTable || cuentaTable
             ? "lg:grid-cols-[1fr_480px]"
-            : pedirTable
+            : pedirTable || ventaRapidaOpen
               ? "lg:grid-cols-[1fr_440px]"
               : "lg:grid-cols-[1fr_360px]",
         )}
@@ -909,9 +914,16 @@ export function SalonDesktop({
                 tables={tables}
                 extras={extras}
                 paintMode={distribuirOpen}
-                onTableClick={(t) =>
-                  distribuirOpen ? handlePaintTable(t) : setSelectedId(t.id)
-                }
+                onTableClick={(t) => {
+                  if (distribuirOpen) {
+                    handlePaintTable(t);
+                    return;
+                  }
+                  // Tocar una mesa manda al detalle: la venta de mostrador no
+                  // es de ninguna mesa, así que cede el panel.
+                  setVentaRapidaOpen(false);
+                  setSelectedId(t.id);
+                }}
               />
             ) : (
               <div className="flex h-full items-center justify-center p-12 text-center">
@@ -1040,6 +1052,11 @@ export function SalonDesktop({
                 {pedirLoading ? "Cargando catálogo…" : "…"}
               </div>
             )
+          ) : ventaRapidaOpen ? (
+            <VentaRapidaPanel
+              slug={slug}
+              onClose={() => setVentaRapidaOpen(false)}
+            />
           ) : selected ? (
             <TableDetail
               table={selected}
@@ -1088,6 +1105,11 @@ export function SalonDesktop({
                 onSelect={(id) => setSelectedId(id)}
                 canDistribuir={canAssignMozo(role) && !!onDistribuirOpen}
                 onDistribuir={() => onDistribuirOpen?.()}
+                canVentaRapida={canCargarPedido(role)}
+                onVentaRapida={() => {
+                  setSelectedId(null);
+                  setVentaRapidaOpen(true);
+                }}
                 editPlanHref={
                   canAssignMozo(role) && active?.plan.id
                     ? `/${slug}/admin/salones/${active.plan.id}`
@@ -1390,6 +1412,8 @@ function ActiveTablesList({
   onSelect,
   canDistribuir,
   onDistribuir,
+  canVentaRapida,
+  onVentaRapida,
   editPlanHref,
 }: {
   tables: FloorTable[];
@@ -1402,6 +1426,9 @@ function ActiveTablesList({
    *  encargado / admin lo ven (el flag es del parent). */
   canDistribuir: boolean;
   onDistribuir: () => void;
+  /** Venta de kiosko/barra sin mesa (spec 058). Encargado / admin. */
+  canVentaRapida: boolean;
+  onVentaRapida: () => void;
   /** Link al editor del plano del salón activo. Si null, no se muestra. */
   editPlanHref: string | null;
 }) {
@@ -1482,8 +1509,18 @@ function ActiveTablesList({
             {totalActivas} {totalActivas === 1 ? "activa" : "activas"} · {tables.length} totales
           </p>
         </div>
-        {canDistribuir || editPlanHref ? (
+        {canVentaRapida || canDistribuir || editPlanHref ? (
           <div className="flex flex-shrink-0 items-center gap-1.5">
+            {canVentaRapida && (
+              <button
+                type="button"
+                onClick={onVentaRapida}
+                className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:brightness-110 active:scale-[0.97]"
+              >
+                <Store className="size-3" />
+                Venta rápida
+              </button>
+            )}
             {canDistribuir && (
               <button
                 type="button"

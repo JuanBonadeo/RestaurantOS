@@ -130,3 +130,39 @@ export const StaffOrderInput = z
   });
 
 export type StaffOrderInput = z.infer<typeof StaffOrderInput>;
+
+/**
+ * Contrato **interno** de `persistOrder`, más ancho que el público: suma
+ * `dine_in` para la venta de mostrador (spec 058), que nace sin mesa y no pasa
+ * por el board. El checkout público sigue tipado con `CreateOrderInput` (dos
+ * valores) — `CreateOrderInput` es asignable a esto, así que ningún caller
+ * existente cambia.
+ */
+export type PersistableOrderInput = Omit<CreateOrderInput, "delivery_type"> & {
+  delivery_type: CreateOrderInput["delivery_type"] | "dine_in";
+};
+
+/**
+ * Venta rápida de mostrador / kiosko / barra (spec 058): productos reales de la
+ * carta, **sin mesa y sin datos de cliente**, que se carga y se cobra en un solo
+ * gesto. A diferencia de `StaffOrderInput` (que deja el pedido abierto en el
+ * board para triage), acá el cobro viaja en el mismo input porque la venta nace
+ * pagada y cerrada.
+ *
+ * `tip_cents` existe para no cerrarle la puerta al frasco de propinas de la
+ * barra, pero la UI de fase 1 manda siempre 0.
+ */
+export const VentaMostradorInput = z.object({
+  business_slug: z.string().min(1),
+  items: z.array(OrderItemInput).min(1, "Agregá al menos un producto."),
+  method: z.enum(["cash", "card_manual", "transfer", "other"]),
+  caja_id: z.string().uuid(),
+  tip_cents: z.number().int().min(0).default(0),
+  last_four: z.string().length(4).optional(),
+  card_brand: z.enum(["visa", "mastercard", "amex", "otro"]).optional(),
+  notes: z.string().max(500).optional(),
+  /** Clave de idempotencia del intento de cobro (dedup en la RPC, issue #58). */
+  request_id: z.string().uuid().optional(),
+});
+
+export type VentaMostradorInput = z.infer<typeof VentaMostradorInput>;
