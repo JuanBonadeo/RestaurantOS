@@ -221,10 +221,7 @@ export function NewReservationModal({ slug, tables, floorPlanId, onClose }: Prop
     });
   }, [mode, slug, date, service, partySize, floorPlanId]);
 
-  // El teléfono es obligatorio en estricto; en flexible es opcional (el libro
-  // del club suele no tenerlo).
-  const baseValid =
-    name.trim().length > 0 && !pending && (mode === "flexible" || phone.trim().length >= 4);
+  const baseValid = name.trim().length > 0 && phone.trim().length >= 4 && !pending;
   const canSubmit =
     mode === "flexible"
       ? baseValid && service.length > 0 && arrivalTime.length > 0

@@ -118,13 +118,7 @@ export const CreateFlexibleReservationInputSchema = z.object({
   /** Zona/salón (para genéricas). */
   floor_plan_id: z.string().uuid().optional(),
   customer_name: z.string().trim().min(1).max(80),
-  /** Opcional en flexible: el libro del club suele no tener teléfono. */
-  customer_phone: z
-    .string()
-    .trim()
-    .max(40)
-    .optional()
-    .transform((v) => v ?? ""),
+  customer_phone: z.string().trim().min(4).max(40),
   notes: z
     .string()
     .trim()
