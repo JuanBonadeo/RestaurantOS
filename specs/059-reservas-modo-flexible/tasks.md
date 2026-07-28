@@ -1,6 +1,6 @@
 # Tasks: Reservas — modo flexible
 
-**Spec**: [`spec.md`](./spec.md) · **Plan**: [`plan.md`](./plan.md) · **Estado**: 📋 propuesto
+**Spec**: [`spec.md`](./spec.md) · **Plan**: [`plan.md`](./plan.md) · **Estado**: 🚧 en progreso (P1 fundaciones hecho; wiring+UI+P3 pendiente)
 
 > ⛔ **Approval gate**: no arrancar código hasta (a) OK de Juan y (b) resolver `[NEEDS CLARIFICATION]` #1 (usable-antes-de-la-hora), #3 (gracia-flexible) y #5 (servicios-config). #2 (códigos del libro) y #4 (bar-reservable) no bloquean el core.
 >
@@ -14,19 +14,19 @@
 
 ## Fase 1 — Fundaciones (bloquea a todo lo demás)
 
-- [ ] **T004** Migración `0021_reservations_modo_flexible.sql`: `reservation_settings.mode` (`estricto|flexible`, default `estricto`), `reservations.service` + `reservations.floor_plan_id`, y `reservation_services` (según #5). RLS de `reservation_services` (SELECT `is_business_staff`, write manager). Ver DDL borrador en `plan.md`.
-- [ ] **T005** Validar el approach de integridad: confirmar que con `ends_at = cierre del servicio` el GIST `reservations_no_overlap` cubre "una por mesa/servicio" y que mediodía/cena no se solapan. Si no → plan B (unique index parcial) en la misma migración.
-- [ ] **T006** Aplicar `0021` al cloud vía MCP (`apply_migration`) + `pnpm db:types`. Verificar con `list_migrations`.
-- [ ] **T007** [P] `types.ts`/`schema.ts`: tipos `ReservationMode`, `ReservationService`, extender `Reservation` (service, floor_plan_id) y `ReservationSettings` (mode). Zod para la reserva flexible (service requerido; mesa/hora opcionales).
+- [x] **T004** Migración `0022_reservations_modo_flexible.sql`: `reservation_settings.mode` (`estricto|flexible`, default `estricto`), `reservations.service` + `reservations.floor_plan_id`, y `reservation_services` (según #5). RLS de `reservation_services` (SELECT `is_business_staff`, write manager). Ver DDL borrador en `plan.md`.
+- [x] **T005** Validar el approach de integridad: confirmar que con `ends_at = cierre del servicio` el GIST `reservations_no_overlap` cubre "una por mesa/servicio" y que mediodía/cena no se solapan. Si no → plan B (unique index parcial) en la misma migración.
+- [ ] **T006** Aplicar `0022` al cloud vía MCP (`apply_migration`) + `pnpm db:types`. Verificar con `list_migrations`.
+- [x] **T007** [P] `types.ts`/`schema.ts`: tipos `ReservationMode`, `ReservationService`, extender `Reservation` (service, floor_plan_id) y `ReservationSettings` (mode). Zod para la reserva flexible (service requerido; mesa/hora opcionales).
 
 ## Fase 2 — P1 · Reserva flexible sin desalojo (MVP) → US1 + US2
 
 ### Lógica pura (TDD: test primero)
 
-- [ ] **T008** [P] Test rojo `availability.test.ts`: `serviceWindow(service, date, tz)` → `[apertura, cierre]` UTC TZ-aware (bordes de día, DST).
-- [ ] **T009** [P] Test rojo: `isTableFreeForService(reservations, tableId, service, date)` (libre / ocupada por otra viva / ignora canceladas).
-- [ ] **T010** [P] Test rojo: `computeFlexibleAvailability(...)` — mesa puntual (libre/ocupada este servicio) y genérica (siempre disponible; warning si sobre-umbral, nunca false por capacidad).
-- [ ] **T011** Implementar `serviceWindow` + `isTableFreeForService` + `computeFlexibleAvailability` en `availability.ts` → tests verdes. **No tocar** `computeAvailableSlots`.
+- [x] **T008** [P] Test rojo `availability.test.ts`: `serviceWindow(service, date, tz)` → `[apertura, cierre]` UTC TZ-aware (bordes de día, DST).
+- [x] **T009** [P] Test rojo: `isTableFreeForService(reservations, tableId, service, date)` (libre / ocupada por otra viva / ignora canceladas).
+- [x] **T010** [P] Test rojo: `computeFlexibleAvailability(...)` — mesa puntual (libre/ocupada este servicio) y genérica (siempre disponible; warning si sobre-umbral, nunca false por capacidad).
+- [x] **T011** Implementar `serviceWindow` + `isTableFreeForService` + `computeFlexibleAvailability` en `availability.ts` → tests verdes. **No tocar** `computeAvailableSlots`.
 
 ### Dispatch + booking
 

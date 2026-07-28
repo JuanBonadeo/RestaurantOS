@@ -4,7 +4,9 @@
 
 **Created**: 2026-07-28
 
-**Status**: 📋 **Propuesto** — approval gate: **sin código hasta OK de Juan** y hasta resolver los `[NEEDS CLARIFICATION]`. Milestone: Post-demo · Growth & hardening.
+**Status**: 🚧 **En progreso (2026-07-28)** — Juan aprobó implementar. **P1 (fundaciones) hecho y commiteado**: motor de disponibilidad flexible puro + 20 tests verdes (`81d764a`) + migración `0022` escrita (`e419ee0`, **pendiente aplicar al cloud**). Clarifications #1/#3/#5 **resueltas** (abajo). **Pendiente**: aplicar migración al cloud + regenerar tipos + wiring (dispatch en `getAvailability`, `createReservation` flexible, `settings-actions`) + UI (config de modo/servicios, panel, flujo cliente) + P3 (no-show relacional, chatbot) + verify en vivo. Milestone: Post-demo · Growth & hardening.
+
+> **Nota de ejecución (2026-07-28):** se avanza por commits chicos en `master` (el árbol del submódulo lo comparten sesiones paralelas que hacen `git clean`; commitear blinda el trabajo). La **aplicación de la migración al cloud + regen de `database.types.ts`** se difiere hasta que baje el churn paralelo (ese archivo lo están reescribiendo otras sesiones).
 
 **Input**: Sesión de diseño con Juan (2026-07-23). Disparador: *"el sistema de reservas que planteamos no tiene sentido, porque nunca vas a poder echar a un comensal de la mesa para que otro ocupe el turno"*. Se descartó primero el modelo actual (mesa pre-asignada + slots de 90 min) y después la alternativa de turnos+cupos rígidos (*"algo más flexible, que no sean tan rígidos los turnos"*). Se acordó: **flag de modo por negocio** (`estricto` = lo actual, se conserva / `flexible` = libro de reservas nuevo), **una reserva por mesa por servicio**, **la hora ancla el bloqueo de la mesa**, y **seguir soportando el modelo estricto** (multi-tenant). Validado contra el **libro real** del Golf (`REGISTRO DE RESERVAS GOLF.xlsx`).
 
@@ -200,10 +202,10 @@ Como encargado, marco reservas como **confirmadas** y manejo el no-show de forma
 - La capacidad blanda es advisory: el negocio no quiere un bloqueo duro (el libro lleva el total a mano y usa lista de espera para el overflow).
 - El chatbot de reservas (LangChain) puede necesitar ajustar sus tools para el modo flexible (disponibilidad por servicio en vez de slots); el alcance exacto del chatbot se afina en el plan.
 
-## [NEEDS CLARIFICATION]
+## [NEEDS CLARIFICATION] — #1/#3/#5 resueltas (Juan, 2026-07-28); #2/#4 abiertas
 
-1. **`usable-antes-de-la-hora`** — ¿la mesa reservada a las 21:00 se puede usar operativamente **antes** de las 21:00 (recomendado, criterio del encargado), o queda **tomada todo el servicio** apenas entra la reserva (más simple)? Pendiente de confirmación de Juan.
+1. **`usable-antes-de-la-hora`** — ✅ **RESUELTO: SÍ.** La mesa se puede usar operativamente **antes** de la hora reservada (criterio del encargado); el sistema no la ofrece a otra *reserva* del servicio, pero no impide sentar un walk-in. Ya reflejado en `isTableFreeForService` (bloquea la reserva, nunca la operación).
 2. **códigos-del-libro** — significado de **"H-A" / "H-S"**, **"R"** suelta, **"-A"** en las notas del Excel (¿zona? ¿confirmada? ¿ratificada?). Preguntar al encargado. No bloquea el core.
-3. **gracia-flexible** — política de vencimiento en flexible: ¿sólo señalar "demorada" sin auto-`no_show` (relacional, como hoy llaman a los 15 min), o gracia configurable que auto-libere? 
+3. **gracia-flexible** — ✅ **RESUELTO: señalar "demorada" sin auto-`no_show`** (relacional, como llaman a los 15 min). En flexible el job de vencidas NO auto-libera; marca para acción manual. (Se implementa en P3.) 
 4. **bar-reservable** — ¿la zona BAR entra al motor de reservas en flexible, o sigue fuera como las mesas `is_bar` de spec 08?
-5. **servicios-config** — ¿mediodía/cena fijos, o lista de servicios configurable por día de semana (como las hojas del libro)? Define si `servicios` es enum o tabla.
+5. **servicios-config** — ✅ **RESUELTO: tabla `reservation_services`** (configurable por negocio, por día de semana y por zona). Ya en la migración `0022`.
