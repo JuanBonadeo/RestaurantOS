@@ -412,9 +412,10 @@ export async function anularMesa(
     return actionError("Solo encargado o admin pueden anular una mesa.");
   }
 
-  // Cancelar orders abiertas de esta mesa.
+  // Cancelar orders abiertas de esta mesa. `.select("id")` devuelve las que
+  // recién cancelamos → las usamos abajo para anular sus comandas.
   const nowIso = new Date().toISOString();
-  const { error: ordersErr } = await service
+  const { data: cancelledOrders, error: ordersErr } = await service
     .from("orders")
     .update({
       lifecycle_status: "cancelled",
@@ -424,10 +425,63 @@ export async function anularMesa(
     })
     .eq("table_id", tableId)
     .eq("business_id", business.id)
-    .eq("lifecycle_status", "open");
+    .eq("lifecycle_status", "open")
+    .select("id");
   if (ordersErr) {
     console.error("anularMesa orders", ordersErr);
     return actionError("No pudimos cancelar las órdenes abiertas.");
+  }
+
+  // Anular las comandas ACTIVAS (pendiente / en_preparacion) de esas órdenes:
+  // cancelar sus ítems vivos + marcar la comanda anulada + encolar la
+  // reimpresión del ticket "ANULADA" (spec 049/35) para que cocina se entere.
+  // Las ENTREGADAS se respetan (la comida ya salió; la orden cancelada ya
+  // garantiza que no se cobra). Mismo criterio que `cancelarComanda`.
+  const cancelledOrderIds = ((cancelledOrders ?? []) as { id: string }[]).map(
+    (o) => o.id,
+  );
+  if (cancelledOrderIds.length > 0) {
+    const { data: comandaRows } = await service
+      .from("comandas")
+      .select("id")
+      .in("order_id", cancelledOrderIds)
+      .in("status", ["pendiente", "en_preparacion"])
+      .is("cancelled_at", null);
+    const comandaIds = ((comandaRows ?? []) as { id: string }[]).map((c) => c.id);
+    if (comandaIds.length > 0) {
+      const { data: links } = await service
+        .from("comanda_items")
+        .select("order_item_id")
+        .in("comanda_id", comandaIds);
+      const itemIds = [
+        ...new Set(
+          ((links ?? []) as { order_item_id: string }[]).map(
+            (l) => l.order_item_id,
+          ),
+        ),
+      ];
+      if (itemIds.length > 0) {
+        await service
+          .from("order_items")
+          .update({
+            cancelled_at: nowIso,
+            cancelled_reason: reason,
+            cancelled_by: ctx.userId,
+          })
+          .in("id", itemIds)
+          .is("cancelled_at", null);
+      }
+      await service
+        .from("comandas")
+        .update({
+          cancelled_at: nowIso,
+          cancelled_reason: reason,
+          cancelled_by: ctx.userId,
+          reprint_requested_at: nowIso, // encola el ticket "ANULADA"
+          print_failed_at: null,
+        })
+        .in("id", comandaIds);
+    }
   }
 
   // mozo_id se preserva: la asignación es fija hasta que el encargado la
