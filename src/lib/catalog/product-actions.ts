@@ -247,6 +247,35 @@ export async function toggleProductAvailability(
   return actionOk({ is_available: isAvailable });
 }
 
+/**
+ * spec 0021 — saca/pone el producto en la carta pública SIN tocar su
+ * disponibilidad para el mozo. Sirve para el catálogo heredado del POS
+ * (kiosko, cafetería, sugerencias del día) que se vende en el salón pero no
+ * va en la carta que ve el cliente.
+ */
+export async function toggleProductShowOnline(
+  businessSlug: string,
+  id: string,
+  showOnline: boolean,
+): Promise<ActionResult<{ show_online: boolean }>> {
+  const guard = await requireCatalogManager(businessSlug);
+  if (!guard.ok) return guard;
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase
+    .from("products")
+    .update({ show_online: showOnline })
+    .eq("id", id)
+    .eq("business_id", guard.data.businessId);
+  if (error) {
+    console.error("toggleProductShowOnline", error);
+    return actionError("No pudimos actualizar.");
+  }
+  revalidatePath(`/${businessSlug}/admin/catalogo`);
+  revalidatePath(`/${businessSlug}/menu`);
+  return actionOk({ show_online: showOnline });
+}
+
 export async function toggleProductActive(
   businessSlug: string,
   id: string,

@@ -74,6 +74,7 @@ export function ProductForm({
           station_id: product.station_id,
           is_available: product.is_available,
           is_active: product.is_active,
+          show_online: product.show_online,
           sort_order: product.sort_order,
           prep_time_minutes: product.prep_time_minutes,
           modifier_groups: product.modifier_groups.map((g) => ({
@@ -99,6 +100,7 @@ export function ProductForm({
           station_id: null,
           is_available: true,
           is_active: true,
+          show_online: true,
           sort_order: 0,
           prep_time_minutes: null,
           modifier_groups: [],
@@ -412,7 +414,31 @@ export function ProductForm({
               </FormItem>
             )}
           />
+          <FormField
+            control={form.control}
+            name="show_online"
+            render={({ field }) => (
+              <FormItem>
+                <FormControl>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      className="size-4"
+                      checked={field.value}
+                      onChange={(e) => field.onChange(e.target.checked)}
+                    />
+                    <span>Mostrar en la carta online</span>
+                  </label>
+                </FormControl>
+              </FormItem>
+            )}
+          />
         </div>
+        <p className="text-muted-foreground text-xs">
+          Si desmarcás <strong>Mostrar en la carta online</strong>, el producto
+          desaparece de la carta que ve el cliente pero el mozo lo sigue teniendo
+          para cargar en la mesa.
+        </p>
 
         <ModifierGroupsEditor />
 

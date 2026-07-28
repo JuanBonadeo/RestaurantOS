@@ -185,14 +185,19 @@ export const getMenu = cache(
       })),
   }));
 
-  const cats: MenuCategory[] = (categories ?? []).map((c) => ({
-    id: c.id,
-    name: c.name,
-    slug: c.slug,
-    sort_order: c.sort_order,
-    super_category_id: (c as any).super_category_id ?? null,
-    products: productsList.filter((p) => p.category_id === c.id),
-  }));
+  const cats: MenuCategory[] = (categories ?? [])
+    .map((c) => ({
+      id: c.id,
+      name: c.name,
+      slug: c.slug,
+      sort_order: c.sort_order,
+      super_category_id: (c as any).super_category_id ?? null,
+      products: productsList.filter((p) => p.category_id === c.id),
+    }))
+    // spec 0021 — al curar la carta con `show_online` una categoría puede
+    // quedar sin un solo producto visible (ej: Kiosko, Whiskys). Mostrar el
+    // título sin nada debajo parece un error de carga, así que la sacamos.
+    .filter((c) => c.products.length > 0);
 
   // Orden por super-categoría (como el mozo): las categorías se agrupan por el
   // sort_order de su super-categoría; dentro de cada una, por su propio

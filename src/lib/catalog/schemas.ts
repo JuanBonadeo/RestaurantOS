@@ -154,6 +154,13 @@ export const ProductInput = z.object({
   station_id: z.string().uuid().nullable().optional(),
   is_available: z.boolean(),
   is_active: z.boolean(),
+  /**
+   * Visible en la carta pública (spec 0021). Es independiente de
+   * `is_available`: el mozo ve el producto igual, sólo se oculta en la web.
+   * El alta arranca en true (defaultValues del form) para que un producto
+   * nuevo aparezca sin tener que acordarse de marcarlo.
+   */
+  show_online: z.boolean(),
   sort_order: z.number().int().min(0),
   prep_time_minutes: z.number().int().min(1).max(999).nullable().optional(),
   modifier_groups: z.array(ModifierGroupInput),
