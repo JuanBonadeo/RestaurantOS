@@ -65,6 +65,16 @@ describe("flexibleServiceWindow", () => {
   it("horas inválidas → null", () => {
     expect(flexibleServiceWindow(DATE, { opens_at: "25:00", closes_at: "26:00" }, TZ)).toBeNull();
   });
+
+  // REGRESIÓN: Postgres `time` llega como "HH:MM:SS". Antes el regex HH:MM no
+  // matcheaba → window null → "El horario del servicio es inválido" y no se
+  // podía crear NINGUNA reserva flexible con la config real de la DB.
+  it("acepta el formato HH:MM:SS que devuelve Postgres", () => {
+    const w = flexibleServiceWindow(DATE, { opens_at: "20:00:00", closes_at: "22:30:00" }, TZ);
+    expect(w).not.toBeNull();
+    expect(w!.starts.toISOString()).toBe("2026-08-04T23:00:00.000Z");
+    expect(w!.ends.toISOString()).toBe("2026-08-05T01:30:00.000Z");
+  });
 });
 
 describe("arrivalSlots", () => {

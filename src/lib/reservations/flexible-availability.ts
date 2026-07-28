@@ -38,9 +38,13 @@ export function flexibleServiceWindow(
   service: Pick<ReservationService, "opens_at" | "closes_at">,
   timezone: string,
 ): ServiceWindow | null {
-  if (!HHMM_RE.test(service.opens_at) || !HHMM_RE.test(service.closes_at)) return null;
-  const starts = fromZonedTime(`${date}T${service.opens_at}:00`, timezone);
-  let ends = fromZonedTime(`${date}T${service.closes_at}:00`, timezone);
+  // Postgres `time` llega como "HH:MM:SS" — normalizamos a "HH:MM" antes de
+  // validar (si no, la config real de la DB nunca matchea el regex).
+  const opensAt = service.opens_at.slice(0, 5);
+  const closesAt = service.closes_at.slice(0, 5);
+  if (!HHMM_RE.test(opensAt) || !HHMM_RE.test(closesAt)) return null;
+  const starts = fromZonedTime(`${date}T${opensAt}:00`, timezone);
+  let ends = fromZonedTime(`${date}T${closesAt}:00`, timezone);
   if (Number.isNaN(starts.getTime()) || Number.isNaN(ends.getTime())) return null;
   if (ends.getTime() <= starts.getTime()) {
     // Cierre después de medianoche → siguiente día.
