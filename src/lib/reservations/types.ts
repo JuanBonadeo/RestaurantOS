@@ -71,6 +71,9 @@ export type ReservationSettings = {
    *  no_show automáticamente (spec 22). */
   no_show_grace_min: number;
   schedule: WeeklySchedule;
+  /** Spec 059 — modo de reservas del negocio. Opcional para compilar sin la
+   *  columna (default `estricto` en DB). */
+  mode?: ReservationMode;
   updated_at: string;
 };
 
@@ -82,6 +85,38 @@ export type ReservationStatus =
   | "cancelled";
 
 export type ReservationSource = "web" | "admin" | "chatbot";
+
+/**
+ * Spec 059 — estrategia de reservas por negocio.
+ * - `estricto`: modelo actual (slots fijos + `pickTable` + GIST anti-overlap).
+ * - `flexible`: "libro de reservas" (mesa opcional, una por mesa/servicio, la
+ *   hora ancla el bloqueo hasta el cierre del servicio, capacidad blanda).
+ */
+export type ReservationMode = "estricto" | "flexible";
+
+export const RESERVATION_MODES: ReservationMode[] = ["estricto", "flexible"];
+
+/**
+ * Spec 059 — un servicio del negocio en modo flexible (ej. Mediodía, Cena),
+ * con ventana de atención y umbral de capacidad blanda opcional. Reemplaza los
+ * `schedule.slots` del modo estricto. Config por negocio (y opcional por día
+ * de semana y por zona).
+ */
+export type ReservationService = {
+  id: string;
+  business_id: string;
+  name: string;
+  /** 0..6 (0=Domingo). null = aplica todos los días. */
+  day_of_week: number | null;
+  /** "HH:MM" local (TZ del negocio). */
+  opens_at: string;
+  /** "HH:MM" local. Si es <= `opens_at` se interpreta que cruza medianoche. */
+  closes_at: string;
+  /** Umbral advisory de cubiertos (NO bloquea). null = sin umbral. */
+  soft_capacity: number | null;
+  /** Zona (floor_plan) a la que aplica el cupo. null = servicio entero. */
+  floor_plan_id: string | null;
+};
 
 /**
  * "Live" statuses: occupy the table and count against availability. Matches
@@ -102,6 +137,12 @@ export type Reservation = {
   status: ReservationStatus;
   notes: string | null;
   source: ReservationSource;
+  // Spec 059 (modo flexible) — opcionales para compilar sin las columnas.
+  /** Servicio (mediodía/cena…) al que pertenece la reserva flexible. */
+  service?: string | null;
+  /** Zona/salón de una reserva genérica (sin mesa). Las con-mesa derivan la
+   *  zona de la mesa. */
+  floor_plan_id?: string | null;
   created_at: string;
   updated_at: string;
 };
