@@ -158,10 +158,11 @@ function ViewerTable({
 
   const labelSize = Math.min(table.width, table.height) * 0.22;
   const subSize = Math.max(9, labelSize * 0.62);
-  const isLarge = Math.min(table.width, table.height) >= 90;
 
   // Qué mostrar debajo del label
   const hasReservation = !!extra?.reservation;
+  // Radio del badge de reserva, escalado para que se lea también en mesas chicas.
+  const reservationBadgeR = Math.max(6, Math.min(9, Math.min(table.width, table.height) * 0.11));
   const minutesOpen = extra?.minutesOpen;
 
   // Punto de demora de cocina (spec 30). En paint mode no va: el encargado
@@ -249,22 +250,24 @@ function ViewerTable({
         </text>
       )}
 
-      {/* Badge reserva (esquina superior derecha) — solo mesas grandes */}
-      {hasReservation && isLarge && (
+      {/* Badge reserva (esquina superior derecha). Antes sólo se dibujaba en
+          mesas grandes, así que en las chicas la reserva pasaba desapercibida:
+          ahora va siempre, escalado al tamaño de la mesa. */}
+      {hasReservation && (
         <>
           <circle
-            cx={table.width - 10}
-            cy={10}
-            r={8}
+            cx={table.width - reservationBadgeR - 2}
+            cy={reservationBadgeR + 2}
+            r={reservationBadgeR}
             fill="#6366f1"
             stroke="white"
             strokeWidth={1.5}
           />
           <text
-            x={table.width - 10}
-            y={14}
+            x={table.width - reservationBadgeR - 2}
+            y={reservationBadgeR + 2 + reservationBadgeR * 0.5}
             textAnchor="middle"
-            fontSize="8"
+            fontSize={reservationBadgeR * 1.1}
             fontWeight="700"
             fill="white"
             style={{ userSelect: "none", pointerEvents: "none" }}

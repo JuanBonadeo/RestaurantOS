@@ -70,6 +70,7 @@ import {
   type PedirCatalogBundle,
 } from "@/lib/mozo/pedir-panel-data";
 import { sentarReserva } from "@/lib/reservations/booking-actions";
+import { useReservationsRealtime } from "@/lib/reservations/use-reservations-realtime";
 import { initialsFromName, mozoColor, mozoPalette } from "@/lib/mozo/colors";
 import type { MozoMember } from "@/lib/mozo/queries";
 import { type OperationalStatus } from "@/lib/mozo/state-machine";
@@ -217,8 +218,18 @@ export function SalonDesktop({
     floorPlanIds: floorPlans.map((fp) => fp.plan.id),
   });
 
+  // Reservas en vivo (spec 059, migración 0023): una reserva nueva (web,
+  // chatbot u otro encargado) aparece sola, sin recargar.
+  useReservationsRealtime({ businessId });
+
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [walkInTableId, setWalkInTableId] = useState<string | null>(null);
+  // Aviso previo al walk-in sobre una mesa reservada (bloqueo blando, spec 059).
+  const [walkInWarning, setWalkInWarning] = useState<{
+    tableId: string;
+    label: string;
+    reservation: SalonReservationRef;
+  } | null>(null);
   const [transferTableId, setTransferTableId] = useState<string | null>(null);
   const [trasladarTableId, setTrasladarTableId] = useState<string | null>(null);
   const [anularPrompt, setAnularPrompt] = useState<{
@@ -1073,7 +1084,21 @@ export function SalonDesktop({
               onCargarPedido={() => openPedir(selected)}
               onPedirCuenta={() => openCuenta(selected)}
               onClose={() => setSelectedId(null)}
-              onWalkIn={() => setWalkInTableId(selected.id)}
+              onWalkIn={() => {
+                // Bloqueo blando (spec 059): si la mesa tiene una reserva, no
+                // se impide el walk-in, pero se avisa antes (el encargado
+                // decide: sentar la reserva o abrir igual).
+                const res = reservationByTable[selected.id];
+                if (res) {
+                  setWalkInWarning({
+                    tableId: selected.id,
+                    label: selected.label,
+                    reservation: res,
+                  });
+                } else {
+                  setWalkInTableId(selected.id);
+                }
+              }}
               onSentarReserva={() => {
                 const res = reservationByTable[selected.id];
                 if (res) handleSentarReserva(res.id, selected.id);
@@ -1094,6 +1119,11 @@ export function SalonDesktop({
                 reservations={reservations}
                 slug={slug}
                 tableLabelById={tableLabelById}
+                tables={activeTables.map((t) => ({
+                  id: t.id,
+                  label: t.label,
+                  seats: t.seats,
+                }))}
                 onNewReservation={() => setShowNewReservation(true)}
               />
               <ActiveTablesList
@@ -1258,6 +1288,68 @@ export function SalonDesktop({
                 className="flex-1"
               >
                 Anular
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Aviso: walk-in sobre una mesa reservada (bloqueo blando, spec 059).
+          No impide abrirla —el encargado manda—, pero avisa y ofrece el
+          camino correcto: sentar la reserva. */}
+      {walkInWarning && (
+        <Dialog open onOpenChange={(o) => !o && setWalkInWarning(null)}>
+          <DialogContent className="max-w-md p-5">
+            <DialogHeader>
+              <DialogTitle className="text-base font-bold text-zinc-900">
+                {walkInWarning.label} está reservada
+              </DialogTitle>
+              <DialogDescription className="text-xs text-zinc-500">
+                {formatTime(walkInWarning.reservation.starts_at)} ·{" "}
+                {walkInWarning.reservation.customer_name} ·{" "}
+                {walkInWarning.reservation.party_size}p
+                {walkInWarning.reservation.notes
+                  ? ` · ${walkInWarning.reservation.notes}`
+                  : ""}
+              </DialogDescription>
+            </DialogHeader>
+            <p className="text-sm text-zinc-600">
+              Podés abrirla igual para un walk-in, pero después vas a necesitar la
+              mesa para esta reserva.
+            </p>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setWalkInWarning(null)}
+                disabled={pending}
+              >
+                Volver
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setWalkInTableId(walkInWarning.tableId);
+                  setWalkInWarning(null);
+                }}
+                disabled={pending}
+              >
+                Abrir igual
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  handleSentarReserva(
+                    walkInWarning.reservation.id,
+                    walkInWarning.tableId,
+                  );
+                  setWalkInWarning(null);
+                }}
+                disabled={pending}
+                className="flex-1"
+              >
+                Sentar la reserva
               </Button>
             </DialogFooter>
           </DialogContent>

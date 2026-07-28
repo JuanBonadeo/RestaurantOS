@@ -2,12 +2,14 @@
 
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarPlus, ChevronDown, Clock, UserCheck, UserX, X } from "lucide-react";
+import { CalendarPlus, Clock, UserCheck, UserX, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { sentarReserva } from "@/lib/reservations/booking-actions";
-import { updateReservationStatus } from "@/lib/reservations/booking-actions";
-import { cn } from "@/lib/utils";
+import {
+  updateReservationDetails,
+  updateReservationStatus,
+} from "@/lib/reservations/booking-actions";
 
 import type { SalonReservationRef } from "./salon-desktop";
 
@@ -23,11 +25,15 @@ export function ReservationsPanel({
   reservations,
   slug,
   tableLabelById,
+  tables = [],
   onNewReservation,
 }: {
   reservations: SalonReservationRef[];
   slug: string;
   tableLabelById: Record<string, string>;
+  /** Mesas activas del salón — para asignar/cambiar la mesa de una reserva
+   *  desde acá (spec 059: las flexibles pueden venir sin mesa). */
+  tables?: Array<{ id: string; label: string; seats: number }>;
   onNewReservation?: () => void;
 }) {
   const router = useRouter();
@@ -63,6 +69,29 @@ export function ReservationsPanel({
         return;
       }
       toast.success("Marcada como no vino.");
+      router.refresh();
+    });
+  };
+
+  /** Asignar (o cambiar) la mesa de una reserva confirmada. El server valida
+   *  capacidad, cross-tenant y solape; la fuente de verdad es el constraint. */
+  const handleAsignarMesa = (
+    reservationId: string,
+    tableId: string,
+    partySize: number,
+  ) => {
+    startTransition(async () => {
+      const result = await updateReservationDetails({
+        business_slug: slug,
+        reservation_id: reservationId,
+        table_id: tableId,
+        party_size: partySize,
+      });
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Mesa asignada.");
       router.refresh();
     });
   };
@@ -131,13 +160,35 @@ export function ReservationsPanel({
                     {r.customer_name}
                   </span>
                 </div>
-                <div className="mt-0.5 flex items-center gap-2 text-[11px] text-zinc-400">
+                <div className="mt-0.5 flex items-center gap-2 text-[11px] text-zinc-500">
                   <span>{r.party_size}p</span>
-                  {r.table_id && tableLabelById[r.table_id] && (
-                    <>
-                      <span>·</span>
-                      <span>Mesa {tableLabelById[r.table_id]}</span>
-                    </>
+                  <span>·</span>
+                  {tables.length > 0 ? (
+                    // Asignar/cambiar la mesa desde el salón. Las reservas
+                    // flexibles pueden venir sin mesa (se define al llegar).
+                    <select
+                      value={r.table_id ?? ""}
+                      disabled={pending}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v) handleAsignarMesa(r.id, v, r.party_size);
+                      }}
+                      className={`-ml-1 max-w-[9rem] truncate rounded-md border-none bg-transparent px-1 py-0.5 text-[11px] font-medium focus:outline-none focus:ring-1 focus:ring-blue-300 ${
+                        r.table_id ? "text-zinc-600" : "text-blue-600"
+                      }`}
+                      aria-label="Mesa de la reserva"
+                    >
+                      <option value="">Sin mesa — asignar</option>
+                      {tables.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          Mesa {t.label} ({t.seats})
+                        </option>
+                      ))}
+                    </select>
+                  ) : r.table_id && tableLabelById[r.table_id] ? (
+                    <span>Mesa {tableLabelById[r.table_id]}</span>
+                  ) : (
+                    <span>Sin mesa</span>
                   )}
                 </div>
               </div>
