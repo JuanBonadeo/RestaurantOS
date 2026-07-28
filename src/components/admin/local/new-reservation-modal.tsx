@@ -23,6 +23,7 @@ import {
   createReservationFromAdmin,
 } from "@/lib/reservations/booking-actions";
 import { arrivalSlots } from "@/lib/reservations/flexible-availability";
+import { buscarClientes, type ClienteMatch } from "@/lib/admin/customers-actions";
 import type { FloorTable, ReservationMode, ReservationService } from "@/lib/reservations/types";
 
 type Slot = { slot: string; starts_at: string; ends_at: string };
@@ -64,6 +65,10 @@ export function NewReservationModal({ slug, tables, floorPlanId, onClose }: Prop
   const [notes, setNotes] = useState("");
   const [tableId, setTableId] = useState<string | undefined>(undefined);
 
+  // Buscar cliente existente (reusa buscarClientes de spec 054).
+  const [clientQuery, setClientQuery] = useState("");
+  const [clientResults, setClientResults] = useState<ClienteMatch[]>([]);
+
   // Modo + servicios (spec 059). mode=null → cargando.
   const [mode, setMode] = useState<ReservationMode | null>(null);
   const [services, setServices] = useState<ReservationService[]>([]);
@@ -95,6 +100,27 @@ export function NewReservationModal({ slug, tables, floorPlanId, onClose }: Prop
       }
     });
   }, [slug]);
+
+  // Búsqueda de cliente existente (debounce 300ms). Reusa buscarClientes.
+  useEffect(() => {
+    const q = clientQuery.trim();
+    if (q.length < 2) {
+      setClientResults([]);
+      return;
+    }
+    const t = setTimeout(async () => {
+      const r = await buscarClientes(slug, q);
+      setClientResults(r.ok ? r.data : []);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [clientQuery, slug]);
+
+  function pickCliente(c: ClienteMatch) {
+    setName(c.name ?? "");
+    setPhone(c.phone);
+    setClientQuery("");
+    setClientResults([]);
+  }
 
   // Servicios aplicables a la fecha elegida (día exacto o "todos los días").
   const serviceNames = useMemo(() => {
@@ -261,6 +287,35 @@ export function NewReservationModal({ slug, tables, floorPlanId, onClose }: Prop
           className="flex min-h-0 flex-1 flex-col"
         >
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-4">
+            {/* Buscar cliente existente */}
+            <div className="relative">
+              <label className={LABEL_CLS}>Buscar cliente</label>
+              <input
+                value={clientQuery}
+                onChange={(e) => setClientQuery(e.target.value)}
+                className={INPUT_CLS}
+                placeholder="Nombre o teléfono…"
+              />
+              {clientResults.length > 0 ? (
+                <ul className="absolute z-20 mt-1 max-h-48 w-full overflow-auto rounded-xl border border-zinc-200 bg-white shadow-lg">
+                  {clientResults.map((c) => (
+                    <li key={c.id}>
+                      <button
+                        type="button"
+                        onClick={() => pickCliente(c)}
+                        className="flex w-full flex-col items-start px-3 py-2 text-left hover:bg-zinc-50"
+                      >
+                        <span className="text-sm font-medium text-zinc-900">
+                          {c.name ?? "Sin nombre"}
+                        </span>
+                        <span className="text-xs text-zinc-500">{c.phone}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+
             <div>
               <label className={LABEL_CLS}>Nombre *</label>
               <input
