@@ -22,6 +22,7 @@ import {
   createFlexibleReservation,
   createReservationFromAdmin,
 } from "@/lib/reservations/booking-actions";
+import { arrivalSlots } from "@/lib/reservations/flexible-availability";
 import type { FloorTable, ReservationMode, ReservationService } from "@/lib/reservations/types";
 
 type Slot = { slot: string; starts_at: string; ends_at: string };
@@ -107,6 +108,28 @@ export function NewReservationModal({ slug, tables, floorPlanId, onClose }: Prop
     const applicable = services.filter((s) => s.day_of_week == null || s.day_of_week === dow);
     return Array.from(new Set(applicable.map((s) => s.name)));
   }, [services, date]);
+
+  const selectedServiceRow = useMemo(() => {
+    if (!service) return null;
+    const dow = new Date(
+      Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8, 10))),
+    ).getUTCDay();
+    const matches = services.filter((s) => s.name === service);
+    return (
+      matches.find((s) => s.day_of_week === dow) ??
+      matches.find((s) => s.day_of_week == null) ??
+      matches[0] ??
+      null
+    );
+  }, [services, service, date]);
+
+  const arrivalOptions = useMemo(
+    () =>
+      selectedServiceRow
+        ? arrivalSlots(selectedServiceRow.opens_at, selectedServiceRow.closes_at)
+        : [],
+    [selectedServiceRow],
+  );
 
   useEffect(() => {
     if (mode === "flexible" && serviceNames.length > 0 && !serviceNames.includes(service)) {
@@ -315,7 +338,10 @@ export function NewReservationModal({ slug, tables, floorPlanId, onClose }: Prop
                         <button
                           key={s}
                           type="button"
-                          onClick={() => setService(s)}
+                          onClick={() => {
+                            setService(s);
+                            setArrivalTime("");
+                          }}
                           className={`rounded-xl px-3 py-2 text-sm font-semibold transition active:scale-95 ${
                             service === s
                               ? "bg-blue-600 text-white shadow-sm"
@@ -329,15 +355,29 @@ export function NewReservationModal({ slug, tables, floorPlanId, onClose }: Prop
                   )}
                 </div>
 
-                {/* Hora de llegada (obligatoria) */}
+                {/* Hora de llegada (obligatoria) — chips cada 15 min */}
                 <div>
-                  <label className={LABEL_CLS}>Hora de llegada</label>
-                  <input
-                    type="time"
-                    value={arrivalTime}
-                    onChange={(e) => setArrivalTime(e.target.value)}
-                    className={INPUT_CLS}
-                  />
+                  <label className={LABEL_CLS}>Horario</label>
+                  {arrivalOptions.length === 0 ? (
+                    <p className="mt-2 text-sm text-zinc-400">Elegí un servicio primero.</p>
+                  ) : (
+                    <div className="mt-2 grid grid-cols-4 gap-1.5 sm:grid-cols-5">
+                      {arrivalOptions.map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => setArrivalTime(t)}
+                          className={`rounded-xl px-2 py-2.5 text-sm font-semibold transition active:scale-95 ${
+                            arrivalTime === t
+                              ? "bg-blue-600 text-white shadow-sm"
+                              : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
+                          }`}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Cupo blando */}

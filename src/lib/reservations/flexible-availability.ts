@@ -49,6 +49,34 @@ export function flexibleServiceWindow(
   return { starts, ends };
 }
 
+function hhmmToMin(hhmm: string): number | null {
+  if (!HHMM_RE.test(hhmm)) return null;
+  const [h, m] = hhmm.split(":").map(Number);
+  return h * 60 + m;
+}
+
+/**
+ * Horarios de llegada elegibles de un servicio, en pasos de `stepMin` (default
+ * 15 min), desde la apertura hasta el cierre (excluido). Maneja el cruce de
+ * medianoche (cena 20:00→00:30 → …23:45, 00:00, 00:15). Devuelve strings
+ * "HH:MM" locales — el equivalente flexible a los slots fijos del estricto,
+ * pero derivados de la ventana del servicio.
+ */
+export function arrivalSlots(opensAt: string, closesAt: string, stepMin = 15): string[] {
+  const open = hhmmToMin(opensAt.slice(0, 5));
+  let close = hhmmToMin(closesAt.slice(0, 5));
+  if (open == null || close == null || stepMin <= 0) return [];
+  if (close <= open) close += 24 * 60; // cruza medianoche
+  const out: string[] = [];
+  for (let t = open; t < close; t += stepMin) {
+    const mm = ((t % (24 * 60)) + 24 * 60) % (24 * 60);
+    const h = Math.floor(mm / 60);
+    const m = mm % 60;
+    out.push(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
+  }
+  return out;
+}
+
 /**
  * Una reserva "pertenece" a un servicio si está viva y su `starts_at` cae dentro
  * de la ventana `[starts, ends)`. Ancla cada reserva a exactamente un servicio

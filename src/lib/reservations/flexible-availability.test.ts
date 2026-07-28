@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  arrivalSlots,
   computeFlexibleAvailability,
   flexibleServiceWindow,
   isTableFreeForService,
@@ -63,6 +64,31 @@ describe("flexibleServiceWindow", () => {
 
   it("horas inválidas → null", () => {
     expect(flexibleServiceWindow(DATE, { opens_at: "25:00", closes_at: "26:00" }, TZ)).toBeNull();
+  });
+});
+
+describe("arrivalSlots", () => {
+  it("genera horarios cada 15 min hasta el cierre (excluido)", () => {
+    const s = arrivalSlots("12:00", "16:00");
+    expect(s[0]).toBe("12:00");
+    expect(s[s.length - 1]).toBe("15:45");
+    expect(s).toHaveLength(16);
+    expect(s).not.toContain("16:00");
+  });
+
+  it("cruza medianoche (cena 20:00→00:30)", () => {
+    const s = arrivalSlots("20:00", "00:30");
+    expect(s[0]).toBe("20:00");
+    expect(s).toContain("23:45");
+    expect(s).toContain("00:00");
+    expect(s).toContain("00:15");
+    expect(s).not.toContain("00:30");
+    expect(s).toHaveLength(18);
+  });
+
+  it("acepta formato HH:MM:SS de la DB y rechaza inválidos", () => {
+    expect(arrivalSlots("12:00:00", "13:00:00")).toEqual(["12:00", "12:15", "12:30", "12:45"]);
+    expect(arrivalSlots("99:99", "10:00")).toEqual([]);
   });
 });
 

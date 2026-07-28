@@ -8,6 +8,7 @@ import { toast } from "sonner";
 
 import { I, ImageTile } from "@/components/delivery/primitives";
 import { fetchAvailability, fetchFlexibleAvailability } from "@/lib/reservations/availability-actions";
+import { arrivalSlots } from "@/lib/reservations/flexible-availability";
 import {
   createFlexibleReservation,
   createReservationFromCustomer,
@@ -182,6 +183,28 @@ export function ReservarFlow({
     const applicable = services.filter((s) => s.day_of_week == null || s.day_of_week === dow);
     return Array.from(new Set(applicable.map((s) => s.name)));
   }, [isFlexible, services, date]);
+
+  // Fila del servicio elegido (para su ventana horaria) + horarios de llegada.
+  const selectedServiceRow = useMemo(() => {
+    if (!isFlexible || !service) return null;
+    const [y, m, d] = date.split("-").map(Number);
+    const dow = new Date(Date.UTC(y ?? 1970, (m ?? 1) - 1, d ?? 1)).getUTCDay();
+    const matches = services.filter((s) => s.name === service);
+    return (
+      matches.find((s) => s.day_of_week === dow) ??
+      matches.find((s) => s.day_of_week == null) ??
+      matches[0] ??
+      null
+    );
+  }, [isFlexible, services, service, date]);
+
+  const arrivalOptions = useMemo(
+    () =>
+      selectedServiceRow
+        ? arrivalSlots(selectedServiceRow.opens_at, selectedServiceRow.closes_at)
+        : [],
+    [selectedServiceRow],
+  );
 
   useEffect(() => {
     if (isFlexible) return;
@@ -697,7 +720,10 @@ export function ReservarFlow({
                     <button
                       key={s}
                       type="button"
-                      onClick={() => setService(s)}
+                      onClick={() => {
+                        setService(s);
+                        setArrivalTime("");
+                      }}
                       style={{
                         height: 44,
                         padding: "0 18px",
@@ -717,30 +743,42 @@ export function ReservarFlow({
                 })}
               </div>
 
-              <div>
-                <label
-                  htmlFor="flex-arrival"
-                  style={{ display: "block", fontSize: 12, color: "var(--ink-2)", marginBottom: 6 }}
-                >
-                  Hora de llegada
-                </label>
-                <input
-                  id="flex-arrival"
-                  type="time"
-                  value={arrivalTime}
-                  onChange={(e) => setArrivalTime(e.target.value)}
-                  style={{
-                    height: 44,
-                    padding: "0 12px",
-                    borderRadius: 12,
-                    border: "1px solid var(--hairline-2)",
-                    background: "var(--bg)",
-                    color: "var(--ink)",
-                    fontSize: 15,
-                    fontFamily: "inherit",
-                  }}
-                />
-              </div>
+              {arrivalOptions.length > 0 ? (
+                <div>
+                  <div style={{ fontSize: 12, color: "var(--ink-2)", marginBottom: 8 }}>Horario</div>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(4, 1fr)",
+                      gap: 6,
+                    }}
+                  >
+                    {arrivalOptions.map((t) => {
+                      const active = arrivalTime === t;
+                      return (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => setArrivalTime(t)}
+                          style={{
+                            height: 44,
+                            borderRadius: 10,
+                            border: active ? "none" : "1px solid var(--hairline-2)",
+                            background: active ? "var(--primary)" : "var(--bg)",
+                            color: active ? "var(--primary-foreground)" : "var(--ink)",
+                            fontSize: 14,
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            fontFamily: "inherit",
+                          }}
+                        >
+                          {t}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
 
               {flexTables.length > 0 ? (
                 <div>
