@@ -85,12 +85,24 @@ Como **encargado**, en la venta de mostrador la orden **nace al cobrar**. El for
 - **Vuelto.** Sólo en efectivo, y sólo informativo: nunca se registra como parte del pago.
 - **Ajuste con monto editado.** Hoy el ajuste se calcula sobre lo que falta y **no** se recalcula si el usuario edita el monto — inconsistencia existente en los dos clientes grandes. Al unificar hay que **decidirlo una vez** y documentarlo (propuesta: el ajuste siempre se calcula sobre lo que falta; si el monto editado es mayor, la diferencia es vuelto).
 
+## Hallazgos del diff previo (T002) — las diferencias que NO son accidentales
+
+Antes de fusionar nada se diffeó el comportamiento real de los dos clientes grandes. Los `METHODS` y sus helpers resultaron **idénticos**, pero aparecieron cuatro divergencias que hay que decidir explícitamente — si se resuelven "sola" en el merge, se pierde comportamiento en silencio.
+
+1. **`onPaid` tiene dos contratos distintos.** El mozo devuelve el `RegistrarPagoResult` completo para **mergear la fila que el server ya persistió** (spec 41, cobro instantáneo: sin `router.refresh()`); el desktop devuelve sólo `{ orderClosed }`. **No es una inconsistencia a limpiar: es perf percibida deliberada.** El contrato unificado devuelve el resultado completo y cada caller usa lo que necesita.
+
+2. **La propina sale de lugares distintos.** El mozo la toma de la orden (`orderTipCents`, cargada en el paso Cuenta y no editable al cobrar); el encargado la edita **dentro del cobro** (`useState(0)`). Son dos semánticas del mismo campo, no un descuido. → `allowTip: boolean` **no alcanza**; ver contrato corregido en `plan.md`.
+
+3. **Facturar está en 3 de 4, y el que falta es el del encargado.** `emitInvoice` vive en el cobro del mozo, en el pedido del board y en la venta de mostrador; **el cobro de mesa del encargado es el único que no puede facturar**. La spec original asumía lo contrario (que el bloque de comprobante era exclusivo del sheet del pedido). Corregido: el comprobante es una **capacidad del caller**, y que el encargado no la tenga hoy es una asimetría a resolver con Juan, no algo a replicar.
+
+4. **Etiquetas de sub-cuenta.** El mozo distingue `split_index === 0` (split implícito) con un texto propio; el desktop no. Cosmético pero visible: va al `subject`.
+
 ## Requirements *(mandatory)*
 
 ### El componente
 
 - **FR-001**: DEBE existir un único componente de formulario de cobro que reciba **cuánto hay que cobrar** y **qué hacer al confirmar**, sin conocer mesas, pedidos ni órdenes.
-- **FR-002**: Contrato de entrada mínimo: `subject` (para los textos), `amountDueCents`, `cajas`, `methodConfigs`, `allowedMethods`, `allowTip`, `onSubmit`, y `mp` opcional.
+- **FR-002**: Contrato de entrada mínimo: `subject` (para los textos), `amountDueCents`, `cajas`, `methodConfigs`, `allowedMethods`, `tip` (fija desde la orden o editable — hallazgo 2), `onSubmit`, y `mp` opcional.
 - **FR-003**: `onSubmit` DEBE recibir todo lo necesario para registrar el pago (`method`, `amountCents` con ajuste, `tipCents`, `cajaId`, `lastFour`, `cardBrand`, `notes`, `adjustmentPercent`, `adjustmentCents`, `requestId`) y devolver un `ActionResult`. **El componente no importa server actions**: el caller decide si es `registrarPago`, `venderMostrador` o lo que venga.
 - **FR-004**: Las reglas de dinero DEBEN vivir dentro del componente una sola vez: ajuste por método, guarda de efectivo (`isCashShortPayment`), vuelto, últimos 4 dígitos, nota obligatoria en `transfer`/`other`, bloqueo mientras el cobro está en vuelo, `requestId` estable entre taps y regenerado tras un cobro OK.
 - **FR-005**: DEBE soportar dos ergonomías sin duplicar lógica: **touch** (mozo, botones grandes) y **compacta** (paneles del admin). Vía prop, no vía copia.
@@ -99,7 +111,7 @@ Como **encargado**, en la venta de mostrador la orden **nace al cobrar**. El for
 
 ### Las cuatro migraciones
 
-- **FR-008**: El **pedido del board** pasa al motor y gana recargo, propina, mixto, MP y anular. Se borra `cobrar-pedido-sheet.tsx`, conservando su bloque de comprobante (Factura A/B, spec 053) como componente aparte.
+- **FR-008**: El **pedido del board** pasa al motor y gana recargo, propina, mixto, MP y anular. Se borra `cobrar-pedido-sheet.tsx`, extrayendo el bloque de comprobante (Factura A/B, spec 053) a un componente propio — que hoy **también** usan el mozo y el mostrador (hallazgo 3), así que la extracción los unifica a los tres.
 - **FR-009**: El **cobro del encargado** (página + panel embebido del salón) pasa al motor sin cambiar su layout ni sus props externas.
 - **FR-010**: El **cobro del mozo** pasa al motor **dentro de su modal actual**, sin cambios visibles de flujo ni de ergonomía.
 - **FR-011**: La **venta de mostrador** pasa al motor para su bloque de pago, conservando el picker de productos.

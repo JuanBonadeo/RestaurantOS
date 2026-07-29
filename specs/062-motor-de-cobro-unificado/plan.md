@@ -38,10 +38,17 @@ export type CobroFormProps = {
   methodConfigs: PaymentMethodConfig[];
   /** Mostrador no ofrece MP; el pedido sí. */
   allowedMethods: PaymentMethod[];
-  allowTip: boolean;
+  /** Hallazgo T002-2: no es un booleano. El mozo la trae de la orden (se carga
+   *  en el paso Cuenta y no se toca al cobrar); el encargado la edita acá. */
+  tip:
+    | { mode: "none" }
+    | { mode: "fixed"; cents: number }
+    | { mode: "editable"; initialCents?: number };
   /** Ergonomía: mozo = touch, paneles del admin = compact. */
   size?: "touch" | "compact";
-  /** El caller elige el action. El form no importa server actions. */
+  /** El caller elige el action. El form no importa server actions.
+   *  Devuelve el resultado COMPLETO: el mozo lo usa para mergear la fila ya
+   *  persistida sin refrescar la pantalla (spec 41). Hallazgo T002-1. */
   onSubmit: (input: CobroSubmit) => Promise<ActionResult<unknown>>;
   /** MP: preference + link/QR + polling. Sin esto, no se ofrece MP. */
   mp?: {
@@ -55,6 +62,8 @@ export type CobroFormProps = {
 Lo que **queda adentro** (una sola vez): ajuste por método, guarda de efectivo, vuelto, validación de últimos 4, nota obligatoria en `transfer`/`other`, botón bloqueado en vuelo, `requestId`.
 
 Lo que **queda afuera** (del caller): qué orden/split se cobra, `splitId: null` vs split real, cerrar la orden, liberar la mesa, facturar, refrescar.
+
+**Facturar queda afuera a propósito** (hallazgo T002-3): hoy `emitInvoice` está en el mozo, en el pedido y en el mostrador — **el único que no factura es el cobro del encargado**. El bloque de comprobante se extrae a `comprobante-fields.tsx` y lo monta el caller que corresponda; que el encargado no lo tenga es una asimetría a decidir con Juan, no algo a replicar.
 
 ## Capas
 

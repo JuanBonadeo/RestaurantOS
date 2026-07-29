@@ -3,8 +3,8 @@
 Leyenda: `[ ]` pendiente · `[x]` hecho. **Sin migración.** Cada bloque de migración (T005–T008) es un commit que deja el árbol verde y la app usable.
 
 ## Preparación
-- [ ] **T001** Mover `calculateAdjustment` a `src/lib/billing/adjustment.ts` + test (redondeo, porcentaje negativo, base 0). Las dos copias locales (`cobrar-client.tsx`, `cobrar-desktop-client.tsx`) pasan a importarla. Nada más cambia (FR-007).
-- [ ] **T002** Diffear el comportamiento real de los dos clientes grandes (labels, orden de campos, condiciones de visibilidad, qué hace cada uno tras un pago parcial). Anotar en la spec las diferencias que **no** son accidentales, para no perderlas en el merge.
+- [x] **T001** Mover `calculateAdjustment` a `src/lib/billing/adjustment.ts` + test (redondeo, porcentaje negativo, base 0). Las dos copias locales (`cobrar-client.tsx`, `cobrar-desktop-client.tsx`) pasan a importarla. Nada más cambia (FR-007).
+- [x] **T002** Diffear el comportamiento real de los dos clientes grandes. **Resultado:** `METHODS` y helpers idénticos; **4 divergencias reales** documentadas en `spec.md` §Hallazgos — contrato de `onPaid` (perf percibida del mozo), origen de la propina, facturación presente en 3 de 4 (falta justo en el del encargado) y etiqueta del split implícito. Las dos primeras cambiaron el contrato en `plan.md`.
 
 ## El componente
 - [ ] **T003** `src/components/billing/cobro-form.tsx` con el contrato de `plan.md` (FR-001, FR-002, FR-003). Sin `Dialog`/`Sheet`/`PageShell`: sólo el cuerpo. **No importa server actions.**
