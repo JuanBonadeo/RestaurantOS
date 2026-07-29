@@ -67,8 +67,9 @@ export function CheckoutForm({
   const [phone, setPhone] = useState(initialPhone);
   const [email] = useState(initialEmail);
   const [payment, setPayment] = useState<PaymentId>(mpEnabled ? "mp" : "cash");
-  // Pedido diferido (spec 31): "¿para cuándo?" → ahora / programar. Solo retiro
-  // y solo si el negocio cobra con MP (el programado se paga por adelantado).
+  // Pedido diferido (spec 31 + 061): "¿para cuándo?" → ahora / programar.
+  // Retiro y delivery; el retiro exige MP (se paga por adelantado), el delivery
+  // se puede pagar en efectivo al recibir.
   const [when, setWhen] = useState<When>("now");
   const [schedDate, setSchedDate] = useState("");
   const [schedTime, setSchedTime] = useState("");
@@ -93,9 +94,12 @@ export function CheckoutForm({
   const [promoError, setPromoError] = useState<string | null>(null);
 
   const isPickup = mode === "pickup";
-  // Programar requiere retiro + MP (pago adelantado). Sin MP no se ofrece.
-  const canSchedule = isPickup && mpEnabled;
+  // Programar un **retiro** exige MP (pago adelantado): sin MP no se ofrece. Un
+  // **delivery** se puede programar siempre — se paga en efectivo al recibir.
+  const canSchedule = isPickup ? mpEnabled : true;
   const isScheduled = canSchedule && when === "scheduled";
+  /** Sólo el retiro programado fuerza el pago adelantado. */
+  const schedulePrepayOnly = isScheduled && isPickup;
   const subtotal = cartTotal(items);
   const baseDeliveryFee = isPickup ? 0 : deliveryFeeCents;
   // free_shipping: el descuento se "absorbe" haciendo el envío 0
@@ -169,13 +173,13 @@ export function CheckoutForm({
     else if (!isPickup && payment === "pickup-cash") setPayment("cash");
   }, [isPickup, payment]);
 
-  // "Programar" solo existe en pickup+MP y fuerza el método MP (adelantado).
   useEffect(() => {
     if (!canSchedule && when !== "now") setWhen("now");
   }, [canSchedule, when]);
+  // Sólo el retiro programado fuerza MP. El delivery programado deja elegir.
   useEffect(() => {
-    if (when === "scheduled" && payment !== "mp") setPayment("mp");
-  }, [when, payment]);
+    if (schedulePrepayOnly && payment !== "mp") setPayment("mp");
+  }, [schedulePrepayOnly, payment]);
 
   // Límites del input de fecha (YYYY-MM-DD en el TZ del local): de hoy hasta la
   // ventana máxima. El helper revalida horario/anticipación igual.
@@ -196,10 +200,11 @@ export function CheckoutForm({
     };
   }, [businessTimezone]);
 
-  // Un pedido programado se paga sí o sí con MP adelantado (spec 31): no se
-  // ofrece efectivo.
+  // Un **retiro** programado se paga sí o sí con MP adelantado (spec 31): no se
+  // ofrece efectivo. Un **delivery** programado usa las opciones de siempre
+  // (spec 061).
   const paymentOptions: { id: PaymentId; label: string; sub: string }[] =
-    isScheduled
+    schedulePrepayOnly
       ? [
           {
             id: "mp" as const,
@@ -251,14 +256,18 @@ export function CheckoutForm({
     let scheduledAtIso: string | undefined;
     if (isScheduled) {
       if (!schedDate || !schedTime) {
-        toast.error("Elegí el día y la hora del retiro.");
+        toast.error(
+          isPickup
+            ? "Elegí el día y la hora del retiro."
+            : "Elegí el día y la hora de la entrega.",
+        );
         return;
       }
       const dt = fromZonedTime(`${schedDate}T${schedTime}:00`, businessTimezone);
       const v = validateScheduledOrder({
         scheduledAt: dt,
-        deliveryType: "pickup",
-        paymentMethod: "mp",
+        deliveryType: mode,
+        paymentMethod: payment === "mp" ? "mp" : "cash",
         businessHours,
         timezone: businessTimezone,
       });

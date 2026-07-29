@@ -6,7 +6,10 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import type { AdminOrder } from "@/lib/admin/orders-query";
-import { confirmarPedido } from "@/lib/orders/confirm-order";
+import {
+  aceptarPedidoProgramado,
+  confirmarPedido,
+} from "@/lib/orders/confirm-order";
 import { isScheduledForLater } from "@/lib/orders/scheduled";
 import type { OrderStatus } from "@/lib/orders/status";
 import { updateOrderStatus } from "@/lib/orders/update-status";
@@ -279,24 +282,53 @@ export function OrdersRealtimeBoard({
     [slug],
   );
 
+  // Aceptar un programado (spec 061): lo avala sin marcharlo. Queda en
+  // Próximos y la comanda sale sola cuando entra en ventana.
+  const handleAceptarProgramado = useCallback(
+    async (order: AdminOrder) => {
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === order.id ? { ...o, status: "confirmed" } : o,
+        ),
+      );
+      const result = await aceptarPedidoProgramado(order.id, slug);
+      if (!result.ok) {
+        toast.error(result.error);
+        setOrders((prev) =>
+          prev.map((o) =>
+            o.id === order.id ? { ...o, status: order.status } : o,
+          ),
+        );
+        return;
+      }
+      toast.success(
+        `Pedido #${order.order_number} aceptado · la comanda sale sola antes de la hora`,
+      );
+    },
+    [slug],
+  );
+
   const unlockSound = () => {
     playBeep();
     setSoundUnlocked(true);
   };
 
-  // Agendados (spec 31): pedidos diferidos pagados que todavía no marcharon
-  // (scheduled_at futuro + pending). Van a la sección "Próximos", NO al kanban
-  // — recién entran a las columnas cuando marchan (status → preparing, por el
-  // cron ~40 min antes o "marchar ahora").
+  // Agendados (spec 31 + 061): pedidos diferidos que todavía no marcharon.
+  // Van a la sección "Próximos", NO al kanban — recién entran a las columnas
+  // cuando marchan (status → preparing, por el cron con el lead del negocio o
+  // por "marchar ahora"). Dos formas de estar acá:
+  //  · `pending`   → pago (MP aprobado, listo) o impago (espera que el
+  //                  encargado lo acepte; sin eso el cron no lo toma — 047).
+  //  · `confirmed` → ya aceptado, esperando su ventana.
   const { agendados, byColumn } = useMemo(() => {
     const now = new Date();
-    const isAgendadoPending = (o: AdminOrder) =>
+    const isAgendado = (o: AdminOrder) =>
       !!o.scheduled_at &&
-      o.status === "pending" &&
+      (o.status === "pending" || o.status === "confirmed") &&
       isScheduledForLater(o.scheduled_at, now);
 
     const proximos = orders
-      .filter((o) => isAgendadoPending(o) && o.payment_status === "paid")
+      .filter(isAgendado)
       .sort((a, b) =>
         (a.scheduled_at ?? "").localeCompare(b.scheduled_at ?? ""),
       );
@@ -304,9 +336,9 @@ export function OrdersRealtimeBoard({
     const groups: Record<string, AdminOrder[]> = {};
     for (const col of COLUMNS) groups[col.key] = [];
     for (const order of orders) {
-      // Un agendado-pendiente (pago o impago) no va al kanban: o está en
-      // Próximos (pago) o esperando el pago (no ensucia la operación de hoy).
-      if (isAgendadoPending(order)) continue;
+      // Un agendado no va al kanban aunque esté `confirmed`: su lugar es
+      // Próximos hasta que marche (no ensucia la operación de hoy).
+      if (isAgendado(order)) continue;
       const col = COLUMNS.find((c) => c.statuses.includes(order.status));
       if (col) groups[col.key].push(order);
     }
@@ -366,7 +398,7 @@ export function OrdersRealtimeBoard({
               {agendados.length}
             </span>
             <span className="text-muted-foreground text-xs">
-              programados para retirar
+              esperando su hora
             </span>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -376,6 +408,7 @@ export function OrdersRealtimeBoard({
                 order={order}
                 timezone={timezone}
                 onMarchNow={() => handleConfirm(order)}
+                onAccept={() => handleAceptarProgramado(order)}
               />
             ))}
           </div>
@@ -477,15 +510,28 @@ function ScheduledOrderCard({
   order,
   timezone,
   onMarchNow,
+  onAccept,
 }: {
   order: AdminOrder;
   timezone: string;
   onMarchNow: () => void;
+  onAccept: () => void;
 }) {
   const [marching, setMarching] = useState(false);
+  const [accepting, setAccepting] = useState(false);
   const itemsLabel = order.items
     .map((i) => `${i.quantity}× ${i.product_name}`)
     .join(" · ");
+  // Tres estados posibles (spec 061). El único que necesita un gesto es el
+  // impago sin aceptar: hasta que el encargado lo avale, el cron no lo marcha.
+  const paid = order.payment_status === "paid";
+  const accepted = order.status === "confirmed";
+  const needsAccept = !paid && !accepted;
+  const estado = paid
+    ? { label: "Pagado", className: "text-emerald-700" }
+    : accepted
+      ? { label: "Aceptado · paga al recibir", className: "text-violet-700" }
+      : { label: "Esperando aceptación", className: "text-amber-700" };
   return (
     <div className="ring-border/60 flex flex-col gap-2 rounded-xl bg-white p-3 ring-1">
       <div className="flex items-center justify-between gap-2">
@@ -505,18 +551,35 @@ function ScheduledOrderCard({
           {itemsLabel}
         </div>
       )}
-      <div className="flex items-center justify-between gap-2 pt-1">
-        <span className="text-xs font-medium text-emerald-700">Pagado</span>
-        <Button
-          size="sm"
-          onClick={() => {
-            setMarching(true);
-            onMarchNow();
-          }}
-          disabled={marching}
-        >
-          {marching ? "Marchando…" : "Marchar ahora"}
-        </Button>
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+        <span className={`text-xs font-medium ${estado.className}`}>
+          {estado.label}
+        </span>
+        <div className="flex items-center gap-2">
+          {needsAccept && (
+            <Button
+              size="sm"
+              onClick={() => {
+                setAccepting(true);
+                onAccept();
+              }}
+              disabled={accepting || marching}
+            >
+              {accepting ? "Aceptando…" : "Aceptar"}
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant={needsAccept ? "outline" : "default"}
+            onClick={() => {
+              setMarching(true);
+              onMarchNow();
+            }}
+            disabled={marching || accepting}
+          >
+            {marching ? "Marchando…" : "Marchar ahora"}
+          </Button>
+        </div>
       </div>
     </div>
   );

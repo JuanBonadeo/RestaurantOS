@@ -60,7 +60,8 @@ describe("CreateOrderInput", () => {
     expect(result.success).toBe(true);
   });
 
-  it("rejects a scheduled order that is delivery", () => {
+  // Spec 061: el delivery se programa, y puede pagarse al recibir.
+  it("accepts a scheduled delivery paid with MP", () => {
     const result = CreateOrderInput.safeParse({
       ...base,
       delivery_type: "delivery",
@@ -68,10 +69,21 @@ describe("CreateOrderInput", () => {
       payment_method: "mp",
       scheduled_at: "2026-06-26T13:00:00-03:00",
     });
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
   });
 
-  it("rejects a scheduled order paid with cash", () => {
+  it("accepts a scheduled delivery paid with cash", () => {
+    const result = CreateOrderInput.safeParse({
+      ...base,
+      delivery_type: "delivery",
+      delivery_address: "Calle 123",
+      payment_method: "cash",
+      scheduled_at: "2026-06-26T13:00:00-03:00",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a scheduled pickup paid with cash (prepay sigue siendo obligatorio)", () => {
     const result = CreateOrderInput.safeParse({
       ...base,
       payment_method: "cash",

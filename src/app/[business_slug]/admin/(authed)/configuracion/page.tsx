@@ -4,6 +4,10 @@ import { Clock } from "lucide-react";
 
 import { BusinessHoursForm } from "@/components/admin/settings/business-hours-form";
 import { BusinessProfileForm } from "@/components/admin/settings/business-profile-form";
+import {
+  DEFAULT_MARCH_LEAD_DELIVERY_MIN,
+  DEFAULT_MARCH_LEAD_PICKUP_MIN,
+} from "@/lib/orders/scheduled";
 import { SettingsSection } from "@/components/admin/settings/settings-section";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
@@ -37,6 +41,11 @@ export default async function ConfiguracionNegocioPage({
     delivery_fee_cents: Number(business.delivery_fee_cents ?? 0) / 100,
     min_order_cents: Number(business.min_order_cents ?? 0) / 100,
     estimated_delivery_minutes: business.estimated_delivery_minutes,
+    scheduled_march_lead_pickup_min:
+      business.scheduled_march_lead_pickup_min ?? DEFAULT_MARCH_LEAD_PICKUP_MIN,
+    scheduled_march_lead_delivery_min:
+      business.scheduled_march_lead_delivery_min ??
+      DEFAULT_MARCH_LEAD_DELIVERY_MIN,
   };
 
   return (

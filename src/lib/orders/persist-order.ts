@@ -68,12 +68,13 @@ export async function persistOrder(
   }
   const paymentMethod = wantsMp ? "mp" : "cash";
 
-  // ── Pedido diferido (spec 31) ───────────────────────────────────────────
-  // Con `scheduled_at` validamos contra el horario del negocio + reglas fijas
-  // (retiro, MP adelantado, anticipación, ventana). Server es la fuente de
-  // verdad: el checkout reusa el mismo helper sólo para feedback. El "agendado"
-  // es un estado derivado (futuro + pago aprobado + sin comandas), no marcha
-  // hasta ~40 min antes (cron) o "marchar ahora".
+  // ── Pedido diferido (spec 31 + 061) ─────────────────────────────────────
+  // Con `scheduled_at` validamos contra el horario del negocio + las reglas del
+  // tipo (retiro exige MP adelantado, delivery acepta efectivo, mesa no se
+  // programa) + anticipación y ventana. Server es la fuente de verdad: el
+  // checkout reusa el mismo helper sólo para feedback. El "agendado" es un
+  // estado derivado (futuro + sin comandas), y no marcha hasta el lead del
+  // negocio (cron) o "marchar ahora".
   let scheduledAtIso: string | null = null;
   if (data.scheduled_at) {
     const scheduledAt = new Date(data.scheduled_at);
@@ -83,10 +84,7 @@ export async function persistOrder(
       .eq("business_id", business.id);
     const validation = validateScheduledOrder({
       scheduledAt,
-      // `dine_in` (venta de mostrador, spec 058) nunca programa. Lo mapeamos a
-      // "delivery" para que caiga en el mismo rechazo que ya da el validador
-      // ("solo se pueden programar pedidos de retiro") en vez de colarse.
-      deliveryType: data.delivery_type === "pickup" ? "pickup" : "delivery",
+      deliveryType: data.delivery_type,
       paymentMethod,
       businessHours: (hoursRows ?? []) as BusinessHourSlot[],
       timezone: business.timezone,

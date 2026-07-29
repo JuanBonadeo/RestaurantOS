@@ -70,18 +70,14 @@ export const CreateOrderInput = z
       });
     }
     if (data.scheduled_at) {
-      // Programar es solo retiro (R1.2) y fuerza MP adelantado (R2.3).
-      if (data.delivery_type !== "pickup") {
+      // Espejo de `validateScheduledOrder` (spec 061): retiro y delivery se
+      // programan; el retiro fuerza MP adelantado, el delivery puede pagarse en
+      // efectivo al recibir. El server revalida igual.
+      if (data.delivery_type === "pickup" && data.payment_method !== "mp") {
         ctx.addIssue({
           code: "custom",
-          message: "Solo se pueden programar pedidos de retiro.",
-          path: ["scheduled_at"],
-        });
-      }
-      if (data.payment_method !== "mp") {
-        ctx.addIssue({
-          code: "custom",
-          message: "Un pedido programado se paga con Mercado Pago.",
+          message:
+            "Un pedido de retiro programado se paga con Mercado Pago por adelantado.",
           path: ["payment_method"],
         });
       }

@@ -8,6 +8,7 @@ import { z } from "zod";
 import { toast } from "sonner";
 import {
   AlertTriangle,
+  Clock,
   Globe,
   Hash,
   Mail,
@@ -60,6 +61,18 @@ const Schema = z.object({
     .union([z.coerce.number().int().min(0), z.literal("")])
     .transform((v) => (v === "" ? null : v))
     .nullable(),
+  // Spec 061: cuánto antes de la hora pedida sale la comanda de un programado.
+  // El techo (240) es el mismo check que la migración 0027.
+  scheduled_march_lead_pickup_min: z.coerce
+    .number()
+    .int("Tiene que ser un número entero.")
+    .min(0, "No puede ser negativo.")
+    .max(240, "Máximo 240 minutos."),
+  scheduled_march_lead_delivery_min: z.coerce
+    .number()
+    .int("Tiene que ser un número entero.")
+    .min(0, "No puede ser negativo.")
+    .max(240, "Máximo 240 minutos."),
 });
 
 type Values = z.infer<typeof Schema>;
@@ -343,6 +356,56 @@ export function BusinessProfileForm({
                   </FormControl>
                   <FormMessage />
                   <p className="text-xs text-zinc-500">Opcional, en min.</p>
+                </FormItem>
+              )}
+            />
+          </div>
+        </SettingsSection>
+
+        {/* Pedidos programados (spec 061) */}
+        <SettingsSection
+          icon={<Clock className="size-5" strokeWidth={1.75} />}
+          title="Pedidos programados"
+          description="Cuánto antes de la hora pedida sale sola la comanda a cocina. El delivery necesita más: además de cocinar, hay que viajar."
+        >
+          <div className="grid gap-4 sm:grid-cols-3">
+            <FormField
+              control={form.control}
+              name="scheduled_march_lead_pickup_min"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Anticipación · retiro</FormLabel>
+                  <FormControl>
+                    <MinutesInput
+                      placeholder="40"
+                      {...field}
+                      value={field.value ?? 40}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                  <p className="text-xs text-zinc-500">
+                    Un retiro para las 21:00 imprime a las 20:20.
+                  </p>
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="scheduled_march_lead_delivery_min"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Anticipación · delivery</FormLabel>
+                  <FormControl>
+                    <MinutesInput
+                      placeholder="60"
+                      {...field}
+                      value={field.value ?? 60}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                  <p className="text-xs text-zinc-500">
+                    Un delivery para las 21:00 imprime a las 20:00.
+                  </p>
                 </FormItem>
               )}
             />

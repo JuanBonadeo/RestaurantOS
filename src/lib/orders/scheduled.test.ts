@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import type { BusinessHourSlot } from "@/lib/business-hours/schema";
 
 import {
+  DEFAULT_MARCH_LEAD_DELIVERY_MIN,
+  DEFAULT_MARCH_LEAD_PICKUP_MIN,
   isScheduledForLater,
-  SCHEDULED_MARCH_LEAD_MIN,
+  marchLeadForOrder,
   SCHEDULED_MAX_WINDOW_DAYS,
   shouldMarchNow,
   validateScheduledOrder,
@@ -37,17 +39,28 @@ describe("validateScheduledOrder", () => {
     });
   });
 
-  it("rechaza delivery (programar es solo retiro)", () => {
+  // ── Spec 061: el delivery también se programa ─────────────────────────────
+
+  it("acepta delivery con MP", () => {
     const scheduledAt = new Date("2026-06-26T13:00:00-03:00");
-    const res = validateScheduledOrder({
-      ...base(),
-      deliveryType: "delivery",
-      scheduledAt,
-    });
-    expect(res.ok).toBe(false);
+    expect(
+      validateScheduledOrder({ ...base(), deliveryType: "delivery", scheduledAt }),
+    ).toEqual({ ok: true });
   });
 
-  it("rechaza efectivo (un programado fuerza Mercado Pago)", () => {
+  it("acepta delivery en efectivo (se paga al recibir)", () => {
+    const scheduledAt = new Date("2026-06-26T13:00:00-03:00");
+    expect(
+      validateScheduledOrder({
+        ...base(),
+        deliveryType: "delivery",
+        paymentMethod: "cash",
+        scheduledAt,
+      }),
+    ).toEqual({ ok: true });
+  });
+
+  it("rechaza retiro en efectivo (el retiro sigue exigiendo MP adelantado)", () => {
     const scheduledAt = new Date("2026-06-26T13:00:00-03:00");
     const res = validateScheduledOrder({
       ...base(),
@@ -55,6 +68,39 @@ describe("validateScheduledOrder", () => {
       scheduledAt,
     });
     expect(res.ok).toBe(false);
+    expect(res).toMatchObject({ error: expect.stringContaining("Mercado Pago") });
+  });
+
+  it("rechaza dine_in con su propio mensaje (no se cuela por el hueco que abre delivery)", () => {
+    const scheduledAt = new Date("2026-06-26T13:00:00-03:00");
+    const res = validateScheduledOrder({
+      ...base(),
+      deliveryType: "dine_in",
+      paymentMethod: "mp",
+      scheduledAt,
+    });
+    expect(res).toEqual({
+      ok: false,
+      error: "Los pedidos en mesa no se programan.",
+    });
+  });
+
+  it("las reglas de anticipación / ventana / horario también aplican a delivery", () => {
+    const delivery = { ...base(), deliveryType: "delivery" as const };
+    // Fuera de horario (viernes 18:00, el local cierra 16:00).
+    expect(
+      validateScheduledOrder({
+        ...delivery,
+        scheduledAt: new Date("2026-06-26T18:00:00-03:00"),
+      }).ok,
+    ).toBe(false);
+    // Menos que la anticipación mínima.
+    expect(
+      validateScheduledOrder({
+        ...delivery,
+        scheduledAt: new Date(NOW.getTime() + 30 * 60_000),
+      }).ok,
+    ).toBe(false);
   });
 
   it("rechaza un horario fuera del horario de atención", () => {
@@ -131,9 +177,44 @@ describe("shouldMarchNow", () => {
 
   it("respeta un lead custom", () => {
     const now = new Date("2026-06-26T12:30:00-03:00");
-    expect(shouldMarchNow(scheduledAt, now, SCHEDULED_MARCH_LEAD_MIN)).toBe(
+    expect(shouldMarchNow(scheduledAt, now, DEFAULT_MARCH_LEAD_PICKUP_MIN)).toBe(
       true,
     );
     expect(shouldMarchNow(scheduledAt, now, 20)).toBe(false);
+  });
+});
+
+describe("marchLeadForOrder", () => {
+  it("usa el lead de delivery para un delivery y el de retiro para un pickup", () => {
+    const business = {
+      scheduled_march_lead_pickup_min: 30,
+      scheduled_march_lead_delivery_min: 90,
+    };
+    expect(marchLeadForOrder("delivery", business)).toBe(90);
+    expect(marchLeadForOrder("pickup", business)).toBe(30);
+  });
+
+  it("cae a los defaults si la fila del negocio no trae el valor", () => {
+    expect(marchLeadForOrder("delivery", null)).toBe(
+      DEFAULT_MARCH_LEAD_DELIVERY_MIN,
+    );
+    expect(marchLeadForOrder("pickup", null)).toBe(
+      DEFAULT_MARCH_LEAD_PICKUP_MIN,
+    );
+    expect(
+      marchLeadForOrder("delivery", {
+        scheduled_march_lead_pickup_min: 30,
+        scheduled_march_lead_delivery_min: null,
+      }),
+    ).toBe(DEFAULT_MARCH_LEAD_DELIVERY_MIN);
+  });
+
+  it("un lead de 0 se respeta (no lo pisa el default)", () => {
+    expect(
+      marchLeadForOrder("delivery", {
+        scheduled_march_lead_pickup_min: 0,
+        scheduled_march_lead_delivery_min: 0,
+      }),
+    ).toBe(0);
   });
 });

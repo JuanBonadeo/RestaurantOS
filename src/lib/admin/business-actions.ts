@@ -74,6 +74,9 @@ const ProfileInput = z.object({
   delivery_fee_cents: centsField,
   min_order_cents: centsField,
   estimated_delivery_minutes: minutesField,
+  // Spec 061: lead de marcha de los programados. Techo 240 = el check de 0027.
+  scheduled_march_lead_pickup_min: z.coerce.number().int().min(0).max(240),
+  scheduled_march_lead_delivery_min: z.coerce.number().int().min(0).max(240),
 });
 
 // Apariencia: logos + cover (columnas) + paleta/tipografía/forma (settings JSONB).
@@ -210,6 +213,8 @@ export async function updateBusinessProfile(
     delivery_fee_cents,
     min_order_cents,
     estimated_delivery_minutes,
+    scheduled_march_lead_pickup_min,
+    scheduled_march_lead_delivery_min,
   } = parsed.data;
 
   const guard = await assertCanManage(business_slug);
@@ -243,6 +248,8 @@ export async function updateBusinessProfile(
       delivery_fee_cents,
       min_order_cents,
       estimated_delivery_minutes,
+      scheduled_march_lead_pickup_min,
+      scheduled_march_lead_delivery_min,
     })
     .eq("id", guard.businessId);
 

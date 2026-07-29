@@ -181,6 +181,8 @@ export type Database = {
           phone: string | null
           plan: string | null
           print_agent_key_set: boolean
+          scheduled_march_lead_delivery_min: number
+          scheduled_march_lead_pickup_min: number
           settings: Json
           slug: string
           timezone: string
@@ -216,6 +218,8 @@ export type Database = {
           phone?: string | null
           plan?: string | null
           print_agent_key_set?: boolean
+          scheduled_march_lead_delivery_min?: number
+          scheduled_march_lead_pickup_min?: number
           settings?: Json
           slug: string
           timezone?: string
@@ -251,6 +255,8 @@ export type Database = {
           phone?: string | null
           plan?: string | null
           print_agent_key_set?: boolean
+          scheduled_march_lead_delivery_min?: number
+          scheduled_march_lead_pickup_min?: number
           settings?: Json
           slug?: string
           timezone?: string

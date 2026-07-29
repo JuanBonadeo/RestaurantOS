@@ -3,7 +3,11 @@ import "server-only";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 import { routeOrderToCocina } from "./route-to-cocina";
-import { SCHEDULED_MARCH_LEAD_MIN } from "./scheduled";
+import {
+  MAX_MARCH_LEAD_MIN,
+  marchLeadForOrder,
+  shouldMarchNow,
+} from "./scheduled";
 
 export type MarchDueResult = {
   considered: number;
@@ -11,9 +15,31 @@ export type MarchDueResult = {
   failed: number;
 };
 
+type DueRow = {
+  id: string;
+  business_id: string;
+  delivery_type: string;
+  scheduled_at: string;
+  business: {
+    scheduled_march_lead_pickup_min: number | null;
+    scheduled_march_lead_delivery_min: number | null;
+  } | null;
+};
+
 /**
- * Marcha los pedidos diferidos que ya entran en ventana: agendados pagados con
- * `scheduled_at - 40min <= now`, todavía sin marchar (status `pending`).
+ * Marcha los pedidos diferidos que ya entran en ventana. La ventana es **por
+ * negocio y por tipo** (spec 061): `scheduled_at - lead <= now`, con el lead de
+ * `businesses.scheduled_march_lead_{pickup,delivery}_min`.
+ *
+ * Qué entra (spec 047 intacto — "imprime solo lo que el local ya avaló"):
+ * - `status = 'pending'` **y** `payment_status = 'paid'` → pagado por
+ *   adelantado (MP aprobado), no necesita gesto humano.
+ * - `status = 'confirmed'` → el encargado lo aceptó desde «Próximos»
+ *   (`aceptarPedidoProgramado`). Es el camino del programado en efectivo.
+ *
+ * Un `pending` impago **no** se marcha nunca: se queda esperando que alguien lo
+ * acepte. Sin eso, abrir el delivery programado al efectivo produciría pedidos
+ * que jamás llegan a cocina.
  *
  * Multi-tenant en una pasada (service client, todos los negocios) — el patrón
  * "una función, todos los tenants" del auto-`no_show` (spec 22). A diferencia
@@ -28,25 +54,38 @@ export async function marchDueScheduledOrders(
 ): Promise<MarchDueResult> {
   const service = createSupabaseServiceClient();
 
-  // Ventana: scheduled_at <= now + lead. El índice parcial
-  // (business_id, scheduled_at) where scheduled_at is not null sirve el filtro.
+  // El filtro SQL acota con el techo del lead configurable: nada más allá de
+  // `now + 240min` puede estar en ventana para ningún negocio. El corte exacto
+  // se hace después, en TS, con el lead de cada pedido. El índice parcial
+  // (business_id, scheduled_at) where scheduled_at is not null sirve el `lte`.
   const cutoff = new Date(
-    now.getTime() + SCHEDULED_MARCH_LEAD_MIN * 60_000,
+    now.getTime() + MAX_MARCH_LEAD_MIN * 60_000,
   ).toISOString();
 
   const { data: due } = await service
     .from("orders")
-    .select("id, business_id")
+    .select(
+      "id, business_id, delivery_type, scheduled_at, business:businesses(scheduled_march_lead_pickup_min, scheduled_march_lead_delivery_min)",
+    )
     .not("scheduled_at", "is", null)
-    .eq("payment_status", "paid")
-    .eq("status", "pending")
-    .eq("delivery_type", "pickup")
+    .in("delivery_type", ["pickup", "delivery"])
+    .or("and(status.eq.pending,payment_status.eq.paid),status.eq.confirmed")
     .lte("scheduled_at", cutoff);
 
-  const rows = (due ?? []) as { id: string; business_id: string }[];
+  const rows = (due ?? []) as unknown as DueRow[];
+  // `considered` = los que efectivamente entraron en ventana, no los que trajo
+  // la query: el `cutoff` es deliberadamente ancho.
+  const inWindow = rows.filter((o) =>
+    shouldMarchNow(
+      new Date(o.scheduled_at),
+      now,
+      marchLeadForOrder(o.delivery_type, o.business),
+    ),
+  );
+
   let marched = 0;
   let failed = 0;
-  for (const o of rows) {
+  for (const o of inWindow) {
     try {
       const res = await routeOrderToCocina(o.id, o.business_id);
       if (res.ok) marched += 1;
@@ -57,5 +96,5 @@ export async function marchDueScheduledOrders(
     }
   }
 
-  return { considered: rows.length, marched, failed };
+  return { considered: inWindow.length, marched, failed };
 }

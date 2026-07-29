@@ -1,19 +1,34 @@
 import type { BusinessHourSlot } from "@/lib/business-hours/schema";
 
 /**
- * Pedidos diferidos (spec 31) — reglas puras, sin DB ni I/O.
+ * Pedidos diferidos (spec 31 + 061) — reglas puras, sin DB ni I/O.
  *
- * Defaults **fijos** para arrancar (configurables = segundo paso, ver design
- * D7). El server (persist-order) es la fuente de verdad; el checkout reusa el
- * mismo helper para feedback inmediato.
+ * El server (persist-order) es la fuente de verdad; el checkout reusa el mismo
+ * helper para feedback inmediato.
+ *
+ * El **lead de marcha** dejó de ser fijo (spec 061, cierra el D7 del design de
+ * spec 31): vive por negocio en `businesses.scheduled_march_lead_{pickup,
+ * delivery}_min`. Lo de acá son los defaults de la columna. La anticipación
+ * mínima y la ventana máxima **sí** siguen fijas.
  */
 
-/** Anticipación mínima entre "ahora" y el retiro programado. */
+/** Anticipación mínima entre "ahora" y el retiro/entrega programado. */
 export const SCHEDULED_MIN_LEAD_MIN = 60;
 /** Ventana máxima hacia adelante (no se programa más allá de esto). */
 export const SCHEDULED_MAX_WINDOW_DAYS = 7;
-/** Cuánto antes de `scheduled_at` se marcha el pedido a cocina (cron/manual). */
-export const SCHEDULED_MARCH_LEAD_MIN = 40;
+/** Default de `businesses.scheduled_march_lead_pickup_min`. */
+export const DEFAULT_MARCH_LEAD_PICKUP_MIN = 40;
+/**
+ * Default de `businesses.scheduled_march_lead_delivery_min`. Mayor que el de
+ * retiro: además de cocinar, el pedido tiene que viajar.
+ */
+export const DEFAULT_MARCH_LEAD_DELIVERY_MIN = 60;
+/**
+ * Techo del lead configurable (= el check de la migración 0027). Además acota
+ * la ventana del filtro SQL del cron: nada que caiga más allá de `now + esto`
+ * puede estar en ventana para ningún negocio.
+ */
+export const MAX_MARCH_LEAD_MIN = 240;
 
 const MIN_MS = 60_000;
 
@@ -76,7 +91,7 @@ export function isWithinBusinessHours(
 
 export type ScheduledOrderValidation = {
   scheduledAt: Date;
-  deliveryType: "delivery" | "pickup";
+  deliveryType: "delivery" | "pickup" | "dine_in";
   paymentMethod: "cash" | "mp" | undefined;
   businessHours: BusinessHourSlot[];
   timezone: string;
@@ -90,19 +105,26 @@ export type ScheduledValidationResult =
 /**
  * Valida un pedido programado. Orden de chequeos pensado para que cada error
  * aísle su causa: tipo → pago → anticipación → ventana → horario.
+ *
+ * Spec 061: el **delivery** también se programa, y puede pagarse en efectivo al
+ * recibir. El **retiro** sigue exigiendo MP adelantado (nadie retiene nada si
+ * el cliente no aparece). La venta de mostrador (`dine_in`) nunca se programa —
+ * antes caía en el rechazo genérico de "solo retiro"; ahora que el delivery
+ * está permitido necesita su propio chequeo o se colaría.
  */
 export function validateScheduledOrder(
   input: ScheduledOrderValidation,
 ): ScheduledValidationResult {
   const now = input.now ?? new Date();
 
-  if (input.deliveryType !== "pickup") {
-    return { ok: false, error: "Solo se pueden programar pedidos de retiro." };
+  if (input.deliveryType === "dine_in") {
+    return { ok: false, error: "Los pedidos en mesa no se programan." };
   }
-  if (input.paymentMethod !== "mp") {
+  if (input.deliveryType === "pickup" && input.paymentMethod !== "mp") {
     return {
       ok: false,
-      error: "Un pedido programado se paga con Mercado Pago por adelantado.",
+      error:
+        "Un pedido de retiro programado se paga con Mercado Pago por adelantado.",
     };
   }
 
@@ -147,13 +169,35 @@ export function isScheduledForLater(
 }
 
 /**
- * ¿Toca marchar el agendado? True si `scheduled_at - leadMin <= now`. Idéntica
- * regla en el cron (espejo SQL/endpoint) y en el botón "marchar ahora".
+ * ¿Toca marchar el agendado? True si `scheduled_at - leadMin <= now`. El
+ * `leadMin` sale del negocio (spec 061); el default cubre el caso retiro.
  */
 export function shouldMarchNow(
   scheduledAt: Date,
   now: Date,
-  leadMin: number = SCHEDULED_MARCH_LEAD_MIN,
+  leadMin: number = DEFAULT_MARCH_LEAD_PICKUP_MIN,
 ): boolean {
   return scheduledAt.getTime() - leadMin * MIN_MS <= now.getTime();
+}
+
+/**
+ * Lead que aplica a un pedido según su tipo, con fallback a los defaults por si
+ * la fila del negocio viene incompleta (join nulo, fixture viejo).
+ */
+export function marchLeadForOrder(
+  deliveryType: string,
+  business: {
+    scheduled_march_lead_pickup_min?: number | null;
+    scheduled_march_lead_delivery_min?: number | null;
+  } | null,
+): number {
+  if (deliveryType === "delivery") {
+    return (
+      business?.scheduled_march_lead_delivery_min ??
+      DEFAULT_MARCH_LEAD_DELIVERY_MIN
+    );
+  }
+  return (
+    business?.scheduled_march_lead_pickup_min ?? DEFAULT_MARCH_LEAD_PICKUP_MIN
+  );
 }
