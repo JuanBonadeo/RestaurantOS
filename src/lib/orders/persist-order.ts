@@ -8,7 +8,7 @@ import { createPreference } from "@/lib/payments/mercadopago";
 import { validatePromoCode } from "@/lib/promos/validate";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
-import type { BusinessHourSlot } from "@/lib/business-hours/schema";
+import type { WeeklySchedule } from "@/lib/reservations/types";
 
 import { resolveComboUpcharge } from "./combo-pricing";
 import { validateScheduledOrder } from "./scheduled";
@@ -68,24 +68,26 @@ export async function persistOrder(
   }
   const paymentMethod = wantsMp ? "mp" : "cash";
 
-  // ── Pedido diferido (spec 31 + 061) ─────────────────────────────────────
-  // Con `scheduled_at` validamos contra el horario del negocio + anticipación,
-  // ventana, y que no sea un pedido en mesa. Server es la fuente de verdad: el
-  // checkout reusa el mismo helper sólo para feedback. El "agendado" es un
-  // estado derivado (futuro + sin comandas), y no marcha hasta el lead del
-  // negocio (cron) o "marchar ahora"; si está impago, hasta que el encargado
-  // lo acepte.
+  // ── Pedido diferido (spec 31 + 061 + 064) ───────────────────────────────
+  // Con `scheduled_at` validamos que sea para HOY, con la anticipación mínima
+  // y en una hora de la grilla de reservas del negocio (spec 064) — ya no
+  // contra `business_hours` ni con ventana de días. Server es la fuente de
+  // verdad: el checkout reusa el mismo helper sólo para feedback. El "agendado"
+  // es un estado derivado (futuro + sin comandas), y no marcha hasta el lead
+  // del negocio (cron) o "marchar ahora"; si está impago, hasta que el
+  // encargado lo acepte.
   let scheduledAtIso: string | null = null;
   if (data.scheduled_at) {
     const scheduledAt = new Date(data.scheduled_at);
-    const { data: hoursRows } = await supabase
-      .from("business_hours")
-      .select("day_of_week, opens_at, closes_at")
-      .eq("business_id", business.id);
+    const { data: reservationSettings } = await supabase
+      .from("reservation_settings")
+      .select("schedule")
+      .eq("business_id", business.id)
+      .maybeSingle();
     const validation = validateScheduledOrder({
       scheduledAt,
       deliveryType: data.delivery_type,
-      businessHours: (hoursRows ?? []) as BusinessHourSlot[],
+      schedule: (reservationSettings?.schedule ?? null) as WeeklySchedule | null,
       timezone: business.timezone,
     });
     if (!validation.ok) return actionError(validation.error);

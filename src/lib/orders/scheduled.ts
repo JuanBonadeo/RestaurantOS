@@ -1,21 +1,32 @@
-import type { BusinessHourSlot } from "@/lib/business-hours/schema";
+import { fromZonedTime } from "date-fns-tz";
+
+import type { WeeklySchedule } from "@/lib/reservations/types";
 
 /**
- * Pedidos diferidos (spec 31 + 061) — reglas puras, sin DB ni I/O.
+ * Pedidos diferidos (spec 31 + 061 + 064) — reglas puras, sin DB ni I/O.
  *
  * El server (persist-order) es la fuente de verdad; el checkout reusa el mismo
  * helper para feedback inmediato.
  *
  * El **lead de marcha** dejó de ser fijo (spec 061, cierra el D7 del design de
  * spec 31): vive por negocio en `businesses.scheduled_march_lead_{pickup,
- * delivery}_min`. Lo de acá son los defaults de la columna. La anticipación
- * mínima y la ventana máxima **sí** siguen fijas.
+ * delivery}_min`. Lo de acá son los defaults de la columna.
+ *
+ * **Spec 064 — programar dejó de ser libre.** Antes el cliente elegía cualquier
+ * día dentro de una ventana de 7 días y cualquier hora dentro del horario de
+ * atención. Ahora:
+ * - solo **hoy** (mismo día calendario en el TZ del local), y
+ * - solo una de las **horas de la grilla de reservas** del negocio
+ *   (`reservation_settings.schedule`) — los mismos chips que ve el que reserva.
+ *
+ * La grilla es más estricta que `business_hours` y es config explícita del
+ * negocio, así que reemplaza al chequeo de horario de atención. Corolario: un
+ * negocio sin grilla cargada para hoy **no puede programar** (el checkout
+ * deshabilita "Programar" en vez de dejar pedir y fallar en el server).
  */
 
 /** Anticipación mínima entre "ahora" y el retiro/entrega programado. */
 export const SCHEDULED_MIN_LEAD_MIN = 60;
-/** Ventana máxima hacia adelante (no se programa más allá de esto). */
-export const SCHEDULED_MAX_WINDOW_DAYS = 7;
 /** Default de `businesses.scheduled_march_lead_pickup_min`. */
 export const DEFAULT_MARCH_LEAD_PICKUP_MIN = 40;
 /**
@@ -31,11 +42,6 @@ export const DEFAULT_MARCH_LEAD_DELIVERY_MIN = 60;
 export const MAX_MARCH_LEAD_MIN = 240;
 
 const MIN_MS = 60_000;
-
-/** "00:00" como cierre = medianoche → "24:00" para comparar como string. */
-function effectiveClose(time: string): string {
-  return time === "00:00" ? "24:00" : time;
-}
 
 const WEEKDAY_TO_DOW: Record<string, number> = {
   Sun: 0,
@@ -74,25 +80,55 @@ function localDowAndTime(at: Date, timezone: string): {
   };
 }
 
-/** ¿El instante cae dentro de alguna franja de `business_hours`? */
-export function isWithinBusinessHours(
+/** YYYY-MM-DD del instante en el TZ del negocio. */
+export function localYmd(at: Date, timezone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(at);
+}
+
+/**
+ * Horarios (HH:MM) que la grilla de reservas tiene abiertos el día calendario
+ * de `at`, ordenados y sin repetidos. Día cerrado o sin grilla → `[]`.
+ */
+export function scheduleSlotsForDay(
+  schedule: WeeklySchedule | null | undefined,
   at: Date,
-  businessHours: BusinessHourSlot[],
   timezone: string,
-): boolean {
-  const { dow, time } = localDowAndTime(at, timezone);
-  return businessHours.some(
-    (s) =>
-      s.day_of_week === dow &&
-      s.opens_at <= time &&
-      time < effectiveClose(s.closes_at),
-  );
+): string[] {
+  if (!schedule) return [];
+  const { dow } = localDowAndTime(at, timezone);
+  const day = schedule[String(dow) as keyof WeeklySchedule];
+  if (!day || !day.open) return [];
+  return [...new Set(day.slots)].sort();
+}
+
+/**
+ * Los slots que todavía cumplen la anticipación mínima. Es lo que se le ofrece
+ * al cliente como chips; el server revalida con `validateScheduledOrder`.
+ */
+export function filterSlotsByLead(
+  slots: string[],
+  timezone: string,
+  now: Date = new Date(),
+  leadMin: number = SCHEDULED_MIN_LEAD_MIN,
+): string[] {
+  const ymd = localYmd(now, timezone);
+  const cutoff = now.getTime() + leadMin * MIN_MS;
+  return slots.filter((slot) => {
+    const at = fromZonedTime(`${ymd}T${slot}:00`, timezone);
+    return !Number.isNaN(at.getTime()) && at.getTime() >= cutoff;
+  });
 }
 
 export type ScheduledOrderValidation = {
   scheduledAt: Date;
   deliveryType: "delivery" | "pickup" | "dine_in";
-  businessHours: BusinessHourSlot[];
+  /** Grilla de reservas del negocio (`reservation_settings.schedule`). */
+  schedule: WeeklySchedule | null | undefined;
   timezone: string;
   now?: Date;
 };
@@ -103,7 +139,7 @@ export type ScheduledValidationResult =
 
 /**
  * Valida un pedido programado. Orden de chequeos pensado para que cada error
- * aísle su causa: tipo → anticipación → ventana → horario.
+ * aísle su causa: tipo → día → anticipación → horario de la grilla.
  *
  * Spec 061: retiro y delivery se programan, **con cualquier método de pago**.
  * El prepago obligatorio de spec 31 se cayó — el resguardo contra el pedido
@@ -123,6 +159,18 @@ export function validateScheduledOrder(
     return { ok: false, error: "Los pedidos en mesa no se programan." };
   }
 
+  // Spec 064 — solo el mismo día. Se chequea antes que la anticipación para
+  // que "mañana a las 13" no se explique como un problema de anticipación.
+  if (
+    localYmd(input.scheduledAt, input.timezone) !==
+    localYmd(now, input.timezone)
+  ) {
+    return {
+      ok: false,
+      error: "Los pedidos programados son solo para hoy.",
+    };
+  }
+
   const leadMs = input.scheduledAt.getTime() - now.getTime();
   if (leadMs < SCHEDULED_MIN_LEAD_MIN * MIN_MS) {
     return {
@@ -130,17 +178,19 @@ export function validateScheduledOrder(
       error: `Programá con al menos ${SCHEDULED_MIN_LEAD_MIN} minutos de anticipación.`,
     };
   }
-  if (leadMs > SCHEDULED_MAX_WINDOW_DAYS * 24 * 60 * MIN_MS) {
-    return {
-      ok: false,
-      error: `No se puede programar a más de ${SCHEDULED_MAX_WINDOW_DAYS} días.`,
-    };
-  }
 
-  if (!isWithinBusinessHours(input.scheduledAt, input.businessHours, input.timezone)) {
+  // Spec 064 — la hora tiene que ser una de la grilla de reservas, no cualquier
+  // minuto dentro del horario de atención.
+  const slots = scheduleSlotsForDay(
+    input.schedule,
+    input.scheduledAt,
+    input.timezone,
+  );
+  const { time } = localDowAndTime(input.scheduledAt, input.timezone);
+  if (!slots.includes(time)) {
     return {
       ok: false,
-      error: "El horario elegido está fuera del horario de atención del local.",
+      error: "Elegí uno de los horarios disponibles del local.",
     };
   }
 

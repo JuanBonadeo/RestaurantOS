@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import type { BusinessHourSlot } from "@/lib/business-hours/schema";
+import type { WeeklySchedule } from "@/lib/reservations/types";
 
 import {
   DEFAULT_MARCH_LEAD_DELIVERY_MIN,
   DEFAULT_MARCH_LEAD_PICKUP_MIN,
+  filterSlotsByLead,
   isScheduledForLater,
   marchLeadForOrder,
-  SCHEDULED_MAX_WINDOW_DAYS,
+  scheduleSlotsForDay,
   shouldMarchNow,
   validateScheduledOrder,
 } from "./scheduled";
@@ -15,33 +16,35 @@ import {
 // Reloj de referencia: jueves 2026-06-25 12:00 hora AR (UTC-3).
 const NOW = new Date("2026-06-25T12:00:00-03:00");
 const TZ = "America/Argentina/Buenos_Aires";
-// El local abre los viernes (dow=5) de 12:00 a 16:00.
-const HOURS: BusinessHourSlot[] = [
-  { day_of_week: 5, opens_at: "12:00", closes_at: "16:00" },
-];
+
+// Grilla de reservas del negocio: jueves (dow=4) almuerzo y cena; viernes
+// (dow=5) solo cena. Es la MISMA grilla que ven los que reservan (spec 064).
+const SCHEDULE: WeeklySchedule = {
+  "4": { open: true, slots: ["12:30", "13:00", "20:00", "21:00", "13:00"] },
+  "5": { open: true, slots: ["20:00", "21:00"] },
+  "6": { open: false, slots: ["20:00"] },
+};
 
 function base() {
   return {
     deliveryType: "pickup" as const,
-    businessHours: HOURS,
+    schedule: SCHEDULE,
     timezone: TZ,
     now: NOW,
   };
 }
 
 describe("validateScheduledOrder", () => {
-  it("acepta un diferido válido (dentro de horario y ventana)", () => {
-    // Viernes 13:00 AR → dow=5, dentro de 12–16.
-    const scheduledAt = new Date("2026-06-26T13:00:00-03:00");
+  it("acepta un horario de hoy que está en la grilla y cumple la anticipación", () => {
+    // Jueves 20:00 AR: está en la grilla del dow=4 y falta más de 1 h.
+    const scheduledAt = new Date("2026-06-25T20:00:00-03:00");
     expect(validateScheduledOrder({ ...base(), scheduledAt })).toEqual({
       ok: true,
     });
   });
 
-  // ── Spec 061: delivery también, y sin exigir prepago ──────────────────────
-
-  it("acepta delivery (programar dejó de ser sólo retiro)", () => {
-    const scheduledAt = new Date("2026-06-26T13:00:00-03:00");
+  it("acepta delivery (programar dejó de ser sólo retiro — spec 061)", () => {
+    const scheduledAt = new Date("2026-06-25T20:00:00-03:00");
     expect(
       validateScheduledOrder({
         ...base(),
@@ -51,81 +54,110 @@ describe("validateScheduledOrder", () => {
     ).toEqual({ ok: true });
   });
 
-  it("el método de pago ya no es asunto del validador (ni retiro ni delivery)", () => {
-    // Antes, un programado exigía MP adelantado. El resguardo pasó a ser que el
-    // encargado acepte los impagos antes de que entren a cocina (spec 047), así
-    // que acá no hay nada que chequear.
-    const scheduledAt = new Date("2026-06-26T13:00:00-03:00");
-    expect(validateScheduledOrder({ ...base(), scheduledAt })).toEqual({
-      ok: true,
-    });
+  it("rechaza dine_in con su propio mensaje", () => {
+    const scheduledAt = new Date("2026-06-25T20:00:00-03:00");
     expect(
       validateScheduledOrder({
         ...base(),
-        deliveryType: "delivery",
+        deliveryType: "dine_in",
         scheduledAt,
       }),
-    ).toEqual({ ok: true });
+    ).toEqual({ ok: false, error: "Los pedidos en mesa no se programan." });
   });
 
-  it("rechaza dine_in con su propio mensaje (no se cuela por el hueco que abre delivery)", () => {
-    const scheduledAt = new Date("2026-06-26T13:00:00-03:00");
-    const res = validateScheduledOrder({
-      ...base(),
-      deliveryType: "dine_in",
-      scheduledAt,
-    });
-    expect(res).toEqual({
+  // ── Spec 064 — solo hoy ───────────────────────────────────────────────────
+
+  it("rechaza programar para mañana, aunque el horario esté en la grilla", () => {
+    // Viernes 20:00: la grilla del dow=5 lo tiene, pero ya no es hoy.
+    const scheduledAt = new Date("2026-06-26T20:00:00-03:00");
+    expect(validateScheduledOrder({ ...base(), scheduledAt })).toEqual({
       ok: false,
-      error: "Los pedidos en mesa no se programan.",
+      error: "Los pedidos programados son solo para hoy.",
     });
   });
 
-  it("las reglas de anticipación / ventana / horario también aplican a delivery", () => {
-    const delivery = { ...base(), deliveryType: "delivery" as const };
-    // Fuera de horario (viernes 18:00, el local cierra 16:00).
+  it("rechaza un instante pasado (ayer) con el mismo mensaje de 'solo hoy'", () => {
+    const scheduledAt = new Date("2026-06-24T20:00:00-03:00");
+    expect(validateScheduledOrder({ ...base(), scheduledAt }).ok).toBe(false);
+  });
+
+  it("el día se compara en el TZ del local, no en UTC", () => {
+    // 2026-06-25T23:00-03:00 = 2026-06-26T02:00Z. En UTC es otro día; en AR es
+    // hoy. Rechaza por no estar en la grilla, NO por "solo para hoy".
+    const scheduledAt = new Date("2026-06-25T23:00:00-03:00");
+    expect(validateScheduledOrder({ ...base(), scheduledAt })).toEqual({
+      ok: false,
+      error: "Elegí uno de los horarios disponibles del local.",
+    });
+  });
+
+  // ── Spec 064 — solo horarios de la grilla ─────────────────────────────────
+
+  it("rechaza una hora que no está en la grilla", () => {
+    // Hoy 20:15: dentro del servicio, pero no es un chip.
+    const scheduledAt = new Date("2026-06-25T20:15:00-03:00");
+    expect(validateScheduledOrder({ ...base(), scheduledAt })).toEqual({
+      ok: false,
+      error: "Elegí uno de los horarios disponibles del local.",
+    });
+  });
+
+  it("rechaza todo si el negocio no tiene grilla cargada", () => {
+    const scheduledAt = new Date("2026-06-25T20:00:00-03:00");
     expect(
-      validateScheduledOrder({
-        ...delivery,
-        scheduledAt: new Date("2026-06-26T18:00:00-03:00"),
-      }).ok,
+      validateScheduledOrder({ ...base(), schedule: {}, scheduledAt }).ok,
     ).toBe(false);
-    // Menos que la anticipación mínima.
     expect(
-      validateScheduledOrder({
-        ...delivery,
-        scheduledAt: new Date(NOW.getTime() + 30 * 60_000),
-      }).ok,
+      validateScheduledOrder({ ...base(), schedule: null, scheduledAt }).ok,
     ).toBe(false);
   });
 
-  it("rechaza un horario fuera del horario de atención", () => {
-    // Viernes 18:00 AR → hay franja ese día (12–16) pero 18:00 queda afuera.
-    const scheduledAt = new Date("2026-06-26T18:00:00-03:00");
+  it("rechaza menos que la anticipación mínima aunque el horario esté en la grilla", () => {
+    // Hoy 12:30 está en la grilla, pero faltan 30 min (< 60).
+    const scheduledAt = new Date("2026-06-25T12:30:00-03:00");
     const res = validateScheduledOrder({ ...base(), scheduledAt });
     expect(res.ok).toBe(false);
+    expect(res).toMatchObject({
+      error: expect.stringContaining("anticipación"),
+    });
+  });
+});
+
+describe("scheduleSlotsForDay", () => {
+  it("devuelve los slots del día, ordenados y sin repetidos", () => {
+    expect(scheduleSlotsForDay(SCHEDULE, NOW, TZ)).toEqual([
+      "12:30",
+      "13:00",
+      "20:00",
+      "21:00",
+    ]);
   });
 
-  it("rechaza un día sin franja de atención", () => {
-    // Jueves siguiente (dow=4): no hay slot configurado.
-    const scheduledAt = new Date("2026-07-02T13:00:00-03:00");
-    const res = validateScheduledOrder({ ...base(), scheduledAt });
-    expect(res.ok).toBe(false);
+  it("un día cerrado no ofrece nada, aunque tenga slots cargados", () => {
+    // Sábado 2026-06-27 → dow=6, open: false.
+    const sat = new Date("2026-06-27T12:00:00-03:00");
+    expect(scheduleSlotsForDay(SCHEDULE, sat, TZ)).toEqual([]);
   });
 
-  it("rechaza menos que la anticipación mínima", () => {
-    // 30 min después de NOW (< SCHEDULED_MIN_LEAD_MIN).
-    const scheduledAt = new Date(NOW.getTime() + 30 * 60_000);
-    const res = validateScheduledOrder({ ...base(), scheduledAt });
-    expect(res.ok).toBe(false);
+  it("sin grilla devuelve vacío", () => {
+    expect(scheduleSlotsForDay(null, NOW, TZ)).toEqual([]);
+    expect(scheduleSlotsForDay({}, NOW, TZ)).toEqual([]);
+  });
+});
+
+describe("filterSlotsByLead", () => {
+  it("descarta los horarios que ya no cumplen la anticipación mínima", () => {
+    // NOW = 12:00 → el corte es 13:00. 12:30 se cae, 13:00 entra (>=).
+    expect(
+      filterSlotsByLead(["12:30", "13:00", "20:00"], TZ, NOW),
+    ).toEqual(["13:00", "20:00"]);
   });
 
-  it("rechaza más allá de la ventana máxima", () => {
-    const scheduledAt = new Date(
-      NOW.getTime() + (SCHEDULED_MAX_WINDOW_DAYS + 1) * 24 * 60 * 60_000,
-    );
-    const res = validateScheduledOrder({ ...base(), scheduledAt });
-    expect(res.ok).toBe(false);
+  it("respeta un lead custom", () => {
+    expect(filterSlotsByLead(["12:30", "13:00"], TZ, NOW, 15)).toEqual([
+      "12:30",
+      "13:00",
+    ]);
   });
 });
 
@@ -138,7 +170,7 @@ describe("isScheduledForLater", () => {
   });
 
   it("es true si el instante es futuro", () => {
-    expect(isScheduledForLater("2026-06-26T13:00:00-03:00", now)).toBe(true);
+    expect(isScheduledForLater("2026-06-25T20:00:00-03:00", now)).toBe(true);
   });
 
   it("es false si el instante ya pasó", () => {
@@ -147,7 +179,7 @@ describe("isScheduledForLater", () => {
 
   it("acepta tanto Date como string ISO", () => {
     expect(
-      isScheduledForLater(new Date("2026-06-26T13:00:00-03:00"), now),
+      isScheduledForLater(new Date("2026-06-25T20:00:00-03:00"), now),
     ).toBe(true);
   });
 });

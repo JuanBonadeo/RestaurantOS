@@ -7,13 +7,12 @@ import { fromZonedTime } from "date-fns-tz";
 import { toast } from "sonner";
 
 import { I } from "@/components/delivery/primitives";
-import type { BusinessHourSlot } from "@/lib/business-hours/schema";
 import { formatCurrency } from "@/lib/currency";
 import { createOrder } from "@/lib/orders/create-order";
 import {
-  SCHEDULED_MAX_WINDOW_DAYS,
+  filterSlotsByLead,
+  localYmd,
   SCHEDULED_MIN_LEAD_MIN,
-  validateScheduledOrder,
 } from "@/lib/orders/scheduled";
 import { previewPromoCode } from "@/lib/promos/preview-action";
 import { cartTotal, useCart } from "@/stores/cart";
@@ -26,7 +25,7 @@ export function CheckoutForm({
   businessName,
   businessAddress,
   businessTimezone,
-  businessHours = [],
+  todaySlots = [],
   deliveryFeeCents,
   estimatedMinutes,
   savedAddresses = [],
@@ -40,7 +39,11 @@ export function CheckoutForm({
   businessName: string;
   businessAddress: string | null;
   businessTimezone: string;
-  businessHours?: BusinessHourSlot[];
+  /**
+   * Horarios (HH:MM) que la grilla de reservas abre HOY — los mismos chips que
+   * ve el que reserva (spec 064). Vacío = hoy no se puede programar.
+   */
+  todaySlots?: string[];
   deliveryFeeCents: number;
   estimatedMinutes: number | null;
   savedAddresses?: { id: string; street: string }[];
@@ -67,11 +70,11 @@ export function CheckoutForm({
   const [phone, setPhone] = useState(initialPhone);
   const [email] = useState(initialEmail);
   const [payment, setPayment] = useState<PaymentId>(mpEnabled ? "mp" : "cash");
-  // Pedido diferido (spec 31 + 061): "¿para cuándo?" → ahora / programar.
-  // Retiro y delivery, con cualquier método de pago.
+  // Pedido diferido (spec 31 + 061 + 064): "¿para cuándo?" → ahora / programar.
+  // Retiro y delivery, con cualquier método de pago, pero **sólo para hoy** y
+  // eligiendo uno de los horarios de la grilla del local.
   const [when, setWhen] = useState<When>("now");
-  const [schedDate, setSchedDate] = useState("");
-  const [schedTime, setSchedTime] = useState("");
+  const [schedSlot, setSchedSlot] = useState<string | null>(null);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [errors, setErrors] = useState<{
     address?: string;
@@ -170,24 +173,15 @@ export function CheckoutForm({
     else if (!isPickup && payment === "pickup-cash") setPayment("cash");
   }, [isPickup, payment]);
 
-  // Límites del input de fecha (YYYY-MM-DD en el TZ del local): de hoy hasta la
-  // ventana máxima. El helper revalida horario/anticipación igual.
-  const { todayStr, maxDateStr } = useMemo(() => {
-    const fmt = (d: Date) =>
-      new Intl.DateTimeFormat("en-CA", {
-        timeZone: businessTimezone,
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-      }).format(d);
-    const nowMs = Date.now();
-    return {
-      todayStr: fmt(new Date(nowMs)),
-      maxDateStr: fmt(
-        new Date(nowMs + SCHEDULED_MAX_WINDOW_DAYS * 24 * 60 * 60 * 1000),
-      ),
-    };
-  }, [businessTimezone]);
+  // Chips de horario: los de hoy que todavía cumplen la anticipación mínima.
+  // Se calculan en el cliente (dependen de "ahora"), pero sólo se renderizan
+  // después de que el usuario toca "Programar" → sin riesgo de mismatch de
+  // hidratación. El server revalida en persist-order.
+  const availableSlots = useMemo(
+    () => filterSlotsByLead(todaySlots, businessTimezone),
+    [todaySlots, businessTimezone],
+  );
+  const canSchedule = todaySlots.length > 0;
 
   // Programar ya no restringe el método de pago (spec 061): las opciones son
   // siempre las mismas.
@@ -230,32 +224,29 @@ export function CheckoutForm({
       return;
     }
 
-    // Pedido diferido (spec 31): armamos el instante en el TZ del local y lo
-    // validamos client-side para feedback; persist-order revalida en el server.
+    // Pedido diferido (spec 31 + 064): el horario es un chip de la grilla de
+    // hoy. Armamos el instante en el TZ del local; persist-order revalida.
     let scheduledAtIso: string | undefined;
     if (isScheduled) {
-      if (!schedDate || !schedTime) {
+      if (!schedSlot) {
         toast.error(
           isPickup
-            ? "Elegí el día y la hora del retiro."
-            : "Elegí el día y la hora de la entrega.",
+            ? "Elegí la hora del retiro."
+            : "Elegí la hora de la entrega.",
         );
         return;
       }
-      const dt = fromZonedTime(
-        `${schedDate}T${schedTime}:00`,
-        businessTimezone,
-      );
-      const v = validateScheduledOrder({
-        scheduledAt: dt,
-        deliveryType: mode,
-        businessHours,
-        timezone: businessTimezone,
-      });
-      if (!v.ok) {
-        toast.error(v.error);
+      // El chip pudo quedar viejo si el cliente tardó: revalidamos contra la
+      // anticipación mínima antes de mandar.
+      if (!filterSlotsByLead(todaySlots, businessTimezone).includes(schedSlot)) {
+        setSchedSlot(null);
+        toast.error("Ese horario ya no está disponible. Elegí otro.");
         return;
       }
+      const dt = fromZonedTime(
+        `${localYmd(new Date(), businessTimezone)}T${schedSlot}:00`,
+        businessTimezone,
+      );
       scheduledAtIso = dt.toISOString();
     }
 
@@ -757,22 +748,29 @@ export function CheckoutForm({
           {(
             [
               { id: "now", label: "Lo antes posible", sub: "15–20 min" },
-              { id: "scheduled", label: "Programar", sub: "Elegí día y hora" },
+              {
+                id: "scheduled",
+                label: "Programar",
+                sub: canSchedule ? "Elegí una hora de hoy" : "No disponible hoy",
+              },
             ] as const
           ).map((o) => {
             const sel = when === o.id;
+            const disabled = o.id === "scheduled" && !canSchedule;
             return (
               <button
                 key={o.id}
                 type="button"
+                disabled={disabled}
                 onClick={() => setWhen(o.id)}
                 style={{
                   padding: "14px 12px",
                   borderRadius: 12,
                   border: `1.5px solid ${sel ? "var(--accent)" : "var(--hairline-2)"}`,
                   background: sel ? "var(--accent-soft)" : "#fff",
-                  cursor: "pointer",
+                  cursor: disabled ? "not-allowed" : "pointer",
                   textAlign: "left",
+                  opacity: disabled ? 0.5 : 1,
                 }}
               >
                 <div
@@ -791,43 +789,64 @@ export function CheckoutForm({
         </div>
         {isScheduled && (
           <>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: 8,
-              }}
-            >
-              <Field label="Día">
-                <input
-                  type="date"
-                  value={schedDate}
-                  min={todayStr}
-                  max={maxDateStr}
-                  onChange={(e) => setSchedDate(e.target.value)}
-                  style={inputStyle()}
-                />
-              </Field>
-              <Field label="Hora">
-                <input
-                  type="time"
-                  value={schedTime}
-                  onChange={(e) => setSchedTime(e.target.value)}
-                  style={inputStyle()}
-                />
-              </Field>
-            </div>
-            <div
-              style={{
-                fontSize: 12,
-                color: "var(--ink-3)",
-                lineHeight: 1.4,
-              }}
-            >
-              Dentro del horario del local, con al menos{" "}
-              {SCHEDULED_MIN_LEAD_MIN} min de anticipación y hasta{" "}
-              {SCHEDULED_MAX_WINDOW_DAYS} días.
-            </div>
+            {availableSlots.length === 0 ? (
+              <div
+                style={{
+                  fontSize: 13,
+                  color: "var(--ink-3)",
+                  lineHeight: 1.4,
+                }}
+              >
+                Ya no quedan horarios para hoy. Pedí «Lo antes posible».
+              </div>
+            ) : (
+              <>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(3, 1fr)",
+                    gap: 8,
+                  }}
+                >
+                  {availableSlots.map((slot) => {
+                    const active = schedSlot === slot;
+                    return (
+                      <button
+                        key={slot}
+                        type="button"
+                        onClick={() => setSchedSlot(slot)}
+                        style={{
+                          height: 48,
+                          borderRadius: 12,
+                          border: `1px solid ${active ? "var(--accent)" : "var(--hairline-2)"}`,
+                          background: active ? "var(--accent)" : "#fff",
+                          color: active ? "#fff" : "var(--ink)",
+                          fontSize: 15,
+                          fontWeight: 600,
+                          letterSpacing: -0.1,
+                          cursor: "pointer",
+                          transition: "all 180ms",
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        {slot}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: "var(--ink-3)",
+                    lineHeight: 1.4,
+                    marginTop: 10,
+                  }}
+                >
+                  Solo para hoy, con al menos {SCHEDULED_MIN_LEAD_MIN} min de
+                  anticipación.
+                </div>
+              </>
+            )}
           </>
         )}
       </Section>

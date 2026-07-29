@@ -5,7 +5,9 @@ import { CheckoutForm } from "@/components/checkout/checkout-form";
 // import { VerifyAccountBanner } from "@/components/public/verify-account-banner";
 import { listUserAddresses } from "@/lib/customers/addresses";
 import { getCustomerProfile } from "@/lib/customers/profile";
+import { scheduleSlotsForDay } from "@/lib/orders/scheduled";
 import { getAssignedCoupon } from "@/lib/promos/assigned-coupon";
+import { getReservationSettings } from "@/lib/reservations/queries";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getBusiness } from "@/lib/tenant";
 
@@ -27,16 +29,23 @@ export default async function CheckoutPage({
     redirect(`/${business_slug}/login?next=${next}`);
   }
 
-  const [savedAddresses, profile, { data: businessHours }] = await Promise.all([
+  const [savedAddresses, profile, reservationSettings] = await Promise.all([
     listUserAddresses(user.id, business.id),
     getCustomerProfile(user.id, business.id),
-    // Horarios del local para el selector "¿para cuándo?" del pedido diferido
-    // (spec 31). El server revalida igual en persist-order.
-    supabase
-      .from("business_hours")
-      .select("day_of_week, opens_at, closes_at")
-      .eq("business_id", business.id),
+    // Grilla de reservas del negocio: desde spec 064 el pedido programado se
+    // elige con los MISMOS chips de horario que una reserva, y sólo para hoy.
+    // El server revalida igual en persist-order.
+    getReservationSettings(business.id),
   ]);
+
+  // Los horarios de hoy se resuelven en el server (con "hoy" en el TZ del
+  // local) para que el chip que ve el cliente sea estable entre SSR e
+  // hidratación; el filtro por anticipación mínima corre en el cliente.
+  const todaySlots = scheduleSlotsForDay(
+    reservationSettings.schedule,
+    new Date(),
+    business.timezone,
+  );
 
   const mpEnabled = Boolean(
     business.mp_accepts_payments && business.mp_access_token,
@@ -79,7 +88,7 @@ export default async function CheckoutPage({
       businessName={business.name}
       businessAddress={business.address}
       businessTimezone={business.timezone}
-      businessHours={businessHours ?? []}
+      todaySlots={todaySlots}
       deliveryFeeCents={Number(business.delivery_fee_cents)}
       estimatedMinutes={business.estimated_delivery_minutes}
       savedAddresses={savedAddresses}
