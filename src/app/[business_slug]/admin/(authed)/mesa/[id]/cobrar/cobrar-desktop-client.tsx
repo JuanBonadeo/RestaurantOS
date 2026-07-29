@@ -44,6 +44,7 @@ import {
 import type { CuentaState, OrderSplit } from "@/lib/billing/types";
 import { CobroForm } from "@/components/billing/cobro-form";
 import type { PaymentMethodConfig } from "@/lib/caja/types";
+import { useCajaPreferida } from "@/lib/caja/use-caja-preferida";
 import { formatCurrency } from "@/lib/currency";
 import { cn } from "@/lib/utils";
 
@@ -108,7 +109,7 @@ export function CobrarDesktopClient({
     splits.find((s) => s.status !== "paid" && s.status !== "cancelled")?.id ??
       null,
   );
-  const [cajaId, setCajaId] = useState<string>(init.cajas[0].id);
+  const [cajaId, setCajaId] = useCajaPreferida(slug, init.cajas);
   const activeSplit = splits.find((s) => s.id === activeSplitId) ?? null;
 
   const total = cuenta.totals.total_cents;

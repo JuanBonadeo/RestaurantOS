@@ -21,6 +21,7 @@ import {
   registrarPago,
   type IniciarCobroResult,
 } from "@/lib/billing/cobro-actions";
+import { useCajaPreferida } from "@/lib/caja/use-caja-preferida";
 import { formatCurrency } from "@/lib/currency";
 
 /**
@@ -54,7 +55,7 @@ export function CobrarPedidoSheet({
   const [init, setInit] = useState<IniciarCobroResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [cajaId, setCajaId] = useState<string>("");
+  const [cajaId, setCajaId] = useCajaPreferida(slug, init?.cajas ?? []);
   const [comprobante, setComprobante] = useState<ComprobanteState>(
     comprobanteInicial(),
   );
@@ -65,8 +66,8 @@ export function CobrarPedidoSheet({
     setLoadError(null);
     iniciarCobro(order.id, slug).then((r) => {
       if (r.ok) {
+        // La caja la resuelve `useCajaPreferida` cuando llega la lista.
         setInit(r.data);
-        setCajaId(r.data.cajas[0]?.id ?? "");
       } else {
         setLoadError(r.error);
       }

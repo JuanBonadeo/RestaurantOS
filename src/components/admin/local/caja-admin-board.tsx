@@ -43,6 +43,7 @@ import type {
   CajaMovimiento,
   PaymentMethod,
 } from "@/lib/caja/types";
+import { useCajaPreferida } from "@/lib/caja/use-caja-preferida";
 import { formatCurrency } from "@/lib/currency";
 import { cn } from "@/lib/utils";
 
@@ -64,35 +65,10 @@ export function CajaAdminBoard({ slug, cajas }: Props) {
   >({});
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // ── Selector de caja activa (persiste en localStorage) ──
-  const storageKey = `caja_active_${slug}`;
-  const [activeCajaId, setActiveCajaId] = useState<string>(
-    () => cajas[0]?.id ?? "",
-  );
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const stored = localStorage.getItem(storageKey);
-      if (stored && cajas.some((c) => c.id === stored)) {
-        setActiveCajaId(stored);
-      } else if (cajas[0]) {
-        setActiveCajaId(cajas[0].id);
-      }
-    } catch {
-      // ignore
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storageKey]);
-  useEffect(() => {
-    if (!cajas.some((c) => c.id === activeCajaId) && cajas[0]) {
-      setActiveCajaId(cajas[0].id);
-    }
-  }, [cajas, activeCajaId]);
-
-  const selectCaja = (id: string) => {
-    setActiveCajaId(id);
-    try { localStorage.setItem(storageKey, id); } catch { /* ignore */ }
-  };
+  // ── Selector de caja activa (persiste por máquina) ──
+  // Misma preferencia que usa el cobro: el puesto del bar registra en Caja Bar
+  // acá y al cobrar. Ver `use-caja-preferida.ts`.
+  const [activeCajaId, selectCaja] = useCajaPreferida(slug, cajas);
 
   useEffect(() => {
     let cancelled = false;

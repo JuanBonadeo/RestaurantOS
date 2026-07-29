@@ -39,6 +39,7 @@ import {
 import type { CuentaState, OrderSplit } from "@/lib/billing/types";
 import { CobroForm } from "@/components/billing/cobro-form";
 import type { PaymentMethodConfig } from "@/lib/caja/types";
+import { useCajaPreferida } from "@/lib/caja/use-caja-preferida";
 import { formatCurrency } from "@/lib/currency";
 import { cn } from "@/lib/utils";
 
@@ -128,7 +129,7 @@ export function CobrarClient({
   const closed = merge.closed;
 
   const [activeSplitId, setActiveSplitId] = useState<string | null>(null);
-  const [cajaId, setCajaId] = useState<string>(init.cajas[0].id);
+  const [cajaId, setCajaId] = useCajaPreferida(slug, init.cajas);
   const activeSplit = splits.find((s) => s.id === activeSplitId) ?? null;
 
   // Stats globales para el header.

@@ -17,6 +17,7 @@ import { ProductModal, type AddToCartItem } from "@/components/mozo/product-moda
 import { emitInvoice } from "@/lib/afip/emit-invoice";
 import { calculateAdjustment } from "@/lib/billing/adjustment";
 import type { Caja, PaymentMethod, PaymentMethodConfig } from "@/lib/caja/types";
+import { useCajaPreferida } from "@/lib/caja/use-caja-preferida";
 import { formatCurrency } from "@/lib/currency";
 import type { CatalogForMozo, CatalogProduct } from "@/lib/mozo/catalog-query";
 import { loadPedirCatalog } from "@/lib/mozo/pedir-panel-data";
@@ -71,7 +72,7 @@ export function VentaRapidaPanel({
   const [openProduct, setOpenProduct] = useState<CatalogProduct | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
 
-  const [cajaId, setCajaId] = useState<string>("");
+  const [cajaId, setCajaId] = useCajaPreferida(slug, cajas);
   const [method, setMethod] = useState<PaymentMethod>("cash");
   const [ultima, setUltima] = useState<UltimaVenta | null>(null);
 
@@ -100,9 +101,9 @@ export function VentaRapidaPanel({
     iniciarVentaMostrador(slug).then((r) => {
       if (!alive) return;
       if (r.ok) {
+        // La caja la resuelve `useCajaPreferida` cuando llega la lista.
         setCajas(r.data.cajas);
         setMethodConfigs(r.data.methodConfigs);
-        setCajaId(r.data.cajas[0]?.id ?? "");
       } else {
         setInitError(r.error);
       }
