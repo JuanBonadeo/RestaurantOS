@@ -77,53 +77,40 @@ export const SetReservationModeInputSchema = z.object({
 });
 export type SetReservationModeInput = z.infer<typeof SetReservationModeInputSchema>;
 
-/** Crear/editar un servicio (Mediodía/Cena…) del modo flexible. */
-export const ReservationServiceInputSchema = z.object({
-  business_slug: z.string().min(1),
-  id: z.string().uuid().optional(),
-  name: z.string().trim().min(1).max(40),
-  /** 0..6 (0=Domingo); null/omitido = todos los días. */
-  day_of_week: z.coerce.number().int().min(0).max(6).nullable().optional(),
-  opens_at: z.string().regex(TIME_HHMM, "Hora inválida"),
-  closes_at: z.string().regex(TIME_HHMM, "Hora inválida"),
-  /** Cupo blando (cubiertos) — advisory, no bloquea. null = sin umbral. */
-  soft_capacity: z.coerce.number().int().min(1).max(100000).nullable().optional(),
-  /** Zona a la que aplica el cupo; null = servicio entero. */
-  floor_plan_id: z.string().uuid().nullable().optional(),
-});
-export type ReservationServiceInput = z.infer<typeof ReservationServiceInputSchema>;
-
-export const DeleteReservationServiceInputSchema = z.object({
-  business_slug: z.string().min(1),
-  id: z.string().uuid(),
-});
-
 /**
  * Alta/edición de un servicio para VARIOS días de una (spec 059). Reemplaza al
  * alta fila-por-día: el grupo se identifica por (nombre, zona) y se reescribe
  * entero, así editar días o horarios es una sola acción — y de paso limpia
  * duplicados del mismo nombre/zona.
  */
-export const ReservationServiceGroupInputSchema = z
+export const ReservationServiceGroupsInputSchema = z
   .object({
     business_slug: z.string().min(1),
-    name: z.string().trim().min(1).max(40),
-    /** Nombre anterior, cuando se está renombrando un grupo existente. */
-    previous_name: z.string().trim().max(40).optional(),
+    /** Servicios marcados. Cada uno con su propio horario/cupo (Almuerzo y Cena
+     *  no comparten horario), pero todos se aplican a los MISMOS días. */
+    services: z
+      .array(
+        z.object({
+          name: z.string().trim().min(1).max(40),
+          /** Nombre anterior, cuando se renombra un grupo existente. */
+          previous_name: z.string().trim().max(40).optional(),
+          opens_at: z.string().regex(TIME_HHMM, "Hora inválida"),
+          closes_at: z.string().regex(TIME_HHMM, "Hora inválida"),
+          soft_capacity: z.coerce.number().int().min(1).max(100000).nullable().optional(),
+        }),
+      )
+      .min(1, "Marcá al menos un servicio."),
     /** Días 0..6 (0=Domingo). Ignorado si `every_day` es true. */
     days: z.array(z.coerce.number().int().min(0).max(6)).default([]),
     /** true = una sola fila que aplica a todos los días (day_of_week NULL). */
     every_day: z.boolean().default(false),
-    opens_at: z.string().regex(TIME_HHMM, "Hora inválida"),
-    closes_at: z.string().regex(TIME_HHMM, "Hora inválida"),
-    soft_capacity: z.coerce.number().int().min(1).max(100000).nullable().optional(),
     floor_plan_id: z.string().uuid().nullable().optional(),
   })
   .refine((v) => v.every_day || v.days.length > 0, {
-    message: "Elegí al menos un día.",
+    message: "Marcá al menos un día.",
     path: ["days"],
   });
-export type ReservationServiceGroupInput = z.infer<typeof ReservationServiceGroupInputSchema>;
+export type ReservationServiceGroupsInput = z.infer<typeof ReservationServiceGroupsInputSchema>;
 
 export const DeleteReservationServiceGroupInputSchema = z.object({
   business_slug: z.string().min(1),

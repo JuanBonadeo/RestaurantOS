@@ -8,9 +8,7 @@ import { canConfigureReservations } from "@/lib/permissions/can";
 import { getReservationActor } from "@/lib/reservations/queries";
 import {
   DeleteReservationServiceGroupInputSchema,
-  DeleteReservationServiceInputSchema,
-  ReservationServiceGroupInputSchema,
-  ReservationServiceInputSchema,
+  ReservationServiceGroupsInputSchema,
   ReservationSettingsInputSchema,
   SetReservationModeInputSchema,
 } from "@/lib/reservations/schema";
@@ -104,58 +102,6 @@ export async function setReservationMode(input: unknown): Promise<ActionResult<n
   return actionOk(null);
 }
 
-/** Crear o editar un servicio (Mediodía/Cena…) del modo flexible. */
-export async function saveReservationService(
-  input: unknown,
-): Promise<ActionResult<{ id: string }>> {
-  const parsed = ReservationServiceInputSchema.safeParse(input);
-  if (!parsed.success) {
-    return actionError(parsed.error.issues[0]?.message ?? "Datos inválidos.");
-  }
-  const guard = await assertCanConfigure(parsed.data.business_slug);
-  if (!guard.ok) return actionError(guard.error);
-
-  const service = createSupabaseServiceClient() as unknown as GenericClient;
-  const row = {
-    business_id: guard.businessId,
-    name: parsed.data.name,
-    day_of_week: parsed.data.day_of_week ?? null,
-    opens_at: parsed.data.opens_at,
-    closes_at: parsed.data.closes_at,
-    soft_capacity: parsed.data.soft_capacity ?? null,
-    floor_plan_id: parsed.data.floor_plan_id ?? null,
-  };
-
-  let id = parsed.data.id ?? null;
-  if (id) {
-    const { error } = await service
-      .from("reservation_services")
-      .update({ ...row, updated_at: new Date().toISOString() })
-      .eq("id", id)
-      .eq("business_id", guard.businessId);
-    if (error) {
-      console.error("saveReservationService/update", error);
-      return actionError("No pudimos guardar el servicio.");
-    }
-  } else {
-    const { data, error } = await service
-      .from("reservation_services")
-      .insert(row)
-      .select("id")
-      .single();
-    if (error || !data) {
-      console.error("saveReservationService/insert", error);
-      return actionError("No pudimos crear el servicio.");
-    }
-    id = (data as { id: string }).id;
-  }
-
-  revalidatePath(`/${parsed.data.business_slug}/admin/reservas/configuracion`);
-  revalidatePath(`/${parsed.data.business_slug}/admin/reservas`);
-  revalidatePath(`/${parsed.data.business_slug}/reservar`);
-  return actionOk({ id });
-}
-
 /**
  * Alta/edición de un servicio para VARIOS días de una sola vez (spec 059).
  * El grupo se identifica por (nombre, zona) y se **reescribe entero**: se borran
@@ -165,10 +111,10 @@ export async function saveReservationService(
  *  - los duplicados del mismo (nombre, zona) quedan limpios solos.
  * No rompe reservas existentes: `reservations.service` guarda el NOMBRE, no el id.
  */
-export async function saveReservationServiceGroup(
+export async function saveReservationServiceGroups(
   input: unknown,
-): Promise<ActionResult<{ rows: number }>> {
-  const parsed = ReservationServiceGroupInputSchema.safeParse(input);
+): Promise<ActionResult<{ services: number; rows: number }>> {
+  const parsed = ReservationServiceGroupsInputSchema.safeParse(input);
   if (!parsed.success) {
     return actionError(parsed.error.issues[0]?.message ?? "Datos inválidos.");
   }
@@ -179,42 +125,46 @@ export async function saveReservationServiceGroup(
   const zoneId = d.floor_plan_id ?? null;
   const service = createSupabaseServiceClient() as unknown as GenericClient;
 
-  // Borrar el grupo anterior (por nombre previo si se renombró) en esa zona.
-  let del = service
-    .from("reservation_services")
-    .delete()
-    .eq("business_id", guard.businessId)
-    .eq("name", d.previous_name?.trim() || d.name);
-  del = zoneId ? del.eq("floor_plan_id", zoneId) : del.is("floor_plan_id", null);
-  const { error: delError } = await del;
-  if (delError) {
-    console.error("saveReservationServiceGroup/delete", delError);
-    return actionError("No pudimos guardar el servicio.");
-  }
+  // Días compartidos por todos los servicios marcados.
+  const days = d.every_day ? [null] : Array.from(new Set(d.days));
 
-  const base = {
-    business_id: guard.businessId,
-    name: d.name,
-    opens_at: d.opens_at,
-    closes_at: d.closes_at,
-    soft_capacity: d.soft_capacity ?? null,
-    floor_plan_id: zoneId,
-  };
-  // `every_day` = una fila con day_of_week NULL (aplica a todos los días).
-  const rows = d.every_day
-    ? [{ ...base, day_of_week: null }]
-    : Array.from(new Set(d.days)).map((day) => ({ ...base, day_of_week: day }));
+  let rowCount = 0;
+  for (const svc of d.services) {
+    // Borrar el grupo anterior (por nombre previo si se renombró) en esa zona.
+    let del = service
+      .from("reservation_services")
+      .delete()
+      .eq("business_id", guard.businessId)
+      .eq("name", svc.previous_name?.trim() || svc.name);
+    del = zoneId ? del.eq("floor_plan_id", zoneId) : del.is("floor_plan_id", null);
+    const { error: delError } = await del;
+    if (delError) {
+      console.error("saveReservationServiceGroups/delete", delError);
+      return actionError(`No pudimos guardar "${svc.name}".`);
+    }
 
-  const { error } = await service.from("reservation_services").insert(rows);
-  if (error) {
-    console.error("saveReservationServiceGroup/insert", error);
-    return actionError("No pudimos guardar el servicio.");
+    const rows = days.map((day) => ({
+      business_id: guard.businessId,
+      name: svc.name,
+      day_of_week: day,
+      opens_at: svc.opens_at,
+      closes_at: svc.closes_at,
+      soft_capacity: svc.soft_capacity ?? null,
+      floor_plan_id: zoneId,
+    }));
+
+    const { error } = await service.from("reservation_services").insert(rows);
+    if (error) {
+      console.error("saveReservationServiceGroups/insert", error);
+      return actionError(`No pudimos guardar "${svc.name}".`);
+    }
+    rowCount += rows.length;
   }
 
   revalidatePath(`/${d.business_slug}/admin/reservas/configuracion`);
   revalidatePath(`/${d.business_slug}/admin/reservas`);
   revalidatePath(`/${d.business_slug}/reservar`);
-  return actionOk({ rows: rows.length });
+  return actionOk({ services: d.services.length, rows: rowCount });
 }
 
 /** Eliminar un servicio completo (todas sus filas de esa zona). */
@@ -241,26 +191,5 @@ export async function deleteReservationServiceGroup(
   }
   revalidatePath(`/${parsed.data.business_slug}/admin/reservas/configuracion`);
   revalidatePath(`/${parsed.data.business_slug}/reservar`);
-  return actionOk(null);
-}
-
-/** Eliminar un servicio del modo flexible. */
-export async function deleteReservationService(input: unknown): Promise<ActionResult<null>> {
-  const parsed = DeleteReservationServiceInputSchema.safeParse(input);
-  if (!parsed.success) return actionError("Datos inválidos.");
-  const guard = await assertCanConfigure(parsed.data.business_slug);
-  if (!guard.ok) return actionError(guard.error);
-
-  const service = createSupabaseServiceClient() as unknown as GenericClient;
-  const { error } = await service
-    .from("reservation_services")
-    .delete()
-    .eq("id", parsed.data.id)
-    .eq("business_id", guard.businessId);
-  if (error) {
-    console.error("deleteReservationService", error);
-    return actionError("No pudimos eliminar el servicio.");
-  }
-  revalidatePath(`/${parsed.data.business_slug}/admin/reservas/configuracion`);
   return actionOk(null);
 }
