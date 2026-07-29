@@ -1119,11 +1119,8 @@ export function SalonDesktop({
                 reservations={reservations}
                 slug={slug}
                 tableLabelById={tableLabelById}
-                tables={activeTables.map((t) => ({
-                  id: t.id,
-                  label: t.label,
-                  seats: t.seats,
-                }))}
+                floorPlans={floorPlans}
+                extras={extras}
                 onNewReservation={() => setShowNewReservation(true)}
               />
               <ActiveTablesList
