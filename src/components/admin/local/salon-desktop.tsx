@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { NewReservationModal } from "@/components/admin/local/new-reservation-modal";
+import { NuevaReservaPanel } from "@/components/admin/local/nueva-reserva-panel";
 import { ReservationsPanel } from "@/components/admin/local/reservations-panel";
 import { SegmentedSelector } from "@/components/admin/local/segmented-selector";
 import { VentaRapidaPanel } from "@/components/admin/local/venta-rapida-panel";
@@ -247,6 +247,9 @@ export function SalonDesktop({
   } | null>(null);
   const [anularReason, setAnularReason] = useState("");
   const [showNewReservation, setShowNewReservation] = useState(false);
+  // Mesa elegida en el plano para la reserva que se está creando (spec 059).
+  const [nuevaReservaTable, setNuevaReservaTable] = useState<FloorTable | null>(null);
+  const [pickingForNueva, setPickingForNueva] = useState(false);
   // Venta rápida de mostrador (spec 058): modo del sidebar, no de una mesa.
   const [ventaRapidaOpen, setVentaRapidaOpen] = useState(false);
   // Overlay optimista por mesa: patch parcial (estado / opened_at / mozo).
@@ -800,6 +803,12 @@ export function SalonDesktop({
     [localAssign, paintMozoId, slug],
   );
 
+  const closeNuevaReserva = useCallback(() => {
+    setShowNewReservation(false);
+    setPickingForNueva(false);
+    setNuevaReservaTable(null);
+  }, []);
+
   /** Asignar la mesa tocada a la reserva que está esperando (spec 059). */
   const handleAsignarMesaReserva = useCallback(
     (table: FloorTable) => {
@@ -955,16 +964,20 @@ export function SalonDesktop({
         {/* Columna del plano: viewer arriba + stats al pie */}
         <div className="flex min-h-0 flex-col gap-2">
           {/* Modo "elegir mesa": el plano queda esperando un tap (spec 059). */}
-          {asignarReservaFor ? (
+          {asignarReservaFor || pickingForNueva ? (
             <div className="flex items-center gap-2 rounded-xl bg-indigo-600 px-3 py-2 text-white shadow-sm">
               <MapPin className="h-4 w-4 shrink-0 animate-pulse" />
               <span className="min-w-0 flex-1 text-sm font-semibold">
-                Tocá una mesa para {asignarReservaFor.customer_name} ·{" "}
-                {asignarReservaFor.party_size}p
+                {asignarReservaFor
+                  ? `Tocá una mesa para ${asignarReservaFor.customer_name} · ${asignarReservaFor.party_size}p`
+                  : "Tocá una mesa para la reserva nueva"}
               </span>
               <button
                 type="button"
-                onClick={() => setAsignarReservaFor(null)}
+                onClick={() => {
+                  setAsignarReservaFor(null);
+                  setPickingForNueva(false);
+                }}
                 className="shrink-0 rounded-lg bg-white/15 px-2.5 py-1 text-xs font-bold transition hover:bg-white/25"
               >
                 Cancelar
@@ -974,7 +987,7 @@ export function SalonDesktop({
           <div
             className={cn(
               "bg-card min-h-0 flex-1 overflow-hidden rounded-2xl ring-1",
-              asignarReservaFor ? "ring-2 ring-indigo-500" : "ring-border/60",
+              asignarReservaFor || pickingForNueva ? "ring-2 ring-indigo-500" : "ring-border/60",
             )}
           >
             {plan ? (
@@ -992,6 +1005,13 @@ export function SalonDesktop({
                   // el detalle de la mesa.
                   if (asignarReservaFor) {
                     handleAsignarMesaReserva(t);
+                    return;
+                  }
+                  // Elegir mesa para la reserva que se está creando en el panel.
+                  if (pickingForNueva) {
+                    if (t.seats < 1) return;
+                    setNuevaReservaTable(t);
+                    setPickingForNueva(false);
                     return;
                   }
                   // Tocar una mesa manda al detalle: la venta de mostrador no
@@ -1020,7 +1040,21 @@ export function SalonDesktop({
             el encargado pinta no queremos que un tap accidental abra el
             detalle. Cobro y pedir son terminales por mesa (excluyentes). */}
         <aside className="bg-card ring-border/60 flex min-h-0 flex-col overflow-hidden rounded-2xl ring-1">
-          {distribuirOpen ? (
+          {showNewReservation ? (
+            <NuevaReservaPanel
+              slug={slug}
+              tables={activeTables}
+              floorPlanId={plan?.id ?? null}
+              tablePicker={{
+                pickedTableId: nuevaReservaTable?.id ?? null,
+                pickedLabel: nuevaReservaTable?.label ?? null,
+                picking: pickingForNueva,
+                onRequest: () => setPickingForNueva(true),
+                onClear: () => setNuevaReservaTable(null),
+              }}
+              onClose={closeNuevaReserva}
+            />
+          ) : distribuirOpen ? (
             <AsignarMozosPanel
               mozos={mozos}
               activeMozoId={paintMozoId}
@@ -1188,7 +1222,14 @@ export function SalonDesktop({
                   setSelectedId(null);
                   setAsignarReservaFor(r);
                 }}
-                onNewReservation={() => setShowNewReservation(true)}
+                onNewReservation={() => {
+                  setSelectedId(null);
+                  setVentaRapidaOpen(false);
+                  setAsignarReservaFor(null);
+                  setNuevaReservaTable(null);
+                  setPickingForNueva(false);
+                  setShowNewReservation(true);
+                }}
               />
               <ActiveTablesList
                 tables={activeTables}
@@ -1290,15 +1331,6 @@ export function SalonDesktop({
             setSelectedId(null);
             router.refresh();
           }}
-        />
-      )}
-
-      {showNewReservation && (
-        <NewReservationModal
-          slug={slug}
-          tables={activeTables}
-          floorPlanId={plan?.id ?? null}
-          onClose={() => setShowNewReservation(false)}
         />
       )}
 
