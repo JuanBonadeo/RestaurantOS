@@ -945,14 +945,11 @@ export function SalonDesktop({
       <div
         className={cn(
           "grid min-h-0 flex-1 grid-cols-1 gap-4",
-          // Ensanchamos el panel según el modo embebido, para que el contenido
-          // respire (el plano sigue visible a la izq). Cobro es el más denso
-          // (KPI + cajas + splits + form de pago) → el más ancho.
-          cobroTable || cuentaTable
-            ? "lg:grid-cols-[1fr_480px]"
-            : pedirTable || ventaRapidaOpen
-              ? "lg:grid-cols-[1fr_440px]"
-              : "lg:grid-cols-[1fr_360px]",
+          // Ancho único del panel: el de cobro (el modo más denso: KPI + cajas +
+          // splits + form de pago). Antes la base era 360 y crecía por modo, así
+          // que el sidebar "saltaba" al entrar a cobrar y las filas de reservas
+          // quedaban apretadas. Pedido de Juan: que arranque ya en ese ancho.
+          "lg:grid-cols-[1fr_480px]",
         )}
       >
         {/* Columna del plano: viewer arriba + stats al pie */}
