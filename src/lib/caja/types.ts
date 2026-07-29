@@ -42,11 +42,19 @@ export type PaymentMethod =
   | "transfer"
   | "other";
 
+/**
+ * De dónde vino la plata, derivado de `orders.delivery_type`.
+ * Ojo: la venta de mostrador se guarda como `dine_in`, así que hoy cae en
+ * `salon` — no está separada.
+ */
+export type VentaOrigen = "salon" | "delivery" | "takeaway" | "otro";
+
 export type CajaLiveStats = {
   caja_id: string;
   total_ventas_cents: number;
   total_propinas_cents: number;
   ventas_por_metodo: Record<PaymentMethod, number>;
+  ventas_por_origen: Record<VentaOrigen, number>;
   cobros_count: number;
   expected_cash_cents: number;
   periodo_desde: string;

@@ -7,6 +7,7 @@ import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 import { calculateExpectedCash } from "./expected-cash";
 import { calcularRendicionMozo } from "./liquidacion-mozo";
+import { agruparVentasPorOrigen } from "./ventas-por-origen";
 import type {
   Caja,
   CajaConEstado,
@@ -267,9 +268,11 @@ export async function getCajaLiveStats(
   const ultimoCorte = await getUltimoCorte(cajaId, businessId);
   const periodoDesdeFecha = ultimoCorte?.created_at ?? (cajaRow as { created_at: string }).created_at;
 
+  // `orders!inner` es seguro: `payments.order_id` es NOT NULL, así que el join
+  // no puede descartar cobros y desbalancear los totales.
   let paymentsQuery = service
     .from("payments")
-    .select("method, amount_cents, tip_cents")
+    .select("method, amount_cents, tip_cents, orders!inner(delivery_type)")
     .eq("caja_id", cajaId)
     .eq("payment_status", "paid");
   paymentsQuery = paymentsQuery.gt("created_at", periodoDesdeFecha);
@@ -285,11 +288,24 @@ export async function getCajaLiveStats(
     movQuery,
   ]);
 
-  const payments = (paymentsRes.data ?? []) as Array<{
+  const paymentRows = (paymentsRes.data ?? []) as unknown as Array<{
     method: PaymentMethod;
     amount_cents: number;
     tip_cents: number;
+    orders:
+      | { delivery_type: string }
+      | { delivery_type: string }[]
+      | null;
   }>;
+  const payments = paymentRows.map((r) => {
+    const ord = Array.isArray(r.orders) ? r.orders[0] : r.orders;
+    return {
+      method: r.method,
+      amount_cents: Number(r.amount_cents),
+      tip_cents: Number(r.tip_cents),
+      delivery_type: ord?.delivery_type ?? "",
+    };
+  });
   const movimientos = (movimientosRes.data ?? []) as Array<{
     kind: "sangria" | "ingreso";
     amount_cents: number;
@@ -315,6 +331,7 @@ export async function getCajaLiveStats(
     total_ventas_cents,
     total_propinas_cents,
     ventas_por_metodo,
+    ventas_por_origen: agruparVentasPorOrigen(payments),
     cobros_count: payments.length,
     expected_cash_cents,
     periodo_desde: periodoDesdeFecha,

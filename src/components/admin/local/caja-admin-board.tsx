@@ -11,9 +11,12 @@ import {
   Link2,
   Lock,
   MoreHorizontal,
+  Package,
   QrCode,
   RefreshCw,
   Settings,
+  Truck,
+  UtensilsCrossed,
   Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -42,6 +45,7 @@ import type {
   CajaLiveStats,
   CajaMovimiento,
   PaymentMethod,
+  VentaOrigen,
 } from "@/lib/caja/types";
 import { useCajaPreferida } from "@/lib/caja/use-caja-preferida";
 import { formatCurrency } from "@/lib/currency";
@@ -230,6 +234,7 @@ function CajaCard({
   const propinas = stats?.total_propinas_cents ?? 0;
   const cobros = stats?.cobros_count ?? 0;
   const porMetodo = stats?.ventas_por_metodo;
+  const porOrigen = stats?.ventas_por_origen;
   const periodoDesdeFecha = stats?.periodo_desde ?? caja.periodo_desde;
 
   const periodoLabel = (() => {
@@ -337,6 +342,8 @@ function CajaCard({
           </p>
         </div>
       </div>
+
+      {porOrigen && cobros > 0 && <VentasPorOrigen porOrigen={porOrigen} />}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <section className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200/70">
@@ -511,6 +518,63 @@ function CobrosPorMetodo({
         </p>
       )}
     </>
+  );
+}
+
+// Desglose de lo cobrado según de dónde vino el pedido. `otro` solo aparece si
+// hay plata ahí: es el balde de valores viejos/desconocidos de `delivery_type`.
+const ORIGEN_META: Record<
+  VentaOrigen,
+  { label: string; Icon: typeof UtensilsCrossed }
+> = {
+  salon: { label: "Salón", Icon: UtensilsCrossed },
+  delivery: { label: "Delivery", Icon: Truck },
+  takeaway: { label: "Take away", Icon: Package },
+  otro: { label: "Otro", Icon: MoreHorizontal },
+};
+
+const ORIGEN_ORDER: VentaOrigen[] = ["salon", "delivery", "takeaway", "otro"];
+
+function VentasPorOrigen({
+  porOrigen,
+}: {
+  porOrigen: Record<VentaOrigen, number>;
+}) {
+  const total = ORIGEN_ORDER.reduce((s, k) => s + (porOrigen[k] ?? 0), 0);
+  const items = ORIGEN_ORDER.filter(
+    (k) => k !== "otro" || (porOrigen[k] ?? 0) > 0,
+  );
+
+  return (
+    <section className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200/70">
+      <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+        Cobrado por origen
+      </p>
+      <ul className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+        {items.map((key) => {
+          const { label, Icon } = ORIGEN_META[key];
+          const amount = porOrigen[key] ?? 0;
+          const pct = total > 0 ? (amount / total) * 100 : 0;
+          return (
+            <li
+              key={key}
+              className="rounded-xl bg-zinc-50 px-3.5 py-3 ring-1 ring-zinc-200/70"
+            >
+              <p className="flex items-center gap-1.5 text-xs font-medium text-zinc-600">
+                <Icon className="size-3.5 shrink-0 text-zinc-400" />
+                {label}
+              </p>
+              <p className="mt-1 text-lg font-bold tracking-tight text-zinc-900 tabular-nums">
+                {formatCurrency(amount)}
+              </p>
+              <p className="text-[0.7rem] tabular-nums text-zinc-400">
+                {pct.toFixed(0)}% del período
+              </p>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 
