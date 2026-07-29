@@ -23,4 +23,4 @@ Leyenda: `[ ]` pendiente · `[x]` hecho. **Sin migración.** Cada bloque de migr
 - [x] **T012** Borrar `cobrar-pedido-sheet.tsx` y todo formulario de cobro que haya quedado sin uso. **Confirmar que no queda ninguno paralelo** (FR-012) — un quinto formulario vivo deja el problema peor que antes.
 - [x] **T013** `pnpm typecheck` + `pnpm test` + `pnpm build` verdes.
 - [ ] **T014** Verify en vivo con **roles reales**, los cuatro: mozo cobrando una mesa en el celular (mixto + MP + dividir) · encargado desde el panel del salón · pedido del board con tarjeta con recargo · venta de mostrador en efectivo (que ahora no deje cobrar de menos).
-- [ ] **T015** Actualizar [`wiki/features/cobros.md`](../../../wiki/features/cobros.md) (sección UI: pasa de cuatro clientes a uno + callers) y `wiki/log.md`.
+- [x] **T015** Actualizar [`wiki/features/cobros.md`](../../../wiki/features/cobros.md) (sección UI: pasa de cuatro clientes a uno + callers) y `wiki/log.md`.
