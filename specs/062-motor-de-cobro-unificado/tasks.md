@@ -7,13 +7,13 @@ Leyenda: `[ ]` pendiente · `[x]` hecho. **Sin migración.** Cada bloque de migr
 - [x] **T002** Diffear el comportamiento real de los dos clientes grandes. **Resultado:** `METHODS` y helpers idénticos; **4 divergencias reales** documentadas en `spec.md` §Hallazgos — contrato de `onPaid` (perf percibida del mozo), origen de la propina, facturación presente en 3 de 4 (falta justo en el del encargado) y etiqueta del split implícito. Las dos primeras cambiaron el contrato en `plan.md`.
 
 ## El componente
-- [ ] **T003** `src/components/billing/cobro-form.tsx` con el contrato de `plan.md` (FR-001, FR-002, FR-003). Sin `Dialog`/`Sheet`/`PageShell`: sólo el cuerpo. **No importa server actions.**
-- [ ] **T004** Reglas adentro, una sola vez (FR-004): ajuste por método · `isCashShortPayment` · vuelto sólo en efectivo e informativo · últimos 4 (4 dígitos o vacío) · nota obligatoria en `transfer`/`other` · botón bloqueado en vuelo · `requestId` estable entre taps y regenerado tras un OK.
-- [ ] **T005** Tests de comportamiento del componente, sin tocar callers: recargo aplicado al `amountCents` · efectivo de menos rechazado · de más = vuelto, no se registra · doble tap = un solo `requestId` · `allowedMethods` filtra los chips · `allowTip: false` oculta la propina · `size="touch"` vs `"compact"` no cambia la lógica (SC-001, SC-002).
-- [ ] **T006** MP como capacidad opcional (FR-006): preference, sub-vista de link/QR, polling cada 4s. Sin `mp`, no se ofrece.
+- [x] **T003** `src/components/billing/cobro-form.tsx` con el contrato de `plan.md` (FR-001, FR-002, FR-003). Sin `Dialog`/`Sheet`/`PageShell`: sólo el cuerpo. **No importa server actions.**
+- [x] **T004** Reglas adentro, una sola vez (FR-004): ajuste por método · `isCashShortPayment` · vuelto sólo en efectivo e informativo · últimos 4 (4 dígitos o vacío) · nota obligatoria en `transfer`/`other` · botón bloqueado en vuelo · `requestId` estable entre taps y regenerado tras un OK.
+- [x] **T005** Tests de comportamiento del componente, sin tocar callers: recargo aplicado al `amountCents` · efectivo de menos rechazado · de más = vuelto, no se registra · doble tap = un solo `requestId` · `allowedMethods` filtra los chips · `allowTip: false` oculta la propina · `size="touch"` vs `"compact"` no cambia la lógica (SC-001, SC-002).
+- [x] **T006** MP como capacidad opcional (FR-006): preference, sub-vista de link/QR, polling cada 4s. Sin `mp`, no se ofrece.
 
 ## Migración de los cuatro callers
-- [ ] **T007** **Pedido del board**: `CobrarPedidoSheet` monta `CobroForm` + `ComprobanteFields` (bloque Factura A/B extraído antes de borrar, FR-008). Test de integración: un pedido cobrado con tarjeta con recargo registra el **mismo** `amount_cents` que la misma cuenta en una mesa (SC-005).
+- [x] **T007** **Pedido del board**: `CobrarPedidoSheet` monta `CobroForm` + `ComprobanteFields` (bloque Factura A/B extraído antes de borrar, FR-008). Test de integración: un pedido cobrado con tarjeta con recargo registra el **mismo** `amount_cents` que la misma cuenta en una mesa (SC-005).
 - [ ] **T008** **Cobro del encargado**: página `/admin/mesa/[id]/cobrar` + panel embebido del salón. Sin cambios de layout ni de props externas; los tests de cobro existentes quedan verdes **sin editarlos** (FR-009).
 - [ ] **T009** **Venta de mostrador**: el bloque de pago del panel pasa al form; el picker de productos no se toca. `onSubmit` llama a `venderMostrador`, no a `registrarPago` (FR-011, US3).
 - [ ] **T010** **Cobro del mozo**: `CobroForm` con `size="touch"` dentro del `CobrarSplitDialog` actual. Mismo flujo, mismos taps, mismos tamaños (FR-010, SC-004).
