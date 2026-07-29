@@ -107,7 +107,8 @@ export function FlexibleServicesEditor({
   const [newName, setNewName] = useState("");
   const [days, setDays] = useState<number[]>([]);
   const [everyDay, setEveryDay] = useState(false);
-  const [zone, setZone] = useState("");
+  /** Zonas marcadas. Vacío = todo el negocio. */
+  const [zones, setZones] = useState<string[]>([]);
   const [pending, startTransition] = useTransition();
 
   // El server revalida tras guardar; re-sincronizamos con las props nuevas.
@@ -135,7 +136,11 @@ export function FlexibleServicesEditor({
         return next;
       }
       // Al marcarlo, precargamos lo que ya tenga configurado (o un default).
-      const existing = groups.find((g) => g.name === name && (g.floorPlanId ?? "") === zone);
+      // Buscamos en la primera zona marcada; si no hay, en "todo el negocio".
+      const zoneKey = zones[0] ?? "";
+      const existing =
+        groups.find((g) => g.name === name && (g.floorPlanId ?? "") === zoneKey) ??
+        groups.find((g) => g.name === name);
       const fallback = DEFAULT_HOURS[name] ?? { opens_at: "20:00", closes_at: "23:30" };
       return {
         ...prev,
@@ -168,16 +173,21 @@ export function FlexibleServicesEditor({
     setDays((prev) => (prev.includes(day) ? prev.filter((x) => x !== day) : [...prev, day]));
   }
 
+  function toggleZone(id: string) {
+    setZones((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
   function resetForm() {
     setSelected({});
     setDays([]);
     setEveryDay(false);
+    setZones([]);
     setNewName("");
   }
 
   /** Cargar un servicio existente en el formulario para editarlo. */
   function editGroup(g: Group) {
-    setZone(g.floorPlanId ?? "");
+    setZones(g.floorPlanId ? [g.floorPlanId] : []);
     setSelected({
       [g.name]: {
         opens_at: g.opens_at,
@@ -204,7 +214,7 @@ export function FlexibleServicesEditor({
         })),
         days,
         every_day: everyDay,
-        floor_plan_id: zone === "" ? null : zone,
+        floor_plan_ids: zones,
       });
       if (!result.ok) {
         toast.error(result.error);
@@ -448,22 +458,44 @@ export function FlexibleServicesEditor({
           </div>
         </div>
 
+        {/* Zonas: se marcan igual que los días y los servicios. Sin ninguna
+            marcada, el servicio aplica a todo el negocio. */}
         {salones.length > 0 ? (
-          <div className="space-y-1.5">
-            <Label htmlFor="svc-zone">Zona</Label>
-            <select
-              id="svc-zone"
-              className="h-9 w-full max-w-xs rounded-md border bg-background px-2 text-sm"
-              value={zone}
-              onChange={(e) => setZone(e.target.value)}
-            >
-              <option value="">Todo el negocio</option>
-              {salones.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
+          <div className="space-y-2">
+            <Label>Zonas</Label>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Button
+                type="button"
+                variant={zones.length === 0 ? "default" : "outline"}
+                size="sm"
+                onClick={() => setZones([])}
+              >
+                Todo el negocio
+              </Button>
+              <span className="mx-1 text-muted-foreground">|</span>
+              {salones.map((s) => {
+                const active = zones.includes(s.id);
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => toggleZone(s.id)}
+                    aria-pressed={active}
+                    className={`h-9 rounded-md border px-3 text-sm font-medium transition ${
+                      active
+                        ? "border-transparent bg-primary text-primary-foreground"
+                        : "bg-background hover:bg-muted"
+                    }`}
+                  >
+                    {s.name}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              El cupo se cuenta por zona. Sin zonas marcadas, el servicio vale para todo el
+              negocio.
+            </p>
           </div>
         ) : null}
 
@@ -474,7 +506,7 @@ export function FlexibleServicesEditor({
           <span className="text-xs text-muted-foreground">
             {selectedNames.length === 0
               ? "Marcá al menos un servicio y un día."
-              : `Se aplica a ${selectedNames.length} ${selectedNames.length === 1 ? "servicio" : "servicios"} × ${everyDay ? "todos los días" : `${days.length} ${days.length === 1 ? "día" : "días"}`}.`}
+              : `Se aplica a ${selectedNames.length} ${selectedNames.length === 1 ? "servicio" : "servicios"} × ${everyDay ? "todos los días" : `${days.length} ${days.length === 1 ? "día" : "días"}`} × ${zones.length === 0 ? "todo el negocio" : `${zones.length} ${zones.length === 1 ? "zona" : "zonas"}`}.`}
           </span>
         </div>
       </div>

@@ -379,6 +379,7 @@ export async function createFlexibleReservation(
   ).getUTCDay();
   const svc = await getReservationServiceByName(business.id, data.service, dow, {
     useService: true,
+    floorPlanId: data.floor_plan_id ?? null,
   });
   if (!svc) return actionError("Ese servicio no está disponible ese día.");
   const window = flexibleServiceWindow(data.date, svc, business.timezone);

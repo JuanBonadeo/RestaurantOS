@@ -122,43 +122,47 @@ export async function saveReservationServiceGroups(
   if (!guard.ok) return actionError(guard.error);
 
   const d = parsed.data;
-  const zoneId = d.floor_plan_id ?? null;
   const service = createSupabaseServiceClient() as unknown as GenericClient;
 
-  // Días compartidos por todos los servicios marcados.
+  // Días y zonas compartidos por todos los servicios marcados. Sin zonas
+  // marcadas = una sola fila con floor_plan_id NULL (todo el negocio).
   const days = d.every_day ? [null] : Array.from(new Set(d.days));
+  const zones: Array<string | null> =
+    d.floor_plan_ids.length > 0 ? Array.from(new Set(d.floor_plan_ids)) : [null];
 
   let rowCount = 0;
   for (const svc of d.services) {
-    // Borrar el grupo anterior (por nombre previo si se renombró) en esa zona.
-    let del = service
-      .from("reservation_services")
-      .delete()
-      .eq("business_id", guard.businessId)
-      .eq("name", svc.previous_name?.trim() || svc.name);
-    del = zoneId ? del.eq("floor_plan_id", zoneId) : del.is("floor_plan_id", null);
-    const { error: delError } = await del;
-    if (delError) {
-      console.error("saveReservationServiceGroups/delete", delError);
-      return actionError(`No pudimos guardar "${svc.name}".`);
-    }
+    for (const zoneId of zones) {
+      // Borrar el grupo anterior (por nombre previo si se renombró) en esa zona.
+      let del = service
+        .from("reservation_services")
+        .delete()
+        .eq("business_id", guard.businessId)
+        .eq("name", svc.previous_name?.trim() || svc.name);
+      del = zoneId ? del.eq("floor_plan_id", zoneId) : del.is("floor_plan_id", null);
+      const { error: delError } = await del;
+      if (delError) {
+        console.error("saveReservationServiceGroups/delete", delError);
+        return actionError(`No pudimos guardar "${svc.name}".`);
+      }
 
-    const rows = days.map((day) => ({
-      business_id: guard.businessId,
-      name: svc.name,
-      day_of_week: day,
-      opens_at: svc.opens_at,
-      closes_at: svc.closes_at,
-      soft_capacity: svc.soft_capacity ?? null,
-      floor_plan_id: zoneId,
-    }));
+      const rows = days.map((day) => ({
+        business_id: guard.businessId,
+        name: svc.name,
+        day_of_week: day,
+        opens_at: svc.opens_at,
+        closes_at: svc.closes_at,
+        soft_capacity: svc.soft_capacity ?? null,
+        floor_plan_id: zoneId,
+      }));
 
-    const { error } = await service.from("reservation_services").insert(rows);
-    if (error) {
-      console.error("saveReservationServiceGroups/insert", error);
-      return actionError(`No pudimos guardar "${svc.name}".`);
+      const { error } = await service.from("reservation_services").insert(rows);
+      if (error) {
+        console.error("saveReservationServiceGroups/insert", error);
+        return actionError(`No pudimos guardar "${svc.name}".`);
+      }
+      rowCount += rows.length;
     }
-    rowCount += rows.length;
   }
 
   revalidatePath(`/${d.business_slug}/admin/reservas/configuracion`);

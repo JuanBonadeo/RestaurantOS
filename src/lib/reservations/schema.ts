@@ -104,7 +104,8 @@ export const ReservationServiceGroupsInputSchema = z
     days: z.array(z.coerce.number().int().min(0).max(6)).default([]),
     /** true = una sola fila que aplica a todos los días (day_of_week NULL). */
     every_day: z.boolean().default(false),
-    floor_plan_id: z.string().uuid().nullable().optional(),
+    /** Zonas marcadas. Vacío = todo el negocio (floor_plan_id NULL). */
+    floor_plan_ids: z.array(z.string().uuid()).default([]),
   })
   .refine((v) => v.every_day || v.days.length > 0, {
     message: "Marcá al menos un día.",

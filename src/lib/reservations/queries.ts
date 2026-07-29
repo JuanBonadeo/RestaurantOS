@@ -285,20 +285,33 @@ export async function getReservationServices(
 }
 
 /**
- * Resuelve el servicio por nombre para una fecha: prioriza la fila del día de
- * semana exacto, cae a la fila `day_of_week = null` (todos los días).
+ * Resuelve el servicio por nombre para una fecha (y zona, si se pide).
+ * Prioridad: día exacto + zona → día exacto + sin zona → todos los días + zona
+ * → todos los días + sin zona. La zona importa porque el cupo blando puede
+ * definirse por salón: sin este orden, un negocio con el mismo servicio en
+ * varias zonas resolvía una fila arbitraria (y por lo tanto el cupo de otra).
  */
 export async function getReservationServiceByName(
   businessId: string,
   name: string,
   dayOfWeek: number | null,
-  options: { useService?: boolean } = {},
+  options: { useService?: boolean; floorPlanId?: string | null } = {},
 ): Promise<ReservationService | null> {
   const services = await getReservationServices(businessId, options);
   const matches = services.filter((s) => s.name === name);
+  const zoneId = options.floorPlanId ?? null;
+  const sameDay = (s: ReservationService) => s.day_of_week === dayOfWeek;
+  const anyDay = (s: ReservationService) => s.day_of_week === null;
+  const sameZone = (s: ReservationService) => s.floor_plan_id === zoneId;
+  const noZone = (s: ReservationService) => s.floor_plan_id === null;
+
   return (
-    matches.find((s) => s.day_of_week === dayOfWeek) ??
-    matches.find((s) => s.day_of_week === null) ??
+    matches.find((s) => sameDay(s) && sameZone(s)) ??
+    matches.find((s) => sameDay(s) && noZone(s)) ??
+    matches.find((s) => anyDay(s) && sameZone(s)) ??
+    matches.find((s) => anyDay(s) && noZone(s)) ??
+    matches.find(sameDay) ??
+    matches.find(anyDay) ??
     null
   );
 }
@@ -347,7 +360,10 @@ export async function getFlexibleAvailability(
   options: { useService?: boolean } = {},
 ): Promise<FlexibleAvailability | null> {
   const dow = dayOfWeekFromDate(params.date);
-  const svc = await getReservationServiceByName(businessId, params.service, dow, options);
+  const svc = await getReservationServiceByName(businessId, params.service, dow, {
+    ...options,
+    floorPlanId: params.floorPlanId ?? null,
+  });
   if (!svc) return null;
   const window = flexibleServiceWindow(params.date, svc, timezone);
   if (!window) return null;
