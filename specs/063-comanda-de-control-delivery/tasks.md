@@ -26,5 +26,5 @@ Leyenda: `[ ]` pendiente · `[x]` hecho.
 
 ## Cierre
 - [x] **T013** `pnpm typecheck` + `pnpm test` en verde.
-- [ ] **T014** Actualizar [`wiki/features/comandas.md`](../../../wiki/features/comandas.md) y [`wiki/features/pedidos.md`](../../../wiki/features/pedidos.md); log en `wiki/log.md`.
+- [x] **T014** Actualizar [`wiki/features/comandas.md`](../../../wiki/features/comandas.md) y [`wiki/features/pedidos.md`](../../../wiki/features/pedidos.md); log en `wiki/log.md`.
 - [ ] **T015** Verify en vivo con el print-agent: configurar la IP, marchar un delivery, ver salir los dos tickets.
