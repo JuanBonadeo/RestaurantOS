@@ -133,7 +133,6 @@ export function CobrarPedidoSheet({
               </div>
 
               <CobroForm
-                subject={{ kind: "pedido", orderNumber: order.order_number }}
                 amountDueCents={amountDueCents}
                 cajas={init.cajas}
                 cajaId={cajaId}

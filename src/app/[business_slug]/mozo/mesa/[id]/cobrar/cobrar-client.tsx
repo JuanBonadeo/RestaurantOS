@@ -504,7 +504,6 @@ function CobrarSplitSheet({
           )}
 
           <CobroForm
-            subject={{ kind: "mesa", label: "" }}
             amountDueCents={remaining}
             cajas={[]}
             cajaId={cajaId}

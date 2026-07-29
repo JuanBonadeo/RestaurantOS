@@ -34,11 +34,6 @@ import { cn } from "@/lib/utils";
 // cerrar la orden, liberar la mesa, facturar, refrescar.
 // ============================================================================
 
-export type CobroSubject =
-  | { kind: "mesa"; label: string }
-  | { kind: "pedido"; orderNumber: number }
-  | { kind: "mostrador" };
-
 export type CobroSubmit = {
   method: PaymentMethod;
   /** Con el ajuste del método ya aplicado — es lo que paga el cliente. */
@@ -65,7 +60,6 @@ export type CobroTip =
   | { mode: "editable"; initialCents?: number };
 
 export type CobroFormProps<T = unknown> = {
-  subject: CobroSubject;
   /** Lo que falta cobrar, SIN ajuste de método. */
   amountDueCents: number;
   cajas: Caja[];
@@ -124,7 +118,6 @@ function isMpMethod(m: PaymentMethod | null): m is "mp_link" | "mp_qr" {
 }
 
 export function CobroForm<T = unknown>({
-  subject,
   amountDueCents,
   cajas,
   cajaId,
@@ -610,16 +603,4 @@ function CajaPicker({
       </div>
     </div>
   );
-}
-
-/** Título legible del cobro según qué se esté cobrando. */
-export function cobroTitle(subject: CobroSubject): string {
-  switch (subject.kind) {
-    case "mesa":
-      return `Cobrar ${subject.label}`;
-    case "pedido":
-      return `Cobrar pedido #${subject.orderNumber}`;
-    case "mostrador":
-      return "Venta rápida";
-  }
 }

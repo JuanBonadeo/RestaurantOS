@@ -37,7 +37,6 @@ function setup(props: Partial<React.ComponentProps<typeof CobroForm>> = {}) {
   const onSubmit = vi.fn(async (_i: CobroSubmit) => okResult);
   render(
     <CobroForm
-      subject={{ kind: "mesa", label: "Mesa 4" }}
       amountDueCents={10_000}
       cajas={[CAJA]}
       cajaId={CAJA.id}
@@ -156,7 +155,6 @@ describe("<CobroForm /> — las reglas de dinero, una sola vez", () => {
     );
     render(
       <CobroForm
-        subject={{ kind: "mesa", label: "Mesa 4" }}
         amountDueCents={10_000}
         cajas={[CAJA]}
         cajaId={CAJA.id}

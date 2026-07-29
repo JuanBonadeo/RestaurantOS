@@ -17,10 +17,10 @@ Leyenda: `[ ]` pendiente · `[x]` hecho. **Sin migración.** Cada bloque de migr
 - [ ] **T008** **Cobro del encargado**: página `/admin/mesa/[id]/cobrar` + panel embebido del salón. Sin cambios de layout ni de props externas; los tests de cobro existentes quedan verdes **sin editarlos** (FR-009).
 - [x] **T009** **Venta de mostrador** — *migración parcial, decidida contra el plan*. **No monta `CobroForm`**: el mostrador no tiene formulario de cobro sino un selector de método al pie del picker, y su cobro es **de un gesto** por diseño (spec 058). Meterle el flujo de dos pasos del form habría empeorado la feature y violado SC-004. Además **no tiene monto editable** (el monto es el total del carrito), así que la guarda de efectivo no le aplica: no hay forma de cobrar de menos. Lo que sí se unificó: el ajuste, que estaba **calculado a mano** (`Math.round((subtotal * pct) / 100)`) y ahora sale de `calculateAdjustment` — era la única regla de dinero duplicada que le quedaba.
 - [x] **T010** **Cobro del mozo**: `CobroForm` con `size="touch"` dentro del `CobrarSplitDialog` actual. Mismo flujo, mismos taps, mismos tamaños (FR-010, SC-004).
-- [ ] **T011** Textos desde el `subject` (FR-013): nada de "mesa" cuando se cobra un delivery — hoy dice *"Cobrar mesa"* y *"La mesa se va a marcar para limpiar"* sin importar qué se cobre.
+- [x] **T011** Textos. **Resuelto por construcción, y el `subject` se eliminó del contrato.** Los textos de mesa viven en `CobrarDesktopClient`, que tras la migración **sólo se usa para mesas reales** — el pedido tiene su propio contenedor. Cada caller pone su encabezado (depende del contenedor, no del form), así que el `subject` que se había diseñado no lo usaba nadie: se sacó en vez de dejarlo decorativo.
 
 ## Cierre
-- [ ] **T012** Borrar `cobrar-pedido-sheet.tsx` y todo formulario de cobro que haya quedado sin uso. **Confirmar que no queda ninguno paralelo** (FR-012) — un quinto formulario vivo deja el problema peor que antes.
-- [ ] **T013** `pnpm typecheck` + `pnpm test` + `pnpm build` verdes.
+- [x] **T012** Borrar `cobrar-pedido-sheet.tsx` y todo formulario de cobro que haya quedado sin uso. **Confirmar que no queda ninguno paralelo** (FR-012) — un quinto formulario vivo deja el problema peor que antes.
+- [x] **T013** `pnpm typecheck` + `pnpm test` + `pnpm build` verdes.
 - [ ] **T014** Verify en vivo con **roles reales**, los cuatro: mozo cobrando una mesa en el celular (mixto + MP + dividir) · encargado desde el panel del salón · pedido del board con tarjeta con recargo · venta de mostrador en efectivo (que ahora no deje cobrar de menos).
 - [ ] **T015** Actualizar [`wiki/features/cobros.md`](../../../wiki/features/cobros.md) (sección UI: pasa de cuatro clientes a uno + callers) y `wiki/log.md`.
