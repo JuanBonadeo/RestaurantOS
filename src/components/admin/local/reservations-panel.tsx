@@ -45,8 +45,12 @@ export function ReservationsPanel({
   tableLabelById: Record<string, string>;
   /** Reserva que está esperando que toquen una mesa en el plano (spec 059). */
   pickingForId?: string | null;
-  /** Pone el plano del salón en modo "elegí una mesa" para esta reserva. */
-  onAsignarMesa?: (reservation: SalonReservationRef) => void;
+  /** Pone el plano del salón en modo "elegí una mesa" para esta reserva.
+   *  `intent: "seat"` = elegir la mesa Y sentar en el mismo gesto. */
+  onAsignarMesa?: (
+    reservation: SalonReservationRef,
+    intent: "assign" | "seat",
+  ) => void;
   onNewReservation?: () => void;
 }) {
   const router = useRouter();
@@ -154,35 +158,28 @@ export function ReservationsPanel({
                   </span>
                 </div>
 
-                {/* Acción primaria: sentar si ya tiene mesa, si no asignarla */}
-                {r.table_id ? (
-                  <button
-                    type="button"
-                    onClick={() => handleSentar(r.id)}
-                    disabled={pending}
-                    className="flex shrink-0 items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.97] disabled:opacity-60"
-                  >
-                    <UserCheck className="h-3.5 w-3.5" />
-                    Sentar
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => onAsignarMesa?.(r)}
-                    disabled={pending || !canPickOnPlan}
-                    // Índigo = asignación de mesa (mismo color del badge "R" del
-                    // plano). Se diferencia de "Nueva reserva" (azul) y "Sentar"
-                    // (verde).
-                    className={`flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm transition active:scale-[0.97] disabled:opacity-60 ${
-                      picking
-                        ? "bg-indigo-700 ring-2 ring-indigo-300"
-                        : "bg-indigo-600 hover:bg-indigo-700"
-                    }`}
-                  >
+                {/* Acción primaria: SIEMPRE sentar. Sin mesa (reserva genérica
+                    del modo flexible) la mesa se elige en el plano y se sienta
+                    en el mismo gesto — antes había que asignar y después sentar. */}
+                <button
+                  type="button"
+                  onClick={() =>
+                    r.table_id ? handleSentar(r.id) : onAsignarMesa?.(r, "seat")
+                  }
+                  disabled={pending || (!r.table_id && !canPickOnPlan)}
+                  className={`flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm transition active:scale-[0.97] disabled:opacity-60 ${
+                    picking
+                      ? "bg-emerald-700 ring-2 ring-emerald-300"
+                      : "bg-emerald-600 hover:bg-emerald-700"
+                  }`}
+                >
+                  {picking ? (
                     <MapPin className="h-3.5 w-3.5" />
-                    {picking ? "Elegí en el plano…" : "Asignar mesa"}
-                  </button>
-                )}
+                  ) : (
+                    <UserCheck className="h-3.5 w-3.5" />
+                  )}
+                  {picking ? "Elegí en el plano…" : "Sentar"}
+                </button>
 
                 {/* Resto de acciones */}
                 <DropdownMenu>
@@ -194,11 +191,11 @@ export function ReservationsPanel({
                     <MoreVertical className="h-4 w-4" />
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-44">
-                    {r.table_id && canPickOnPlan ? (
+                    {canPickOnPlan ? (
                       <>
-                        <DropdownMenuItem onClick={() => onAsignarMesa?.(r)}>
+                        <DropdownMenuItem onClick={() => onAsignarMesa?.(r, "assign")}>
                           <MapPin className="h-4 w-4" />
-                          Reasignar mesa
+                          {r.table_id ? "Reasignar mesa" : "Asignar mesa (sin sentar)"}
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                       </>

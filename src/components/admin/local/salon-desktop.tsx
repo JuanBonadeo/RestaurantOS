@@ -236,9 +236,11 @@ export function SalonDesktop({
   } | null>(null);
   // Modo "elegir mesa para una reserva" (spec 059): el plano principal queda a
   // la espera de un tap, como el modo Distribuir mozos. Nada de modal aparte.
-  const [asignarReservaFor, setAsignarReservaFor] = useState<SalonReservationRef | null>(
-    null,
-  );
+  const [asignarReservaFor, setAsignarReservaFor] = useState<{
+    reservation: SalonReservationRef;
+    /** "seat" = elegir la mesa Y sentar en un solo gesto (reserva genérica). */
+    intent: "assign" | "seat";
+  } | null>(null);
   const [transferTableId, setTransferTableId] = useState<string | null>(null);
   const [trasladarTableId, setTrasladarTableId] = useState<string | null>(null);
   const [anularPrompt, setAnularPrompt] = useState<{
@@ -809,11 +811,16 @@ export function SalonDesktop({
     setNuevaReservaTable(null);
   }, []);
 
-  /** Asignar la mesa tocada a la reserva que está esperando (spec 059). */
+  /**
+   * Mesa tocada mientras una reserva espera (spec 059). Con intent "seat" la
+   * sienta directo en esa mesa — es el caso de las reservas genéricas del modo
+   * flexible, donde la mesa se decide recién al llegar: obligarlo a asignar y
+   * después sentar eran dos pasos para el mismo gesto.
+   */
   const handleAsignarMesaReserva = useCallback(
     (table: FloorTable) => {
-      const res = asignarReservaFor;
-      if (!res) return;
+      if (!asignarReservaFor) return;
+      const { reservation: res, intent } = asignarReservaFor;
       if (table.seats < res.party_size) {
         toast.error(
           `Mesa ${table.label} tiene ${table.seats} lugares para ${res.party_size} personas.`,
@@ -821,17 +828,28 @@ export function SalonDesktop({
         return;
       }
       startTransition(async () => {
-        const r = await updateReservationDetails({
-          business_slug: slug,
-          reservation_id: res.id,
-          table_id: table.id,
-          party_size: res.party_size,
-        });
+        const r =
+          intent === "seat"
+            ? await sentarReserva({
+                business_slug: slug,
+                reservation_id: res.id,
+                table_id: table.id,
+              })
+            : await updateReservationDetails({
+                business_slug: slug,
+                reservation_id: res.id,
+                table_id: table.id,
+                party_size: res.party_size,
+              });
         if (!r.ok) {
           toast.error(r.error);
           return;
         }
-        toast.success(`Mesa ${table.label} asignada a ${res.customer_name}.`);
+        toast.success(
+          intent === "seat"
+            ? `${res.customer_name} sentado en ${table.label}.`
+            : `Mesa ${table.label} asignada a ${res.customer_name}.`,
+        );
         setAsignarReservaFor(null);
         router.refresh();
       });
@@ -969,7 +987,7 @@ export function SalonDesktop({
               <MapPin className="h-4 w-4 shrink-0 animate-pulse" />
               <span className="min-w-0 flex-1 text-sm font-semibold">
                 {asignarReservaFor
-                  ? `Tocá una mesa para ${asignarReservaFor.customer_name} · ${asignarReservaFor.party_size}p`
+                  ? `${asignarReservaFor.intent === "seat" ? "Tocá dónde sentar a" : "Tocá una mesa para"} ${asignarReservaFor.reservation.customer_name} · ${asignarReservaFor.reservation.party_size}p`
                   : "Tocá una mesa para la reserva nueva"}
               </span>
               <button
@@ -1217,10 +1235,11 @@ export function SalonDesktop({
                 reservations={reservations}
                 slug={slug}
                 tableLabelById={tableLabelById}
-                pickingForId={asignarReservaFor?.id ?? null}
-                onAsignarMesa={(r) => {
+                pickingForId={asignarReservaFor?.reservation.id ?? null}
+                onAsignarMesa={(r, intent) => {
                   setSelectedId(null);
-                  setAsignarReservaFor(r);
+                  setShowNewReservation(false);
+                  setAsignarReservaFor({ reservation: r, intent });
                 }}
                 onNewReservation={() => {
                   setSelectedId(null);
