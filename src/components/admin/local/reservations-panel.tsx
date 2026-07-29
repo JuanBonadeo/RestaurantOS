@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   CalendarPlus,
@@ -20,11 +20,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { AsignarMesaReservaModal } from "@/components/admin/local/asignar-mesa-reserva-modal";
-import type { TableExtra } from "@/components/mozo/floor-plan-viewer";
 import { sentarReserva } from "@/lib/reservations/booking-actions";
 import { updateReservationStatus } from "@/lib/reservations/booking-actions";
-import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
 
 import type { SalonReservationRef } from "./salon-desktop";
 
@@ -39,22 +36,21 @@ export function ReservationsPanel({
   reservations,
   slug,
   tableLabelById,
-  floorPlans = [],
-  extras = {},
+  pickingForId = null,
+  onAsignarMesa,
   onNewReservation,
 }: {
   reservations: SalonReservationRef[];
   slug: string;
   tableLabelById: Record<string, string>;
-  /** Planos del negocio — para elegir la mesa tocándola (spec 059). */
-  floorPlans?: FloorPlanWithTables[];
-  /** Extras ya calculados por el salón (estado, reservas) para pintar el plano. */
-  extras?: Record<string, TableExtra>;
+  /** Reserva que está esperando que toquen una mesa en el plano (spec 059). */
+  pickingForId?: string | null;
+  /** Pone el plano del salón en modo "elegí una mesa" para esta reserva. */
+  onAsignarMesa?: (reservation: SalonReservationRef) => void;
   onNewReservation?: () => void;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [asignarFor, setAsignarFor] = useState<SalonReservationRef | null>(null);
   const confirmed = reservations.filter((r) => r.status === "confirmed");
 
   if (confirmed.length === 0 && !onNewReservation) return null;
@@ -139,7 +135,8 @@ export function ReservationsPanel({
         <div className="max-h-48 space-y-1 overflow-y-auto px-3 pb-3">
           {confirmed.map((r) => {
             const tableLabel = r.table_id ? tableLabelById[r.table_id] : null;
-            const canPickOnPlan = floorPlans.length > 0;
+            const canPickOnPlan = !!onAsignarMesa;
+            const picking = pickingForId === r.id;
             return (
               <div
                 key={r.id}
@@ -171,12 +168,14 @@ export function ReservationsPanel({
                 ) : (
                   <button
                     type="button"
-                    onClick={() => setAsignarFor(r)}
+                    onClick={() => onAsignarMesa?.(r)}
                     disabled={pending || !canPickOnPlan}
-                    className="flex shrink-0 items-center gap-1 rounded-lg bg-blue-600 px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700 active:scale-[0.97] disabled:opacity-60"
+                    className={`flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm transition active:scale-[0.97] disabled:opacity-60 ${
+                      picking ? "bg-blue-700 ring-2 ring-blue-300" : "bg-blue-600 hover:bg-blue-700"
+                    }`}
                   >
                     <MapPin className="h-3.5 w-3.5" />
-                    Asignar mesa
+                    {picking ? "Elegí en el plano…" : "Asignar mesa"}
                   </button>
                 )}
 
@@ -192,7 +191,7 @@ export function ReservationsPanel({
                   <DropdownMenuContent align="end" className="w-44">
                     {r.table_id && canPickOnPlan ? (
                       <>
-                        <DropdownMenuItem onClick={() => setAsignarFor(r)}>
+                        <DropdownMenuItem onClick={() => onAsignarMesa?.(r)}>
                           <MapPin className="h-4 w-4" />
                           Reasignar mesa
                         </DropdownMenuItem>
@@ -218,20 +217,6 @@ export function ReservationsPanel({
         </div>
       )}
 
-      {asignarFor ? (
-        <AsignarMesaReservaModal
-          slug={slug}
-          reservation={{
-            id: asignarFor.id,
-            customer_name: asignarFor.customer_name,
-            party_size: asignarFor.party_size,
-            table_id: asignarFor.table_id,
-          }}
-          floorPlans={floorPlans}
-          extras={extras}
-          onClose={() => setAsignarFor(null)}
-        />
-      ) : null}
     </div>
   );
 }

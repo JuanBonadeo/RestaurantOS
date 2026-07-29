@@ -8,6 +8,7 @@ import {
   Ban,
   ClipboardList,
   Clock,
+  MapPin,
   MoreVertical,
   MoveRight,
   Pencil,
@@ -69,7 +70,10 @@ import {
   loadTableComandas,
   type PedirCatalogBundle,
 } from "@/lib/mozo/pedir-panel-data";
-import { sentarReserva } from "@/lib/reservations/booking-actions";
+import {
+  sentarReserva,
+  updateReservationDetails,
+} from "@/lib/reservations/booking-actions";
 import { useReservationsRealtime } from "@/lib/reservations/use-reservations-realtime";
 import { initialsFromName, mozoColor, mozoPalette } from "@/lib/mozo/colors";
 import type { MozoMember } from "@/lib/mozo/queries";
@@ -230,6 +234,11 @@ export function SalonDesktop({
     label: string;
     reservation: SalonReservationRef;
   } | null>(null);
+  // Modo "elegir mesa para una reserva" (spec 059): el plano principal queda a
+  // la espera de un tap, como el modo Distribuir mozos. Nada de modal aparte.
+  const [asignarReservaFor, setAsignarReservaFor] = useState<SalonReservationRef | null>(
+    null,
+  );
   const [transferTableId, setTransferTableId] = useState<string | null>(null);
   const [trasladarTableId, setTrasladarTableId] = useState<string | null>(null);
   const [anularPrompt, setAnularPrompt] = useState<{
@@ -791,6 +800,36 @@ export function SalonDesktop({
     [localAssign, paintMozoId, slug],
   );
 
+  /** Asignar la mesa tocada a la reserva que está esperando (spec 059). */
+  const handleAsignarMesaReserva = useCallback(
+    (table: FloorTable) => {
+      const res = asignarReservaFor;
+      if (!res) return;
+      if (table.seats < res.party_size) {
+        toast.error(
+          `Mesa ${table.label} tiene ${table.seats} lugares para ${res.party_size} personas.`,
+        );
+        return;
+      }
+      startTransition(async () => {
+        const r = await updateReservationDetails({
+          business_slug: slug,
+          reservation_id: res.id,
+          table_id: table.id,
+          party_size: res.party_size,
+        });
+        if (!r.ok) {
+          toast.error(r.error);
+          return;
+        }
+        toast.success(`Mesa ${table.label} asignada a ${res.customer_name}.`);
+        setAsignarReservaFor(null);
+        router.refresh();
+      });
+    },
+    [asignarReservaFor, slug, router],
+  );
+
   const countByMozo = useMemo(() => {
     const c: Record<string, number> = {};
     for (const id of Object.values(localAssign)) {
@@ -918,7 +957,29 @@ export function SalonDesktop({
       >
         {/* Columna del plano: viewer arriba + stats al pie */}
         <div className="flex min-h-0 flex-col gap-2">
-          <div className="bg-card ring-border/60 min-h-0 flex-1 overflow-hidden rounded-2xl ring-1">
+          {/* Modo "elegir mesa": el plano queda esperando un tap (spec 059). */}
+          {asignarReservaFor ? (
+            <div className="flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-white shadow-sm">
+              <MapPin className="h-4 w-4 shrink-0 animate-pulse" />
+              <span className="min-w-0 flex-1 text-sm font-semibold">
+                Tocá una mesa para {asignarReservaFor.customer_name} ·{" "}
+                {asignarReservaFor.party_size}p
+              </span>
+              <button
+                type="button"
+                onClick={() => setAsignarReservaFor(null)}
+                className="shrink-0 rounded-lg bg-white/15 px-2.5 py-1 text-xs font-bold transition hover:bg-white/25"
+              >
+                Cancelar
+              </button>
+            </div>
+          ) : null}
+          <div
+            className={cn(
+              "bg-card min-h-0 flex-1 overflow-hidden rounded-2xl ring-1",
+              asignarReservaFor ? "ring-2 ring-blue-500" : "ring-border/60",
+            )}
+          >
             {plan ? (
               <FloorPlanViewer
                 plan={plan}
@@ -928,6 +989,12 @@ export function SalonDesktop({
                 onTableClick={(t) => {
                   if (distribuirOpen) {
                     handlePaintTable(t);
+                    return;
+                  }
+                  // Modo "elegir mesa para la reserva": el tap asigna, no abre
+                  // el detalle de la mesa.
+                  if (asignarReservaFor) {
+                    handleAsignarMesaReserva(t);
                     return;
                   }
                   // Tocar una mesa manda al detalle: la venta de mostrador no
@@ -1119,8 +1186,11 @@ export function SalonDesktop({
                 reservations={reservations}
                 slug={slug}
                 tableLabelById={tableLabelById}
-                floorPlans={floorPlans}
-                extras={extras}
+                pickingForId={asignarReservaFor?.id ?? null}
+                onAsignarMesa={(r) => {
+                  setSelectedId(null);
+                  setAsignarReservaFor(r);
+                }}
                 onNewReservation={() => setShowNewReservation(true)}
               />
               <ActiveTablesList
