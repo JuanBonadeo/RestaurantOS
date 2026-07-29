@@ -47,6 +47,7 @@ import type {
   OrderSplit,
   PaymentMethod,
 } from "@/lib/billing/types";
+import { calculateAdjustment } from "@/lib/billing/adjustment";
 import { isCashShortPayment } from "@/lib/billing/totals";
 import type { PaymentMethodConfig } from "@/lib/caja/types";
 import { formatCurrency } from "@/lib/currency";
@@ -492,11 +493,6 @@ const METHODS: Array<{
     icon: MoreHorizontal,
   },
 ];
-
-function calculateAdjustment(baseCents: number, percent: number): { adjustmentCents: number; finalCents: number } {
-  const adjustmentCents = Math.round(baseCents * percent / 100);
-  return { adjustmentCents, finalCents: baseCents + adjustmentCents };
-}
 
 function CobrarSplitSheet({
   split,

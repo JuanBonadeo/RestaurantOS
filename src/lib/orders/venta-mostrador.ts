@@ -3,6 +3,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
+import { calculateAdjustment } from "@/lib/billing/adjustment";
 import { registrarPago } from "@/lib/billing/cobro-actions";
 import { getCajasForBusiness, getPaymentMethodConfigs } from "@/lib/caja/queries";
 import type { Caja, PaymentMethodConfig } from "@/lib/caja/types";
@@ -76,19 +77,6 @@ const CLIENTE_MOSTRADOR = "Mostrador";
 
 /** Teléfono placeholder — mismo que usan el pedido flash y `cargarPedidoStaff`. */
 const TELEFONO_MOSTRADOR = "-";
-
-/**
- * Redondeo del recargo/descuento por método de pago, idéntico al del cobro de
- * mesa (`calculateAdjustment` en `cobrar-client.tsx`): el porcentaje se aplica
- * sobre el total y el resultado se suma a lo que paga el cliente.
- */
-function calcularAjuste(
-  baseCents: number,
-  percent: number,
-): { ajusteCents: number; finalCents: number } {
-  const ajusteCents = Math.round((baseCents * percent) / 100);
-  return { ajusteCents, finalCents: baseCents + ajusteCents };
-}
 
 /**
  * Venta rápida de mostrador / kiosko / barra (spec 058): crea la orden con
@@ -173,7 +161,10 @@ export async function venderMostrador(
   const configs = await getPaymentMethodConfigs(business.id);
   const ajustePercent =
     configs.find((c) => c.method === data.method)?.adjustment_percent ?? 0;
-  const { ajusteCents, finalCents } = calcularAjuste(totalCents, ajustePercent);
+  const { adjustmentCents: ajusteCents, finalCents } = calculateAdjustment(
+    totalCents,
+    ajustePercent,
+  );
 
   const pago = await registrarPago({
     orderId,
