@@ -6,6 +6,10 @@
 
 **Status**: 📝 Spec — pendiente de aprobación. Issue [#91](https://github.com/gachetponzellini/RestaurantOS-app/issues/91). Milestone: Post-demo · Growth & hardening.
 
+> ⚠️ **La mitad A (cobro unificado) quedó reemplazada por [spec 062](../062-motor-de-cobro-unificado/)** (2026-07-28, [#96](https://github.com/gachetponzellini/RestaurantOS-app/issues/96)). Acá se proponía reusar `CobrarDesktopClient` para el pedido sin mesa; Juan pidió ir más lejos — **un solo motor de cobro para las cuatro UIs**, parametrizado por lo que hay que cobrar. Todo lo de la mitad A (FR-001 a FR-006, US1) se cumple allá y **no se implementa desde acá**.
+>
+> **Esta spec queda con la mitad B: corregir un pago ya registrado** (US2, US3, FR-007 a FR-018) — independiente del refactor y todavía vigente.
+
 **Input**: Pedido de Juan 2026-07-28 — *"hay un gran problema de los pedidos que crea el encargado, la forma del pago es inmanejable, yo reutilizaría el cobro de las mesas, y también se tendría que poder editar el pago, que a veces ponen efectivo y después pagan con otra cosa"*. Decidido con Juan (misma fecha): (1) **editar = corregir el pago in-place** con auditoría, no anular y rehacer; (2) el alcance del editar es **cualquier pago de una caja con el período abierto**, no sólo los pedidos del board.
 
 Cierra la divergencia que dejó [spec 054](../054-cargar-pedido-para-llevar/) y extiende el motor de cobro de [features/cobros.md](../../../wiki/features/cobros.md).
