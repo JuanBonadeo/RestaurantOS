@@ -114,7 +114,7 @@ Antes de fusionar nada se diffeó el comportamiento real de los dos clientes gra
 - **FR-008**: El **pedido del board** pasa al motor y gana recargo, propina, mixto, MP y anular. Se borra `cobrar-pedido-sheet.tsx`, extrayendo el bloque de comprobante (Factura A/B, spec 053) a un componente propio — que hoy **también** usan el mozo y el mostrador (hallazgo 3), así que la extracción los unifica a los tres.
 - **FR-009**: El **cobro del encargado** (página + panel embebido del salón) pasa al motor sin cambiar su layout ni sus props externas.
 - **FR-010**: El **cobro del mozo** pasa al motor **dentro de su modal actual**, sin cambios visibles de flujo ni de ergonomía.
-- **FR-011**: La **venta de mostrador** pasa al motor para su bloque de pago, conservando el picker de productos.
+- **FR-011**: La **venta de mostrador** comparte las **reglas**, no el formulario. Su cobro es de un gesto (spec 058) y **no tiene monto editable** —el monto es el total del carrito—, así que la guarda de efectivo no le aplica y montarle el flujo de dos pasos del form la empeoraría. Lo que sí se unifica es el ajuste, que estaba calculado a mano. *(Ajustado durante la implementación, 2026-07-28.)*
 - **FR-012**: Al terminar NO DEBE quedar ningún formulario de cobro paralelo.
 
 ### Textos

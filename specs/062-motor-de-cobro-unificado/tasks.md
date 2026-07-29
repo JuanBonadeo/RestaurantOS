@@ -15,8 +15,8 @@ Leyenda: `[ ]` pendiente · `[x]` hecho. **Sin migración.** Cada bloque de migr
 ## Migración de los cuatro callers
 - [x] **T007** **Pedido del board**: `CobrarPedidoSheet` monta `CobroForm` + `ComprobanteFields` (bloque Factura A/B extraído antes de borrar, FR-008). Test de integración: un pedido cobrado con tarjeta con recargo registra el **mismo** `amount_cents` que la misma cuenta en una mesa (SC-005).
 - [ ] **T008** **Cobro del encargado**: página `/admin/mesa/[id]/cobrar` + panel embebido del salón. Sin cambios de layout ni de props externas; los tests de cobro existentes quedan verdes **sin editarlos** (FR-009).
-- [ ] **T009** **Venta de mostrador**: el bloque de pago del panel pasa al form; el picker de productos no se toca. `onSubmit` llama a `venderMostrador`, no a `registrarPago` (FR-011, US3).
-- [ ] **T010** **Cobro del mozo**: `CobroForm` con `size="touch"` dentro del `CobrarSplitDialog` actual. Mismo flujo, mismos taps, mismos tamaños (FR-010, SC-004).
+- [x] **T009** **Venta de mostrador** — *migración parcial, decidida contra el plan*. **No monta `CobroForm`**: el mostrador no tiene formulario de cobro sino un selector de método al pie del picker, y su cobro es **de un gesto** por diseño (spec 058). Meterle el flujo de dos pasos del form habría empeorado la feature y violado SC-004. Además **no tiene monto editable** (el monto es el total del carrito), así que la guarda de efectivo no le aplica: no hay forma de cobrar de menos. Lo que sí se unificó: el ajuste, que estaba **calculado a mano** (`Math.round((subtotal * pct) / 100)`) y ahora sale de `calculateAdjustment` — era la única regla de dinero duplicada que le quedaba.
+- [x] **T010** **Cobro del mozo**: `CobroForm` con `size="touch"` dentro del `CobrarSplitDialog` actual. Mismo flujo, mismos taps, mismos tamaños (FR-010, SC-004).
 - [ ] **T011** Textos desde el `subject` (FR-013): nada de "mesa" cuando se cobra un delivery — hoy dice *"Cobrar mesa"* y *"La mesa se va a marcar para limpiar"* sin importar qué se cobre.
 
 ## Cierre

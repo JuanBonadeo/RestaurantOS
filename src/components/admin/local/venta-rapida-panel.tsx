@@ -15,6 +15,7 @@ import { toast } from "sonner";
 
 import { ProductModal, type AddToCartItem } from "@/components/mozo/product-modal";
 import { emitInvoice } from "@/lib/afip/emit-invoice";
+import { calculateAdjustment } from "@/lib/billing/adjustment";
 import type { Caja, PaymentMethod, PaymentMethodConfig } from "@/lib/caja/types";
 import { formatCurrency } from "@/lib/currency";
 import type { CatalogForMozo, CatalogProduct } from "@/lib/mozo/catalog-query";
@@ -149,11 +150,13 @@ export function VentaRapidaPanel({
 
   // El ajuste que muestra la UI es el mismo que el server recalcula al cobrar
   // (`payment_method_configs`) — acá sólo se anticipa para que el encargado
-  // cante el precio correcto antes de confirmar.
+  // cante el precio correcto antes de confirmar. La cuenta sale de
+  // `calculateAdjustment`, la misma que usan el resto de los cobros (spec 062):
+  // estaba escrita a mano acá, que es exactamente cómo se despegan los precios.
   const ajustePercent =
     methodConfigs.find((c) => c.method === method)?.adjustment_percent ?? 0;
-  const ajusteCents = Math.round((subtotal * ajustePercent) / 100);
-  const totalACobrar = subtotal + ajusteCents;
+  const { adjustmentCents: ajusteCents, finalCents: totalACobrar } =
+    calculateAdjustment(subtotal, ajustePercent);
 
   function focusSearch() {
     setTimeout(() => searchRef.current?.focus(), 0);
