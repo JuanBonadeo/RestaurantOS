@@ -161,6 +161,9 @@ export type Database = {
           afip_provider: string | null
           afip_punto_venta: number | null
           cover_image_url: string | null
+          control_printer_enabled: boolean
+          control_printer_ip: string | null
+          control_printer_port: number
           created_at: string
           currency: string
           customer_channel: string
@@ -198,6 +201,9 @@ export type Database = {
           afip_provider?: string | null
           afip_punto_venta?: number | null
           cover_image_url?: string | null
+          control_printer_enabled?: boolean
+          control_printer_ip?: string | null
+          control_printer_port?: number
           created_at?: string
           currency?: string
           customer_channel?: string
@@ -235,6 +241,9 @@ export type Database = {
           afip_provider?: string | null
           afip_punto_venta?: number | null
           cover_image_url?: string | null
+          control_printer_enabled?: boolean
+          control_printer_ip?: string | null
+          control_printer_port?: number
           created_at?: string
           currency?: string
           customer_channel?: string
@@ -1017,6 +1026,54 @@ export type Database = {
             columns: ["station_id"]
             isOneToOne: false
             referencedRelation: "stations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      control_tickets: {
+        Row: {
+          business_id: string
+          emitted_at: string
+          id: string
+          order_id: string
+          print_failed_at: string | null
+          printed_at: string | null
+          reprint_requested_at: string | null
+          status: string
+        }
+        Insert: {
+          business_id: string
+          emitted_at?: string
+          id?: string
+          order_id: string
+          print_failed_at?: string | null
+          printed_at?: string | null
+          reprint_requested_at?: string | null
+          status?: string
+        }
+        Update: {
+          business_id?: string
+          emitted_at?: string
+          id?: string
+          order_id?: string
+          print_failed_at?: string | null
+          printed_at?: string | null
+          reprint_requested_at?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "control_tickets_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "control_tickets_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: true
+            referencedRelation: "orders"
             referencedColumns: ["id"]
           },
         ]

@@ -32,7 +32,7 @@ const CHAR_SIZE: Record<Size, string> = { sm: "\x00", tall: "\x01", xl: "\x11" }
 // celda y el espaciado se duplican (24 + 8 = 32 pt) ⇒ 12 col; usamos 11 para
 // dejar margen. Se usa para cortar por palabra en vez de que la impresora parta
 // el nombre del producto a la mitad.
-const COLS: Record<Size, number> = { sm: 24, tall: 24, xl: 11 };
+export const COLS: Record<Size, number> = { sm: 24, tall: 24, xl: 11 };
 
 // Espaciado lateral por carácter (ESC SP n) ≈ +33% de ancho sin duplicarlo.
 const CHAR_RIGHT_SPACING = 4;
@@ -40,13 +40,13 @@ const CHAR_RIGHT_SPACING = 4;
 // Interlineado (ESC 3 n): más alto = más espaciado y evita que el doble alto se pise.
 const LINE_SPACING = 64;
 
-const RULE = "------------------------"; // 24 col (≈ ancho útil 58mm con el espaciado)
+export const RULE = "------------------------"; // 24 col (≈ ancho útil 58mm con el espaciado)
 
 // Renglones en blanco arriba y abajo del bloque de ítems (entre ítem e ítem va
 // uno solo). Despega la lista de la línea separadora y del corte del papel.
 const EDGE_PADDING = 3;
 
-const TIMEZONE = "America/Argentina/Buenos_Aires";
+export const TIMEZONE = "America/Argentina/Buenos_Aires";
 
 export type TicketItem = {
   product_name: string;
@@ -68,9 +68,9 @@ export type TicketComanda = {
   items?: TicketItem[] | null;
 };
 
-type Size = "sm" | "tall" | "xl";
-type Align = "left" | "center" | "right";
-type Line = { text: string; size?: Size; bold?: boolean; align?: Align };
+export type Size = "sm" | "tall" | "xl";
+export type Align = "left" | "center" | "right";
+export type Line = { text: string; size?: Size; bold?: boolean; align?: Align };
 
 // Reemplazos de los caracteres no-ASCII más comunes. La térmica no recibe
 // codepage, así que todo lo que pase de 0x7e sale como el símbolo que tenga
@@ -115,7 +115,7 @@ const ASCII_MAP: Record<string, string> = {
  * tildes y diéresis vía NFD (Ñoquis → Noquis, Café → Cafe) y descarta
  * cualquier resto fuera de 0x20–0x7e (emoji, alfabetos no latinos).
  */
-function toAscii(text: string): string {
+export function toAscii(text: string): string {
   return String(text)
     .replace(/[^\x20-\x7e]/g, (ch) => ASCII_MAP[ch] ?? ch)
     .normalize("NFD")
@@ -128,7 +128,7 @@ function toAscii(text: string): string {
  * ancho se parte a lo bruto (mejor cortada que desbordada). Devuelve al menos
  * una línea para no perder el renglón.
  */
-function wrap(text: string, cols: number): string[] {
+export function wrap(text: string, cols: number): string[] {
   const out: string[] = [];
   let line = "";
   // Se traduce acá también (es idempotente con el `push`): algunos reemplazos

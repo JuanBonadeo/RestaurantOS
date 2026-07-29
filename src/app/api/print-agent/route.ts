@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 
 import { notifyPrintFailed } from "@/lib/notifications/events";
+import {
+  buildControlTicketContent,
+  type ControlTicketData,
+} from "@/lib/print/control-ticket";
 import { buildComandaContent } from "@/lib/print/ticket";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
@@ -159,7 +163,169 @@ export async function GET(req: Request) {
     };
   });
 
-  return NextResponse.json({ comandas: printable });
+  // ── Controles de pedido (spec 063) ────────────────────────────────────────
+  // Viajan en el MISMO array que las comandas, con su propio UUID, su IP y su
+  // contenido ya renderizado: para el agente instalado en el local son un ítem
+  // más de la lista y no hace falta recompilar nada (D2 del spec).
+  const controls = await buildPrintableControlTickets(service, businessId);
+
+  return NextResponse.json({ comandas: [...printable, ...controls] });
+}
+
+/**
+ * Los controles de pedido `pendiente` (o con reimpresión pedida) del negocio,
+ * con la forma que el agente ya sabe consumir. Devuelve `[]` sin ruido si el
+ * negocio no tiene comandera de control configurada o la tiene apagada — el
+ * resto de la impresión no se entera.
+ */
+async function buildPrintableControlTickets(
+  service: ReturnType<typeof createSupabaseServiceClient>,
+  businessId: string,
+) {
+  const { data: business } = await service
+    .from("businesses")
+    .select(
+      "name, address, phone, control_printer_ip, control_printer_port, control_printer_enabled",
+    )
+    .eq("id", businessId)
+    .maybeSingle();
+
+  const biz = business as {
+    name: string;
+    address: string | null;
+    phone: string | null;
+    control_printer_ip: string | null;
+    control_printer_port: number | null;
+    control_printer_enabled: boolean | null;
+  } | null;
+
+  if (!biz || !biz.control_printer_ip?.trim() || biz.control_printer_enabled === false) {
+    return [];
+  }
+
+  const { data: tickets, error } = await service
+    .from("control_tickets")
+    .select(
+      `
+      id,
+      status,
+      emitted_at,
+      reprint_requested_at,
+      orders!inner(
+        order_number,
+        delivery_type,
+        customer_name,
+        customer_phone,
+        delivery_address,
+        delivery_notes,
+        subtotal_cents,
+        delivery_fee_cents,
+        discount_cents,
+        total_cents,
+        payment_method,
+        payment_status,
+        scheduled_at,
+        order_items(
+          quantity,
+          unit_price_cents,
+          notes,
+          cancelled_at,
+          products(name),
+          order_item_modifiers(modifiers(name))
+        )
+      )
+    `,
+    )
+    .eq("business_id", businessId)
+    .or("status.eq.pendiente,reprint_requested_at.not.is.null")
+    .order("emitted_at", { ascending: true });
+
+  if (error) {
+    // No tumba el GET: las comandas de cocina se devuelven igual.
+    console.error("print-agent GET · control_tickets", error);
+    return [];
+  }
+
+  return (tickets ?? []).map((t) => {
+    const order = t.orders as unknown as {
+      order_number: number;
+      delivery_type: string;
+      customer_name: string | null;
+      customer_phone: string | null;
+      delivery_address: string | null;
+      delivery_notes: string | null;
+      subtotal_cents: number;
+      delivery_fee_cents: number;
+      discount_cents: number;
+      total_cents: number;
+      payment_method: string | null;
+      payment_status: string | null;
+      scheduled_at: string | null;
+      order_items: {
+        quantity: number;
+        unit_price_cents: number;
+        notes: string | null;
+        cancelled_at: string | null;
+        products: { name: string } | null;
+        order_item_modifiers: { modifiers: { name: string } | null }[];
+      }[];
+    };
+
+    const data: ControlTicketData = {
+      control_ticket_id: t.id,
+      business_name: sanitizeTicketText(biz.name) ?? "—",
+      business_address: sanitizeTicketText(biz.address),
+      business_phone: sanitizeTicketText(biz.phone),
+      order_number: order.order_number,
+      delivery_type: order.delivery_type === "delivery" ? "delivery" : "pickup",
+      emitted_at: t.emitted_at,
+      scheduled_at: order.scheduled_at,
+      customer_name: sanitizeTicketText(order.customer_name),
+      customer_phone: sanitizeTicketText(order.customer_phone),
+      delivery_address: sanitizeTicketText(order.delivery_address),
+      delivery_notes: sanitizeTicketText(order.delivery_notes),
+      subtotal_cents: order.subtotal_cents,
+      delivery_fee_cents: order.delivery_fee_cents,
+      discount_cents: order.discount_cents,
+      total_cents: order.total_cents,
+      payment_method: order.payment_method,
+      payment_status: order.payment_status,
+      reprint: Boolean(t.reprint_requested_at),
+      items: (order.order_items ?? [])
+        // Un ítem anulado no se lleva ni se cobra.
+        .filter((it) => !it.cancelled_at)
+        .map((it) => ({
+          product_name: sanitizeTicketText(it.products?.name) ?? "—",
+          quantity: it.quantity,
+          line_total_cents: it.unit_price_cents * it.quantity,
+          notes: sanitizeTicketText(it.notes),
+          modifiers: (it.order_item_modifiers ?? [])
+            .map((m) => sanitizeTicketText(m.modifiers?.name))
+            .filter(Boolean),
+        })),
+    };
+
+    const content = buildControlTicketContent(data);
+    return {
+      // El agente confirma con este id; el POST lo resuelve contra
+      // `control_tickets` cuando no está en `comandas`.
+      comanda_id: t.id,
+      station_id: null,
+      station_name: "CONTROL",
+      printer_ip: biz.control_printer_ip,
+      printer_port: biz.control_printer_port ?? 9100,
+      printer_enabled: true,
+      batch: 1,
+      emitted_at: t.emitted_at,
+      cancelled: false,
+      cancelled_reason: null,
+      reprint: Boolean(t.reprint_requested_at),
+      table_label: `#${order.order_number}`,
+      items: data.items ?? [],
+      content_escpos_b64: content.escpos_b64,
+      content_plain: content.plain,
+    };
+  });
 }
 
 /**
@@ -221,9 +387,14 @@ export async function POST(req: Request) {
     .maybeSingle();
 
   if (!row) {
-    return NextResponse.json(
-      { error: "comanda not found" },
-      { status: 404 },
+    // Spec 063: puede ser un control de pedido. El agente reporta cualquier
+    // impresión con el campo `comanda_id`, así que el id se resuelve contra la
+    // otra tabla antes de dar por perdido el reporte.
+    return handleControlTicketReport(
+      service,
+      comandaId,
+      body.business_id,
+      result,
     );
   }
 
@@ -289,4 +460,72 @@ export async function POST(req: Request) {
   }
 
   return NextResponse.json({ status: "en_preparacion", changed: true });
+}
+
+/**
+ * Confirmación / fallo de un **control de pedido** (spec 063). Espeja el
+ * tratamiento de las comandas: `ok` lo marca impreso y limpia los flags
+ * laterales, `failed` setea `print_failed_at` sin cambiar el estado (se
+ * reintenta en el próximo pull).
+ *
+ * A diferencia de la comanda, no notifica: el aviso de impresión fallida (spec
+ * 33) está pensado para cocina, y un control que no salió no bloquea la
+ * preparación. Queda el flag para verlo.
+ */
+async function handleControlTicketReport(
+  service: ReturnType<typeof createSupabaseServiceClient>,
+  ticketId: string,
+  businessId: string,
+  result: "ok" | "failed",
+) {
+  const { data } = await service
+    .from("control_tickets")
+    .select("id, business_id, status, print_failed_at, reprint_requested_at")
+    .eq("id", ticketId)
+    .maybeSingle();
+
+  const ticket = data as {
+    business_id: string;
+    status: string;
+    print_failed_at: string | null;
+    reprint_requested_at: string | null;
+  } | null;
+
+  // Mismo mensaje que la comanda: no se le confirma al agente que el id existe
+  // pero es de otro negocio (ownership por tenant, spec 36).
+  if (!ticket || ticket.business_id !== businessId) {
+    return NextResponse.json({ error: "comanda not found" }, { status: 404 });
+  }
+
+  if (result === "failed") {
+    if (ticket.print_failed_at) {
+      return NextResponse.json({
+        status: ticket.status,
+        notified: false,
+        alreadyFlagged: true,
+      });
+    }
+    await service
+      .from("control_tickets")
+      .update({ print_failed_at: new Date().toISOString() })
+      .eq("id", ticketId);
+    return NextResponse.json({ status: ticket.status, notified: false });
+  }
+
+  const { error } = await service
+    .from("control_tickets")
+    .update({
+      status: "impreso",
+      printed_at: new Date().toISOString(),
+      print_failed_at: null,
+      reprint_requested_at: null,
+    })
+    .eq("id", ticketId);
+
+  if (error) {
+    console.error("print-agent confirm · control", error);
+    return NextResponse.json({ error: "update failed" }, { status: 500 });
+  }
+
+  return NextResponse.json({ status: "impreso", changed: true });
 }

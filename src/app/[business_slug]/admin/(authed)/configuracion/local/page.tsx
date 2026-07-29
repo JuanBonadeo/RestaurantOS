@@ -1,8 +1,12 @@
 import { notFound } from "next/navigation";
 
-import { Fingerprint, MonitorDown, Printer } from "lucide-react";
+import { ClipboardList, Fingerprint, MonitorDown, Printer } from "lucide-react";
 
 import { ClockOriginsForm } from "@/components/admin/settings/clock-origins-form";
+import {
+  ControlPrinterForm,
+  type ControlPrinterRow,
+} from "@/components/admin/settings/control-printer-form";
 import { PrintAgentCard } from "@/components/admin/settings/print-agent-card";
 import { SettingsSection } from "@/components/admin/settings/settings-section";
 import {
@@ -35,7 +39,9 @@ export default async function ConfiguracionLocalPage({
         .order("sort_order"),
       service
         .from("businesses")
-        .select("print_agent_key_set")
+        .select(
+          "print_agent_key_set, control_printer_ip, control_printer_port, control_printer_enabled",
+        )
         .eq("id", business.id)
         .maybeSingle(),
       service
@@ -48,6 +54,14 @@ export default async function ConfiguracionLocalPage({
   const printAgentKeySet = Boolean(
     (bizFlag as { print_agent_key_set?: boolean } | null)?.print_agent_key_set,
   );
+  const controlPrinter: ControlPrinterRow = {
+    control_printer_ip:
+      (bizFlag as ControlPrinterRow | null)?.control_printer_ip ?? null,
+    control_printer_port:
+      (bizFlag as ControlPrinterRow | null)?.control_printer_port ?? 9100,
+    control_printer_enabled:
+      (bizFlag as ControlPrinterRow | null)?.control_printer_enabled ?? true,
+  };
   const printAgentLastSeenAt =
     (agentStatus as { last_seen_at?: string } | null)?.last_seen_at ?? null;
 
@@ -62,6 +76,14 @@ export default async function ConfiguracionLocalPage({
           slug={business_slug}
           stations={(stations ?? []) as StationPrinterRow[]}
         />
+      </SettingsSection>
+
+      <SettingsSection
+        icon={<ClipboardList className="size-5" />}
+        title="Comandera de control"
+        description="Además de las comandas de cocina, cada delivery y cada retiro imprime un «control de pedido» — el papel que se lleva el repartidor: el pedido completo con precios, cliente, dirección, horario de entrega y cuánta plata cobrar. Dejá la IP vacía para no imprimirlos."
+      >
+        <ControlPrinterForm slug={business_slug} initial={controlPrinter} />
       </SettingsSection>
 
       <SettingsSection

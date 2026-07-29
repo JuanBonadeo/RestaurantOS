@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { createComandasForItems } from "@/lib/comandas/route-items";
 import { resolveStation } from "@/lib/comandas/routing";
+import { emitControlTicket } from "@/lib/print/control-ticket-emit";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 type GenericClient = SupabaseClient;
@@ -22,7 +23,7 @@ export type RouteOrderResult = {
  */
 export async function routeOrderToCocina(
   orderId: string,
-  _businessId: string,
+  businessId: string,
 ): Promise<ActionResult<RouteOrderResult>> {
   const service = createSupabaseServiceClient() as unknown as GenericClient;
 
@@ -112,6 +113,16 @@ export async function routeOrderToCocina(
   if (orderErr) {
     console.error("routeOrderToCocina · order update", orderErr);
     return actionError("No pudimos avanzar el pedido.");
+  }
+
+  // Control de pedido (spec 063): el papel del repartidor sale junto con las
+  // comandas de cocina. Best-effort a propósito — si falla, la comida entra a
+  // cocina igual. Perder el control es un papel menos; abortar la marcha por
+  // eso sería dejar el pedido sin cocinar.
+  try {
+    await emitControlTicket(service, orderId, businessId);
+  } catch (e) {
+    console.error("routeOrderToCocina · emitControlTicket", orderId, e);
   }
 
   return actionOk({

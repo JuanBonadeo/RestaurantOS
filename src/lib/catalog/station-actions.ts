@@ -221,3 +221,48 @@ export async function reorderStations(
   revalidatePath(`/${businessSlug}/admin/catalogo`);
   return actionOk(null);
 }
+
+/**
+ * Comandera de **control** del negocio (spec 063): dónde se imprime el "control
+ * de pedido" que se lleva el repartidor. Es un destino único del local, no un
+ * sector más, así que vive en `businesses` — pero se configura en la misma
+ * pantalla y con la misma validación que las comanderas por sector.
+ */
+export async function setControlPrinter(
+  businessSlug: string,
+  input: unknown,
+): Promise<ActionResult<null>> {
+  const parsed = StationPrinterInput.safeParse(input);
+  if (!parsed.success) {
+    const first = parsed.error.issues[0];
+    return actionError(
+      first ? `${first.path.join(".") || "campo"}: ${first.message}` : "Datos inválidos.",
+    );
+  }
+
+  const business = await getBusiness(businessSlug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctx = await ensureAdminAccess(business.id, businessSlug);
+  if (!canManageBusiness(ctx)) {
+    return actionError("No tenés permisos para configurar las comanderas.");
+  }
+
+  const service = createSupabaseServiceClient();
+  const { error } = await service
+    .from("businesses")
+    .update({
+      control_printer_ip: parsed.data.printer_ip,
+      control_printer_port: parsed.data.printer_port,
+      control_printer_enabled: parsed.data.printer_enabled,
+    })
+    .eq("id", business.id);
+
+  if (error) {
+    console.error("setControlPrinter", error);
+    return actionError("No pudimos guardar la comandera de control.");
+  }
+
+  revalidatePath(`/${businessSlug}/admin/configuracion`);
+  return actionOk(null);
+}
