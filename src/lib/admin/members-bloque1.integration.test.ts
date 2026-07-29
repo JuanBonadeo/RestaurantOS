@@ -58,6 +58,7 @@ const {
   disableBusinessMember,
   enableBusinessMember,
   updateMemberProfile,
+  updateMemberRole,
 } = await import("./members-actions");
 const { listBusinessMembers } = await import("./members-query");
 const { ensureAdminAccess } = await import("./context");
@@ -214,5 +215,59 @@ describe.skipIf(!dbAvailable)("empleados — Bloque 1 (integration)", () => {
     if (!r.ok) {
       expect(r.error).toMatch(/vos mismo/i);
     }
+  });
+
+  it("updateMemberRole promueve al mozo a encargado", async () => {
+    const r = await updateMemberRole({
+      business_slug: businessSlug,
+      user_id: mozoUserId,
+      role: "encargado",
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.data.needsCredentials).toBe(false);
+
+    const list = await listBusinessMembers(businessId);
+    expect(list.find((m) => m.user_id === mozoUserId)?.role).toBe("encargado");
+  });
+
+  it("updateMemberRole rechaza el rol Personal si el miembro no tiene PIN", async () => {
+    const r = await updateMemberRole({
+      business_slug: businessSlug,
+      user_id: mozoUserId,
+      role: "personal",
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/PIN/i);
+  });
+
+  it("updateMemberRole rechaza cambiarse el rol a uno mismo", async () => {
+    const r = await updateMemberRole({
+      business_slug: businessSlug,
+      user_id: ADMIN_USER_ID,
+      role: "mozo",
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/vos mismo/i);
+  });
+
+  it("updateMemberRole permite degradar a un admin mientras quede otro activo", async () => {
+    const up = await updateMemberRole({
+      business_slug: businessSlug,
+      user_id: mozoUserId,
+      role: "admin",
+    });
+    expect(up.ok).toBe(true);
+
+    // Hay dos admins activos (el operador + el recién promovido): degradar
+    // no deja al negocio huérfano.
+    const down = await updateMemberRole({
+      business_slug: businessSlug,
+      user_id: mozoUserId,
+      role: "mozo",
+    });
+    expect(down.ok).toBe(true);
+
+    const list = await listBusinessMembers(businessId);
+    expect(list.find((m) => m.user_id === mozoUserId)?.role).toBe("mozo");
   });
 });

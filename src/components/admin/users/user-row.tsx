@@ -14,7 +14,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { RoleBadge } from "@/components/shared/role-badge";
+import { RolePicker } from "@/components/admin/users/role-picker";
 import {
   disableBusinessMember,
   enableBusinessMember,
@@ -144,7 +144,13 @@ export function UserRow({
         </div>
       </div>
       <div className="flex items-center gap-2">
-        <RoleBadge role={member.role} size="sm" />
+        <RolePicker
+          slug={slug}
+          userId={member.user_id}
+          role={member.role}
+          displayName={displayName}
+          editable={canManage && !isCurrentUser && !isDisabled}
+        />
         {canManage && !isCurrentUser && !isDisabled && (
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger

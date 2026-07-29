@@ -75,6 +75,23 @@ const UpdateProfileInput = z.object({
   phone: PhoneSchema,
 });
 
+const UpdateRoleInput = z.object({
+  business_slug: z.string().min(1),
+  user_id: z.string().min(1),
+  role: z.enum(BUSINESS_ROLES),
+});
+
+export type UpdateRolePayload = {
+  role: BusinessRoleInput;
+  /**
+   * `true` cuando el miembro pasa a un rol que entra al sistema con
+   * email + contraseña pero su cuenta tiene el email interno que genera el
+   * alta de Personal (`personal-XXXX@slug.internal`). No puede loguearse
+   * hasta que se le carguen credenciales reales.
+   */
+  needsCredentials: boolean;
+};
+
 async function assertCanManage(businessSlug: string) {
   const supabase = await createSupabaseServerClient();
   const {
@@ -483,6 +500,96 @@ export async function updateMemberProfile(
 
   revalidateEmpleados(business_slug);
   return actionOk(null);
+}
+
+/**
+ * Cambia el rol de un miembro dentro del negocio.
+ *
+ * Guardas:
+ * - Solo admin del negocio o platform admin (`assertCanManage`).
+ * - Nadie se cambia el rol a sí mismo (evita auto-degradarse y quedar afuera).
+ * - Siempre queda al menos un Admin activo en el negocio.
+ * - El rol Personal necesita PIN cargado (es como ficha asistencia).
+ */
+export async function updateMemberRole(
+  input: unknown,
+): Promise<ActionResult<UpdateRolePayload>> {
+  const parsed = UpdateRoleInput.safeParse(input);
+  if (!parsed.success) {
+    return actionError(parsed.error.issues[0]?.message ?? "Datos inválidos.");
+  }
+  const { business_slug, user_id, role } = parsed.data;
+
+  const guard = await assertCanManage(business_slug);
+  if (!guard.ok) return actionError(guard.error);
+
+  if (user_id === guard.user.id && !guard.isPlatformAdmin) {
+    return actionError("No podés cambiarte el rol a vos mismo.");
+  }
+
+  const service = svc();
+
+  const { data: member } = await service
+    .from("business_users")
+    .select("role, pin, users:user_id(email)")
+    .eq("business_id", guard.businessId)
+    .eq("user_id", user_id)
+    .maybeSingle();
+  if (!member) return actionError("Miembro no encontrado.");
+
+  const currentRole = member.role as BusinessRoleInput;
+  const email: string | null =
+    (member as { users?: { email?: string | null } | null }).users?.email ??
+    null;
+
+  if (currentRole === role) {
+    return actionOk({ role, needsCredentials: false });
+  }
+
+  if (role === "personal" && !member.pin) {
+    return actionError(
+      "El rol Personal necesita un PIN de 4 dígitos. Cargáselo antes de cambiarlo.",
+    );
+  }
+
+  // El negocio no puede quedarse sin Admin activo.
+  if (currentRole === "admin") {
+    const { count } = await service
+      .from("business_users")
+      .select("user_id", { count: "exact", head: true })
+      .eq("business_id", guard.businessId)
+      .eq("role", "admin")
+      .is("disabled_at", null);
+    if ((count ?? 0) <= 1) {
+      return actionError(
+        "Tiene que quedar al menos un Admin activo en el negocio.",
+      );
+    }
+  }
+
+  const { error } = await service
+    .from("business_users")
+    .update({ role })
+    .eq("business_id", guard.businessId)
+    .eq("user_id", user_id);
+  if (error) {
+    console.error("updateMemberRole", error);
+    return actionError("No pudimos cambiar el rol.");
+  }
+
+  revalidateEmpleados(business_slug);
+  return actionOk({
+    role,
+    needsCredentials: role !== "personal" && isInternalEmail(email),
+  });
+}
+
+/**
+ * Los usuarios de rol Personal se crean con un email sintético
+ * (`personal-XXXX@slug.internal`) porque entran por PIN, no por login.
+ */
+function isInternalEmail(email: string | null): boolean {
+  return Boolean(email && email.toLowerCase().endsWith(".internal"));
 }
 
 function getSiteUrl(): string {
