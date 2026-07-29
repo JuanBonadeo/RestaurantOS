@@ -181,12 +181,17 @@ export async function closeOrderIfFullyPaid(
 
   if (!fullyPaid) return { orderClosed: false };
 
+  // `payment_status` también: hasta ahora sólo lo escribían el webhook de MP y
+  // `reconcile`, así que un delivery cobrado en efectivo por el encargado
+  // quedaba `pending` para siempre y el board lo seguía mostrando como impago.
+  // Es la misma verdad que `lifecycle_status: closed` — la orden está saldada.
   await service
     .from("orders")
     .update({
       lifecycle_status: "closed",
       closed_at: new Date().toISOString(),
       total_paid_cents: total_paid,
+      payment_status: "paid",
     })
     .eq("id", orderId);
 
@@ -799,6 +804,9 @@ export async function anularCobro(
         lifecycle_status: "open",
         closed_at: null,
         total_paid_cents: 0,
+        // La contracara de `closeOrderIfFullyPaid`: si la orden vuelve a estar
+        // abierta, no está paga.
+        payment_status: "pending",
       })
       .eq("id", orderId);
   }

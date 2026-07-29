@@ -218,6 +218,7 @@ export async function venderMostrador(
         lifecycle_status: "closed",
         closed_at: new Date().toISOString(),
         total_paid_cents: finalCents,
+        payment_status: "paid",
       })
       .eq("id", orderId)
       .eq("business_id", business.id)

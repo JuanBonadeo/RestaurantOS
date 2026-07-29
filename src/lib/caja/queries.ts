@@ -41,7 +41,7 @@ export async function getCajasForBusiness(
   const service = db();
   const { data } = await service
     .from("cajas")
-    .select("id, business_id, name, is_active, sort_order")
+    .select("id, business_id, name, is_active, sort_order, is_default")
     .eq("business_id", businessId)
     .eq("is_active", true)
     .order("sort_order", { ascending: true })
@@ -55,12 +55,28 @@ export async function getAllCajasForBusiness(
   const service = db();
   const { data } = await service
     .from("cajas")
-    .select("id, business_id, name, is_active, sort_order")
+    .select("id, business_id, name, is_active, sort_order, is_default")
     .eq("business_id", businessId)
     .order("is_active", { ascending: false })
     .order("sort_order", { ascending: true })
     .order("name", { ascending: true });
   return (data ?? []) as Caja[];
+}
+
+/**
+ * Caja donde se asienta un cobro que no tuvo cajero: hoy, el pago online de un
+ * delivery / take-away que acredita el webhook de MP.
+ *
+ * Si el negocio no marcó ninguna, cae en la primera caja activa por
+ * `sort_order`. El fallback importa: `payments.caja_id` es NOT NULL, así que
+ * sin él un negocio que nunca entró a la config perdería el pago.
+ */
+export async function getDefaultCaja(
+  businessId: string,
+): Promise<Caja | null> {
+  const cajas = await getCajasForBusiness(businessId);
+  if (cajas.length === 0) return null;
+  return cajas.find((c) => c.is_default) ?? cajas[0];
 }
 
 async function getUltimoCorte(

@@ -164,6 +164,60 @@ export async function setCajaActive(
   return actionOk(undefined);
 }
 
+/**
+ * Marca la caja donde caen los cobros sin cajero — hoy, el pago online de un
+ * delivery / take-away que acredita el webhook de MP (no hay nadie eligiendo
+ * dónde asentarlo y `payments.caja_id` es NOT NULL).
+ *
+ * Es excluyente: el índice único parcial `cajas_one_default_per_business`
+ * (migración 0025) sólo admite una por negocio, así que primero se limpia la
+ * anterior. Sin una marcada, `getDefaultCaja` cae en la primera activa.
+ */
+export async function setCajaDefault(
+  cajaId: string,
+  businessSlug: string,
+): Promise<ActionResult<void>> {
+  const business = await getBusiness(businessSlug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  const ctx = ctxResult.data;
+
+  if (!canManageCajas(ctx.role)) {
+    return actionError("Solo admin puede configurar cajas.");
+  }
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+
+  const caja = await loadCajaForBusiness(service, cajaId, business.id);
+  if (!caja) return actionError("Caja no encontrada.");
+  if (!caja.is_active) {
+    return actionError("Una caja inactiva no puede ser la caja por defecto.");
+  }
+
+  // Limpiar la anterior antes de marcar la nueva: el unique parcial no admite
+  // dos, y hacerlo al revés falla.
+  const { error: clearErr } = await service
+    .from("cajas")
+    .update({ is_default: false })
+    .eq("business_id", business.id)
+    .eq("is_default", true);
+  if (clearErr) {
+    return actionError(`No se pudo actualizar la caja: ${clearErr.message}`);
+  }
+
+  const { error } = await service
+    .from("cajas")
+    .update({ is_default: true })
+    .eq("id", cajaId);
+  if (error) return actionError(`No se pudo actualizar la caja: ${error.message}`);
+
+  revalidatePath(`/${businessSlug}/admin/cajas`);
+  revalidatePath(`/${businessSlug}/admin/operacion`);
+  return actionOk(undefined);
+}
+
 // ── Corte ─────────────────────────────────────────────────────
 
 export async function hacerCorte(

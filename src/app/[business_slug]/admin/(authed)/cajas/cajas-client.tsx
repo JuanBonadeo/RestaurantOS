@@ -20,6 +20,7 @@ import {
   crearCaja,
   renombrarCaja,
   setCajaActive,
+  setCajaDefault,
 } from "@/lib/caja/actions";
 import type { Caja } from "@/lib/caja/types";
 import { cn } from "@/lib/utils";
@@ -59,6 +60,18 @@ export function CajasClient({ slug, cajas }: Props) {
         return;
       }
       toast.success(next ? "Caja habilitada" : "Caja deshabilitada");
+      router.refresh();
+    });
+  };
+
+  const handleSetDefault = (caja: Caja) => {
+    startTransition(async () => {
+      const r = await setCajaDefault(caja.id, slug);
+      if (!r.ok) {
+        toast.error(r.error);
+        return;
+      }
+      toast.success(`Los cobros online van a ${caja.name}`);
       router.refresh();
     });
   };
@@ -133,6 +146,7 @@ export function CajasClient({ slug, cajas }: Props) {
                 stripe={idx % 2 === 1}
                 onRenombrar={() => setEditing(c)}
                 onDeshabilitar={() => handleToggleActive(c, false)}
+                onHacerDefault={() => handleSetDefault(c)}
               />
             ))}
           </ul>
@@ -218,11 +232,13 @@ function CajaRow({
   stripe,
   onRenombrar,
   onDeshabilitar,
+  onHacerDefault,
 }: {
   caja: Caja;
   stripe: boolean;
   onRenombrar: () => void;
   onDeshabilitar: () => void;
+  onHacerDefault: () => void;
 }) {
   return (
     <li
@@ -239,9 +255,16 @@ function CajaRow({
           <p className="truncate text-sm font-semibold text-zinc-900">
             {caja.name}
           </p>
-          <p className="inline-flex items-center gap-1.5 text-xs text-emerald-700">
-            <span className="inline-block size-1.5 rounded-full bg-emerald-500" />
-            Activa
+          <p className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-emerald-700">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block size-1.5 rounded-full bg-emerald-500" />
+              Activa
+            </span>
+            {caja.is_default && (
+              <span className="inline-flex items-center rounded-full bg-zinc-900 px-2 py-0.5 text-[0.65rem] font-semibold text-white">
+                Por defecto
+              </span>
+            )}
           </p>
         </div>
       </div>
@@ -255,6 +278,16 @@ function CajaRow({
         >
           <Pencil className="size-3.5" />
         </button>
+        {!caja.is_default && (
+          <button
+            type="button"
+            onClick={onHacerDefault}
+            className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900"
+            title="Los cobros sin cajero (pago online) se asientan acá"
+          >
+            Hacer por defecto
+          </button>
+        )}
         <button
           type="button"
           onClick={onDeshabilitar}

@@ -113,11 +113,19 @@ export function OrderCard({
   const firstItem = order.items[0];
   const moreItems = order.items.length - 1;
 
+  // El estado del pago manda sobre el método elegido en el checkout: un pedido
+  // en efectivo ya cobrado decía "Paga en efectivo" para siempre — el board no
+  // distinguía lo cobrado de lo que falta cobrar, que es lo único que el
+  // encargado necesita saber de un vistazo.
   const paymentBadge = (() => {
+    if (order.payment_status === "paid")
+      return {
+        label: "Cobrado",
+        className: "bg-emerald-100 text-emerald-800",
+        Icon: order.payment_method === "mp" ? CreditCard : Banknote,
+      };
     if (order.payment_method === "cash")
       return { label: "Paga en efectivo", className: "bg-amber-100 text-amber-800", Icon: Banknote };
-    if (order.payment_method === "mp" && order.payment_status === "paid")
-      return { label: "Pagado", className: "bg-emerald-100 text-emerald-800", Icon: CreditCard };
     if (order.payment_method === "mp" && order.payment_status === "pending")
       return { label: "Pago pendiente", className: "bg-orange-100 text-orange-800", Icon: CreditCard };
     if (order.payment_method === "mp" && order.payment_status === "failed")

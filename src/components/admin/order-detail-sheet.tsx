@@ -202,6 +202,10 @@ export function OrderDetailSheet({
   const isPendingOnline =
     order.status === "pending" && order.delivery_type !== "dine_in";
 
+  /** La orden está saldada: pagada online o cobrada por el encargado
+   *  (`closeOrderIfFullyPaid` también pone `payment_status: paid`). */
+  const isPaid = order.payment_status === "paid";
+
   const nextForDelivery =
     order.delivery_type === "pickup" && order.status === "ready"
       ? "delivered"
@@ -452,15 +456,26 @@ export function OrderDetailSheet({
 
         {!isTerminal && !showCancel && (
           <footer className="border-border/60 flex flex-col gap-2 border-t px-5 py-4">
-            <Button
-              variant="outline"
-              size="lg"
-              className="w-full font-semibold"
-              onClick={() => setCobrarOpen(true)}
-            >
-              <Receipt className="size-4" />
-              Cobrar / Facturar
-            </Button>
+            {/* Un pedido ya saldado no se vuelve a cobrar: hasta ahora el botón
+                miraba sólo el estado operativo (`isTerminal` = entregado /
+                cancelado), así que un delivery pagado online ofrecía cobrarse
+                otra vez y registraba un segundo pago contra la misma orden. */}
+            {isPaid ? (
+              <p className="flex items-center justify-center gap-2 rounded-lg bg-emerald-50 py-2.5 text-sm font-semibold text-emerald-800 ring-1 ring-emerald-200">
+                <Receipt className="size-4" />
+                Pedido cobrado
+              </p>
+            ) : (
+              <Button
+                variant="outline"
+                size="lg"
+                className="w-full font-semibold"
+                onClick={() => setCobrarOpen(true)}
+              >
+                <Receipt className="size-4" />
+                Cobrar / Facturar
+              </Button>
+            )}
             {isPendingOnline && onConfirm ? (
               <Button
                 size="lg"
@@ -563,7 +578,20 @@ function PaymentChip({
   method: string | null | undefined;
   status: string | null | undefined;
 }) {
-  if (!method || method !== "mp") return null;
+  // Antes sólo se renderizaba para MP, así que un pedido en efectivo no tenía
+  // ningún indicador de pago en el detalle — ni antes ni después de cobrarlo.
+  if (!method) return null;
+  if (method !== "mp") {
+    return status === "paid" ? (
+      <span className="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-800">
+        Efectivo · Cobrado
+      </span>
+    ) : (
+      <span className="inline-flex items-center rounded-full bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800">
+        Efectivo · A cobrar
+      </span>
+    );
+  }
 
   const styles: Record<string, { bg: string; text: string; label: string }> = {
     paid: { bg: "bg-emerald-50", text: "text-emerald-800", label: "MP · Pagado" },

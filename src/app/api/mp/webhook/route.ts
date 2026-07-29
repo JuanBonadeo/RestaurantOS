@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { closeOrderIfFullyPaid } from "@/lib/billing/cobro-actions";
+import { getDefaultCaja } from "@/lib/caja/queries";
 import { notifyScheduledConfirmed } from "@/lib/notifications/delivery-notify";
 import { routeOrderToCocina } from "@/lib/orders/route-to-cocina";
 import { isScheduledForLater } from "@/lib/orders/scheduled";
@@ -227,7 +228,7 @@ export async function POST(req: Request) {
   const orderId = externalRef;
   const { data: order } = await service
     .from("orders")
-    .select("id, business_id, status, payment_status, scheduled_at")
+    .select("id, business_id, status, payment_status, scheduled_at, total_cents")
     .eq("id", orderId)
     .maybeSingle();
   if (!order) {
@@ -275,6 +276,49 @@ export async function POST(req: Request) {
   if (updErr) {
     console.error("MP webhook: update failed", updErr);
     return NextResponse.json({ error: "update failed" }, { status: 500 });
+  }
+
+  // ── El pago entra a la caja ───────────────────────────────────
+  // Hasta acá el flow legacy sólo marcaba `orders.payment_status`: la plata de
+  // un delivery pagado online no existía en `payments`, así que no aparecía en
+  // la caja ni en la recaudación del cierre de turno (que se arma leyendo
+  // `payments`). Como no hay cajero que elija dónde asentarlo, va a la caja por
+  // defecto del negocio.
+  //
+  // Idempotente por el índice único parcial `(business_id, mp_payment_id)`
+  // (migración 0026): MP reintenta hasta recibir un 2xx y un reintento no puede
+  // acreditar la misma plata dos veces.
+  if (nextPaymentStatus === "paid") {
+    const caja = await getDefaultCaja(business.id);
+    if (!caja) {
+      // Sin cajas cargadas no hay dónde asentarlo. El pago ya quedó acreditado
+      // en la orden; no se pierde, pero hay que avisar fuerte porque la caja va
+      // a cerrar sin esta venta.
+      console.error("MP webhook: negocio sin cajas, pago sin asentar", {
+        orderId: order.id,
+        businessId,
+      });
+    } else {
+      const { error: payErr } = await service.from("payments").insert({
+        order_id: order.id,
+        business_id: business.id,
+        split_id: null,
+        caja_id: caja.id,
+        method: "mp_link",
+        amount_cents: (order as { total_cents: number }).total_cents,
+        tip_cents: 0,
+        mp_payment_id: paymentId,
+        payment_status: "paid",
+      });
+      // 23505 = unique_violation: ya lo habíamos asentado en una entrega previa
+      // del mismo webhook. Es el camino esperado en un reintento, no un error.
+      if (payErr && payErr.code !== "23505") {
+        console.error("MP webhook: no se pudo asentar el pago en la caja", {
+          orderId: order.id,
+          error: payErr,
+        });
+      }
+    }
   }
 
   // Auto-march (spec-05): pago aprobado → rutear a cocina.

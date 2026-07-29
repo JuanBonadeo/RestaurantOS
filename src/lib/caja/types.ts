@@ -4,6 +4,8 @@ export type Caja = {
   name: string;
   is_active: boolean;
   sort_order: number;
+  /** Dónde caen los cobros sin cajero (pago online). Máx 1 por negocio. */
+  is_default: boolean;
 };
 
 export type CajaCorte = {
