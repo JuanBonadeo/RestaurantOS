@@ -1,14 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Ban, Scissors, Users } from "lucide-react";
+import { Ban, Banknote, Plus, Scissors, Users, X } from "lucide-react";
 import { toast } from "sonner";
 
 import {
   dividirPorComensal,
   dividirPorItems,
+  dividirPorMonto,
   dividirPorPersonas,
 } from "@/lib/billing/cuenta-actions";
+import { expectedByAmounts } from "@/lib/billing/totals";
 import type { CuentaState } from "@/lib/billing/types";
 import { formatCurrency } from "@/lib/currency";
 import { cn } from "@/lib/utils";
@@ -73,6 +75,7 @@ export function DividirModal({
   items,
   orderId,
   slug,
+  totalCents,
   parentStartTransition,
   isPending,
   onDone,
@@ -82,16 +85,24 @@ export function DividirModal({
   items: CuentaState["items"];
   orderId: string;
   slug: string;
+  /** Total de la cuenta (con propina y descuento) — para calcular el resto en
+   *  la tab «Por monto». Es el total que ve el usuario; el server recalcula el
+   *  suyo al dividir, así que acá sólo se usa para mostrar. */
+  totalCents: number;
   parentStartTransition: (cb: () => void | Promise<void>) => void;
   /** Hay una división (u otro refresh) en vuelo: bloquea re-envíos. */
   isPending: boolean;
   onDone: () => void;
 }) {
   const startTransition = parentStartTransition;
-  const [tab, setTab] = useState<"personas" | "items" | "comensal">("personas");
+  const [tab, setTab] = useState<
+    "personas" | "items" | "comensal" | "monto"
+  >("personas");
   const [count, setCount] = useState(2);
   const [mapping, setMapping] = useState<Record<string, number>>({});
   const [numSplits, setNumSplits] = useState(2);
+  /** Montos cargados a mano, en centavos. 0 = renglón todavía vacío. */
+  const [montos, setMontos] = useState<number[]>([0]);
 
   const hasSeatNumbers = useMemo(
     () =>
@@ -106,6 +117,7 @@ export function DividirModal({
       setCount(2);
       setMapping({});
       setNumSplits(2);
+      setMontos([0]);
       setTab("personas");
     }
   }, [open]);
@@ -114,6 +126,19 @@ export function DividirModal({
     () => items.every((it) => mapping[it.id]),
     [items, mapping],
   );
+
+  // Los renglones vacíos no cuentan: se puede tener un input a medio tipear sin
+  // que la vista previa grite. La validación real (y la del server) corre sobre
+  // los montos efectivamente cargados.
+  const montosCargados = useMemo(
+    () => montos.filter((m) => m > 0),
+    [montos],
+  );
+  const previewMontos = useMemo(
+    () => expectedByAmounts(totalCents, montosCargados),
+    [totalCents, montosCargados],
+  );
+  const restoMontos = totalCents - montosCargados.reduce((a, b) => a + b, 0);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -125,11 +150,14 @@ export function DividirModal({
           <TabsList
             className={cn(
               "mb-4 grid",
-              hasSeatNumbers ? "grid-cols-3" : "grid-cols-2",
+              hasSeatNumbers ? "grid-cols-4" : "grid-cols-3",
             )}
           >
             <TabsTrigger value="personas">
               <Users className="mr-2 size-4" /> Personas
+            </TabsTrigger>
+            <TabsTrigger value="monto">
+              <Banknote className="mr-2 size-4" /> Monto
             </TabsTrigger>
             <TabsTrigger value="items">
               <Scissors className="mr-2 size-4" /> Por items
@@ -140,6 +168,127 @@ export function DividirModal({
               </TabsTrigger>
             )}
           </TabsList>
+
+          <TabsContent value="monto" className="space-y-4">
+            <div>
+              <Label>¿Cuánto pone cada uno?</Label>
+              <p className="mt-1 text-xs text-zinc-500">
+                Cargá los montos que ya sabés. Lo que falte para llegar al total
+                queda como una sub-cuenta más.
+              </p>
+              <div className="mt-3 space-y-2">
+                {montos.map((m, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="w-6 shrink-0 text-sm font-semibold text-zinc-500 tabular-nums">
+                      {i + 1}
+                    </span>
+                    <div className="relative flex-1">
+                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-zinc-400">
+                        $
+                      </span>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        min={0}
+                        value={m === 0 ? "" : m / 100}
+                        placeholder="0"
+                        onChange={(e) => {
+                          const cents = Math.max(
+                            0,
+                            Math.round(Number(e.target.value) * 100),
+                          );
+                          setMontos((prev) =>
+                            prev.map((v, idx) => (idx === i ? cents : v)),
+                          );
+                        }}
+                        className="h-11 w-full rounded-xl border border-zinc-200 pl-7 pr-3 text-base font-semibold tabular-nums focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+                      />
+                    </div>
+                    {montos.length > 1 && (
+                      <button
+                        type="button"
+                        aria-label={`Quitar monto ${i + 1}`}
+                        onClick={() =>
+                          setMontos((prev) => prev.filter((_, idx) => idx !== i))
+                        }
+                        className="inline-flex size-9 shrink-0 items-center justify-center rounded-full text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700"
+                      >
+                        <X className="size-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => setMontos((prev) => [...prev, 0])}
+                className="mt-2 inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold text-zinc-600 ring-1 ring-zinc-200 transition hover:bg-zinc-50"
+              >
+                <Plus className="size-3.5" /> Agregar monto
+              </button>
+            </div>
+
+            {/* Vista previa: lo que va a quedar. El resto es la última
+                sub-cuenta y es lo que más se mira. */}
+            <div className="rounded-xl bg-zinc-50 px-4 py-3 text-sm">
+              <div className="flex items-baseline justify-between">
+                <span className="text-zinc-500">Total de la cuenta</span>
+                <span className="font-semibold tabular-nums text-zinc-900">
+                  {formatCurrency(totalCents)}
+                </span>
+              </div>
+              <div className="mt-1.5 flex items-baseline justify-between">
+                <span className="text-zinc-500">
+                  {restoMontos > 0 ? "Resto (última sub-cuenta)" : "Resto"}
+                </span>
+                <span
+                  className={cn(
+                    "font-bold tabular-nums",
+                    restoMontos < 0 ? "text-rose-600" : "text-zinc-900",
+                  )}
+                >
+                  {formatCurrency(restoMontos)}
+                </span>
+              </div>
+              {previewMontos.ok && (
+                <p className="mt-2 text-xs text-zinc-500">
+                  Queda dividida en {previewMontos.expecteds.length}{" "}
+                  {previewMontos.expecteds.length === 1
+                    ? "sub-cuenta"
+                    : "sub-cuentas"}
+                  .
+                </p>
+              )}
+            </div>
+
+            {montosCargados.length > 0 && !previewMontos.ok && (
+              <p className="text-xs font-semibold text-rose-600">
+                {previewMontos.error}
+              </p>
+            )}
+
+            <button
+              type="button"
+              disabled={isPending || !previewMontos.ok}
+              className="mt-1 inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-primary text-sm font-bold text-primary-foreground transition hover:bg-primary/90 active:translate-y-px disabled:opacity-50"
+              onClick={() =>
+                startTransition(async () => {
+                  const r = await dividirPorMonto(
+                    orderId,
+                    montosCargados,
+                    slug,
+                  );
+                  if (!r.ok) toast.error(r.error);
+                  else {
+                    toast.success(`Dividido en ${r.data.splits.length}`);
+                    onDone();
+                  }
+                })
+              }
+            >
+              Dividir por monto
+            </button>
+          </TabsContent>
           <TabsContent value="personas" className="space-y-4">
             <div>
               <Label>¿Cuántas personas?</Label>

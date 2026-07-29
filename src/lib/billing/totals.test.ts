@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   calculateTotals,
+  expectedByAmounts,
+  isCashShortPayment,
   expectedBySplitItems,
   prorrateEqualSplits,
   sumActiveItems,
@@ -125,5 +127,109 @@ describe("expectedBySplitItems", () => {
       discount_cents: 0,
     });
     expect(result[0].expected_amount_cents).toBe(5_000);
+  });
+});
+
+describe("expectedByAmounts (dividir por monto)", () => {
+  it("el resto queda como última sub-cuenta", () => {
+    const r = expectedByAmounts(30_000, [10_000]);
+    expect(r).toEqual({ ok: true, expecteds: [10_000, 20_000] });
+  });
+
+  it("varios montos cargados + resto", () => {
+    const r = expectedByAmounts(50_000, [10_000, 15_000]);
+    expect(r).toEqual({ ok: true, expecteds: [10_000, 15_000, 25_000] });
+  });
+
+  it("si los montos suman exacto no agrega split de resto", () => {
+    const r = expectedByAmounts(30_000, [10_000, 20_000]);
+    expect(r).toEqual({ ok: true, expecteds: [10_000, 20_000] });
+  });
+
+  it("la suma de los expecteds siempre cierra contra el total", () => {
+    for (const [total, amounts] of [
+      [30_000, [10_000]],
+      [10_001, [3_333, 3_333]],
+      [99_999, [1]],
+    ] as Array<[number, number[]]>) {
+      const r = expectedByAmounts(total, amounts);
+      expect(r.ok).toBe(true);
+      if (!r.ok) return;
+      expect(r.expecteds.reduce((a, b) => a + b, 0)).toBe(total);
+    }
+  });
+
+  it("rechaza montos que se pasan del total", () => {
+    const r = expectedByAmounts(30_000, [10_000, 25_000]);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error).toContain("suman más");
+  });
+
+  it("rechaza un único monto igual al total (no habría división)", () => {
+    const r = expectedByAmounts(30_000, [30_000]);
+    expect(r.ok).toBe(false);
+  });
+
+  it("rechaza montos cero o negativos", () => {
+    expect(expectedByAmounts(30_000, [0]).ok).toBe(false);
+    expect(expectedByAmounts(30_000, [-1_000]).ok).toBe(false);
+  });
+
+  it("rechaza centavos no enteros y cuenta vacía", () => {
+    expect(expectedByAmounts(30_000, [10_000.5]).ok).toBe(false);
+    expect(expectedByAmounts(30_000, []).ok).toBe(false);
+    expect(expectedByAmounts(0, [1_000]).ok).toBe(false);
+  });
+});
+
+describe("isCashShortPayment (efectivo: nunca de menos)", () => {
+  const base = { method: "cash", adjustment_cents: 0, remaining_cents: 10_000 };
+
+  it("rechaza pagar menos de lo que falta", () => {
+    expect(isCashShortPayment({ ...base, amount_cents: 9_999 })).toBe(true);
+  });
+
+  it("acepta el monto exacto", () => {
+    expect(isCashShortPayment({ ...base, amount_cents: 10_000 })).toBe(false);
+  });
+
+  it("acepta de más — es vuelto", () => {
+    expect(isCashShortPayment({ ...base, amount_cents: 20_000 })).toBe(false);
+  });
+
+  it("con descuento por efectivo, pagar el neto es pagar completo", () => {
+    // -10%: la cuenta es 10.000, el cliente entrega 9.000 y está saldada.
+    expect(
+      isCashShortPayment({
+        ...base,
+        amount_cents: 9_000,
+        adjustment_cents: -1_000,
+      }),
+    ).toBe(false);
+    // Un peso menos que el neto sí es de menos.
+    expect(
+      isCashShortPayment({
+        ...base,
+        amount_cents: 8_999,
+        adjustment_cents: -1_000,
+      }),
+    ).toBe(true);
+  });
+
+  it("con recargo, la base sigue siendo lo que se debe", () => {
+    expect(
+      isCashShortPayment({
+        ...base,
+        amount_cents: 11_000,
+        adjustment_cents: 1_000,
+      }),
+    ).toBe(false);
+  });
+
+  it("no aplica a los otros métodos (dos tarjetas, transferencia parcial)", () => {
+    for (const method of ["card_manual", "transfer", "other", "mp_link"]) {
+      expect(isCashShortPayment({ ...base, method, amount_cents: 1 })).toBe(false);
+    }
   });
 });

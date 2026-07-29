@@ -12,6 +12,7 @@ import { getBusiness } from "@/lib/tenant";
 
 import {
   calculateTotals,
+  expectedByAmounts,
   expectedBySplitItems,
   groupItemsBySeat,
   prorrateEqualSplits,
@@ -493,6 +494,72 @@ export async function dividirPorComensal(
       "por_comensal",
       expectedsWithLabels,
       mapping,
+    );
+    revalidatePath(`/${businessSlug}/mozo`);
+    return actionOk({ splits });
+  } catch (e) {
+    return actionError(`No se pudieron crear los splits: ${(e as Error).message}`);
+  }
+}
+
+/**
+ * Dividir por monto de dinero: el mozo carga cuánto pone cada uno y el resto
+ * queda como última sub-cuenta (ver `expectedByAmounts`). Es el cuarto modo,
+ * y el único que no se deriva de los items — los montos los decide la mesa.
+ *
+ * Es también el camino formal para el pago partido: con el cobro en efectivo
+ * bloqueando montos menores a lo que se debe, partir una cuenta deja de ser
+ * "cobro un poco menos" y pasa a ser una división explícita, con su expected y
+ * su progreso visibles.
+ */
+export async function dividirPorMonto(
+  orderId: string,
+  amounts: number[],
+  businessSlug: string,
+): Promise<ActionResult<{ splits: OrderSplit[] }>> {
+  const business = await getBusiness(businessSlug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+  const order = await loadOrderForBusiness(service, orderId, business.id);
+  if (!order) return actionError("Orden no encontrada.");
+  if (order.lifecycle_status !== "open") {
+    return actionError("La orden ya está cerrada.");
+  }
+
+  const items = await loadActiveItems(service, orderId);
+  if (items.length === 0 || sumActiveItems(items) === 0) {
+    return actionError("No hay items para dividir.");
+  }
+
+  // El total a repartir es el de la cuenta con propina y descuento ya
+  // aplicados — igual que `dividirPorPersonas`. Dividir sobre el subtotal
+  // dejaría splits que no suman lo que el cliente tiene que pagar.
+  const totals = calculateTotals({
+    subtotal_cents: sumActiveItems(items),
+    tip_cents: order.tip_cents,
+    discount_cents: order.discount_cents,
+  });
+
+  const result = expectedByAmounts(totals.total_cents, amounts);
+  if (!result.ok) return actionError(result.error);
+
+  const expecteds = result.expecteds.map((amt, i) => ({
+    split_index: i + 1,
+    expected_amount_cents: amt,
+  }));
+
+  try {
+    const splits = await persistSplits(
+      service,
+      orderId,
+      business.id,
+      "por_monto",
+      expecteds,
+      null,
     );
     revalidatePath(`/${businessSlug}/mozo`);
     return actionOk({ splits });

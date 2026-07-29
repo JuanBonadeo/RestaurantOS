@@ -49,6 +49,86 @@ export function prorrateEqualSplits(total_cents: number, count: number): number[
 }
 
 /**
+ * En efectivo no se cobra de menos. Si el cliente da $5.000 sobre una cuenta de
+ * $8.000, eso no es "un pago parcial": es que todavía debe plata, y registrarlo
+ * como cobro deja la caja diciendo que entró algo que no cerró. De más sí — la
+ * diferencia es vuelto.
+ *
+ * `amount_cents` viaja con el ajuste del método ya aplicado, así que la
+ * comparación se hace contra la **base sin ajuste**: con un descuento por
+ * efectivo del 10%, pagar $9.000 de una cuenta de $10.000 es pagar completo.
+ *
+ * Los demás métodos no entran acá: dos tarjetas sobre una misma cuenta, o una
+ * transferencia parcial, son casos reales. Para partir un pago en efectivo está
+ * dividir la cuenta por monto.
+ */
+export function isCashShortPayment(input: {
+  method: string;
+  amount_cents: number;
+  adjustment_cents: number;
+  remaining_cents: number;
+}): boolean {
+  if (input.method !== "cash") return false;
+  const base = input.amount_cents - input.adjustment_cents;
+  return base < input.remaining_cents;
+}
+
+export type ExpectedByAmountsResult =
+  | { ok: true; expecteds: number[] }
+  | { ok: false; error: string };
+
+/**
+ * Dividir por monto: el mozo carga cuánto pone cada uno ("yo pongo $10.000")
+ * y el **resto queda como última sub-cuenta**. Es cómo se divide de verdad en
+ * la mesa — nadie calcula su parte exacta, alguien pone un número y otro paga
+ * lo que falta.
+ *
+ * Por eso los montos cargados NO tienen que sumar el total: si suman menos, el
+ * remanente es un split más. Si suman exacto, esos son todos los splits (y
+ * tienen que ser al menos 2). Si suman de más, es un error del que carga —
+ * nunca se crea una cuenta que espera más plata de la que se debe.
+ *
+ * A diferencia de `prorrateEqualSplits`, acá no hay redondeo que repartir: los
+ * montos son los que el usuario tipeó y el resto absorbe la diferencia por
+ * construcción.
+ */
+export function expectedByAmounts(
+  total_cents: number,
+  amounts: number[],
+): ExpectedByAmountsResult {
+  if (total_cents <= 0) {
+    return { ok: false, error: "No hay nada para dividir." };
+  }
+  if (amounts.length === 0) {
+    return { ok: false, error: "Cargá al menos un monto." };
+  }
+  if (amounts.some((a) => !Number.isInteger(a))) {
+    return { ok: false, error: "Los montos tienen que estar en centavos enteros." };
+  }
+  if (amounts.some((a) => a <= 0)) {
+    return { ok: false, error: "Todos los montos tienen que ser mayores a cero." };
+  }
+
+  const sum = amounts.reduce((acc, a) => acc + a, 0);
+  if (sum > total_cents) {
+    return {
+      ok: false,
+      error: `Los montos suman más que el total de la cuenta (se pasan por ${sum - total_cents} centavos).`,
+    };
+  }
+
+  const rest = total_cents - sum;
+  const expecteds = rest > 0 ? [...amounts, rest] : [...amounts];
+  if (expecteds.length < 2) {
+    return {
+      ok: false,
+      error: "Se necesitan al menos 2 sub-cuentas para dividir.",
+    };
+  }
+  return { ok: true, expecteds };
+}
+
+/**
  * Agrupa items activos por seat_number. null = sin asignar.
  */
 export function groupItemsBySeat(items: CuentaItem[]): Map<number | null, CuentaItem[]> {

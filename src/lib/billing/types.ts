@@ -8,7 +8,11 @@
 import type { PaymentMethod } from "@/lib/caja/types";
 export type { PaymentMethod };
 
-export type SplitMode = "por_personas" | "por_items" | "por_comensal";
+export type SplitMode =
+  | "por_personas"
+  | "por_items"
+  | "por_comensal"
+  | "por_monto";
 export type SplitStatus = "pending" | "paid" | "cancelled";
 
 export type OrderSplit = {

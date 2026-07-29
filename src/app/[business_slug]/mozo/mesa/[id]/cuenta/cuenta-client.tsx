@@ -536,6 +536,7 @@ export function CuentaClient({
         items={items.filter((i) => i.cancelled_at === null)}
         orderId={cuenta.order.id}
         slug={slug}
+        totalCents={total}
         parentStartTransition={startTransition}
         isPending={isPending}
         onDone={() => {

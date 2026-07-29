@@ -9,6 +9,7 @@ vi.mock("@/lib/billing/cuenta-actions", () => ({
   dividirPorPersonas: vi.fn(),
   dividirPorItems: vi.fn(),
   dividirPorComensal: vi.fn(),
+  dividirPorMonto: vi.fn(),
 }));
 
 function renderModal(isPending: boolean) {
@@ -19,6 +20,7 @@ function renderModal(isPending: boolean) {
       items={[]}
       orderId="ord-1"
       slug="demo"
+      totalCents={30_000}
       parentStartTransition={(cb) => void cb()}
       isPending={isPending}
       onDone={() => {}}

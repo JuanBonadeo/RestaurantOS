@@ -52,6 +52,7 @@ import type {
   OrderSplit,
   PaymentMethod,
 } from "@/lib/billing/types";
+import { isCashShortPayment } from "@/lib/billing/totals";
 import type { PaymentMethodConfig } from "@/lib/caja/types";
 import { formatCurrency } from "@/lib/currency";
 import { cn } from "@/lib/utils";
@@ -525,6 +526,14 @@ function CobrarSplitPanel({
   const adjustmentPercent = configForMethod?.adjustment_percent ?? 0;
   const { adjustmentCents, finalCents } = calculateAdjustment(remaining, adjustmentPercent);
   const [amount, setAmount] = useState(remaining);
+  // En efectivo no se cobra de menos (de más es vuelto). Misma regla que el
+  // server aplica en `registrarPago` — acá sólo para no dejar tocar Confirmar.
+  const cashShort = isCashShortPayment({
+    method: method ?? "",
+    amount_cents: amount,
+    adjustment_cents: adjustmentCents,
+    remaining_cents: remaining,
+  });
   const [hasSetAmount, setHasSetAmount] = useState(false);
   const [tip, setTip] = useState(0);
   const [lastFour, setLastFour] = useState("");
@@ -877,11 +886,19 @@ function CobrarSplitPanel({
             </div>
           )}
 
+          {cashShort && (
+            <p className="text-xs font-semibold text-rose-600">
+              En efectivo no se puede cobrar menos de {formatCurrency(finalCents)}.
+              Si van a pagar en partes, volvé y dividí la cuenta por monto.
+            </p>
+          )}
+
           <button
             type="button"
             disabled={
               isRegistering ||
               amount <= 0 ||
+              cashShort ||
               ((method === "other" || method === "transfer") && notes.trim() === "") ||
               (method === "card_manual" &&
                 lastFour !== "" &&

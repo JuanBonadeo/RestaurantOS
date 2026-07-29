@@ -9,10 +9,11 @@ import type { Caja, PaymentMethod, PaymentMethodConfig } from "@/lib/caja/types"
 import { requireMozoActionContext } from "@/lib/mozo/auth";
 import { canCancelItem } from "@/lib/permissions/can";
 import { createPreference } from "@/lib/payments/mercadopago";
+import { formatCurrency } from "@/lib/currency";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
-import { sumActiveItems } from "./totals";
+import { isCashShortPayment, sumActiveItems } from "./totals";
 import type { OrderSplit, Payment } from "./types";
 
 type GenericClient = SupabaseClient;
@@ -402,6 +403,25 @@ export async function registrarPago(
   if (input.method === "mp_link" || input.method === "mp_qr") {
     return actionError(
       "Para MP, usá iniciarPagoMp para generar la preference primero.",
+    );
+  }
+
+  // En efectivo no se cobra de menos: si falta plata, el cobro no está cerrado
+  // y la caja quedaría diciendo que entró algo que no alcanzó. De más sí (es
+  // vuelto). Para partir un pago está dividir la cuenta por monto.
+  const remainingCents = split
+    ? split.expected_amount_cents - split.paid_amount_cents
+    : order.total_cents - order.total_paid_cents;
+  if (
+    isCashShortPayment({
+      method: input.method,
+      amount_cents: input.amount_cents,
+      adjustment_cents: input.adjustment_cents ?? 0,
+      remaining_cents: remainingCents,
+    })
+  ) {
+    return actionError(
+      `En efectivo no se puede cobrar menos de lo que falta (${formatCurrency(remainingCents)}). Si van a pagar en partes, dividí la cuenta por monto.`,
     );
   }
 
