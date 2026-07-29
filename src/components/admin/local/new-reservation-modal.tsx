@@ -221,7 +221,9 @@ export function NewReservationModal({ slug, tables, floorPlanId, onClose }: Prop
     });
   }, [mode, slug, date, service, partySize, floorPlanId]);
 
-  const baseValid = name.trim().length > 0 && phone.trim().length >= 4 && !pending;
+  // El teléfono es opcional cuando la carga el encargado (el libro del club no
+  // siempre lo tiene). El cliente web sí lo necesita — eso lo valida el server.
+  const baseValid = name.trim().length > 0 && !pending;
   const canSubmit =
     mode === "flexible"
       ? baseValid && service.length > 0 && arrivalTime.length > 0
@@ -338,7 +340,7 @@ export function NewReservationModal({ slug, tables, floorPlanId, onClose }: Prop
             </div>
 
             <div>
-              <label className={LABEL_CLS}>Teléfono *</label>
+              <label className={LABEL_CLS}>Teléfono (opcional)</label>
               <input
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}

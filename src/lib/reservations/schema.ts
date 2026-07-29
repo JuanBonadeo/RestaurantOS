@@ -124,7 +124,8 @@ export const DeleteReservationServiceGroupInputSchema = z.object({
  * al llegar), la hora es opcional (sin hora → inicio del servicio). El servicio
  * es obligatorio.
  */
-export const CreateFlexibleReservationInputSchema = z.object({
+export const CreateFlexibleReservationInputSchema = z
+  .object({
   business_slug: z.string().min(1),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida (YYYY-MM-DD)"),
   /** Nombre del servicio (matchea reservation_services.name). */
@@ -139,7 +140,15 @@ export const CreateFlexibleReservationInputSchema = z.object({
   /** Zona/salón (para genéricas). */
   floor_plan_id: z.string().uuid().optional(),
   customer_name: z.string().trim().min(1).max(80),
-  customer_phone: z.string().trim().min(4).max(40),
+  /** Obligatorio para el cliente (web/chatbot); opcional cuando lo carga el
+   *  encargado (`source: "admin"`): el libro del club no siempre lo tiene.
+   *  La columna es NOT NULL, así que sin teléfono se guarda "". */
+  customer_phone: z
+    .string()
+    .trim()
+    .max(40)
+    .optional()
+    .transform((v) => v ?? ""),
   notes: z
     .string()
     .trim()
@@ -147,7 +156,11 @@ export const CreateFlexibleReservationInputSchema = z.object({
     .optional()
     .transform((v) => (!v ? null : v)),
   source: z.enum(["web", "chatbot", "admin"]).default("web"),
-});
+  })
+  .refine((v) => v.source === "admin" || v.customer_phone.length >= 4, {
+    message: "Necesitamos un teléfono de contacto.",
+    path: ["customer_phone"],
+  });
 export type CreateFlexibleReservationInput = z.infer<typeof CreateFlexibleReservationInputSchema>;
 
 export const CreateReservationInputSchema = z.object({
@@ -176,6 +189,14 @@ export type CreateReservationInput = z.infer<typeof CreateReservationInputSchema
 
 export const AdminCreateReservationInputSchema = CreateReservationInputSchema.extend({
   table_id: z.string().uuid().optional(),
+  /** El encargado puede cargar la reserva sin teléfono (a diferencia del
+   *  cliente web, que sí lo necesita). Columna NOT NULL → se guarda "". */
+  customer_phone: z
+    .string()
+    .trim()
+    .max(40)
+    .optional()
+    .transform((v) => v ?? ""),
 });
 
 export type AdminCreateReservationInput = z.infer<typeof AdminCreateReservationInputSchema>;
