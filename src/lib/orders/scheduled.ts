@@ -92,7 +92,6 @@ export function isWithinBusinessHours(
 export type ScheduledOrderValidation = {
   scheduledAt: Date;
   deliveryType: "delivery" | "pickup" | "dine_in";
-  paymentMethod: "cash" | "mp" | undefined;
   businessHours: BusinessHourSlot[];
   timezone: string;
   now?: Date;
@@ -104,13 +103,16 @@ export type ScheduledValidationResult =
 
 /**
  * Valida un pedido programado. Orden de chequeos pensado para que cada error
- * aísle su causa: tipo → pago → anticipación → ventana → horario.
+ * aísle su causa: tipo → anticipación → ventana → horario.
  *
- * Spec 061: el **delivery** también se programa, y puede pagarse en efectivo al
- * recibir. El **retiro** sigue exigiendo MP adelantado (nadie retiene nada si
- * el cliente no aparece). La venta de mostrador (`dine_in`) nunca se programa —
- * antes caía en el rechazo genérico de "solo retiro"; ahora que el delivery
- * está permitido necesita su propio chequeo o se colaría.
+ * Spec 061: retiro y delivery se programan, **con cualquier método de pago**.
+ * El prepago obligatorio de spec 31 se cayó — el resguardo contra el pedido
+ * fantasma no es cobrar por adelantado sino que nada entra a cocina sin aval:
+ * un programado impago espera a que el encargado lo acepte antes de que el
+ * cron lo marche (`aceptarPedidoProgramado`, política de spec 047).
+ *
+ * La venta de mostrador (`dine_in`) nunca se programa — antes caía en el
+ * rechazo genérico de "solo retiro"; ahora necesita su propio chequeo.
  */
 export function validateScheduledOrder(
   input: ScheduledOrderValidation,
@@ -119,13 +121,6 @@ export function validateScheduledOrder(
 
   if (input.deliveryType === "dine_in") {
     return { ok: false, error: "Los pedidos en mesa no se programan." };
-  }
-  if (input.deliveryType === "pickup" && input.paymentMethod !== "mp") {
-    return {
-      ok: false,
-      error:
-        "Un pedido de retiro programado se paga con Mercado Pago por adelantado.",
-    };
   }
 
   const leadMs = input.scheduledAt.getTime() - now.getTime();

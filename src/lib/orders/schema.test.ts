@@ -83,13 +83,13 @@ describe("CreateOrderInput", () => {
     expect(result.success).toBe(true);
   });
 
-  it("rejects a scheduled pickup paid with cash (prepay sigue siendo obligatorio)", () => {
+  it("accepts a scheduled pickup paid with cash (el prepago dejó de ser obligatorio)", () => {
     const result = CreateOrderInput.safeParse({
       ...base,
       payment_method: "cash",
       scheduled_at: "2026-06-26T13:00:00-03:00",
     });
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
   });
 
   it("rejects a malformed scheduled_at", () => {

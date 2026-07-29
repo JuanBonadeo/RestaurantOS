@@ -69,12 +69,12 @@ export async function persistOrder(
   const paymentMethod = wantsMp ? "mp" : "cash";
 
   // ── Pedido diferido (spec 31 + 061) ─────────────────────────────────────
-  // Con `scheduled_at` validamos contra el horario del negocio + las reglas del
-  // tipo (retiro exige MP adelantado, delivery acepta efectivo, mesa no se
-  // programa) + anticipación y ventana. Server es la fuente de verdad: el
+  // Con `scheduled_at` validamos contra el horario del negocio + anticipación,
+  // ventana, y que no sea un pedido en mesa. Server es la fuente de verdad: el
   // checkout reusa el mismo helper sólo para feedback. El "agendado" es un
   // estado derivado (futuro + sin comandas), y no marcha hasta el lead del
-  // negocio (cron) o "marchar ahora".
+  // negocio (cron) o "marchar ahora"; si está impago, hasta que el encargado
+  // lo acepte.
   let scheduledAtIso: string | null = null;
   if (data.scheduled_at) {
     const scheduledAt = new Date(data.scheduled_at);
@@ -85,7 +85,6 @@ export async function persistOrder(
     const validation = validateScheduledOrder({
       scheduledAt,
       deliveryType: data.delivery_type,
-      paymentMethod,
       businessHours: (hoursRows ?? []) as BusinessHourSlot[],
       timezone: business.timezone,
     });

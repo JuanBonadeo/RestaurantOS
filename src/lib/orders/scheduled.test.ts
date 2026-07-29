@@ -23,7 +23,6 @@ const HOURS: BusinessHourSlot[] = [
 function base() {
   return {
     deliveryType: "pickup" as const,
-    paymentMethod: "mp" as const,
     businessHours: HOURS,
     timezone: TZ,
     now: NOW,
@@ -31,7 +30,7 @@ function base() {
 }
 
 describe("validateScheduledOrder", () => {
-  it("acepta un diferido válido (pickup + MP + dentro de horario y ventana)", () => {
+  it("acepta un diferido válido (dentro de horario y ventana)", () => {
     // Viernes 13:00 AR → dow=5, dentro de 12–16.
     const scheduledAt = new Date("2026-06-26T13:00:00-03:00");
     expect(validateScheduledOrder({ ...base(), scheduledAt })).toEqual({
@@ -39,36 +38,34 @@ describe("validateScheduledOrder", () => {
     });
   });
 
-  // ── Spec 061: el delivery también se programa ─────────────────────────────
+  // ── Spec 061: delivery también, y sin exigir prepago ──────────────────────
 
-  it("acepta delivery con MP", () => {
-    const scheduledAt = new Date("2026-06-26T13:00:00-03:00");
-    expect(
-      validateScheduledOrder({ ...base(), deliveryType: "delivery", scheduledAt }),
-    ).toEqual({ ok: true });
-  });
-
-  it("acepta delivery en efectivo (se paga al recibir)", () => {
+  it("acepta delivery (programar dejó de ser sólo retiro)", () => {
     const scheduledAt = new Date("2026-06-26T13:00:00-03:00");
     expect(
       validateScheduledOrder({
         ...base(),
         deliveryType: "delivery",
-        paymentMethod: "cash",
         scheduledAt,
       }),
     ).toEqual({ ok: true });
   });
 
-  it("rechaza retiro en efectivo (el retiro sigue exigiendo MP adelantado)", () => {
+  it("el método de pago ya no es asunto del validador (ni retiro ni delivery)", () => {
+    // Antes, un programado exigía MP adelantado. El resguardo pasó a ser que el
+    // encargado acepte los impagos antes de que entren a cocina (spec 047), así
+    // que acá no hay nada que chequear.
     const scheduledAt = new Date("2026-06-26T13:00:00-03:00");
-    const res = validateScheduledOrder({
-      ...base(),
-      paymentMethod: "cash",
-      scheduledAt,
+    expect(validateScheduledOrder({ ...base(), scheduledAt })).toEqual({
+      ok: true,
     });
-    expect(res.ok).toBe(false);
-    expect(res).toMatchObject({ error: expect.stringContaining("Mercado Pago") });
+    expect(
+      validateScheduledOrder({
+        ...base(),
+        deliveryType: "delivery",
+        scheduledAt,
+      }),
+    ).toEqual({ ok: true });
   });
 
   it("rechaza dine_in con su propio mensaje (no se cuela por el hueco que abre delivery)", () => {
@@ -76,7 +73,6 @@ describe("validateScheduledOrder", () => {
     const res = validateScheduledOrder({
       ...base(),
       deliveryType: "dine_in",
-      paymentMethod: "mp",
       scheduledAt,
     });
     expect(res).toEqual({

@@ -69,19 +69,11 @@ export const CreateOrderInput = z
         path: ["delivery_address"],
       });
     }
-    if (data.scheduled_at) {
-      // Espejo de `validateScheduledOrder` (spec 061): retiro y delivery se
-      // programan; el retiro fuerza MP adelantado, el delivery puede pagarse en
-      // efectivo al recibir. El server revalida igual.
-      if (data.delivery_type === "pickup" && data.payment_method !== "mp") {
-        ctx.addIssue({
-          code: "custom",
-          message:
-            "Un pedido de retiro programado se paga con Mercado Pago por adelantado.",
-          path: ["payment_method"],
-        });
-      }
-    }
+    // `scheduled_at` no tiene reglas cruzadas acá (spec 061): retiro y delivery
+    // se programan con cualquier método de pago. Las reglas que quedan —
+    // anticipación, ventana, horario del local, y que `dine_in` no se programa —
+    // dependen del negocio (timezone + business_hours) y viven en
+    // `validateScheduledOrder`, que corre en `persistOrder`.
   });
 
 export type CreateOrderInput = z.infer<typeof CreateOrderInput>;

@@ -68,8 +68,7 @@ export function CheckoutForm({
   const [email] = useState(initialEmail);
   const [payment, setPayment] = useState<PaymentId>(mpEnabled ? "mp" : "cash");
   // Pedido diferido (spec 31 + 061): "¿para cuándo?" → ahora / programar.
-  // Retiro y delivery; el retiro exige MP (se paga por adelantado), el delivery
-  // se puede pagar en efectivo al recibir.
+  // Retiro y delivery, con cualquier método de pago.
   const [when, setWhen] = useState<When>("now");
   const [schedDate, setSchedDate] = useState("");
   const [schedTime, setSchedTime] = useState("");
@@ -94,12 +93,10 @@ export function CheckoutForm({
   const [promoError, setPromoError] = useState<string | null>(null);
 
   const isPickup = mode === "pickup";
-  // Programar un **retiro** exige MP (pago adelantado): sin MP no se ofrece. Un
-  // **delivery** se puede programar siempre — se paga en efectivo al recibir.
-  const canSchedule = isPickup ? mpEnabled : true;
-  const isScheduled = canSchedule && when === "scheduled";
-  /** Sólo el retiro programado fuerza el pago adelantado. */
-  const schedulePrepayOnly = isScheduled && isPickup;
+  // Programar ya no depende del método de pago (spec 061): el resguardo contra
+  // el pedido fantasma es que el encargado acepte los impagos antes de que
+  // entren a cocina, no cobrar por adelantado.
+  const isScheduled = when === "scheduled";
   const subtotal = cartTotal(items);
   const baseDeliveryFee = isPickup ? 0 : deliveryFeeCents;
   // free_shipping: el descuento se "absorbe" haciendo el envío 0
@@ -173,14 +170,6 @@ export function CheckoutForm({
     else if (!isPickup && payment === "pickup-cash") setPayment("cash");
   }, [isPickup, payment]);
 
-  useEffect(() => {
-    if (!canSchedule && when !== "now") setWhen("now");
-  }, [canSchedule, when]);
-  // Sólo el retiro programado fuerza MP. El delivery programado deja elegir.
-  useEffect(() => {
-    if (schedulePrepayOnly && payment !== "mp") setPayment("mp");
-  }, [schedulePrepayOnly, payment]);
-
   // Límites del input de fecha (YYYY-MM-DD en el TZ del local): de hoy hasta la
   // ventana máxima. El helper revalida horario/anticipación igual.
   const { todayStr, maxDateStr } = useMemo(() => {
@@ -200,40 +189,30 @@ export function CheckoutForm({
     };
   }, [businessTimezone]);
 
-  // Un **retiro** programado se paga sí o sí con MP adelantado (spec 31): no se
-  // ofrece efectivo. Un **delivery** programado usa las opciones de siempre
-  // (spec 061).
-  const paymentOptions: { id: PaymentId; label: string; sub: string }[] =
-    schedulePrepayOnly
+  // Programar ya no restringe el método de pago (spec 061): las opciones son
+  // siempre las mismas.
+  const paymentOptions: { id: PaymentId; label: string; sub: string }[] = [
+    ...(mpEnabled
       ? [
           {
             id: "mp" as const,
             label: "Mercado Pago",
-            sub: "Pago adelantado del pedido programado",
+            sub: "Pagás ahora desde la app",
           },
         ]
-      : [
-          ...(mpEnabled
-            ? [
-                {
-                  id: "mp" as const,
-                  label: "Mercado Pago",
-                  sub: "Pagás ahora desde la app",
-                },
-              ]
-            : []),
-          isPickup
-            ? {
-                id: "pickup-cash" as const,
-                label: "Efectivo al retirar",
-                sub: "Pagás en el local",
-              }
-            : {
-                id: "cash" as const,
-                label: "Efectivo al recibir",
-                sub: "Indicá con cuánto abonás",
-              },
-        ];
+      : []),
+    isPickup
+      ? {
+          id: "pickup-cash" as const,
+          label: "Efectivo al retirar",
+          sub: "Pagás en el local",
+        }
+      : {
+          id: "cash" as const,
+          label: "Efectivo al recibir",
+          sub: "Indicá con cuánto abonás",
+        },
+  ];
 
   const phoneOk = /^\+?[\d\s-]{8,}$/.test(phone);
 
@@ -263,11 +242,13 @@ export function CheckoutForm({
         );
         return;
       }
-      const dt = fromZonedTime(`${schedDate}T${schedTime}:00`, businessTimezone);
+      const dt = fromZonedTime(
+        `${schedDate}T${schedTime}:00`,
+        businessTimezone,
+      );
       const v = validateScheduledOrder({
         scheduledAt: dt,
         deliveryType: mode,
-        paymentMethod: payment === "mp" ? "mp" : "cash",
         businessHours,
         timezone: businessTimezone,
       });
@@ -592,14 +573,16 @@ export function CheckoutForm({
             marginBottom: 14,
           }}
         >
-          {([
-            {
-              id: "delivery",
-              label: "Envío a domicilio",
-              sub: estimatedMinutes ? `${estimatedMinutes} min` : "30–45 min",
-            },
-            { id: "pickup", label: "Retiro en el local", sub: "15–20 min" },
-          ] as const).map((o) => {
+          {(
+            [
+              {
+                id: "delivery",
+                label: "Envío a domicilio",
+                sub: estimatedMinutes ? `${estimatedMinutes} min` : "30–45 min",
+              },
+              { id: "pickup", label: "Retiro en el local", sub: "15–20 min" },
+            ] as const
+          ).map((o) => {
             const sel = mode === o.id;
             return (
               <button
@@ -614,10 +597,14 @@ export function CheckoutForm({
                   textAlign: "left",
                 }}
               >
-                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>
+                <div
+                  style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}
+                >
                   {o.label}
                 </div>
-                <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 3 }}>
+                <div
+                  style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 3 }}
+                >
                   {o.sub}
                 </div>
               </button>
@@ -730,13 +717,19 @@ export function CheckoutForm({
               {I.store("var(--ink)", 20)}
             </div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 14, fontWeight: 600 }}>{businessName}</div>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>
+                {businessName}
+              </div>
               {businessAddress && (
-                <div style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 2 }}>
+                <div
+                  style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 2 }}
+                >
                   {businessAddress}
                 </div>
               )}
-              <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>
+              <div
+                style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}
+              >
                 Listo en 15–20 min
               </div>
             </div>
@@ -752,92 +745,92 @@ export function CheckoutForm({
         </Section>
       )}
 
-      {canSchedule && (
-        <Section title="¿Para cuándo?">
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: 8,
-              marginBottom: isScheduled ? 14 : 4,
-            }}
-          >
-            {([
+      <Section title="¿Para cuándo?">
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 8,
+            marginBottom: isScheduled ? 14 : 4,
+          }}
+        >
+          {(
+            [
               { id: "now", label: "Lo antes posible", sub: "15–20 min" },
               { id: "scheduled", label: "Programar", sub: "Elegí día y hora" },
-            ] as const).map((o) => {
-              const sel = when === o.id;
-              return (
-                <button
-                  key={o.id}
-                  type="button"
-                  onClick={() => setWhen(o.id)}
-                  style={{
-                    padding: "14px 12px",
-                    borderRadius: 12,
-                    border: `1.5px solid ${sel ? "var(--accent)" : "var(--hairline-2)"}`,
-                    background: sel ? "var(--accent-soft)" : "#fff",
-                    cursor: "pointer",
-                    textAlign: "left",
-                  }}
+            ] as const
+          ).map((o) => {
+            const sel = when === o.id;
+            return (
+              <button
+                key={o.id}
+                type="button"
+                onClick={() => setWhen(o.id)}
+                style={{
+                  padding: "14px 12px",
+                  borderRadius: 12,
+                  border: `1.5px solid ${sel ? "var(--accent)" : "var(--hairline-2)"}`,
+                  background: sel ? "var(--accent-soft)" : "#fff",
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+              >
+                <div
+                  style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}
                 >
-                  <div
-                    style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}
-                  >
-                    {o.label}
-                  </div>
-                  <div
-                    style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 3 }}
-                  >
-                    {o.sub}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-          {isScheduled && (
-            <>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: 8,
-                }}
-              >
-                <Field label="Día">
-                  <input
-                    type="date"
-                    value={schedDate}
-                    min={todayStr}
-                    max={maxDateStr}
-                    onChange={(e) => setSchedDate(e.target.value)}
-                    style={inputStyle()}
-                  />
-                </Field>
-                <Field label="Hora">
-                  <input
-                    type="time"
-                    value={schedTime}
-                    onChange={(e) => setSchedTime(e.target.value)}
-                    style={inputStyle()}
-                  />
-                </Field>
-              </div>
-              <div
-                style={{
-                  fontSize: 12,
-                  color: "var(--ink-3)",
-                  lineHeight: 1.4,
-                }}
-              >
-                Se paga con Mercado Pago por adelantado. Dentro del horario del
-                local, con al menos {SCHEDULED_MIN_LEAD_MIN} min de anticipación
-                y hasta {SCHEDULED_MAX_WINDOW_DAYS} días.
-              </div>
-            </>
-          )}
-        </Section>
-      )}
+                  {o.label}
+                </div>
+                <div
+                  style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 3 }}
+                >
+                  {o.sub}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        {isScheduled && (
+          <>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 8,
+              }}
+            >
+              <Field label="Día">
+                <input
+                  type="date"
+                  value={schedDate}
+                  min={todayStr}
+                  max={maxDateStr}
+                  onChange={(e) => setSchedDate(e.target.value)}
+                  style={inputStyle()}
+                />
+              </Field>
+              <Field label="Hora">
+                <input
+                  type="time"
+                  value={schedTime}
+                  onChange={(e) => setSchedTime(e.target.value)}
+                  style={inputStyle()}
+                />
+              </Field>
+            </div>
+            <div
+              style={{
+                fontSize: 12,
+                color: "var(--ink-3)",
+                lineHeight: 1.4,
+              }}
+            >
+              Dentro del horario del local, con al menos{" "}
+              {SCHEDULED_MIN_LEAD_MIN} min de anticipación y hasta{" "}
+              {SCHEDULED_MAX_WINDOW_DAYS} días.
+            </div>
+          </>
+        )}
+      </Section>
 
       <Section title="Contacto">
         <Field label="Nombre" error={errors.name}>
@@ -970,7 +963,9 @@ export function CheckoutForm({
                   fontSize: 13,
                   fontWeight: 600,
                   cursor:
-                    promoChecking || !promoInput.trim() ? "not-allowed" : "pointer",
+                    promoChecking || !promoInput.trim()
+                      ? "not-allowed"
+                      : "pointer",
                   opacity: promoChecking || !promoInput.trim() ? 0.5 : 1,
                 }}
               >
@@ -1035,10 +1030,14 @@ export function CheckoutForm({
               )}
             </div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 14, color: "var(--ink)", fontWeight: 500 }}>
+              <div
+                style={{ fontSize: 14, color: "var(--ink)", fontWeight: 500 }}
+              >
                 {p.label}
               </div>
-              <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 1 }}>
+              <div
+                style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 1 }}
+              >
                 {p.sub}
               </div>
             </div>
@@ -1143,7 +1142,9 @@ function Field({
       </div>
       {children}
       {error && (
-        <div style={{ fontSize: 12, color: "#B94A2A", marginTop: 4 }}>{error}</div>
+        <div style={{ fontSize: 12, color: "#B94A2A", marginTop: 4 }}>
+          {error}
+        </div>
       )}
     </div>
   );

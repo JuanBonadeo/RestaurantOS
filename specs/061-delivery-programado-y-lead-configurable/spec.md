@@ -69,12 +69,14 @@ Ojo con el atajo obvio: hoy el único gesto que existe es `confirmarPedido`, y e
 
 Como **cliente**, pido delivery para las 21:00 desde la carta web. Elijo «Programar», día y hora, y pago con Mercado Pago **o** en efectivo al recibir. Recibo la confirmación de que el pedido quedó agendado para esa hora.
 
+> **Ampliación 2026-07-28 (Juan):** el prepago obligatorio se cae también para el **retiro**. Programar deja de tener reglas de pago propias en los dos tipos.
+
 **Why this priority**: Es la mitad del pedido de Juan y no existe hoy en ninguna forma.
 
 **Acceptance**:
 1. Con delivery elegido, el selector «¿Para cuándo? → Ahora / Programar» **aparece**.
-2. Programando delivery, las opciones de pago son **Mercado Pago** y **Efectivo al recibir**.
-3. Programando **retiro**, sigue apareciendo solo Mercado Pago (sin cambio).
+2. Programar no restringe el método de pago, ni en delivery ni en retiro: las opciones son las de siempre (Mercado Pago si el negocio lo tiene, y efectivo).
+3. El selector «¿Para cuándo?» aparece aunque el negocio no cobre con MP.
 4. Rigen las mismas reglas de spec 31: mínimo 60 min de anticipación, máximo 7 días, dentro del horario de atención. Los tres errores se muestran con su mensaje propio.
 5. Una venta de mostrador (`dine_in`) con `scheduled_at` se rechaza con *"Los pedidos en mesa no se programan."*
 
@@ -116,8 +118,8 @@ Como **dueño**, en Configuración → Perfil del negocio pongo cuánto antes qu
 ## Requisitos funcionales
 
 - **FR-001** `validateScheduledOrder` acepta `deliveryType: "pickup" | "delivery"` y rechaza `"dine_in"` con *"Los pedidos en mesa no se programan."*
-- **FR-002** Un programado de **delivery** admite `payment_method` `mp` o `cash`. Un programado de **retiro** sigue exigiendo `mp`.
-- **FR-003** El `superRefine` de `CreateOrderInput` refleja FR-001 y FR-002 (defensa en el borde, además del server).
+- **FR-002** Un programado admite cualquier `payment_method`, sea retiro o delivery. El prepago obligatorio de spec 31 se elimina: el resguardo contra el pedido fantasma es FR-007/FR-009 (nada entra a cocina sin aval del local), no cobrar por adelantado.
+- **FR-003** El `superRefine` de `CreateOrderInput` deja de tener reglas cruzadas para `scheduled_at`; lo que queda (tipo, anticipación, ventana, horario) depende del negocio y vive en `validateScheduledOrder`.
 - **FR-004** `persist-order` pasa el `delivery_type` **real** al validador, sin el mapeo `dine_in → delivery`.
 - **FR-005** `businesses.scheduled_march_lead_pickup_min` (default 40) y `businesses.scheduled_march_lead_delivery_min` (default 60), `not null`, con check `between 0 and 240`.
 - **FR-006** `shouldMarchNow` recibe el lead como parámetro (ya lo hace); `marchDueScheduledOrders` lo resuelve por pedido según `delivery_type` + config del negocio.
@@ -128,7 +130,7 @@ Como **dueño**, en Configuración → Perfil del negocio pongo cuánto antes qu
 - **FR-011** «Próximos» muestra los programados futuros con `status` `pending` **o** `confirmed`, pagos o impagos, con su estado visible (*Esperando aceptación* / *Aceptado* / *Pago*).
 - **FR-012** Un programado en `confirmed` **no** aparece en las columnas del kanban.
 - **FR-013** El formulario de perfil del negocio expone los dos leads; `updateBusinessProfile` los valida y persiste.
-- **FR-014** El checkout ofrece «Programar» cuando el modo es `pickup` **o** `delivery`; para retiro sigue exigiendo MP habilitado, para delivery no (puede pagarse en efectivo).
+- **FR-014** El checkout ofrece «Programar» en `pickup` y en `delivery`, sin condicionarlo al método de pago ni a que el negocio tenga MP.
 
 ## Éxito medible
 
@@ -140,7 +142,6 @@ Como **dueño**, en Configuración → Perfil del negocio pongo cuánto antes qu
 
 ## Fuera de alcance
 
-- Que el **retiro** programado acepte efectivo. Sigue exigiendo MP adelantado — decisión explícita de Juan, se puede relajar después con un `if`.
 - Anticipación mínima (60 min) y ventana máxima (7 días) configurables. Siguen fijas.
 - Calcular el tiempo de viaje por dirección/distancia. El lead de delivery es un número plano por negocio.
 - Avisar al cliente cuando su programado entra a cocina.

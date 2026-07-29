@@ -34,14 +34,11 @@ Se actualiza también el `COMMENT ON COLUMN orders.scheduled_at`, que hoy dice *
 ### Dominio puro — `src/lib/orders/scheduled.ts`
 
 - `SCHEDULED_MARCH_LEAD_MIN` (40) pasa a ser el **default de retiro**: `DEFAULT_MARCH_LEAD_PICKUP_MIN`. Se suma `DEFAULT_MARCH_LEAD_DELIVERY_MIN = 60` y `MAX_MARCH_LEAD_MIN = 240` (el techo del check, y la ventana del filtro SQL).
-- `ScheduledOrderValidation.deliveryType` pasa a `"delivery" | "pickup" | "dine_in"`.
-- Orden de chequeos nuevo: **`dine_in` → pago → anticipación → ventana → horario**. El chequeo de pago se vuelve condicional al tipo:
+- `ScheduledOrderValidation.deliveryType` pasa a `"delivery" | "pickup" | "dine_in"`, y `paymentMethod` **desaparece del tipo**: ya no hay ninguna regla de pago que validar.
+- Orden de chequeos nuevo: **`dine_in` → anticipación → ventana → horario**.
 
 ```ts
 if (input.deliveryType === "dine_in") return { ok: false, error: "Los pedidos en mesa no se programan." };
-if (input.deliveryType === "pickup" && input.paymentMethod !== "mp") {
-  return { ok: false, error: "Un pedido de retiro programado se paga con Mercado Pago por adelantado." };
-}
 ```
 
 `shouldMarchNow` **no cambia** — ya recibe `leadMin`. Solo cambia su default.
@@ -75,10 +72,10 @@ Un action nuevo al lado del existente, compartiendo el gate:
 
 **`checkout-form.tsx`** — el cambio es de condiciones, no de layout:
 
-- `canSchedule = isPickup ? mpEnabled : true`.
-- El `useEffect` que fuerza `payment = 'mp'` al programar pasa a hacerlo **solo en pickup**.
-- `paymentOptions`: programando delivery, la lista es la normal (MP si está habilitado + «Efectivo al recibir»); programando pickup, sigue siendo MP solo.
-- En el submit, `deliveryType` pasa el modo real en vez del literal `"pickup"`, y `paymentMethod` el elegido en vez del literal `"mp"`.
+- `canSchedule` desaparece: la sección «¿Para cuándo?» se renderiza siempre.
+- El `useEffect` que forzaba `payment = 'mp'` al programar se borra.
+- `paymentOptions` vuelve a tener una sola forma — programar ya no la altera.
+- En el submit, `deliveryType` pasa el modo real en vez del literal `"pickup"`.
 - Los textos que dicen "retiro" ("Elegí el día y la hora del retiro") se vuelven neutros.
 
 **`orders-realtime-board.tsx`**:
