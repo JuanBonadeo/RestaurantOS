@@ -170,8 +170,13 @@ export function ReservationsPanel({
                     type="button"
                     onClick={() => onAsignarMesa?.(r)}
                     disabled={pending || !canPickOnPlan}
+                    // Índigo = asignación de mesa (mismo color del badge "R" del
+                    // plano). Se diferencia de "Nueva reserva" (azul) y "Sentar"
+                    // (verde).
                     className={`flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm transition active:scale-[0.97] disabled:opacity-60 ${
-                      picking ? "bg-blue-700 ring-2 ring-blue-300" : "bg-blue-600 hover:bg-blue-700"
+                      picking
+                        ? "bg-indigo-700 ring-2 ring-indigo-300"
+                        : "bg-indigo-600 hover:bg-indigo-700"
                     }`}
                   >
                     <MapPin className="h-3.5 w-3.5" />

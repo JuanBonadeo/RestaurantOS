@@ -956,7 +956,7 @@ export function SalonDesktop({
         <div className="flex min-h-0 flex-col gap-2">
           {/* Modo "elegir mesa": el plano queda esperando un tap (spec 059). */}
           {asignarReservaFor ? (
-            <div className="flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-white shadow-sm">
+            <div className="flex items-center gap-2 rounded-xl bg-indigo-600 px-3 py-2 text-white shadow-sm">
               <MapPin className="h-4 w-4 shrink-0 animate-pulse" />
               <span className="min-w-0 flex-1 text-sm font-semibold">
                 Tocá una mesa para {asignarReservaFor.customer_name} ·{" "}
@@ -974,7 +974,7 @@ export function SalonDesktop({
           <div
             className={cn(
               "bg-card min-h-0 flex-1 overflow-hidden rounded-2xl ring-1",
-              asignarReservaFor ? "ring-2 ring-blue-500" : "ring-border/60",
+              asignarReservaFor ? "ring-2 ring-indigo-500" : "ring-border/60",
             )}
           >
             {plan ? (
