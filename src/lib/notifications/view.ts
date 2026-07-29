@@ -98,10 +98,12 @@ export function viewForNotification(n: Notification): NotiView {
   }
   if (n.type === "order.pending") {
     const num = (p.orderNumber as number | undefined) ?? "?";
+    // El retiro en el local se persiste como `pickup`; `take_away` nunca se
+    // escribe (era un valor fantasma que dejaba a todo retiro como "Pedido").
     const tipo =
       p.deliveryType === "delivery"
         ? "Delivery"
-        : p.deliveryType === "take_away"
+        : p.deliveryType === "pickup"
           ? "Take-away"
           : "Pedido";
     const customer = (p.customerName as string | undefined) ?? "cliente";

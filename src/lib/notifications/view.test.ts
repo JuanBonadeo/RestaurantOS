@@ -47,4 +47,18 @@ describe("viewForNotification (spec 27)", () => {
     const v = viewForNotification(noti("tipo.inexistente"));
     expect(v.title).toBe("tipo.inexistente");
   });
+
+  // `deliveryType` viene crudo de `orders.delivery_type` (events.ts), donde el
+  // retiro en el local es `pickup`. `take_away` nunca se persiste.
+  it("order.pending nombra el canal: delivery y retiro se distinguen", () => {
+    const del = viewForNotification(
+      noti("order.pending", { orderNumber: 12, deliveryType: "delivery" }),
+    );
+    expect(del.title).toContain("Delivery");
+
+    const pick = viewForNotification(
+      noti("order.pending", { orderNumber: 13, deliveryType: "pickup" }),
+    );
+    expect(pick.title).toContain("Take-away");
+  });
 });

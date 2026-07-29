@@ -8,10 +8,10 @@ export const EMPTY_BY_ORIGEN: Record<VentaOrigen, number> = {
 };
 
 /**
- * `orders.delivery_type` es texto libre en la DB. Hoy solo existen tres valores
- * (`dine_in`, `delivery`, `pickup`), pero el código todavía tipa `take_away`
- * como posible, así que lo tratamos como sinónimo de `pickup` — para la caja,
- * "el cliente se lo lleva" es un solo balde.
+ * `orders.delivery_type` es texto libre en la DB y solo existen tres valores:
+ * `dine_in`, `delivery` y `pickup` (el retiro en el local, o sea take away).
+ * `take_away` se acepta por defensa —  fue un valor fantasma que nunca se
+ * llegó a persistir— pero es el mismo balde que `pickup`.
  *
  * Cualquier valor desconocido cae en `otro` en vez de descartarse: la suma de
  * los orígenes tiene que cerrar con `total_ventas_cents` siempre.

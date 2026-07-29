@@ -196,7 +196,9 @@ function prepTone(min: number): string {
 
 function deliveryIcon(type: string) {
   if (type === "delivery") return Truck;
-  if (type === "take_away") return Package;
+  // Take away = `pickup`. Antes se comparaba contra `take_away`, que no se
+  // persiste nunca, así que los retiros salían con el ícono de salón.
+  if (type === "pickup") return Package;
   return UtensilsCrossed;
 }
 

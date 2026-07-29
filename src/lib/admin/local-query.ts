@@ -46,7 +46,7 @@ export type LocalComanda = {
    *  cancelados y la card se oculta (fantasma); el flag corta los botones en la
    *  ventana previa al refresh de realtime. */
   cancelled_at: string | null;
-  /** Tipo de la order — "dine_in" / "delivery" / "take_away".
+  /** Tipo de la order — "dine_in" / "delivery" / "pickup" (retiro en el local).
    *  El dine-in se rotula como Mesa N en la card. */
   delivery_type: string;
   table_label: string | null;
