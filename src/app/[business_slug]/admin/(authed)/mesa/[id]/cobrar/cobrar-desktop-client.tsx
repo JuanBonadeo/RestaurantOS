@@ -1,18 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowRight,
   Banknote,
   Check,
   CheckCircle2,
-  CreditCard,
-  Link as LinkIcon,
-  MoreHorizontal,
-  QrCode,
   Trash2,
-  Wallet,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -30,7 +25,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -47,13 +41,8 @@ import {
   registrarPago,
   type IniciarCobroResult,
 } from "@/lib/billing/cobro-actions";
-import type {
-  CuentaState,
-  OrderSplit,
-  PaymentMethod,
-} from "@/lib/billing/types";
-import { calculateAdjustment } from "@/lib/billing/adjustment";
-import { isCashShortPayment } from "@/lib/billing/totals";
+import type { CuentaState, OrderSplit } from "@/lib/billing/types";
+import { CobroForm } from "@/components/billing/cobro-form";
 import type { PaymentMethodConfig } from "@/lib/caja/types";
 import { formatCurrency } from "@/lib/currency";
 import { cn } from "@/lib/utils";
@@ -445,50 +434,6 @@ function SplitRow({
 
 // ── Panel de cobro (lado derecho) ─────────────────────────────────────────
 
-const METHODS: Array<{
-  value: PaymentMethod;
-  label: string;
-  description: string;
-  icon: typeof Banknote;
-}> = [
-  {
-    value: "cash",
-    label: "Efectivo",
-    description: "Cobrá en mano. El sistema calcula el vuelto.",
-    icon: Banknote,
-  },
-  {
-    value: "card_manual",
-    label: "Tarjeta",
-    description: "Posnet físico. Anotá los últimos 4 dígitos.",
-    icon: CreditCard,
-  },
-  {
-    value: "mp_link",
-    label: "Link Mercado Pago",
-    description: "Generá un link para enviar al cliente.",
-    icon: LinkIcon,
-  },
-  {
-    value: "mp_qr",
-    label: "QR Mercado Pago",
-    description: "Mostrá un QR para que el cliente escanee.",
-    icon: QrCode,
-  },
-  {
-    value: "transfer",
-    label: "Transferencia",
-    description: "CBU/CVU o alias. Anotá la referencia.",
-    icon: Wallet,
-  },
-  {
-    value: "other",
-    label: "Otro",
-    description: "Cheque, cortesía, etc.",
-    icon: MoreHorizontal,
-  },
-];
-
 function CobrarSplitPanel({
   split,
   orderId,
@@ -508,182 +453,7 @@ function CobrarSplitPanel({
   onPaid: (result: { orderClosed: boolean }) => void;
   onClear: () => void;
 }) {
-  // `isRegistering` bloquea el botón mientras el pago está en vuelo: sin esto,
-  // tocar "Confirmar" varias veces registra N pagos e infla la caja (bug
-  // crítico cobro-doble-submit, reproducido en datos reales). spec 41 · FR-007.
-  const [isRegistering, startTransition] = useTransition();
-  // Idempotency key por intento de cobro (spec 42): estable entre taps del
-  // mismo pago, se regenera tras un cobro OK. El server dedup por
-  // (business_id, request_id) → un retry/tab/tap no duplica el pago (issue #58).
-  const requestIdRef = useRef<string | null>(null);
   const remaining = split.expected_amount_cents - split.paid_amount_cents;
-  const [method, setMethod] = useState<PaymentMethod | null>(null);
-  const configForMethod = methodConfigs.find((c) => c.method === method);
-  const adjustmentPercent = configForMethod?.adjustment_percent ?? 0;
-  const { adjustmentCents, finalCents } = calculateAdjustment(remaining, adjustmentPercent);
-  const [amount, setAmount] = useState(remaining);
-  // En efectivo no se cobra de menos (de más es vuelto). Misma regla que el
-  // server aplica en `registrarPago` — acá sólo para no dejar tocar Confirmar.
-  const cashShort = isCashShortPayment({
-    method: method ?? "",
-    amount_cents: amount,
-    adjustment_cents: adjustmentCents,
-    remaining_cents: remaining,
-  });
-  const [hasSetAmount, setHasSetAmount] = useState(false);
-  const [tip, setTip] = useState(0);
-  const [lastFour, setLastFour] = useState("");
-  const [cardBrand, setCardBrand] = useState<
-    "visa" | "mastercard" | "amex" | "otro"
-  >("visa");
-  const [notes, setNotes] = useState("");
-  const [mpInitPoint, setMpInitPoint] = useState<string | null>(null);
-  const [mpPaymentId, setMpPaymentId] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (method && !hasSetAmount) {
-      setAmount(finalCents);
-    }
-  }, [method, finalCents, hasSetAmount]);
-
-  useEffect(() => {
-    if (!mpPaymentId) return;
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch(
-          `/api/billing/payment-status?id=${mpPaymentId}`,
-        );
-        const data = await res.json();
-        if (data?.payment_status === "paid") {
-          toast.success("Pago MP confirmado");
-          clearInterval(interval);
-          // El webhook MP cierra la orden si correspondía. No tenemos la flag
-          // acá, así que dejamos que el refresh decida (server-side render).
-          onPaid({ orderClosed: false });
-        } else if (data?.payment_status === "failed") {
-          toast.error("MP rechazó el pago");
-          clearInterval(interval);
-          setMpPaymentId(null);
-          setMpInitPoint(null);
-          setMethod(null);
-        }
-      } catch {
-        // ignore polling errors
-      }
-    }, 4_000);
-    return () => clearInterval(interval);
-  }, [mpPaymentId, onPaid]);
-
-  const handleConfirm = () => {
-    if (!method) return;
-    if (method === "mp_link" || method === "mp_qr") {
-      startTransition(async () => {
-        const r = await iniciarPagoMp({
-          orderId,
-          splitId: isImplicit ? null : split.id,
-          method,
-          amount_cents: amount,
-          tip_cents: tip,
-          caja_id: cajaId,
-          slug,
-        });
-        if (!r.ok) {
-          toast.error(r.error);
-          return;
-        }
-        setMpInitPoint(r.data.initPoint);
-        setMpPaymentId(r.data.paymentId);
-      });
-      return;
-    }
-    startTransition(async () => {
-      const r = await registrarPago({
-        orderId,
-        splitId: isImplicit ? null : split.id,
-        method,
-        amount_cents: amount,
-        tip_cents: tip,
-        caja_id: cajaId,
-        last_four:
-          method === "card_manual" && lastFour.length === 4
-            ? lastFour
-            : undefined,
-        card_brand: method === "card_manual" ? cardBrand : undefined,
-        notes:
-          method === "other" || method === "card_manual" || method === "transfer" ? notes : undefined,
-        adjustment_percent: adjustmentPercent,
-        adjustment_cents: adjustmentCents,
-        slug,
-        requestId: (requestIdRef.current ??= crypto.randomUUID()),
-      });
-      if (!r.ok) {
-        toast.error(r.error);
-        return;
-      }
-      requestIdRef.current = null; // pago OK → el próximo cobro usa una clave nueva
-      toast.success("Pago registrado");
-      onPaid({ orderClosed: r.data.orderClosed });
-    });
-  };
-
-  if (mpInitPoint) {
-    return (
-      <Surface padding="compact" className="space-y-3">
-        <div>
-          <p className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-            {method === "mp_qr" ? "QR Mercado Pago" : "Link Mercado Pago"}
-          </p>
-          <h3 className="mt-1 text-base font-semibold text-zinc-900">
-            Esperando confirmación
-          </h3>
-        </div>
-        {method === "mp_qr" ? (
-          <a
-            href={mpInitPoint}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1.5 rounded-full bg-zinc-900 px-4 py-2 text-sm font-semibold text-white"
-          >
-            <QrCode className="size-4" />
-            Abrir QR de checkout
-          </a>
-        ) : (
-          <div className="space-y-1.5">
-            <Label>Link de pago</Label>
-            <Input value={mpInitPoint} readOnly className="text-xs" />
-            <button
-              type="button"
-              onClick={async () => {
-                try {
-                  await navigator.clipboard.writeText(mpInitPoint);
-                  toast.success("Link copiado");
-                } catch {
-                  toast.error("No se pudo copiar");
-                }
-              }}
-              className="inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-200"
-            >
-              Copiar link
-            </button>
-          </div>
-        )}
-        <p className="text-xs text-zinc-500">
-          Auto-refresh cada 4 segundos. Si MP confirma, se cierra solo.
-        </p>
-        <button
-          type="button"
-          onClick={() => {
-            setMpInitPoint(null);
-            setMpPaymentId(null);
-            setMethod(null);
-          }}
-          className="flex h-12 w-full items-center justify-center rounded-2xl text-sm font-semibold text-zinc-700 ring-1 ring-zinc-200 transition hover:bg-zinc-50"
-        >
-          Cancelar
-        </button>
-      </Surface>
-    );
-  }
 
   return (
     <Surface padding="compact" className="space-y-4">
@@ -707,213 +477,54 @@ function CobrarSplitPanel({
         </button>
       </header>
 
-      {!method && (
-        <div className="space-y-2">
-          {METHODS.map((m) => {
-            const Icon = m.icon;
-            const mc = methodConfigs.find((c) => c.method === m.value);
-            const adj = mc?.adjustment_percent ?? 0;
-            const { finalCents: adjFinal } = calculateAdjustment(remaining, adj);
-            return (
-              <button
-                key={m.value}
-                type="button"
-                onClick={() => { setMethod(m.value); setHasSetAmount(false); }}
-                className="flex w-full items-center gap-3 rounded-xl bg-white p-3 text-left ring-1 ring-zinc-200/70 transition hover:bg-zinc-50 hover:ring-zinc-300"
-              >
-                <div className="flex size-10 flex-shrink-0 items-center justify-center rounded-full bg-zinc-100 text-zinc-700">
-                  <Icon className="size-5" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-zinc-900">
-                    {mc?.label ?? m.label}
-                    {adj !== 0 && (
-                      <span className={cn("ml-1 text-xs font-medium", adj < 0 ? "text-emerald-600" : "text-rose-600")}>
-                        {adj > 0 ? "+" : ""}{adj}%
-                      </span>
-                    )}
-                  </p>
-                  <p className="text-xs text-zinc-500">{m.description}</p>
-                </div>
-                <span className="text-sm font-semibold text-zinc-900 tabular-nums">
-                  {formatCurrency(adjFinal)}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {method && (
-        <div className="space-y-4">
-          <button
-            type="button"
-            onClick={() => setMethod(null)}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-zinc-600 transition hover:text-zinc-900"
-          >
-            <ArrowRight className="size-3 rotate-180" /> Cambiar método
-          </button>
-
-          <div className="rounded-xl bg-zinc-50 p-3 ring-1 ring-zinc-200/70">
-            {(() => {
-              const meta = METHODS.find((m) => m.value === method)!;
-              const Icon = meta.icon;
-              return (
-                <div className="flex items-center gap-3">
-                  <div className="flex size-9 items-center justify-center rounded-full bg-white">
-                    <Icon className="size-4 text-zinc-700" />
-                  </div>
-                  <p className="text-sm font-semibold text-zinc-900">
-                    {meta.label}
-                  </p>
-                </div>
-              );
-            })()}
-          </div>
-
-          <div className="grid gap-1.5">
-            <Label>Monto</Label>
-            <Input
-              type="number"
-              value={amount / 100}
-              onChange={(e) => {
-                setAmount(Math.max(0, Math.round(Number(e.target.value) * 100)));
-                setHasSetAmount(true);
-              }}
-              inputMode="decimal"
-            />
-            {adjustmentPercent !== 0 && (
-              <p className={cn("text-xs font-medium", adjustmentPercent < 0 ? "text-emerald-700" : "text-rose-600")}>
-                {adjustmentPercent < 0 ? "Descuento" : "Recargo"} {adjustmentPercent > 0 ? "+" : ""}{adjustmentPercent}%: {formatCurrency(adjustmentCents)}
-                <span className="ml-1 text-zinc-500">(base {formatCurrency(remaining)})</span>
-              </p>
-            )}
-            {method === "cash" && amount > finalCents && (
-              <p className="text-xs font-semibold text-emerald-700">
-                Vuelto: {formatCurrency(amount - finalCents)}
-              </p>
-            )}
-          </div>
-
-          {(method === "cash" || method === "card_manual" || method === "transfer") && (
-            <div className="grid gap-1.5">
-              <Label>Propina (opcional)</Label>
-              <Input
-                type="number"
-                value={tip / 100}
-                onChange={(e) =>
-                  setTip(
-                    Math.max(0, Math.round(Number(e.target.value) * 100)),
-                  )
-                }
-                inputMode="decimal"
-              />
-            </div>
-          )}
-
-          {method === "card_manual" && (
-            <>
-              <div className="grid gap-1.5">
-                <Label>Últimos 4 dígitos</Label>
-                <Input
-                  value={lastFour}
-                  onChange={(e) =>
-                    setLastFour(
-                      e.target.value.replace(/\D/g, "").slice(0, 4),
-                    )
+      <CobroForm
+        subject={{ kind: "mesa", label: "" }}
+        amountDueCents={remaining}
+        cajas={[]}
+        cajaId={cajaId}
+        methodConfigs={methodConfigs}
+        tip={{ mode: "editable" }}
+        onSubmit={(input) =>
+          registrarPago({
+            orderId,
+            splitId: isImplicit ? null : split.id,
+            method: input.method,
+            amount_cents: input.amountCents,
+            tip_cents: input.tipCents,
+            caja_id: input.cajaId,
+            last_four: input.lastFour,
+            card_brand: input.cardBrand,
+            notes: input.notes,
+            adjustment_percent: input.adjustmentPercent,
+            adjustment_cents: input.adjustmentCents,
+            slug,
+            requestId: input.requestId,
+          })
+        }
+        onPaid={(data) => onPaid({ orderClosed: data.orderClosed })}
+        mp={{
+          start: (input) =>
+            iniciarPagoMp({
+              orderId,
+              splitId: isImplicit ? null : split.id,
+              method: input.method,
+              amount_cents: input.amountCents,
+              tip_cents: input.tipCents,
+              caja_id: input.cajaId,
+              slug,
+            }).then((r) =>
+              r.ok
+                ? {
+                    ok: true as const,
+                    data: { paymentId: r.data.paymentId, initPoint: r.data.initPoint },
                   }
-                  placeholder="1234"
-                  maxLength={4}
-                  inputMode="numeric"
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label>Marca</Label>
-                <Select
-                  value={cardBrand}
-                  onValueChange={(v) =>
-                    v &&
-                    setCardBrand(
-                      v as "visa" | "mastercard" | "amex" | "otro",
-                    )
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue>
-                      {{
-                        visa: "Visa",
-                        mastercard: "MasterCard",
-                        amex: "Amex",
-                        otro: "Otra",
-                      }[cardBrand] ?? "Marca"}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="visa">Visa</SelectItem>
-                    <SelectItem value="mastercard">MasterCard</SelectItem>
-                    <SelectItem value="amex">Amex</SelectItem>
-                    <SelectItem value="otro">Otra</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </>
-          )}
-
-          {(method === "other" || method === "card_manual" || method === "transfer") && (
-            <div className="grid gap-1.5">
-              <Label>
-                Notas
-                {(method === "other" || method === "transfer") && (
-                  <span className="ml-1 text-rose-600">*</span>
-                )}
-              </Label>
-              <Textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                rows={2}
-                placeholder={
-                  method === "transfer"
-                    ? "Alias o referencia de la transferencia…"
-                    : method === "other"
-                      ? "Cheque #1234, cortesía…"
-                      : "Opcional"
-                }
-              />
-            </div>
-          )}
-
-          {cashShort && (
-            <p className="text-xs font-semibold text-rose-600">
-              En efectivo no se puede cobrar menos de {formatCurrency(finalCents)}.
-              Si van a pagar en partes, volvé y dividí la cuenta por monto.
-            </p>
-          )}
-
-          <button
-            type="button"
-            disabled={
-              isRegistering ||
-              amount <= 0 ||
-              cashShort ||
-              ((method === "other" || method === "transfer") && notes.trim() === "") ||
-              (method === "card_manual" &&
-                lastFour !== "" &&
-                lastFour.length !== 4)
-            }
-            onClick={handleConfirm}
-            className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 text-base font-semibold text-white shadow-sm transition hover:brightness-105 active:scale-[0.98] disabled:opacity-50"
-          >
-            {isRegistering ? (
-              "Registrando…"
-            ) : (
-              <>
-                <Check className="size-5" />
-                Confirmar {formatCurrency(amount)}
-              </>
-            )}
-          </button>
-        </div>
-      )}
+                : r,
+            ),
+          // El webhook de MP cierra la orden si correspondía; no tenemos la flag
+          // acá, así que dejamos que el refresh del parent lo resuelva.
+          onConfirmed: () => onPaid({ orderClosed: false }),
+        }}
+      />
     </Surface>
   );
 }
@@ -942,8 +553,6 @@ function EmptyPanel({ allPaid }: { allPaid: boolean }) {
     </Surface>
   );
 }
-
-// ── Anular cobro ──────────────────────────────────────────────────────────
 
 function AnularCobroSection({
   orderId,

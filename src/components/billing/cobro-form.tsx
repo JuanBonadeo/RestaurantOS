@@ -64,7 +64,7 @@ export type CobroTip =
   | { mode: "fixed"; cents: number }
   | { mode: "editable"; initialCents?: number };
 
-export type CobroFormProps = {
+export type CobroFormProps<T = unknown> = {
   subject: CobroSubject;
   /** Lo que falta cobrar, SIN ajuste de método. */
   amountDueCents: number;
@@ -80,9 +80,11 @@ export type CobroFormProps = {
   /** Se llama al confirmar. El caller elige el action — el form no importa
    *  server actions. Devuelve el resultado completo: el mozo lo usa para
    *  mergear la fila ya persistida sin refrescar (spec 41). */
-  onSubmit: (input: CobroSubmit) => Promise<ActionResult<unknown>>;
-  /** Corre después de un cobro OK. */
-  onPaid?: () => void;
+  onSubmit: (input: CobroSubmit) => Promise<ActionResult<T>>;
+  /** Corre después de un cobro OK, con **lo que devolvió el server**. El mozo
+   *  lo usa para mergear la fila ya persistida sin refrescar la pantalla, y el
+   *  encargado para saber si la orden quedó cerrada. Hallazgo T002-1. */
+  onPaid?: (data: T) => void;
   /** Volver atrás (deseleccionar el método). */
   onCancel?: () => void;
   /** MP: preference + link/QR + polling. Sin esto, no se ofrece MP. */
@@ -121,7 +123,7 @@ function isMpMethod(m: PaymentMethod | null): m is "mp_link" | "mp_qr" {
   return m === "mp_link" || m === "mp_qr";
 }
 
-export function CobroForm({
+export function CobroForm<T = unknown>({
   subject,
   amountDueCents,
   cajas,
@@ -135,7 +137,7 @@ export function CobroForm({
   onPaid,
   onCancel,
   mp,
-}: CobroFormProps) {
+}: CobroFormProps<T>) {
   // Bloquea el botón mientras el pago está en vuelo: sin esto, tocar
   // "Confirmar" varias veces registra N pagos e infla la caja (bug crítico
   // cobro-doble-submit, reproducido en datos reales — spec 41 / #58).
@@ -266,7 +268,7 @@ export function CobroForm({
       // Cobro OK → el próximo intento usa una clave nueva.
       requestIdRef.current = null;
       toast.success("Pago registrado");
-      onPaid?.();
+      onPaid?.(r.data);
     });
   };
 
