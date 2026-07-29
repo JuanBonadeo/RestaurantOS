@@ -8,10 +8,13 @@ import { createPreference } from "@/lib/payments/mercadopago";
 import { validatePromoCode } from "@/lib/promos/validate";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
-import type { WeeklySchedule } from "@/lib/reservations/types";
+import type {
+  ReservationMode,
+  WeeklySchedule,
+} from "@/lib/reservations/types";
 
 import { resolveComboUpcharge } from "./combo-pricing";
-import { validateScheduledOrder } from "./scheduled";
+import { orderSlotsForDay, validateScheduledOrder } from "./scheduled";
 import type { PersistableOrderInput } from "./schema";
 
 export type CreateOrderResult = {
@@ -70,24 +73,41 @@ export async function persistOrder(
 
   // ── Pedido diferido (spec 31 + 061 + 064) ───────────────────────────────
   // Con `scheduled_at` validamos que sea para HOY, con la anticipación mínima
-  // y en una hora de la grilla de reservas del negocio (spec 064) — ya no
-  // contra `business_hours` ni con ventana de días. Server es la fuente de
-  // verdad: el checkout reusa el mismo helper sólo para feedback. El "agendado"
-  // es un estado derivado (futuro + sin comandas), y no marcha hasta el lead
-  // del negocio (cron) o "marchar ahora"; si está impago, hasta que el
-  // encargado lo acepte.
+  // y en uno de los chips que el negocio ofrece hoy en reservas (spec 064) —
+  // ya no contra `business_hours` ni con ventana de días. La grilla sale del
+  // modo de reservas: flexible → servicios cada 15 min; estricto → `schedule`.
+  // Server es la fuente de verdad: el checkout reusa el mismo helper sólo para
+  // feedback. El "agendado" es un estado derivado (futuro + sin comandas), y no
+  // marcha hasta el lead del negocio (cron) o "marchar ahora"; si está impago,
+  // hasta que el encargado lo acepte.
   let scheduledAtIso: string | null = null;
   if (data.scheduled_at) {
     const scheduledAt = new Date(data.scheduled_at);
-    const { data: reservationSettings } = await supabase
-      .from("reservation_settings")
-      .select("schedule")
-      .eq("business_id", business.id)
-      .maybeSingle();
+    const [{ data: reservationSettings }, { data: services }] =
+      await Promise.all([
+        supabase
+          .from("reservation_settings")
+          .select("mode, schedule")
+          .eq("business_id", business.id)
+          .maybeSingle(),
+        supabase
+          .from("reservation_services")
+          .select("day_of_week, opens_at, closes_at")
+          .eq("business_id", business.id),
+      ]);
     const validation = validateScheduledOrder({
       scheduledAt,
       deliveryType: data.delivery_type,
-      schedule: (reservationSettings?.schedule ?? null) as WeeklySchedule | null,
+      daySlots: orderSlotsForDay(
+        {
+          mode: (reservationSettings?.mode ?? null) as ReservationMode | null,
+          schedule: (reservationSettings?.schedule ??
+            null) as WeeklySchedule | null,
+          services: services ?? [],
+        },
+        new Date(),
+        business.timezone,
+      ),
       timezone: business.timezone,
     });
     if (!validation.ok) return actionError(validation.error);

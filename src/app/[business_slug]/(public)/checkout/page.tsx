@@ -5,9 +5,12 @@ import { CheckoutForm } from "@/components/checkout/checkout-form";
 // import { VerifyAccountBanner } from "@/components/public/verify-account-banner";
 import { listUserAddresses } from "@/lib/customers/addresses";
 import { getCustomerProfile } from "@/lib/customers/profile";
-import { scheduleSlotsForDay } from "@/lib/orders/scheduled";
+import { orderSlotsForDay } from "@/lib/orders/scheduled";
 import { getAssignedCoupon } from "@/lib/promos/assigned-coupon";
-import { getReservationSettings } from "@/lib/reservations/queries";
+import {
+  getReservationServices,
+  getReservationSettings,
+} from "@/lib/reservations/queries";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getBusiness } from "@/lib/tenant";
 
@@ -29,20 +32,27 @@ export default async function CheckoutPage({
     redirect(`/${business_slug}/login?next=${next}`);
   }
 
-  const [savedAddresses, profile, reservationSettings] = await Promise.all([
-    listUserAddresses(user.id, business.id),
-    getCustomerProfile(user.id, business.id),
-    // Grilla de reservas del negocio: desde spec 064 el pedido programado se
-    // elige con los MISMOS chips de horario que una reserva, y sólo para hoy.
-    // El server revalida igual en persist-order.
-    getReservationSettings(business.id),
-  ]);
+  const [savedAddresses, profile, reservationSettings, reservationServices] =
+    await Promise.all([
+      listUserAddresses(user.id, business.id),
+      getCustomerProfile(user.id, business.id),
+      // Config de reservas: desde spec 064 el pedido programado se elige con
+      // los MISMOS chips de horario que una reserva, y sólo para hoy. En modo
+      // flexible salen de los servicios (cada 15 min); en estricto, de la
+      // grilla fija. El server revalida igual en persist-order.
+      getReservationSettings(business.id),
+      getReservationServices(business.id),
+    ]);
 
   // Los horarios de hoy se resuelven en el server (con "hoy" en el TZ del
   // local) para que el chip que ve el cliente sea estable entre SSR e
   // hidratación; el filtro por anticipación mínima corre en el cliente.
-  const todaySlots = scheduleSlotsForDay(
-    reservationSettings.schedule,
+  const todaySlots = orderSlotsForDay(
+    {
+      mode: reservationSettings.mode ?? null,
+      schedule: reservationSettings.schedule,
+      services: reservationServices,
+    },
     new Date(),
     business.timezone,
   );

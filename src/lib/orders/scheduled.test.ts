@@ -8,7 +8,7 @@ import {
   filterSlotsByLead,
   isScheduledForLater,
   marchLeadForOrder,
-  scheduleSlotsForDay,
+  orderSlotsForDay,
   shouldMarchNow,
   validateScheduledOrder,
 } from "./scheduled";
@@ -17,18 +17,31 @@ import {
 const NOW = new Date("2026-06-25T12:00:00-03:00");
 const TZ = "America/Argentina/Buenos_Aires";
 
-// Grilla de reservas del negocio: jueves (dow=4) almuerzo y cena; viernes
-// (dow=5) solo cena. Es la MISMA grilla que ven los que reservan (spec 064).
+// Grilla del modo ESTRICTO: jueves (dow=4) almuerzo y cena; viernes (dow=5)
+// solo cena; sábado cerrado. Es la MISMA grilla que ven los que reservan.
 const SCHEDULE: WeeklySchedule = {
   "4": { open: true, slots: ["12:30", "13:00", "20:00", "21:00", "13:00"] },
   "5": { open: true, slots: ["20:00", "21:00"] },
   "6": { open: false, slots: ["20:00"] },
 };
 
+// Servicios del modo FLEXIBLE (spec 059) — el caso de golf-house. Los chips
+// se derivan cada 15 min de la ventana del servicio, y el mismo servicio puede
+// venir duplicado por salón.
+const SERVICES = [
+  { day_of_week: 4, opens_at: "12:00:00", closes_at: "13:00:00" },
+  { day_of_week: 4, opens_at: "12:00:00", closes_at: "13:00:00" }, // otro salón
+  { day_of_week: 4, opens_at: "20:00:00", closes_at: "20:30:00" },
+  { day_of_week: 5, opens_at: "20:00:00", closes_at: "21:00:00" },
+];
+
+/** Los chips de hoy (jueves) en modo estricto. */
+const TODAY_SLOTS = orderSlotsForDay({ schedule: SCHEDULE }, NOW, TZ);
+
 function base() {
   return {
     deliveryType: "pickup" as const,
-    schedule: SCHEDULE,
+    daySlots: TODAY_SLOTS,
     timezone: TZ,
     now: NOW,
   };
@@ -102,13 +115,10 @@ describe("validateScheduledOrder", () => {
     });
   });
 
-  it("rechaza todo si el negocio no tiene grilla cargada", () => {
+  it("rechaza todo si el negocio no ofrece chips hoy", () => {
     const scheduledAt = new Date("2026-06-25T20:00:00-03:00");
     expect(
-      validateScheduledOrder({ ...base(), schedule: {}, scheduledAt }).ok,
-    ).toBe(false);
-    expect(
-      validateScheduledOrder({ ...base(), schedule: null, scheduledAt }).ok,
+      validateScheduledOrder({ ...base(), daySlots: [], scheduledAt }).ok,
     ).toBe(false);
   });
 
@@ -123,9 +133,9 @@ describe("validateScheduledOrder", () => {
   });
 });
 
-describe("scheduleSlotsForDay", () => {
+describe("orderSlotsForDay — modo estricto", () => {
   it("devuelve los slots del día, ordenados y sin repetidos", () => {
-    expect(scheduleSlotsForDay(SCHEDULE, NOW, TZ)).toEqual([
+    expect(orderSlotsForDay({ schedule: SCHEDULE }, NOW, TZ)).toEqual([
       "12:30",
       "13:00",
       "20:00",
@@ -136,12 +146,59 @@ describe("scheduleSlotsForDay", () => {
   it("un día cerrado no ofrece nada, aunque tenga slots cargados", () => {
     // Sábado 2026-06-27 → dow=6, open: false.
     const sat = new Date("2026-06-27T12:00:00-03:00");
-    expect(scheduleSlotsForDay(SCHEDULE, sat, TZ)).toEqual([]);
+    expect(orderSlotsForDay({ schedule: SCHEDULE }, sat, TZ)).toEqual([]);
   });
 
   it("sin grilla devuelve vacío", () => {
-    expect(scheduleSlotsForDay(null, NOW, TZ)).toEqual([]);
-    expect(scheduleSlotsForDay({}, NOW, TZ)).toEqual([]);
+    expect(orderSlotsForDay({ schedule: null }, NOW, TZ)).toEqual([]);
+    expect(orderSlotsForDay({}, NOW, TZ)).toEqual([]);
+  });
+});
+
+describe("orderSlotsForDay — modo flexible (spec 059)", () => {
+  const flexible = { mode: "flexible" as const, services: SERVICES };
+
+  it("deriva los chips de los servicios del día, cada 15 min", () => {
+    // Jueves: almuerzo 12:00–13:00 y cena 20:00–20:30. El cierre no se incluye.
+    expect(orderSlotsForDay(flexible, NOW, TZ)).toEqual([
+      "12:00",
+      "12:15",
+      "12:30",
+      "12:45",
+      "20:00",
+      "20:15",
+    ]);
+  });
+
+  it("el mismo servicio duplicado por salón no duplica chips", () => {
+    const slots = orderSlotsForDay(flexible, NOW, TZ);
+    expect(new Set(slots).size).toBe(slots.length);
+  });
+
+  it("ignora los servicios de otro día y toma los de `day_of_week: null`", () => {
+    expect(
+      orderSlotsForDay(
+        {
+          mode: "flexible",
+          services: [
+            { day_of_week: 5, opens_at: "20:00:00", closes_at: "20:30:00" },
+            { day_of_week: null, opens_at: "10:00:00", closes_at: "10:30:00" },
+          ],
+        },
+        NOW,
+        TZ,
+      ),
+    ).toEqual(["10:00", "10:15"]);
+  });
+
+  it("en flexible NO mira `schedule` (la grilla vieja del estricto)", () => {
+    expect(
+      orderSlotsForDay(
+        { mode: "flexible", schedule: SCHEDULE, services: [] },
+        NOW,
+        TZ,
+      ),
+    ).toEqual([]);
   });
 });
 

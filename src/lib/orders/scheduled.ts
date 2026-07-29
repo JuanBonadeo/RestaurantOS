@@ -1,6 +1,11 @@
 import { fromZonedTime } from "date-fns-tz";
 
-import type { WeeklySchedule } from "@/lib/reservations/types";
+import { arrivalSlots } from "@/lib/reservations/flexible-availability";
+import type {
+  ReservationMode,
+  ReservationService,
+  WeeklySchedule,
+} from "@/lib/reservations/types";
 
 /**
  * Pedidos diferidos (spec 31 + 061 + 064) — reglas puras, sin DB ni I/O.
@@ -16,13 +21,19 @@ import type { WeeklySchedule } from "@/lib/reservations/types";
  * día dentro de una ventana de 7 días y cualquier hora dentro del horario de
  * atención. Ahora:
  * - solo **hoy** (mismo día calendario en el TZ del local), y
- * - solo una de las **horas de la grilla de reservas** del negocio
- *   (`reservation_settings.schedule`) — los mismos chips que ve el que reserva.
+ * - solo uno de los **chips que ofrece reservas** ese día.
  *
- * La grilla es más estricta que `business_hours` y es config explícita del
- * negocio, así que reemplaza al chequeo de horario de atención. Corolario: un
- * negocio sin grilla cargada para hoy **no puede programar** (el checkout
- * deshabilita "Programar" en vez de dejar pedir y fallar en el server).
+ * De dónde salen esos chips depende del modo de reservas del negocio (spec
+ * 059), igual que en el flujo de reservar:
+ * - **flexible** → los horarios de llegada de los servicios del día, cada 15
+ *   min (`arrivalSlots` sobre `reservation_services`). Es el caso de
+ *   golf-house.
+ * - **estricto** → la grilla fija de `reservation_settings.schedule`.
+ *
+ * Eso reemplaza al viejo chequeo contra `business_hours`: es config explícita
+ * del negocio y es lo que el cliente ya ve al reservar. Corolario: un negocio
+ * sin nada configurado para hoy **no puede programar** (el checkout deshabilita
+ * "Programar" en vez de dejar pedir y fallar en el server).
  */
 
 /** Anticipación mínima entre "ahora" y el retiro/entrega programado. */
@@ -90,18 +101,54 @@ export function localYmd(at: Date, timezone: string): string {
   }).format(at);
 }
 
+/** Paso de la grilla de llegada en modo flexible (igual que reservas). */
+export const ORDER_SLOT_STEP_MIN = 15;
+
 /**
- * Horarios (HH:MM) que la grilla de reservas tiene abiertos el día calendario
- * de `at`, ordenados y sin repetidos. Día cerrado o sin grilla → `[]`.
+ * Config de reservas que define la grilla de horarios del negocio. Es lo que
+ * necesita `orderSlotsForDay` para ofrecer los MISMOS chips que reservar.
  */
-export function scheduleSlotsForDay(
-  schedule: WeeklySchedule | null | undefined,
+export type OrderSlotSource = {
+  mode?: ReservationMode | null;
+  /** Modo estricto. */
+  schedule?: WeeklySchedule | null;
+  /** Modo flexible: servicios del negocio (`day_of_week: null` = todos). */
+  services?: Pick<
+    ReservationService,
+    "day_of_week" | "opens_at" | "closes_at"
+  >[] | null;
+};
+
+/**
+ * Horarios (HH:MM) que el negocio ofrece el día calendario de `at`, ordenados y
+ * sin repetidos. Nada configurado ese día → `[]`.
+ *
+ * En flexible se unen los servicios del día (pueden venir duplicados por salón:
+ * a un retiro/delivery no le importa la zona, así que se deduplican).
+ */
+export function orderSlotsForDay(
+  source: OrderSlotSource,
   at: Date,
   timezone: string,
 ): string[] {
-  if (!schedule) return [];
   const { dow } = localDowAndTime(at, timezone);
-  const day = schedule[String(dow) as keyof WeeklySchedule];
+
+  if (source.mode === "flexible") {
+    const out = new Set<string>();
+    for (const s of source.services ?? []) {
+      if (s.day_of_week !== null && s.day_of_week !== dow) continue;
+      for (const slot of arrivalSlots(
+        s.opens_at,
+        s.closes_at,
+        ORDER_SLOT_STEP_MIN,
+      )) {
+        out.add(slot);
+      }
+    }
+    return [...out].sort();
+  }
+
+  const day = source.schedule?.[String(dow) as keyof WeeklySchedule];
   if (!day || !day.open) return [];
   return [...new Set(day.slots)].sort();
 }
@@ -127,8 +174,8 @@ export function filterSlotsByLead(
 export type ScheduledOrderValidation = {
   scheduledAt: Date;
   deliveryType: "delivery" | "pickup" | "dine_in";
-  /** Grilla de reservas del negocio (`reservation_settings.schedule`). */
-  schedule: WeeklySchedule | null | undefined;
+  /** Chips que el negocio ofrece hoy (`orderSlotsForDay`). */
+  daySlots: string[];
   timezone: string;
   now?: Date;
 };
@@ -179,15 +226,10 @@ export function validateScheduledOrder(
     };
   }
 
-  // Spec 064 — la hora tiene que ser una de la grilla de reservas, no cualquier
-  // minuto dentro del horario de atención.
-  const slots = scheduleSlotsForDay(
-    input.schedule,
-    input.scheduledAt,
-    input.timezone,
-  );
+  // Spec 064 — la hora tiene que ser uno de los chips del día (los mismos que
+  // ofrece reservar), no cualquier minuto dentro del horario de atención.
   const { time } = localDowAndTime(input.scheduledAt, input.timezone);
-  if (!slots.includes(time)) {
+  if (!input.daySlots.includes(time)) {
     return {
       ok: false,
       error: "Elegí uno de los horarios disponibles del local.",
