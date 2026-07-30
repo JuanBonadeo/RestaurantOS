@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-30
 
-**Status**: 📋 Propuesta — sin issue todavía. Milestone tentativo: Post-demo · Growth & hardening.
+**Status**: ✅ Implementada (2026-07-30), pendiente verify en vivo. Issue [#111](https://github.com/gachetponzellini/RestaurantOS-app/issues/111). Milestone: Post-demo · Growth & hardening.
 
 **Input**: Pedido de Juan 2026-07-30 — *"en los menus hay muchos platos principales que no permiten guarnicion, entonces habria que poner un check, que si lleva o no guarnicion, o otro grupo, asi es bien general la regla y sirve para todos los negocios"*.
 
@@ -75,7 +75,7 @@ Un validador puro nuevo, compartido por los **dos** caminos de persistencia — 
 2. **ninguna** elección corresponde a un grupo bloqueado;
 3. (ya existía) cada opción pertenece al grupo que dice.
 
-La resolución es de punto fijo sobre las elecciones recibidas: se parte del set de grupos, se aplican los bloqueos de las opciones elegidas y se compara el resultado con lo que llegó. Si no cierra, se rechaza la orden entera y no se persiste nada.
+La resolución es **una pasada hacia adelante** sobre los grupos en orden, no un punto fijo iterativo: al recorrerlos en secuencia, cuando llegamos a un grupo ya sabemos si algún grupo anterior *activo* lo sacó del juego, y un bloqueo emitido por un grupo que quedó inactivo nunca se aplica. Eso lo habilita D-GCM-3 (sólo hacia adelante) y resuelve solo el caso encadenado —A saca a B, y la opción de B sacaba a C ⇒ C vuelve—. Termina siempre y no puede oscilar. Si el resultado no coincide con lo que llegó, se rechaza la orden entera y no se persiste nada.
 
 El precio se sigue derivando de la DB, nunca del payload (invariante de spec 29). Un grupo bloqueado **no puede** aportar `extra_price_cents`.
 

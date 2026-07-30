@@ -12,6 +12,11 @@
  * `product-search.ts` (clamp, sin wrap-around) que usa el buscador.
  */
 
+import {
+  activeChoiceGroups,
+  pruneBlockedSelections,
+} from "@/lib/orders/combo-choices";
+
 import type { DailyMenuChoiceGroup } from "./daily-menus-query";
 
 /** Una opción elegida. Es exactamente lo que viaja en `selected_choices` del
@@ -33,14 +38,32 @@ export type MenuStep =
   | { kind: "confirm" };
 
 /**
- * Pasos del asistente: uno por grupo con opciones, más el de confirmación al
- * final. Un menú sin grupos (todo fijo) es un solo paso: no hay nada que
- * decidir. Los grupos vacíos se descartan —serían un paso sin salida—.
+ * Grupos activos y descarte de lo que dejó de aplicar (spec 074).
+ *
+ * Se re-exportan desde `lib/orders/combo-choices` —donde también vive el
+ * validador del server— para que la regla se escriba **una sola vez**: el
+ * asistente del mozo, el sheet de la carta pública y los dos caminos de
+ * persistencia resuelven idéntico (FR-005).
  */
-export function buildMenuSteps(groups: DailyMenuChoiceGroup[]): MenuStep[] {
-  const steps: MenuStep[] = groups
-    .filter((g) => g.options.length > 0)
-    .map((group) => ({ kind: "choice" as const, group }));
+export { activeChoiceGroups, pruneBlockedSelections };
+
+/**
+ * Pasos del asistente: uno por grupo **activo**, más el de confirmación al
+ * final. Un menú sin grupos (todo fijo) es un solo paso: no hay nada que
+ * decidir.
+ *
+ * Depende de `selections` porque una elección puede sacar un paso del medio
+ * (FR-003): la lista se recalcula en vivo y `Paso N de M` se mueve con ella.
+ * Sin elecciones (el estado inicial) todos los grupos están activos, que es
+ * exactamente el comportamiento previo a la spec 074.
+ */
+export function buildMenuSteps(
+  groups: DailyMenuChoiceGroup[],
+  selections: DailyMenuSelections = new Map(),
+): MenuStep[] {
+  const steps: MenuStep[] = activeChoiceGroups(groups, selections).map(
+    (group) => ({ kind: "choice" as const, group }),
+  );
   steps.push({ kind: "confirm" });
   return steps;
 }

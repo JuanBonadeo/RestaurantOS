@@ -1289,6 +1289,7 @@ export type Database = {
       }
       daily_menu_components: {
         Row: {
+          blocks_choice_group_ids: string[]
           choice_group_id: string | null
           choice_group_label: string | null
           description: string | null
@@ -1301,6 +1302,7 @@ export type Database = {
           sort_order: number
         }
         Insert: {
+          blocks_choice_group_ids?: string[]
           choice_group_id?: string | null
           choice_group_label?: string | null
           description?: string | null
@@ -1313,6 +1315,7 @@ export type Database = {
           sort_order?: number
         }
         Update: {
+          blocks_choice_group_ids?: string[]
           choice_group_id?: string | null
           choice_group_label?: string | null
           description?: string | null

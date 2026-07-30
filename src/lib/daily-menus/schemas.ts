@@ -14,6 +14,10 @@ export const DailyMenuComponentInput = z
     // `.default()`— para no divergir input/output de Zod y romper la inferencia
     // de react-hook-form; el default 0 lo aplica la columna DB y los consumidores.
     extra_price_cents: z.number().int().min(0).optional(),
+    // Grupos que esta opción NO habilita (spec 074). Sólo aplica a `choice`.
+    // La regla de "sólo hacia adelante" no se puede validar acá —es una regla
+    // entre componentes—, va en el `superRefine` de `DailyMenuInput`.
+    blocks_choice_group_ids: z.array(z.string().uuid()).optional(),
   })
   .superRefine((data, ctx) => {
     if (data.kind === "product" && !data.product_id) {
@@ -66,5 +70,46 @@ export const DailyMenuInput = z.object({
   components: z
     .array(DailyMenuComponentInput)
     .min(1, "Agregá al menos un componente."),
+}).superRefine((data, ctx) => {
+  // FR-002 (spec 074) — una opción sólo puede condicionar un grupo POSTERIOR.
+  // El `sort_order` que se persiste es la posición en el array (ver
+  // `syncComponents`), así que el orden del array ES el orden de los grupos.
+  // Si «Guarnición» va antes que «Principal», el mozo ya la eligió cuando
+  // llegaría la regla: no hay forma de aplicarla.
+  const groupPosition = new Map<string, number>();
+  const groupLabel = new Map<string, string>();
+  data.components.forEach((c, idx) => {
+    if (c.kind !== "choice" || !c.choice_group_id) return;
+    if (!groupPosition.has(c.choice_group_id)) {
+      groupPosition.set(c.choice_group_id, idx);
+      groupLabel.set(c.choice_group_id, c.choice_group_label || "Ese grupo");
+    }
+  });
+
+  data.components.forEach((c, idx) => {
+    if (c.kind !== "choice" || !c.choice_group_id) return;
+    const ownPosition = groupPosition.get(c.choice_group_id) ?? idx;
+    for (const blockedId of c.blocks_choice_group_ids ?? []) {
+      if (blockedId === c.choice_group_id) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Un grupo no puede condicionarse a sí mismo.",
+          path: ["components", idx, "blocks_choice_group_ids"],
+        });
+        continue;
+      }
+      const blockedPosition = groupPosition.get(blockedId);
+      // Un grupo que ya no existe (lo borraron) no es un error del encargado:
+      // `syncComponents` limpia esas referencias al guardar.
+      if (blockedPosition === undefined) continue;
+      if (blockedPosition < ownPosition) {
+        ctx.addIssue({
+          code: "custom",
+          message: `"${groupLabel.get(blockedId)}" se decide antes que "${groupLabel.get(c.choice_group_id)}" — movelo después para poder condicionarlo.`,
+          path: ["components", idx, "blocks_choice_group_ids"],
+        });
+      }
+    }
+  });
 });
 export type DailyMenuInput = z.infer<typeof DailyMenuInput>;

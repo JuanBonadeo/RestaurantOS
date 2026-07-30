@@ -13,6 +13,14 @@ export type DailyMenuComponent = {
   choice_group_label: string | null;
   /** Adicional de la opción (spec 29). 0 en `text`/`product` y opciones incluidas. */
   extra_price_cents: number;
+  /**
+   * Grupos que NO aplican si se elige esta opción (spec 074) — «los ravioles no
+   * llevan guarnición». Vacío = todos los grupos del menú aplican.
+   */
+  blocks_choice_group_ids: string[];
+  /** `sort_order` del componente: define el orden de los grupos, y el orden ES
+   *  la regla de resolución (sólo se puede bloquear hacia adelante). */
+  sort_order: number;
 };
 
 export type DailyMenuChoiceGroup = {
@@ -52,7 +60,7 @@ export async function getDailyMenusForToday(
   const { data, error } = await supabase
     .from("daily_menus")
     .select(
-      "id, name, description, price_cents, image_url, sort_order, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, extra_price_cents, products(id, name, image_url))",
+      "id, name, description, price_cents, image_url, sort_order, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, extra_price_cents, blocks_choice_group_ids, products(id, name, image_url))",
     )
     .eq("business_id", businessId)
     .eq("is_active", true)
@@ -81,6 +89,8 @@ export async function getDailyMenusForToday(
         choice_group_id: c.choice_group_id ?? null,
         choice_group_label: c.choice_group_label ?? null,
         extra_price_cents: Number(c.extra_price_cents ?? 0),
+        blocks_choice_group_ids: c.blocks_choice_group_ids ?? [],
+        sort_order: Number(c.sort_order ?? 0),
       }));
 
     const groupMap = new Map<string, DailyMenuChoiceGroup>();

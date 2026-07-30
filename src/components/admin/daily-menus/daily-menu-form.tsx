@@ -88,6 +88,7 @@ export function DailyMenuForm({
             choice_group_label: c.choice_group_label,
             // Centavos en datos → pesos en el form (igual que price_cents).
             extra_price_cents: (c.extra_price_cents ?? 0) / 100,
+            blocks_choice_group_ids: c.blocks_choice_group_ids ?? [],
           })),
         }
       : {
@@ -398,6 +399,17 @@ function ComponentsEditor({
     }
   });
 
+  // Grupos en el orden en que se van a decidir (spec 074). La posición de un
+  // grupo es la de su primera opción, porque `sort_order` se persiste como el
+  // índice en este array (ver `syncComponents`).
+  const orderedGroups = [...choiceGroups.entries()]
+    .map(([id, idxs]) => ({
+      id,
+      firstIndex: Math.min(...idxs),
+      label: components[idxs[0]]?.choice_group_label ?? "",
+    }))
+    .sort((a, b) => a.firstIndex - b.firstIndex);
+
   const addChoiceOption = (groupId: string, groupLabel: string) => {
     append({
       label: "",
@@ -405,6 +417,7 @@ function ComponentsEditor({
       choice_group_id: groupId,
       choice_group_label: groupLabel,
       extra_price_cents: 0,
+      blocks_choice_group_ids: [],
     });
   };
 
@@ -441,6 +454,7 @@ function ComponentsEditor({
                 choice_group_id: groupId,
                 choice_group_label: "",
                 extra_price_cents: 0,
+                blocks_choice_group_ids: [],
               });
             }}
           >
@@ -467,6 +481,11 @@ function ComponentsEditor({
                 groupId={groupId}
                 groupLabel={groupLabel}
                 indices={groupIndices}
+                // Sólo los grupos POSTERIORES se pueden condicionar (FR-002):
+                // uno anterior ya está decidido cuando llegaría la regla.
+                laterGroups={orderedGroups.filter(
+                  (g) => g.firstIndex > Math.min(...groupIndices),
+                )}
                 control={control}
                 productNames={productNames}
                 onLabelChange={(label) => {
@@ -614,6 +633,7 @@ function ChoiceGroupCard({
   groupId,
   groupLabel,
   indices,
+  laterGroups,
   control,
   productNames,
   onLabelChange,
@@ -624,6 +644,8 @@ function ChoiceGroupCard({
   groupId: string;
   groupLabel: string;
   indices: number[];
+  /** Grupos que se deciden DESPUÉS de éste: los únicos condicionables (FR-002). */
+  laterGroups: { id: string; label: string }[];
   control: ReturnType<typeof useFormContext<DailyMenuInput>>["control"];
   productNames: Map<string, string>;
   onLabelChange: (label: string) => void;
@@ -631,6 +653,27 @@ function ChoiceGroupCard({
   onRemoveOption: (idx: number) => void;
 }) {
   const { watch, setValue } = useFormContext<DailyMenuInput>();
+
+  /** Tildado = ese grupo aplica. Destildar lo agrega a los bloqueados. */
+  const toggleBlocked = (idx: number, blockedId: string, lleva: boolean) => {
+    const current = watch(`components.${idx}.blocks_choice_group_ids`) ?? [];
+    setValue(
+      `components.${idx}.blocks_choice_group_ids`,
+      lleva
+        ? current.filter((id) => id !== blockedId)
+        : [...current, blockedId],
+      { shouldDirty: true },
+    );
+  };
+
+  // T9 · un grupo que TODAS las opciones de éste condicionan nunca va a
+  // aparecer. No es un dato inválido —puede ser transitorio mientras se carga—
+  // así que se avisa, no se bloquea. Mismo criterio que `warnGarnishModifierGroups`.
+  const alwaysBlocked = laterGroups.filter((g) =>
+    indices.every((idx) =>
+      (watch(`components.${idx}.blocks_choice_group_ids`) ?? []).includes(g.id),
+    ),
+  );
 
   return (
     <div className="bg-card space-y-3 rounded-xl border-2 border-dashed border-amber-300 p-3">
@@ -649,8 +692,10 @@ function ChoiceGroupCard({
       <div className="space-y-2 pl-3">
         {indices.map((idx) => {
           const productId = watch(`components.${idx}.product_id`);
+          const blocked = watch(`components.${idx}.blocks_choice_group_ids`) ?? [];
           return (
-            <div key={idx} className="flex items-center gap-2">
+            <div key={idx} className="space-y-1.5">
+            <div className="flex items-center gap-2">
               <GripVertical className="text-muted-foreground size-3.5 shrink-0" />
               <div className="flex-1">
                 <ProductPicker
@@ -710,6 +755,32 @@ function ChoiceGroupCard({
                 </Button>
               )}
             </div>
+
+            {/* Qué OTROS grupos habilita esta opción (spec 074). El rótulo sale
+                del nombre que puso el encargado: acá no hay ninguna palabra de
+                dominio hardcodeada, sirve igual para «Guarnición» que para
+                «Postre» o «Bebida». */}
+            {laterGroups.length > 0 && (
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pl-6">
+                {laterGroups.map((g) => (
+                  <label
+                    key={g.id}
+                    className="text-muted-foreground flex items-center gap-1.5 text-xs"
+                  >
+                    <input
+                      type="checkbox"
+                      className="size-3.5"
+                      checked={!blocked.includes(g.id)}
+                      onChange={(e) =>
+                        toggleBlocked(idx, g.id, e.target.checked)
+                      }
+                    />
+                    <span>Lleva {g.label || "(grupo sin nombre)"}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+            </div>
           );
         })}
       </div>
@@ -729,6 +800,24 @@ function ChoiceGroupCard({
         0 si la opción va incluida; lo que cargues se suma al precio cuando el
         cliente la elige.
       </p>
+
+      {laterGroups.length > 0 && (
+        <p className="text-muted-foreground ml-3 text-xs">
+          Destildá un grupo en una opción si esa opción <strong>no</strong> lo
+          lleva — ej. los ravioles no llevan guarnición. Al elegirla, ese paso
+          se saltea y no se cobra su adicional. Sólo se pueden condicionar los
+          grupos que van más abajo: los de arriba ya están decididos.
+        </p>
+      )}
+
+      {alwaysBlocked.length > 0 && (
+        <p className="ml-3 text-xs text-amber-700">
+          Ojo: <strong>{alwaysBlocked.map((g) => g.label || "sin nombre").join(", ")}</strong>{" "}
+          {alwaysBlocked.length === 1 ? "quedó destildado" : "quedaron destildados"} en
+          todas las opciones de este grupo, así que{" "}
+          {alwaysBlocked.length === 1 ? "nunca va" : "nunca van"} a aparecer.
+        </p>
+      )}
     </div>
   );
 }

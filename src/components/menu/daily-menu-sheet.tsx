@@ -9,6 +9,10 @@ import type {
   MenuDailyMenuChoiceGroup,
   MenuDailyMenuComponent,
 } from "@/lib/menu";
+import {
+  activeChoiceGroups,
+  pruneBlockedSelections,
+} from "@/lib/orders/combo-choices";
 import { useCart } from "@/stores/cart";
 import type { CartSelectedChoice } from "@/stores/cart";
 
@@ -56,9 +60,14 @@ export function DailyMenuSheet({
   );
   const lineTotal = (menu.price_cents + choicesDelta) * quantity;
 
+  // Grupos que aplican con lo elegido hasta ahora (spec 074): el comensal ve el
+  // mismo condicionamiento que el mozo — elegir los ravioles hace desaparecer
+  // la guarnición. Misma función pura que valida el server (FR-005).
+  const visibleGroups = activeChoiceGroups(menu.choice_groups, selections);
+
   const allChoicesResolved =
-    menu.choice_groups.length === 0 ||
-    menu.choice_groups.every((g) => selections.has(g.choice_group_id));
+    visibleGroups.length === 0 ||
+    visibleGroups.every((g) => selections.has(g.choice_group_id));
 
   const handleSelect = (
     group: MenuDailyMenuChoiceGroup,
@@ -74,7 +83,9 @@ export function DailyMenuSheet({
         extra_price_cents: opt.extra_price_cents ?? 0,
         modifiers: [],
       });
-      return next;
+      // FR-004: lo que dejó de aplicar se descarta, así el total no lo cobra y
+      // el payload no lleva una opción que el server va a rechazar.
+      return pruneBlockedSelections(menu.choice_groups, next);
     });
   };
 
@@ -316,7 +327,7 @@ export function DailyMenuSheet({
                 ))}
             </ul>
 
-            {menu.choice_groups.map((group) => {
+            {visibleGroups.map((group) => {
               const selected = selections.get(group.choice_group_id);
               return (
                 <div key={group.choice_group_id} style={{ marginTop: 16 }}>

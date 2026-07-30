@@ -515,7 +515,7 @@ export async function enviarComanda(
     const { data: menuRow } = await service
       .from("daily_menus")
       .select(
-        "id, name, price_cents, image_url, business_id, is_active, is_available, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, extra_price_cents)",
+        "id, name, price_cents, image_url, business_id, is_active, is_available, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, extra_price_cents, blocks_choice_group_ids)",
       )
       .eq("id", menuItem.daily_menu_id)
       .maybeSingle();
@@ -540,7 +540,9 @@ export async function enviarComanda(
         kind: c.kind ?? "text",
         choice_group_id: c.choice_group_id,
         product_id: c.product_id,
+        sort_order: Number(c.sort_order ?? 0),
         extra_price_cents: Number(c.extra_price_cents ?? 0),
+        blocks_choice_group_ids: c.blocks_choice_group_ids ?? [],
       })),
       (menuItem.selected_choices ?? []).map((sc) => ({
         choice_group_id: sc.choice_group_id,

@@ -1,0 +1,239 @@
+/**
+ * Qué grupos de opciones de un menú del día aplican, y si lo que eligió el
+ * cliente es legal (spec 074).
+ *
+ * Puro y sin dependencias: lo usan el asistente del mozo, el formulario de la
+ * carta pública y los dos caminos de persistencia (`enviarComanda` y
+ * `persist-order`). Una sola implementación — FR-005.
+ *
+ * El modelo asumía que todos los grupos aplican siempre. No es cierto: los
+ * ravioles no llevan guarnición. Cada opción declara en
+ * `blocks_choice_group_ids` qué grupos NO aplican si se la elige.
+ */
+
+export type ComboChoiceComponent = {
+  kind: string;
+  choice_group_id: string | null;
+  product_id: string | null;
+  sort_order: number;
+  extra_price_cents: number;
+  blocks_choice_group_ids: string[];
+};
+
+export type SelectedChoiceRef = {
+  choice_group_id: string;
+  product_id: string;
+};
+
+export type ComboChoicesResult =
+  | { ok: true; activeGroupIds: string[] }
+  | { ok: false; error: string };
+
+/**
+ * Los `choice_group_id` del menú, en el orden en que el encargado los definió
+ * (`sort_order` del primer componente de cada grupo). El orden **es** la regla:
+ * ver `resolveActiveGroupIds`.
+ */
+export function orderedChoiceGroupIds(
+  components: ComboChoiceComponent[],
+): string[] {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const c of [...components].sort((a, b) => a.sort_order - b.sort_order)) {
+    if (c.kind !== "choice" || !c.choice_group_id) continue;
+    if (seen.has(c.choice_group_id)) continue;
+    seen.add(c.choice_group_id);
+    ids.push(c.choice_group_id);
+  }
+  return ids;
+}
+
+/**
+ * Grupos que siguen aplicando, dado lo elegido hasta ahora.
+ *
+ * `blocksBySelectedGroup` mapea cada grupo YA RESUELTO al `blocks_choice_group_ids`
+ * de la opción que se eligió en él. Los grupos sin elegir todavía no aportan
+ * bloqueos, así que a mitad del asistente los posteriores siguen activos.
+ *
+ * Es **una pasada hacia adelante**, no un punto fijo iterativo, y eso lo
+ * habilita D-GCM-3: una opción sólo puede bloquear grupos POSTERIORES. Al
+ * recorrer en orden, cuando llegamos a un grupo ya sabemos si algún grupo
+ * anterior *activo* lo sacó del juego. Un bloqueo emitido por un grupo que
+ * quedó inactivo nunca se aplica —su elección no existe— y eso resuelve solo
+ * el caso encadenado (A saca a B, y la opción de B sacaba a C ⇒ C vuelve).
+ *
+ * Consecuencia buena: termina siempre y no puede oscilar. Un bloqueo "hacia
+ * atrás" (dato viejo o corrupto) simplemente no tiene efecto, en vez de
+ * desarmar la resolución.
+ */
+export function resolveActiveGroupIds(
+  orderedGroupIds: string[],
+  blocksBySelectedGroup: Map<string, string[]>,
+): string[] {
+  const active: string[] = [];
+  const blocked = new Set<string>();
+  for (const groupId of orderedGroupIds) {
+    if (blocked.has(groupId)) continue;
+    active.push(groupId);
+    for (const target of blocksBySelectedGroup.get(groupId) ?? []) {
+      // Un grupo no puede bloquearse a sí mismo: sería un paso que se borra al
+      // resolverlo, sin salida.
+      if (target !== groupId) blocked.add(target);
+    }
+  }
+  return active;
+}
+
+/** Lo mínimo que necesita una opción para participar de la regla. */
+export type ChoiceOptionLike = {
+  product_id: string | null;
+  blocks_choice_group_ids: string[];
+};
+
+/** Lo mínimo que necesita un grupo. */
+export type ChoiceGroupLike = {
+  choice_group_id: string;
+  options: ChoiceOptionLike[];
+};
+
+/**
+ * Grupos que siguen aplicando con lo elegido hasta ahora, sobre las estructuras
+ * agrupadas que usan las dos UIs (el asistente del mozo y el sheet de la carta
+ * pública). Genérica en `G` para devolver los mismos objetos que recibió.
+ *
+ * `groups` tiene que venir en orden de `sort_order` —así los arman `menu.ts` y
+ * `daily-menus-query`— porque el orden es la regla de resolución.
+ *
+ * Los grupos vacíos se descartan: serían un paso sin salida.
+ */
+export function activeChoiceGroups<G extends ChoiceGroupLike>(
+  groups: G[],
+  chosenByGroup: Map<string, { product_id: string }>,
+): G[] {
+  const withOptions = groups.filter((g) => g.options.length > 0);
+
+  const blocksBySelectedGroup = new Map<string, string[]>();
+  for (const group of withOptions) {
+    const chosen = chosenByGroup.get(group.choice_group_id);
+    if (!chosen) continue;
+    const option = group.options.find((o) => o.product_id === chosen.product_id);
+    // Si lo elegido ya no está en el grupo (el admin editó el menú con el panel
+    // abierto), no aporta bloqueos en vez de romper la resolución.
+    if (option) {
+      blocksBySelectedGroup.set(
+        group.choice_group_id,
+        option.blocks_choice_group_ids ?? [],
+      );
+    }
+  }
+
+  const activeIds = new Set(
+    resolveActiveGroupIds(
+      withOptions.map((g) => g.choice_group_id),
+      blocksBySelectedGroup,
+    ),
+  );
+  return withOptions.filter((g) => activeIds.has(g.choice_group_id));
+}
+
+/**
+ * Borra las elecciones que quedaron en un grupo que ya no aplica (FR-004).
+ *
+ * Se corre después de cada elección: si se eligió «Milanesa» → «Papas» y
+ * después se cambia el principal a «Ravioles», la guarnición se **descarta** en
+ * vez de quedar estacionada (D-GCM-4). Es la invariante que hace que el
+ * resumen, el precio y el payload sean consistentes sin chequeos extra: nunca
+ * hay una elección de un grupo inactivo.
+ *
+ * Idempotente: una elección inactiva no aporta bloqueos, así que borrarla no
+ * cambia qué grupos están activos.
+ */
+export function pruneBlockedSelections<S extends { product_id: string }>(
+  groups: ChoiceGroupLike[],
+  selections: Map<string, S>,
+): Map<string, S> {
+  const activeIds = new Set(
+    activeChoiceGroups(groups, selections).map((g) => g.choice_group_id),
+  );
+  const pruned = new Map<string, S>();
+  for (const [groupId, selection] of selections) {
+    if (activeIds.has(groupId)) pruned.set(groupId, selection);
+  }
+  return pruned;
+}
+
+/**
+ * Valida lo que llegó del cliente contra los componentes leídos de la DB.
+ *
+ * Tres reglas, en orden de especificidad del mensaje:
+ *
+ * 1. cada opción elegida existe y pertenece al grupo que dice (ya existía en
+ *    `resolveComboUpcharge`);
+ * 2. ninguna elección corresponde a un grupo bloqueado por otra elección (la
+ *    regla nueva, FR-006);
+ * 3. cada grupo **activo** tiene exactamente una elección — esto cierra un
+ *    hueco preexistente: D-MDR-4 ("cada grupo requiere una selección") la
+ *    sostenía **sólo el cliente**, y como las opciones llevan
+ *    `extra_price_cents` (spec 29) un payload armado a mano podía omitir un
+ *    grupo caro o mandar dos del mismo. Ver D-GCM-5.
+ *
+ * Devuelve los grupos activos para que el llamador no los recalcule.
+ */
+export function validateComboChoices(
+  components: ComboChoiceComponent[],
+  selectedChoices: SelectedChoiceRef[],
+): ComboChoicesResult {
+  const optionByKey = new Map<string, ComboChoiceComponent>();
+  for (const c of components) {
+    if (c.kind !== "choice" || !c.choice_group_id || !c.product_id) continue;
+    optionByKey.set(`${c.choice_group_id}::${c.product_id}`, c);
+  }
+
+  // (1) + duplicados. Se arma el mapa de bloqueos en la misma pasada.
+  const blocksBySelectedGroup = new Map<string, string[]>();
+  for (const sc of selectedChoices) {
+    const option = optionByKey.get(`${sc.choice_group_id}::${sc.product_id}`);
+    if (!option) {
+      return {
+        ok: false,
+        error: "Una de las opciones elegidas no es válida para este menú.",
+      };
+    }
+    if (blocksBySelectedGroup.has(sc.choice_group_id)) {
+      return {
+        ok: false,
+        error: "Hay dos opciones elegidas para el mismo grupo.",
+      };
+    }
+    blocksBySelectedGroup.set(
+      sc.choice_group_id,
+      option.blocks_choice_group_ids ?? [],
+    );
+  }
+
+  const activeGroupIds = resolveActiveGroupIds(
+    orderedChoiceGroupIds(components),
+    blocksBySelectedGroup,
+  );
+  const activeSet = new Set(activeGroupIds);
+
+  // (2) elecciones de un grupo que no aplica.
+  for (const sc of selectedChoices) {
+    if (!activeSet.has(sc.choice_group_id)) {
+      return {
+        ok: false,
+        error:
+          "Una de las opciones elegidas no corresponde a este menú con lo que elegiste.",
+      };
+    }
+  }
+
+  // (3) grupos activos sin elegir.
+  for (const groupId of activeGroupIds) {
+    if (!blocksBySelectedGroup.has(groupId)) {
+      return { ok: false, error: "Falta elegir una opción del menú." };
+    }
+  }
+
+  return { ok: true, activeGroupIds };
+}

@@ -9,8 +9,10 @@ import {
   choicesDeltaCents,
   initialOptionIndex,
   optionIndexFromKey,
+  pruneBlockedSelections,
   type DailyMenuSelection,
   type DailyMenuSelections,
+  type MenuStep,
 } from "@/lib/mozo/daily-menu-steps";
 import type {
   DailyMenuChoiceGroup,
@@ -65,12 +67,18 @@ export function DailyMenuWizard({
    *  derecho ahí, sin repetir los pasos que ya estaban resueltos (FR-005). */
   const [returnToConfirm, setReturnToConfirm] = useState(false);
 
+  // Los pasos dependen de lo elegido (spec 074): una opción puede sacar un
+  // grupo del medio —«los ravioles no llevan guarnición»— así que la lista se
+  // recalcula en vivo y `Paso N de M` se mueve con ella (FR-003).
   const steps = useMemo(
-    () => buildMenuSteps(menu?.choice_groups ?? []),
-    [menu],
+    () => buildMenuSteps(menu?.choice_groups ?? [], selections),
+    [menu, selections],
   );
-  const step = steps[Math.min(stepIndex, steps.length - 1)];
   const confirmIndex = steps.length - 1;
+  // Si la lista se achicó debajo del paso donde estábamos, el índice se clampea
+  // en vez de dejar el asistente apuntando a un paso que ya no existe.
+  const currentIndex = Math.min(stepIndex, confirmIndex);
+  const step = steps[currentIndex];
 
   const panelRef = useRef<HTMLDivElement>(null);
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -102,7 +110,7 @@ export function DailyMenuWizard({
       }
     }, 0);
     return () => clearTimeout(t);
-  }, [menu?.id, stepIndex, activeIndex, step?.kind]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [menu?.id, currentIndex, activeIndex, step?.kind]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!menu || !step) return null;
 
@@ -110,9 +118,19 @@ export function DailyMenuWizard({
   const delta = choicesDeltaCents(selections);
   const lineTotal = (menu.price_cents + delta) * quantity;
 
-  /** Entra al paso `target` dejando el foco donde corresponde. */
-  const goToStep = (target: number, withSelections: DailyMenuSelections) => {
-    const next = steps[target];
+  /**
+   * Entra al paso `target` dejando el foco donde corresponde.
+   *
+   * `withSteps` existe porque elegir una opción puede cambiar la lista de pasos
+   * (FR-003): hay que navegar sobre la lista NUEVA, no sobre la del render que
+   * todavía está en pantalla.
+   */
+  const goToStep = (
+    target: number,
+    withSelections: DailyMenuSelections,
+    withSteps: MenuStep[] = steps,
+  ) => {
+    const next = withSteps[target];
     setStepIndex(target);
     setActiveIndex(
       next?.kind === "choice" ? initialOptionIndex(next.group, withSelections) : 0,
@@ -121,8 +139,8 @@ export function DailyMenuWizard({
 
   const choose = (group: DailyMenuChoiceGroup, option: DailyMenuComponent) => {
     if (!option.product_id) return;
-    const next = new Map(selections);
-    next.set(group.choice_group_id, {
+    const draft = new Map(selections);
+    draft.set(group.choice_group_id, {
       choice_group_id: group.choice_group_id,
       choice_group_label: group.label,
       product_id: option.product_id,
@@ -130,23 +148,40 @@ export function DailyMenuWizard({
       extra_price_cents: option.extra_price_cents ?? 0,
       modifier_ids: [],
     });
+    // FR-004: cambiar el principal por uno que no lleva guarnición descarta la
+    // guarnición que ya estaba elegida. Así en `selections` nunca queda una
+    // elección de un grupo que no aplica, y el total del pie no la cobra.
+    const next = pruneBlockedSelections(menu.choice_groups, draft);
     setSelections(next);
+
+    const nextSteps = buildMenuSteps(menu.choice_groups, next);
+    const nextConfirmIndex = nextSteps.length - 1;
     if (returnToConfirm) {
       setReturnToConfirm(false);
-      goToStep(confirmIndex, next);
-    } else {
-      goToStep(Math.min(stepIndex + 1, confirmIndex), next);
+      goToStep(nextConfirmIndex, next, nextSteps);
+      return;
     }
+    // Dónde quedó ESTE grupo en la lista nueva: elegir acá sólo puede sacar
+    // grupos posteriores (D-GCM-3), pero buscarlo en vez de asumir `stepIndex`
+    // deja el avance correcto sin depender de esa invariante.
+    const here = nextSteps.findIndex(
+      (s) => s.kind === "choice" && s.group.choice_group_id === group.choice_group_id,
+    );
+    goToStep(
+      Math.min((here >= 0 ? here : currentIndex) + 1, nextConfirmIndex),
+      next,
+      nextSteps,
+    );
   };
 
   /** Volver: al paso anterior, o cerrar si ya estamos en el primero. */
   const goBack = () => {
-    if (stepIndex === 0) {
+    if (currentIndex === 0) {
       onClose();
       return;
     }
     setReturnToConfirm(false);
-    goToStep(stepIndex - 1, selections);
+    goToStep(currentIndex - 1, selections);
   };
 
   const editGroup = (groupIndex: number) => {
@@ -269,7 +304,7 @@ export function DailyMenuWizard({
               type="button"
               onClick={goBack}
               className="rounded-full p-2 text-zinc-600 active:bg-zinc-100"
-              aria-label={stepIndex === 0 ? "Cerrar" : "Paso anterior"}
+              aria-label={currentIndex === 0 ? "Cerrar" : "Paso anterior"}
             >
               <ArrowLeft className="h-5 w-5" />
             </button>
@@ -298,9 +333,9 @@ export function DailyMenuWizard({
                   <span
                     key={i}
                     className={`h-1.5 rounded-full transition-all ${
-                      i === stepIndex
+                      i === currentIndex
                         ? "w-5 bg-emerald-600"
-                        : i < stepIndex
+                        : i < currentIndex
                           ? "w-1.5 bg-emerald-300"
                           : "w-1.5 bg-zinc-200"
                     }`}
@@ -308,7 +343,7 @@ export function DailyMenuWizard({
                 ))}
               </div>
               <span className="text-[11px] font-semibold text-zinc-500">
-                Paso {stepIndex + 1} de {steps.length}
+                Paso {currentIndex + 1} de {steps.length}
               </span>
             </div>
           )}
@@ -378,7 +413,7 @@ export function DailyMenuWizard({
             </ul>
           ) : (
             <ConfirmStep
-              menu={menu}
+              steps={steps}
               fixedComponents={fixedComponents}
               selections={selections}
               onEditGroup={editGroup}
@@ -449,19 +484,28 @@ export function DailyMenuWizard({
   );
 }
 
-/** Paso final: qué incluye, qué se eligió (editable) y a cuánto queda. */
+/**
+ * Paso final: qué incluye, qué se eligió (editable) y a cuánto queda.
+ *
+ * Los grupos salen de `steps` y no del menú entero: así lista exactamente los
+ * que aplican con lo elegido —un grupo bloqueado no aparece como «Guarnición:
+ * ninguna», sencillamente no está (FR-007)— y el índice del paso al que hay que
+ * volver para editarlo es el mismo que el del asistente.
+ */
 function ConfirmStep({
-  menu,
+  steps,
   fixedComponents,
   selections,
   onEditGroup,
 }: {
-  menu: DailyMenuForMozo;
+  steps: MenuStep[];
   fixedComponents: DailyMenuComponent[];
   selections: DailyMenuSelections;
-  onEditGroup: (groupIndex: number) => void;
+  onEditGroup: (stepIndex: number) => void;
 }) {
-  const groups = menu.choice_groups.filter((g) => g.options.length > 0);
+  const groups = steps.flatMap((s, i) =>
+    s.kind === "choice" ? [{ group: s.group, stepIndex: i }] : [],
+  );
   return (
     <div className="space-y-4">
       {fixedComponents.length > 0 && (
@@ -496,13 +540,13 @@ function ConfirmStep({
             Elegiste
           </p>
           <ul className="mt-1.5 space-y-1.5">
-            {groups.map((g, i) => {
+            {groups.map(({ group: g, stepIndex }) => {
               const sel = selections.get(g.choice_group_id);
               return (
                 <li key={g.choice_group_id}>
                   <button
                     type="button"
-                    onClick={() => onEditGroup(i)}
+                    onClick={() => onEditGroup(stepIndex)}
                     className="flex w-full items-center gap-3 rounded-2xl bg-white px-3 py-2.5 text-left ring-1 ring-zinc-200 transition active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
                     <span className="min-w-0 flex-1">

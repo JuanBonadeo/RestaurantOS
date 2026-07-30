@@ -16,11 +16,14 @@ import type {
  * `selected_choices` que consumía el modal viejo.
  */
 
+let sortOrder = 0;
+
 function option(
   groupId: string,
   label: string,
   i: number,
   extra = 0,
+  blocks: string[] = [],
 ): DailyMenuComponent {
   return {
     id: `${groupId}-opt-${i}`,
@@ -32,6 +35,8 @@ function option(
     choice_group_id: groupId,
     choice_group_label: label,
     extra_price_cents: extra,
+    blocks_choice_group_ids: blocks,
+    sort_order: sortOrder++,
   };
 }
 
@@ -62,6 +67,8 @@ const MENU: DailyMenuForMozo = {
       choice_group_id: null,
       choice_group_label: null,
       extra_price_cents: 0,
+      blocks_choice_group_ids: [],
+      sort_order: 0,
     },
     ...entradas,
     ...principales,
@@ -208,5 +215,103 @@ describe("asistente del menú del día · teclado (spec 072)", () => {
     await expectFocusOn(/Entrada 1/);
     fireEvent.keyDown(document, { key: "Escape" });
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe("asistente del menú del día · grupos condicionados (spec 074)", () => {
+  /**
+   * Principal + Guarnición + Postre, donde «Principal 2» (los ravioles) no
+   * lleva guarnición. La guarnición tiene adicional para poder verificar que
+   * descartarla también descuenta la plata.
+   */
+  function menuConGuarnicion(): DailyMenuForMozo {
+    const principales = [
+      option("gp", "Principal", 1),
+      option("gp", "Principal", 2, 0, ["gg"]),
+    ];
+    const guarniciones = [
+      option("gg", "Guarnición", 1, 300000),
+      option("gg", "Guarnición", 2),
+    ];
+    const postres = [option("gd", "Postre", 1)];
+    return {
+      id: "m-cond",
+      name: "Menú con guarnición",
+      description: null,
+      price_cents: 1000000,
+      image_url: null,
+      components: [...principales, ...guarniciones, ...postres],
+      choice_groups: [
+        { choice_group_id: "gp", label: "Principal", options: principales },
+        { choice_group_id: "gg", label: "Guarnición", options: guarniciones },
+        { choice_group_id: "gd", label: "Postre", options: postres },
+      ],
+      has_choices: true,
+    };
+  }
+
+  it("elegir el plato que no lleva guarnición saltea ese paso (FR-003)", async () => {
+    renderWizard(menuConGuarnicion());
+    await expectFocusOn(/Principal 1/);
+    expect(screen.getByText(/Paso 1 de 4/)).toBeTruthy();
+
+    // «Principal 2» bloquea la guarnición: el paso siguiente es el postre.
+    fireEvent.keyDown(focused(), { key: "2" });
+    await expectFocusOn(/Postre 1/);
+    expect(screen.getByText(/Paso 2 de 3/)).toBeTruthy();
+  });
+
+  it("el plato que sí la lleva conserva el paso", async () => {
+    renderWizard(menuConGuarnicion());
+    await expectFocusOn(/Principal 1/);
+    fireEvent.keyDown(focused(), { key: "1" });
+    await expectFocusOn(/Guarnición 1/);
+    expect(screen.getByText(/Paso 2 de 4/)).toBeTruthy();
+  });
+
+  it("cambiar a un plato sin guarnición descarta la ya elegida y su adicional (FR-004)", async () => {
+    const { onAdd } = renderWizard(menuConGuarnicion());
+    await expectFocusOn(/Principal 1/);
+    fireEvent.keyDown(focused(), { key: "1" });
+    await expectFocusOn(/Guarnición 1/);
+    fireEvent.keyDown(focused(), { key: "1" }); // la de +$3.000
+    await expectFocusOn(/Postre 1/);
+    fireEvent.keyDown(focused(), { key: "1" });
+    await expectFocusOn(/Agregar/);
+    expect(screen.getByRole("button", { name: /Agregar/ }).textContent).toContain(
+      "13.000",
+    );
+
+    // Volver al principal y pasarse a los ravioles.
+    fireEvent.click(screen.getByRole("button", { name: /Principal.*cambiar/i }));
+    await expectFocusOn(/Principal 1/);
+    fireEvent.keyDown(focused(), { key: "2" });
+    await expectFocusOn(/Agregar/);
+
+    // La guarnición no está ni en el resumen ni en el total (FR-007).
+    expect(screen.queryByRole("button", { name: /Guarnición.*cambiar/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /Agregar/ }).textContent).toContain(
+      "10.000",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Agregar/ }));
+    const choices = onAdd.mock.calls[0]![2];
+    expect(choices.map((c: { choice_group_id: string }) => c.choice_group_id)).toEqual([
+      "gp",
+      "gd",
+    ]);
+  });
+
+  it("volver al plato original hace reaparecer el paso, vacío", async () => {
+    renderWizard(menuConGuarnicion());
+    await expectFocusOn(/Principal 1/);
+    fireEvent.keyDown(focused(), { key: "2" }); // ravioles → sin guarnición
+    await expectFocusOn(/Postre 1/);
+
+    fireEvent.keyDown(focused(), { key: "ArrowLeft" });
+    await expectFocusOn(/Principal 2/);
+    fireEvent.keyDown(focused(), { key: "1" }); // vuelve al que sí la lleva
+    await expectFocusOn(/Guarnición 1/);
+    expect(screen.getByText(/Paso 2 de 4/)).toBeTruthy();
   });
 });

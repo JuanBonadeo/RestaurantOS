@@ -208,6 +208,8 @@ export async function persistOrder(
     choice_group_id: string | null;
     choice_group_label: string | null;
     extra_price_cents: number;
+    /** Grupos que esta opción NO habilita (spec 074). */
+    blocks_choice_group_ids: string[] | null;
   };
   type DailyMenuRow = {
     id: string;
@@ -226,7 +228,7 @@ export async function persistOrder(
     const { data: menus } = await supabase
       .from("daily_menus")
       .select(
-        "id, name, price_cents, image_url, available_days, is_active, is_available, business_id, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, extra_price_cents)",
+        "id, name, price_cents, image_url, available_days, is_active, is_available, business_id, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, extra_price_cents, blocks_choice_group_ids)",
       )
       .in("id", menuIds);
     if (!menus || menus.length !== menuIds.length) {
@@ -324,7 +326,9 @@ export async function persistOrder(
           kind: c.kind ?? "text",
           choice_group_id: c.choice_group_id,
           product_id: c.product_id,
+          sort_order: Number(c.sort_order ?? 0),
           extra_price_cents: Number(c.extra_price_cents ?? 0),
+          blocks_choice_group_ids: c.blocks_choice_group_ids ?? [],
         })),
         (inputItem.selected_choices ?? []).map((sc) => ({
           choice_group_id: sc.choice_group_id,

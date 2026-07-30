@@ -20,6 +20,17 @@ async function syncComponents(
 ): Promise<string | null> {
   const supabase = await createSupabaseServerClient();
 
+  // Grupos que realmente existen en lo que se está guardando. Se usa para
+  // limpiar referencias a grupos borrados en `blocks_choice_group_ids` (spec
+  // 074): si el encargado elimina el grupo «Guarnición», las opciones que lo
+  // condicionaban quedarían apuntando a un uuid fantasma. No es un error —el
+  // schema lo deja pasar a propósito—, se limpia acá.
+  const existingGroupIds = new Set(
+    components
+      .filter((c) => c.kind === "choice" && c.choice_group_id)
+      .map((c) => c.choice_group_id as string),
+  );
+
   const { data: existing } = await supabase
     .from("daily_menu_components")
     .select("id")
@@ -50,6 +61,15 @@ async function syncComponents(
       // Adicional sólo para `choice` (spec 29); los demás kinds van en 0.
       extra_price_cents:
         component.kind === "choice" ? (component.extra_price_cents ?? 0) : 0,
+      // Grupos condicionados (spec 074), sólo para `choice` y sólo los que
+      // siguen existiendo. Un componente que deja de ser `choice` pierde sus
+      // condiciones, igual que pierde el adicional.
+      blocks_choice_group_ids:
+        component.kind === "choice"
+          ? (component.blocks_choice_group_ids ?? []).filter(
+              (id) => id !== component.choice_group_id && existingGroupIds.has(id),
+            )
+          : [],
     };
     if (component.id) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
