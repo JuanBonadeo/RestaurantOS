@@ -9,6 +9,8 @@
 > ⚠️ **La mitad A (cobro unificado) quedó reemplazada por [spec 062](../062-motor-de-cobro-unificado/)** (2026-07-28, [#96](https://github.com/gachetponzellini/RestaurantOS-app/issues/96)). Acá se proponía reusar `CobrarDesktopClient` para el pedido sin mesa; Juan pidió ir más lejos — **un solo motor de cobro para las cuatro UIs**, parametrizado por lo que hay que cobrar. Todo lo de la mitad A (FR-001 a FR-006, US1) se cumple allá y **no se implementa desde acá**.
 >
 > **Esta spec queda con la mitad B: corregir un pago ya registrado** (US2, US3, FR-007 a FR-018) — independiente del refactor y todavía vigente.
+>
+> ⚠️ **La mitad B también quedó reemplazada, por [spec 070](../070-caja-correccion-de-lineas-y-libro/)** (2026-07-30, [#106](https://github.com/gachetponzellini/RestaurantOS-app/issues/106)). Nunca se implementó (`corregirPago` y `payments_audit_log` no existen en el código), y Juan pidió además **el monto y el mozo atribuido** + un **libro de movimientos** como puerta de entrada. La 070 absorbe todo lo de acá. **Esta spec queda cerrada — no se implementa nada desde ella.**
 
 **Input**: Pedido de Juan 2026-07-28 — *"hay un gran problema de los pedidos que crea el encargado, la forma del pago es inmanejable, yo reutilizaría el cobro de las mesas, y también se tendría que poder editar el pago, que a veces ponen efectivo y después pagan con otra cosa"*. Decidido con Juan (misma fecha): (1) **editar = corregir el pago in-place** con auditoría, no anular y rehacer; (2) el alcance del editar es **cualquier pago de una caja con el período abierto**, no sólo los pedidos del board.
 
