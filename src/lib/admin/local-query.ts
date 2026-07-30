@@ -50,6 +50,9 @@ export type LocalComanda = {
    *  El dine-in se rotula como Mesa N en la card. */
   delivery_type: string;
   table_label: string | null;
+  /** Spec 065: salón (floor_plan) de la mesa. `null` en delivery / retiro /
+   *  venta rápida de mostrador — esas comandas no pertenecen a ningún salón. */
+  floor_plan_id: string | null;
   customer_name: string | null;
   /** Mozo asignado a la order (solo dine_in). El nombre se resuelve en
    *  cliente desde la lista de mozos del business. */
@@ -93,7 +96,7 @@ export async function getActiveComandas(
     stations!inner ( name ),
     orders!inner (
       id, business_id, order_number, delivery_type, customer_name, mozo_id,
-      tables!orders_table_id_fkey ( label )
+      tables!orders_table_id_fkey ( label, floor_plan_id )
     ),
     comanda_items (
       order_items (
@@ -151,7 +154,7 @@ export async function getActiveComandas(
       delivery_type: string;
       customer_name: string;
       mozo_id: string | null;
-      tables: { label: string } | null;
+      tables: { label: string; floor_plan_id: string | null } | null;
     };
     comanda_items: {
       order_items: {
@@ -187,6 +190,7 @@ export async function getActiveComandas(
     cancelled_at: c.cancelled_at,
     delivery_type: c.orders.delivery_type,
     table_label: c.orders.tables?.label ?? null,
+    floor_plan_id: c.orders.tables?.floor_plan_id ?? null,
     customer_name: c.orders.customer_name,
     mozo_id: c.orders.mozo_id,
     items: (c.comanda_items ?? [])

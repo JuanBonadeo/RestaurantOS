@@ -96,6 +96,28 @@ export async function getFloorPlansForBusiness(
   }));
 }
 
+export type SalonOption = { id: string; name: string };
+
+/**
+ * Salones del negocio, sólo id + nombre (spec 065).
+ *
+ * Es la versión liviana de `getFloorPlansForBusiness` para el **selector de
+ * salón** de `/admin/operacion`: la barra de tabs no puede suspender, así que
+ * la page la resuelve con un `await` antes del render. Un puñado de filas por
+ * índice de `business_id`; no trae mesas ni auto-crea nada.
+ */
+export async function getSalonOptions(
+  businessId: string,
+): Promise<SalonOption[]> {
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+  const { data } = await service
+    .from("floor_plans")
+    .select("id, name")
+    .eq("business_id", businessId)
+    .order("created_at", { ascending: true });
+  return (data ?? []) as SalonOption[];
+}
+
 /**
  * Devuelve un floor_plan específico (por id) + sus tables. Valida pertenencia
  * al business para defensa cross-tenant. Retorna null si no existe o es de

@@ -50,6 +50,7 @@ function isTab(value: string | null | undefined): value is Tab {
 
 function TabsInner({
   slug,
+  businessId,
   superCategories,
   stations,
   categories,
@@ -217,7 +218,9 @@ function TabsInner({
         {active === "productos" && (
           <CatalogClient
             slug={slug}
+            businessId={businessId}
             categories={categories}
+            stations={stations}
             products={products}
           />
         )}

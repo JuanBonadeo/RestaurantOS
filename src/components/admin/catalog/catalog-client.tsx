@@ -6,34 +6,105 @@ import { Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { ProductRow } from "@/components/admin/catalog/product-row";
+import { useStickyFilter } from "@/lib/ui/use-sticky-filter";
 import type {
   AdminCategory,
   AdminProduct,
+  AdminStation,
 } from "@/lib/admin/catalog-query";
 
+const ALL = "all";
 const UNCATEGORIZED = "__uncat__";
+const SIN_SECTOR = "__sin_sector__";
+
+/**
+ * Estado operativo del producto (spec 065). Es `is_available`: lo que el local
+ * prende y apaga durante el servicio ("se acabó el pescado"). `is_active`
+ * (producto de baja) y `show_online` (visible en la carta pública) son
+ * decisiones de catálogo, no de operación, y no entran acá.
+ */
+const ESTADOS = [
+  { id: ALL, label: "Todos" },
+  { id: "disponibles", label: "Disponibles" },
+  { id: "no-disponibles", label: "No disponibles" },
+] as const;
+
+const ESTADO_IDS = ESTADOS.filter((e) => e.id !== ALL).map((e) => e.id);
 
 export function CatalogClient({
   slug,
+  businessId,
   categories,
+  stations,
   products,
 }: {
   slug: string;
+  businessId: string;
   categories: AdminCategory[];
+  stations: AdminStation[];
   products: AdminProduct[];
 }) {
-  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-
   const hasUncategorized = products.some((p) => !p.category_id);
+  const hasSinSector = products.some((p) => !p.station_id);
+
+  // ── Filtros persistidos por máquina + negocio (spec 065, FR-007) ──
+  // Un catálogo de cientos de productos no se filtra una vez: se filtra todo el
+  // día. Que el filtro se resetee al volver de editar un producto es re-hacer
+  // el mismo trabajo cada vez.
+  const categoryOptions = useMemo(
+    () => [
+      ...categories.map((c) => c.id),
+      ...(hasUncategorized ? [UNCATEGORIZED] : []),
+    ],
+    [categories, hasUncategorized],
+  );
+  const sectorOptions = useMemo(
+    () => [
+      ...stations.map((s) => s.id),
+      ...(hasSinSector ? [SIN_SECTOR] : []),
+    ],
+    [stations, hasSinSector],
+  );
+
+  const [categoryFilter, setCategoryFilter] = useStickyFilter(
+    `catalogo_prod_categoria_${businessId}`,
+    ALL,
+    categoryOptions,
+  );
+  const [estadoFilter, setEstadoFilter] = useStickyFilter<string>(
+    `catalogo_prod_estado_${businessId}`,
+    ALL,
+    ESTADO_IDS,
+  );
+  const [sectorFilter, setSectorFilter] = useStickyFilter(
+    `catalogo_prod_sector_${businessId}`,
+    ALL,
+    sectorOptions,
+  );
+
+  // La búsqueda NO se persiste (FR-008): una búsqueda guardada de ayer que hoy
+  // deja la lista en cero se lee como "se me borró el catálogo".
+  const [search, setSearch] = useState("");
 
   const filteredProducts = useMemo(() => {
     let result = products;
 
     if (categoryFilter === UNCATEGORIZED) {
       result = result.filter((p) => !p.category_id);
-    } else if (categoryFilter !== null) {
+    } else if (categoryFilter !== ALL) {
       result = result.filter((p) => p.category_id === categoryFilter);
+    }
+
+    if (estadoFilter === "disponibles") {
+      result = result.filter((p) => p.is_available);
+    } else if (estadoFilter === "no-disponibles") {
+      result = result.filter((p) => !p.is_available);
+    }
+
+    if (sectorFilter === SIN_SECTOR) {
+      result = result.filter((p) => !p.station_id);
+    } else if (sectorFilter !== ALL) {
+      result = result.filter((p) => p.station_id === sectorFilter);
     }
 
     const q = search.trim().toLowerCase();
@@ -42,19 +113,32 @@ export function CatalogClient({
     }
 
     return result;
-  }, [products, categoryFilter, search]);
+  }, [products, categoryFilter, estadoFilter, sectorFilter, search]);
 
-  const filterChip = (
-    id: string | null,
+  const hayFiltro =
+    categoryFilter !== ALL || estadoFilter !== ALL || sectorFilter !== ALL;
+
+  const limpiar = () => {
+    setCategoryFilter(ALL);
+    setEstadoFilter(ALL);
+    setSectorFilter(ALL);
+    setSearch("");
+  };
+
+  const chip = (
+    id: string,
     label: string,
+    active: boolean,
+    onClick: () => void,
   ) => (
     <button
-      key={id ?? "all"}
+      key={id}
       type="button"
-      onClick={() => setCategoryFilter(categoryFilter === id ? null : id)}
+      onClick={onClick}
+      aria-pressed={active}
       className={cn(
         "rounded-full border px-3 py-1 text-sm font-medium transition-colors",
-        categoryFilter === id
+        active
           ? "bg-primary text-primary-foreground border-primary"
           : "border-border hover:bg-muted",
       )}
@@ -63,10 +147,15 @@ export function CatalogClient({
     </button>
   );
 
+  const categoryChip = (id: string, label: string) =>
+    chip(id, label, categoryFilter === id, () =>
+      setCategoryFilter(categoryFilter === id ? ALL : id),
+    );
+
   return (
     <>
-      {/* Search */}
-      <div className="flex items-center gap-3">
+      {/* Búsqueda */}
+      <div className="flex flex-wrap items-center gap-3">
         <div className="relative w-full max-w-md">
           <Search className="text-muted-foreground pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2" />
           <Input
@@ -86,24 +175,63 @@ export function CatalogClient({
             </button>
           )}
         </div>
+
+        {/* Estado operativo */}
+        <div className="flex flex-wrap items-center gap-2">
+          {ESTADOS.map((e) =>
+            chip(e.id, e.label, estadoFilter === e.id, () =>
+              setEstadoFilter(e.id),
+            ),
+          )}
+        </div>
+
+        {/* Sector: sólo tiene sentido con más de uno cargado. */}
+        {stations.length > 1 && (
+          <label className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1 text-sm">
+            <span className="text-muted-foreground">Sector</span>
+            <select
+              value={sectorFilter}
+              onChange={(e) => setSectorFilter(e.target.value)}
+              className="cursor-pointer border-0 bg-transparent font-medium outline-none"
+            >
+              <option value={ALL}>Todos</option>
+              {stations.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+              {hasSinSector && <option value={SIN_SECTOR}>Sin sector</option>}
+            </select>
+          </label>
+        )}
+
+        {(hayFiltro || search) && (
+          <button
+            type="button"
+            onClick={limpiar}
+            className="text-muted-foreground hover:text-foreground text-sm font-medium underline underline-offset-4"
+          >
+            Limpiar filtros
+          </button>
+        )}
       </div>
 
       {/* Filtro por categoría — solo lectura, gestión vive en la tab Categorías. */}
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        {filterChip(null, "Todas")}
-        {categories.map((c) => filterChip(c.id, c.name))}
-        {hasUncategorized && filterChip(UNCATEGORIZED, "Sin categoría")}
+        {categoryChip(ALL, "Todas")}
+        {categories.map((c) => categoryChip(c.id, c.name))}
+        {hasUncategorized && categoryChip(UNCATEGORIZED, "Sin categoría")}
       </div>
 
       {/* Product list */}
       <ul className="mt-4 grid gap-2">
         {filteredProducts.length === 0 ? (
           <li className="text-muted-foreground py-8 text-center text-sm italic">
-            {search
-              ? `Sin resultados para "${search}".`
-              : categoryFilter
-                ? "Sin productos en esta categoría."
-                : "Sin productos."}
+            {products.length === 0
+              ? "Sin productos."
+              : search
+                ? `Sin resultados para "${search}".`
+                : "Ningún producto entra en los filtros activos."}
           </li>
         ) : (
           filteredProducts.map((p) => (
@@ -111,7 +239,6 @@ export function CatalogClient({
           ))
         )}
       </ul>
-
     </>
   );
 }

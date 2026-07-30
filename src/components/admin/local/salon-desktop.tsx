@@ -194,6 +194,7 @@ export function SalonDesktop({
   mozos,
   currentUserId,
   role,
+  pinnedPlanId = null,
   distribuirOpen = false,
   onDistribuirOpen,
   onDistribuirClose,
@@ -206,6 +207,11 @@ export function SalonDesktop({
   mozos: MozoMember[];
   currentUserId: string;
   role: BusinessRole;
+  /** Spec 065: salón fijado desde el filtro del operativo. Cuando viene, manda
+   *  sobre la preferencia local y el selector propio se esconde (un solo
+   *  control para lo mismo). `null` = «Todos» → el componente vuelve a elegir
+   *  su salón como siempre. */
+  pinnedPlanId?: string | null;
   /** Modo "Distribuir mozos" (paint mode). El sidebar derecho muestra la
    *  paleta de mozos y el plano grande tiñe mesas por mozo + tap asigna. */
   distribuirOpen?: boolean;
@@ -521,8 +527,24 @@ export function SalonDesktop({
     }
   };
 
+  // Spec 065: el salón fijado desde el filtro del operativo manda sobre la
+  // preferencia interna (que se conserva intacta para cuando se vuelve a
+  // «Todos»). Si el id fijado no existe acá, se ignora en vez de romper.
+  const effectivePlanId =
+    pinnedPlanId && floorPlans.some((p) => p.plan.id === pinnedPlanId)
+      ? pinnedPlanId
+      : activePlanId;
+
+  // Cambiar de salón desde el filtro del operativo también limpia la selección
+  // (igual que `setActivePlan`): una mesa seleccionada de otro salón dejaría el
+  // sidebar mostrando algo que ya no está en el plano.
+  useEffect(() => {
+    setSelectedId(null);
+  }, [pinnedPlanId]);
+
   // Plano + mesas del salón activo.
-  const active = floorPlans.find((p) => p.plan.id === activePlanId) ?? floorPlans[0];
+  const active =
+    floorPlans.find((p) => p.plan.id === effectivePlanId) ?? floorPlans[0];
   const plan = active?.plan;
 
   // Aplica el overlay optimista (patch parcial) sobre una mesa. Solo pisa las
@@ -954,8 +976,8 @@ export function SalonDesktop({
 
   return (
     <div className="flex h-full flex-col gap-4">
-      {/* ── Selector de salón (solo si hay >1) ── */}
-      {floorPlans.length > 1 && (
+      {/* ── Selector de salón (solo si hay >1 y el operativo no fijó uno) ── */}
+      {floorPlans.length > 1 && !pinnedPlanId && (
         <SegmentedSelector
           ariaLabel="Seleccionar salón"
           activeId={activePlanId}

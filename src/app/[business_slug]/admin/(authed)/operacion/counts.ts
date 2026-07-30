@@ -1,6 +1,7 @@
 import type { LocalComanda } from "@/lib/admin/local-query";
 import type { AdminOrder } from "@/lib/admin/orders-query";
 import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
+import { SALON_ALL, matchesSalon, reservaSalonId } from "@/lib/admin/salon-filter";
 import type { CajaConEstado, RendicionMozoPendiente } from "@/lib/caja/types";
 import type { ReservationStatus } from "@/lib/reservations/types";
 import type { PresentEmployee } from "@/lib/rrhh/clock-actions";
@@ -23,17 +24,31 @@ export function countPedidosNuevos(orders: AdminOrder[]): number {
     .length;
 }
 
-/** Comandas activas = todavía no entregadas. */
-export function countComandasActivas(comandas: LocalComanda[]): number {
-  return comandas.filter((c) => c.status !== "entregado").length;
+/**
+ * Comandas activas = todavía no entregadas.
+ *
+ * `salon` (spec 065) recorta al salón elegido en el shell; las comandas sin
+ * mesa (delivery / retiro / mostrador) sólo cuentan en «Todos».
+ */
+export function countComandasActivas(
+  comandas: LocalComanda[],
+  salon: string = SALON_ALL,
+): number {
+  return comandas.filter(
+    (c) => c.status !== "entregado" && matchesSalon(salon, c.floor_plan_id),
+  ).length;
 }
 
 /**
  * Mesas ocupadas = mesas activas que NO están libres (ocupada / pidió cuenta).
  * Refleja cuántas mesas requieren atención del encargado.
  */
-export function countSalonOcupadas(floorPlans: FloorPlanWithTables[]): number {
+export function countSalonOcupadas(
+  floorPlans: FloorPlanWithTables[],
+  salon: string = SALON_ALL,
+): number {
   return floorPlans
+    .filter((fp) => matchesSalon(salon, fp.plan.id))
     .flatMap((fp) => fp.tables.filter((t) => t.status === "active"))
     .filter((t) => (t.operational_status ?? "libre") !== "libre").length;
 }
@@ -60,9 +75,16 @@ export function countRendicionesPendientes(
  * le importa al encargado: cuánta gente falta sentar.
  */
 export function countReservasPorSentar(
-  rows: { status: ReservationStatus }[],
+  rows: {
+    status: ReservationStatus;
+    tables?: { floor_plans?: { id: string } | null } | null;
+    floor_plan_id?: string | null;
+  }[],
+  salon: string = SALON_ALL,
 ): number {
-  return rows.filter((r) => r.status === "confirmed").length;
+  return rows.filter(
+    (r) => r.status === "confirmed" && matchesSalon(salon, reservaSalonId(r)),
+  ).length;
 }
 
 /** Personal presente ahora (fichados sin salida). */

@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { LocalShell } from "@/components/admin/local/local-shell";
 import { ensureAdminAccess } from "@/lib/admin/context";
+import { getSalonOptions } from "@/lib/admin/floor-plan/queries";
 import { startOfTodayUtc } from "@/lib/admin/orders-query";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
@@ -41,6 +42,11 @@ export default async function LocalEnVivoPage({
   }
 
   const service = createSupabaseServiceClient() as unknown as SupabaseClient;
+
+  // Spec 065: el selector de salón vive en la barra de tabs, que no puede
+  // suspender — así que sus opciones se resuelven acá (query chica: id + nombre
+  // de `floor_plans`). El streaming por tab de abajo no se toca.
+  const salones = await getSalonOptions(business.id);
 
   // Ventana "hoy" en la TZ del negocio (no la del server) para que las
   // reservas no se corran en el borde de medianoche (mismo criterio que el
@@ -87,6 +93,7 @@ export default async function LocalEnVivoPage({
       timezone={business.timezone}
       currentUserId={ctx.user.id}
       role={ctx.isPlatformAdmin ? "admin" : (ctx.role ?? "admin")}
+      salones={salones}
       salon={salon}
       comandas={comandas}
       pedidos={pedidos}

@@ -9,6 +9,7 @@ import {
   countReservasPorSentar,
   countSalonOcupadas,
 } from "./counts";
+import { SALON_ALL } from "@/lib/admin/salon-filter";
 import type { LocalComanda } from "@/lib/admin/local-query";
 import type { AdminOrder } from "@/lib/admin/orders-query";
 import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
@@ -91,5 +92,81 @@ describe("operacion/counts — predicados de pills (FR-012)", () => {
     expect(countSalonOcupadas([])).toBe(0);
     expect(countRendicionesPendientes([])).toBe(0);
     expect(countReservasPorSentar([])).toBe(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Spec 065 — las pills cuentan sobre el MISMO dato filtrado que muestra la tab.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const comandaEn = (
+  status: LocalComanda["status"],
+  floor_plan_id: string | null,
+) => ({ status, floor_plan_id }) as LocalComanda;
+const planDe = (
+  id: string,
+  tables: FloorPlanWithTables["tables"],
+): FloorPlanWithTables =>
+  ({ plan: { id }, tables }) as unknown as FloorPlanWithTables;
+const reservaEn = (
+  status: "confirmed" | "seated" | "cancelled",
+  salon: string | null,
+) => ({
+  status,
+  tables: salon ? { floor_plans: { id: salon } } : null,
+  floor_plan_id: null,
+});
+
+describe("operacion/counts — filtro por salón (spec 065)", () => {
+  it("countComandasActivas: con un salón puntual cuenta sólo las de ese salón", () => {
+    const comandas = [
+      comandaEn("pendiente", "terraza"),
+      comandaEn("en_preparacion", "terraza"),
+      comandaEn("pendiente", "comedor"),
+      comandaEn("entregado", "terraza"),
+      comandaEn("pendiente", null), // delivery / mostrador
+    ];
+    expect(countComandasActivas(comandas, SALON_ALL)).toBe(4);
+    expect(countComandasActivas(comandas, "terraza")).toBe(2);
+    expect(countComandasActivas(comandas, "comedor")).toBe(1);
+  });
+
+  it("countComandasActivas: sin filtro explícito se comporta como «Todos»", () => {
+    const comandas = [comandaEn("pendiente", "terraza"), comandaEn("pendiente", null)];
+    expect(countComandasActivas(comandas)).toBe(2);
+  });
+
+  it("countSalonOcupadas: con un salón puntual sólo mira ese plano", () => {
+    const floorPlans = [
+      planDe("terraza", [table("active", "ocupada"), table("active", "libre")]),
+      planDe("comedor", [
+        table("active", "ocupada"),
+        table("active", "pidio_cuenta"),
+      ]),
+    ];
+    expect(countSalonOcupadas(floorPlans, SALON_ALL)).toBe(3);
+    expect(countSalonOcupadas(floorPlans, "terraza")).toBe(1);
+    expect(countSalonOcupadas(floorPlans, "comedor")).toBe(2);
+  });
+
+  it("countReservasPorSentar: con un salón puntual sólo las de ese salón", () => {
+    const rows = [
+      reservaEn("confirmed", "terraza"),
+      reservaEn("confirmed", "comedor"),
+      reservaEn("seated", "terraza"),
+      reservaEn("confirmed", null), // sin mesa ni zona
+    ];
+    expect(countReservasPorSentar(rows, SALON_ALL)).toBe(3);
+    expect(countReservasPorSentar(rows, "terraza")).toBe(1);
+  });
+
+  it("un salón sin nada da 0, no el total sin filtrar", () => {
+    expect(
+      countComandasActivas([comandaEn("pendiente", "terraza")], "quincho"),
+    ).toBe(0);
+    expect(
+      countReservasPorSentar([reservaEn("confirmed", "terraza")], "quincho"),
+    ).toBe(0);
+    expect(countSalonOcupadas([planDe("terraza", [table("active", "ocupada")])], "quincho")).toBe(0);
   });
 });

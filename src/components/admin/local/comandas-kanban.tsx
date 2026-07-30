@@ -14,6 +14,7 @@ import {
   ChefHat,
   Check,
   Clock,
+  MapPin,
   Minus,
   MoreVertical,
   Package,
@@ -45,6 +46,7 @@ import type {
   SwappableProduct,
 } from "@/lib/comandas/actions";
 import type { LocalComanda, LocalStation } from "@/lib/admin/local-query";
+import { SALON_ALL, matchesSalon } from "@/lib/admin/salon-filter";
 import type { ComandaStatus } from "@/lib/comandas/types";
 import {
   Dialog,
@@ -217,6 +219,8 @@ export function ComandasKanban({
   stations: initialStations,
   mozos: initialMozos,
   printAgentLastSeenAt: initialPrintAgentLastSeenAt,
+  salonId = SALON_ALL,
+  salonName = null,
 }: {
   slug: string;
   businessId: string;
@@ -224,6 +228,10 @@ export function ComandasKanban({
   stations: LocalStation[];
   mozos: MozoMember[];
   printAgentLastSeenAt: string | null;
+  /** Spec 065: salón elegido en el operativo. `"all"` = sin filtro. */
+  salonId?: string;
+  /** Nombre del salón elegido, para los textos. `null` con «Todos». */
+  salonName?: string | null;
 }) {
   // Filtro "solo fallidas": lo activa la alerta de fallos de impresión (spec
   // 35) para ir directo a las comandas con `print_failed_at`.
@@ -408,6 +416,27 @@ export function ComandasKanban({
     return m;
   }, [mozos]);
 
+  // ── Filtro por salón (spec 065) ──
+  // Todo lo que sigue (saturación por sector, alerta de impresión, kanban) mira
+  // `visibles`, no `comandas`: la tab y sus números tienen que contar lo mismo.
+  const visibles = useMemo(
+    () => comandas.filter((c) => matchesSalon(salonId, c.floor_plan_id)),
+    [comandas, salonId],
+  );
+
+  // Comandas activas que el filtro dejó afuera por no tener mesa (delivery,
+  // retiro, mostrador). Esconderlas en silencio sería el riesgo real de esta
+  // feature: una comanda de cocina que nadie mira. Se avisan.
+  const ocultasSinSalon = useMemo(() => {
+    if (salonId === SALON_ALL) return 0;
+    return comandas.filter(
+      (c) =>
+        c.floor_plan_id === null &&
+        c.status !== "entregado" &&
+        c.items.some((it) => !it.cancelled_at),
+    ).length;
+  }, [comandas, salonId]);
+
   // Mapas derivados.
   const stationStyleById = useMemo(() => {
     const out = new Map<string, (typeof SECTOR_PALETTE)[number]>();
@@ -420,7 +449,7 @@ export function ComandasKanban({
   const stationStats = useMemo(() => {
     const m = new Map<string, number>();
     for (const s of stations) m.set(s.id, 0);
-    for (const c of comandas) {
+    for (const c of visibles) {
       if (c.status === "entregado") continue;
       // No contamos comandas fantasma (todos los items cancelados): no se
       // muestran como card, así que no deben inflar la saturación del sector.
@@ -428,19 +457,21 @@ export function ComandasKanban({
       m.set(c.station_id, (m.get(c.station_id) ?? 0) + 1);
     }
     return m;
-  }, [comandas, stations]);
+  }, [visibles, stations]);
 
   // Comandas con fallo de impresión pendiente (spec 33/35), visibles (no
   // fantasma). Alimenta la alerta accionable y el filtro "solo fallidas".
+  // Sobre `visibles`: la alerta tiene que corresponderse con lo que el filtro
+  // «solo fallidas» va a mostrar (spec 065, FR-004).
   const failedCount = useMemo(
     () =>
-      comandas.filter(
+      visibles.filter(
         (c) =>
           c.print_failed_at &&
           (c.status === "entregado" ||
             c.items.some((it) => !it.cancelled_at)),
       ).length,
-    [comandas],
+    [visibles],
   );
 
   // Si se resolvieron todas las fallidas mientras el filtro estaba activo, lo
@@ -455,7 +486,7 @@ export function ComandasKanban({
       en_preparacion: [],
       entregado: [],
     };
-    for (const c of comandas) {
+    for (const c of visibles) {
       // Comandas activas (pendiente/en_preparacion) cuyos items están TODOS
       // cancelados quedarían como cards fantasma: header + sector + botón
       // accionable pero sin un solo item vivo. Las ocultamos. Las entregadas
@@ -473,13 +504,27 @@ export function ComandasKanban({
     // mismo 100 del server para no recortar lo que sí trajo la query.
     groups.entregado = groups.entregado.slice(0, 100);
     return groups;
-  }, [comandas, showOnlyFailed]);
+  }, [visibles, showOnlyFailed]);
 
   return (
     <div className="flex flex-col gap-5">
       {/* ── Salud del print agent (spec 35) ── */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <AgentHealthPill lastSeenAt={printAgentLastSeenAt} />
+        {salonId !== SALON_ALL && (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-900 ring-1 ring-amber-200">
+            <MapPin className="size-3.5 shrink-0" strokeWidth={2.5} />
+            Solo {salonName ?? "un salón"}
+            {ocultasSinSalon > 0 && (
+              <span className="font-medium text-amber-800">
+                ·{" "}
+                {ocultasSinSalon === 1
+                  ? "1 comanda de delivery / mostrador oculta"
+                  : `${ocultasSinSalon} comandas de delivery / mostrador ocultas`}
+              </span>
+            )}
+          </span>
+        )}
       </div>
 
       {/* ── Alerta de fallos de impresión (spec 35) ── */}

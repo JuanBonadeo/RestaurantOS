@@ -1,7 +1,8 @@
 "use client";
 
-import { Suspense, use, useEffect, useState, type ReactNode } from "react";
+import { Suspense, use, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { MapPin } from "lucide-react";
 
 import { CajaAdminBoard } from "@/components/admin/local/caja-admin-board";
 import { ComandasKanban } from "@/components/admin/local/comandas-kanban";
@@ -34,6 +35,9 @@ import type {
   SalonData,
 } from "@/app/[business_slug]/admin/(authed)/operacion/data";
 import type { BusinessRole } from "@/lib/admin/context";
+import type { SalonOption } from "@/lib/admin/floor-plan/queries";
+import { SALON_ALL } from "@/lib/admin/salon-filter";
+import { useStickyFilter } from "@/lib/ui/use-sticky-filter";
 import { cn } from "@/lib/utils";
 
 type Tab =
@@ -44,6 +48,15 @@ type Tab =
   | "caja"
   | "rendicion"
   | "fichaje";
+
+/**
+ * Tabs a las que aplica el filtro por salón (spec 065, FR-002).
+ *
+ * En Caja / Rendición / Fichaje / Pedidos online el selector se **oculta**: no
+ * tienen dimensión salón y dejarlo a la vista invitaría a leer un total de caja
+ * como si estuviera recortado por salón.
+ */
+const SALON_FILTERABLE: Tab[] = ["salon", "comandas", "reservas"];
 
 function isTab(v: string | null | undefined): v is Tab {
   return (
@@ -63,6 +76,8 @@ type ShellProps = {
   timezone: string;
   currentUserId: string;
   role: BusinessRole;
+  /** Salones del negocio (id + nombre) para el selector de la barra de tabs. */
+  salones: SalonOption[];
   salon: Promise<SalonData>;
   comandas: Promise<ComandasData>;
   pedidos: Promise<PedidosData>;
@@ -143,6 +158,7 @@ function SalonPanel({
   businessId,
   currentUserId,
   role,
+  pinnedPlanId,
   distribuirOpen,
   onDistribuirOpen,
   onDistribuirClose,
@@ -152,6 +168,7 @@ function SalonPanel({
   businessId: string;
   currentUserId: string;
   role: BusinessRole;
+  pinnedPlanId: string | null;
   distribuirOpen: boolean;
   onDistribuirOpen: () => void;
   onDistribuirClose: () => void;
@@ -161,6 +178,7 @@ function SalonPanel({
     <SalonDesktop
       slug={slug}
       businessId={businessId}
+      pinnedPlanId={pinnedPlanId}
       floorPlans={floorPlans}
       dineInOrders={dineInOrders}
       reservations={reservations}
@@ -200,10 +218,14 @@ function ComandasPanel({
   promise,
   slug,
   businessId,
+  salonId,
+  salonName,
 }: {
   promise: Promise<ComandasData>;
   slug: string;
   businessId: string;
+  salonId: string;
+  salonName: string | null;
 }) {
   const { initialComandas, stations, mozos, printAgentLastSeenAt } =
     use(promise);
@@ -215,6 +237,8 @@ function ComandasPanel({
       stations={stations}
       mozos={mozos}
       printAgentLastSeenAt={printAgentLastSeenAt}
+      salonId={salonId}
+      salonName={salonName}
     />
   );
 }
@@ -267,10 +291,12 @@ function ReservasPanel({
   promise,
   slug,
   timezone,
+  salonId,
 }: {
   promise: Promise<ReservasData>;
   slug: string;
   timezone: string;
+  salonId: string;
 }) {
   const { date, rows, floorPlans, activeTables } = use(promise);
   return (
@@ -281,6 +307,7 @@ function ReservasPanel({
       timezone={timezone}
       floorPlans={floorPlans}
       activeTables={activeTables}
+      salonId={salonId}
       // Embebida en el operativo: el navegador de fechas se queda acá
       // (`?tab=reservas&date=…`) en vez de saltar a /admin/reservas.
       datePath={`/${slug}/admin/operacion`}
@@ -305,12 +332,57 @@ function FichajePanel({
   );
 }
 
+/**
+ * Selector de salón del operativo (spec 065, FR-001).
+ *
+ * Un solo control para las tres tabs que tienen salón. La elección se recuerda
+ * por máquina: la tablet de la terraza mira la terraza.
+ */
+function SalonSelector({
+  salones,
+  value,
+  onChange,
+}: {
+  salones: SalonOption[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const filtrando = value !== SALON_ALL;
+  return (
+    <label
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1.5 rounded-xl px-2.5 py-2 text-sm font-semibold ring-1 transition",
+        // Filtrando = estado "no estás viendo todo": tiene que cantar.
+        filtrando
+          ? "bg-amber-50 text-amber-900 ring-amber-300"
+          : "bg-white text-zinc-500 ring-zinc-200/70",
+      )}
+    >
+      <MapPin className="size-4 shrink-0" strokeWidth={2.5} />
+      <span className="sr-only">Filtrar por salón</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="cursor-pointer border-0 bg-transparent pr-1 text-sm font-semibold outline-none"
+      >
+        <option value={SALON_ALL}>Todos los salones</option>
+        {salones.map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function TabsInner({
   slug,
   businessId,
   timezone,
   currentUserId,
   role,
+  salones,
   salon,
   comandas,
   pedidos,
@@ -342,6 +414,21 @@ function TabsInner({
   // con las tabs en el header (en vez de dentro del SalonDesktop).
   const [distribuirOpen, setDistribuirOpen] = useState(false);
 
+  // ── Filtro por salón (spec 065) ──
+  // Preferencia por máquina + negocio. Gobierna Mesas, Comandas y Reservas; las
+  // pills cuentan sobre el mismo dato filtrado (FR-006).
+  const salonIds = useMemo(() => salones.map((s) => s.id), [salones]);
+  const [salonId, setSalonId] = useStickyFilter(
+    `operacion_salon_${businessId}`,
+    SALON_ALL,
+    salonIds,
+  );
+  const salonName =
+    salones.find((s) => s.id === salonId)?.name ?? null;
+  // Con un solo salón no hay nada que elegir.
+  const showSalonFilter =
+    salones.length > 1 && SALON_FILTERABLE.includes(active);
+
   const tabsBar = (
     <nav
       aria-label="Secciones del operativo"
@@ -350,21 +437,21 @@ function TabsInner({
       <TabButton
         active={active === "salon"}
         onClick={() => setTab("salon")}
-        count={<Pill promise={salon} compute={(d) => countSalonOcupadas(d.floorPlans)} />}
+        count={<Pill promise={salon} compute={(d) => countSalonOcupadas(d.floorPlans, salonId)} />}
       >
         Mesas
       </TabButton>
       <TabButton
         active={active === "reservas"}
         onClick={() => setTab("reservas")}
-        count={<Pill promise={reservas} compute={(d) => countReservasPorSentar(d.rows)} />}
+        count={<Pill promise={reservas} compute={(d) => countReservasPorSentar(d.rows, salonId)} />}
       >
         Reservas
       </TabButton>
       <TabButton
         active={active === "comandas"}
         onClick={() => setTab("comandas")}
-        count={<Pill promise={comandas} compute={(d) => countComandasActivas(d.initialComandas)} />}
+        count={<Pill promise={comandas} compute={(d) => countComandasActivas(d.initialComandas, salonId)} />}
       >
         Comandas
       </TabButton>
@@ -403,6 +490,13 @@ function TabsInner({
     <div className="fixed inset-x-0 bottom-0 top-14 z-30 flex flex-col bg-zinc-50 transition-[left] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] md:left-[var(--admin-sidebar-width,60px)] md:top-0">
       <div className="border-border/60 flex items-center justify-between gap-3 overflow-x-auto border-b bg-white/95 px-3 py-3 backdrop-blur sm:px-4">
         {tabsBar}
+        {showSalonFilter && (
+          <SalonSelector
+            salones={salones}
+            value={salonId}
+            onChange={setSalonId}
+          />
+        )}
       </div>
       <div className="flex-1 overflow-auto p-4">
         {active === "salon" && (
@@ -414,6 +508,7 @@ function TabsInner({
                 businessId={businessId}
                 currentUserId={currentUserId}
                 role={role}
+                pinnedPlanId={salonId === SALON_ALL ? null : salonId}
                 distribuirOpen={distribuirOpen}
                 onDistribuirOpen={() => setDistribuirOpen(true)}
                 onDistribuirClose={() => setDistribuirOpen(false)}
@@ -442,6 +537,7 @@ function TabsInner({
                 promise={reservas}
                 slug={slug}
                 timezone={timezone}
+                salonId={salonId}
               />
             </Suspense>
           </ErrorBoundary>
@@ -453,6 +549,8 @@ function TabsInner({
                 promise={comandas}
                 slug={slug}
                 businessId={businessId}
+                salonId={salonId}
+                salonName={salonName}
               />
             </Suspense>
           </ErrorBoundary>
