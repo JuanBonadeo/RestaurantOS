@@ -97,6 +97,7 @@ export async function saveFloorPlan(input: unknown): Promise<ActionResult<{ id: 
         height: parsed.data.height,
         background_image_url: parsed.data.background_image_url,
         background_opacity: parsed.data.background_opacity,
+        show_customer_name: parsed.data.show_customer_name,
       })
       .eq("id", planId);
     if (error) {
@@ -122,6 +123,7 @@ export async function saveFloorPlan(input: unknown): Promise<ActionResult<{ id: 
           height: parsed.data.height,
           background_image_url: parsed.data.background_image_url,
           background_opacity: parsed.data.background_opacity,
+          show_customer_name: parsed.data.show_customer_name,
         })
         .eq("id", planId);
       if (error) {
@@ -138,6 +140,7 @@ export async function saveFloorPlan(input: unknown): Promise<ActionResult<{ id: 
           height: parsed.data.height,
           background_image_url: parsed.data.background_image_url,
           background_opacity: parsed.data.background_opacity,
+          show_customer_name: parsed.data.show_customer_name,
         })
         .select("id")
         .single();

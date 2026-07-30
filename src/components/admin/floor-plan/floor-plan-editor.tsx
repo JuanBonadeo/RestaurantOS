@@ -50,6 +50,7 @@ export function FloorPlanEditor({ businessSlug, businessId, plan, tables }: Prop
   const setCanvasSize = useFloorPlanStore((s) => s.setCanvasSize);
   const setBackgroundImage = useFloorPlanStore((s) => s.setBackgroundImage);
   const setBackgroundOpacity = useFloorPlanStore((s) => s.setBackgroundOpacity);
+  const setShowCustomerName = useFloorPlanStore((s) => s.setShowCustomerName);
   const addTable = useFloorPlanStore((s) => s.addTable);
   const select = useFloorPlanStore((s) => s.select);
   const updateSelected = useFloorPlanStore((s) => s.updateSelected);
@@ -65,6 +66,7 @@ export function FloorPlanEditor({ businessSlug, businessId, plan, tables }: Prop
   const name = useFloorPlanStore((s) => s.name);
   const backgroundImageUrl = useFloorPlanStore((s) => s.backgroundImageUrl);
   const backgroundOpacity = useFloorPlanStore((s) => s.backgroundOpacity);
+  const showCustomerName = useFloorPlanStore((s) => s.showCustomerName);
   const allTables = useFloorPlanStore((s) => s.tables);
   const selectedLocalId = useFloorPlanStore((s) => s.selectedLocalId);
   const dirty = useFloorPlanStore((s) => s.dirty);
@@ -89,12 +91,14 @@ export function FloorPlanEditor({ businessSlug, businessId, plan, tables }: Prop
       name: plan.name,
       backgroundImageUrl: plan.background_image_url,
       backgroundOpacity: plan.background_opacity,
+      showCustomerName: plan.show_customer_name ?? false,
       tables,
     });
   }, [
     init,
     plan.background_image_url,
     plan.background_opacity,
+    plan.show_customer_name,
     plan.height,
     plan.name,
     plan.width,
@@ -280,6 +284,7 @@ export function FloorPlanEditor({ businessSlug, businessId, plan, tables }: Prop
         height,
         background_image_url: backgroundImageUrl,
         background_opacity: backgroundOpacity,
+        show_customer_name: showCustomerName,
         tables: allTables.map((t) => ({
           id: t.id,
           label: t.label,
@@ -627,6 +632,29 @@ export function FloorPlanEditor({ businessSlug, businessId, plan, tables }: Prop
               </button>
             )}
           </div>
+        </div>
+
+        {/* Cómo se rotulan las mesas en vivo (spec 067) */}
+        <div className="space-y-3 rounded-xl border bg-card p-4 shadow-sm">
+          <h3 className="text-sm font-semibold">En vivo</h3>
+          <label className="flex cursor-pointer items-start gap-2.5">
+            <input
+              type="checkbox"
+              checked={showCustomerName}
+              onChange={(e) => setShowCustomerName(e.target.checked)}
+              className="mt-0.5 size-4 shrink-0 accent-primary"
+            />
+            <span className="space-y-0.5">
+              <span className="block text-xs font-medium leading-tight">
+                Mostrar el nombre del cliente en las mesas ocupadas
+              </span>
+              <span className="text-muted-foreground block text-[10px] leading-snug">
+                En vez del número de mesa y el tiempo abierto. Las mesas libres
+                siguen mostrando su número, y si no se conoce el nombre (walk-in
+                sin datos) la mesa se rotula como siempre.
+              </span>
+            </span>
+          </label>
         </div>
 
         {/* Selected table card */}

@@ -35,6 +35,8 @@ export const SaveFloorPlanInputSchema = z.object({
     .optional()
     .transform((v) => v ?? null),
   background_opacity: z.coerce.number().int().min(0).max(100).default(60),
+  /** Spec 067 — mostrar el nombre del cliente en las mesas ocupadas. */
+  show_customer_name: z.coerce.boolean().default(false),
   tables: z.array(FloorTableInputSchema).max(200),
 });
 

@@ -15,6 +15,9 @@ export type FloorPlan = {
   height: number;
   background_image_url: string | null;
   background_opacity: number;
+  /** Spec 067: las mesas ocupadas de este plano muestran el nombre del cliente
+   *  sentado en vez del número de mesa + tiempo abierto. */
+  show_customer_name: boolean;
   created_at: string;
   updated_at: string;
 };

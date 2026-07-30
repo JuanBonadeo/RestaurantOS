@@ -32,6 +32,8 @@ type State = {
   name: string;
   backgroundImageUrl: string | null;
   backgroundOpacity: number;
+  /** Spec 067: las mesas ocupadas muestran el nombre del cliente. */
+  showCustomerName: boolean;
   tables: EditorTable[];
   selectedLocalId: string | null;
   tool: Tool;
@@ -45,12 +47,14 @@ type Actions = {
     name: string;
     backgroundImageUrl: string | null;
     backgroundOpacity: number;
+    showCustomerName: boolean;
     tables: FloorTable[];
   }) => void;
   setName: (name: string) => void;
   setCanvasSize: (w: number, h: number) => void;
   setBackgroundImage: (url: string | null) => void;
   setBackgroundOpacity: (opacity: number) => void;
+  setShowCustomerName: (value: boolean) => void;
   setTool: (tool: Tool) => void;
   addTable: (shape: TableShape) => void;
   select: (localId: string | null) => void;
@@ -81,18 +85,28 @@ export const useFloorPlanStore = create<State & Actions>((set, get) => ({
   name: "Salón",
   backgroundImageUrl: null,
   backgroundOpacity: 60,
+  showCustomerName: false,
   tables: [],
   selectedLocalId: null,
   tool: "select",
   dirty: false,
 
-  init: ({ width, height, name, backgroundImageUrl, backgroundOpacity, tables }) =>
+  init: ({
+    width,
+    height,
+    name,
+    backgroundImageUrl,
+    backgroundOpacity,
+    showCustomerName,
+    tables,
+  }) =>
     set({
       width,
       height,
       name,
       backgroundImageUrl,
       backgroundOpacity,
+      showCustomerName,
       tables: tables.map((t) => ({
         id: t.id,
         _localId: makeLocalId(),
@@ -119,6 +133,8 @@ export const useFloorPlanStore = create<State & Actions>((set, get) => ({
 
   setBackgroundOpacity: (opacity) =>
     set({ backgroundOpacity: Math.max(0, Math.min(100, Math.round(opacity))), dirty: true }),
+
+  setShowCustomerName: (value) => set({ showCustomerName: value, dirty: true }),
 
   setTool: (tool) => set({ tool }),
 

@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+import { fitNameToTable } from "@/lib/mozo/table-display-name";
+
 import { DELAY_COLORS } from "@/lib/comandas/mesa-demora";
 import type { FloorPlan, FloorTable, OperationalStatus } from "@/lib/reservations/types";
 
@@ -23,6 +25,9 @@ export type TableExtra = {
     delivery_type: string;
   };
   minutesOpen?: number;
+  /** Spec 067: nombre del cliente sentado (`tableDisplayName`). Sólo se usa si
+   *  el plano tiene `show_customer_name`. `undefined` = walk-in anónimo. */
+  customerName?: string;
   mozoInitial?: string;
   /** HSL determinístico por user_id — pinta el badge con el color del mozo. */
   mozoColor?: string;
@@ -42,7 +47,13 @@ export type TableExtra = {
 };
 
 type Props = {
-  plan: Pick<FloorPlan, "width" | "height" | "background_image_url" | "background_opacity">;
+  plan: Pick<
+    FloorPlan,
+    "width" | "height" | "background_image_url" | "background_opacity"
+  > &
+    // Spec 067: opcional para no romper a los callers que arman un `plan`
+    // mínimo a mano (el overlay de distribuir mozos).
+    Partial<Pick<FloorPlan, "show_customer_name">>;
   tables: FloorTable[];
   extras?: Record<string, TableExtra>; // keyed by table.id
   onTableClick?: (table: FloorTable) => void;
@@ -86,6 +97,7 @@ export function FloorPlanViewer({ plan, tables, extras = {}, onTableClick, paint
 
         {active.map((table) => (
           <ViewerTable
+          showCustomerName={plan.show_customer_name ?? false}
             key={table.id}
             table={table}
             extra={extras[table.id]}
@@ -126,6 +138,7 @@ function ViewerTable({
   table,
   extra,
   paintMode,
+  showCustomerName,
   planWidth,
   planHeight,
   onClick,
@@ -133,6 +146,8 @@ function ViewerTable({
   table: FloorTable;
   extra?: TableExtra;
   paintMode: boolean;
+  /** Spec 067: este plano rotula las mesas ocupadas con el nombre del cliente. */
+  showCustomerName: boolean;
   planWidth: number;
   planHeight: number;
   onClick: () => void;
@@ -184,9 +199,20 @@ function ViewerTable({
   const tipX = table.x + 16 + tipW > planWidth ? 4 - tipW : 16;
   const tipY = table.y + 16 + tipH > planHeight ? -tipH - 2 : 16;
 
+  // ── Qué dice la mesa (spec 067) ──
+  // Con `show_customer_name` y una mesa OCUPADA de la que se conoce el nombre,
+  // la mesa muestra SOLO el nombre: ni número ni tiempo abierto (decisión de
+  // Juan). Si no hay nombre —walk-in anónimo, que es el default de openTable—
+  // cae al rótulo de siempre: la opción cambia qué se muestra, nunca deja una
+  // mesa sin etiqueta. En paint mode manda el modo pintura.
+  const nameLabel =
+    !paintMode && showCustomerName && opStatus !== "libre" && extra?.customerName
+      ? fitNameToTable(extra.customerName, table.width / (labelSize * 0.58))
+      : null;
+
   // Línea secundaria bajo el label (oculta en paint mode para no saturar).
   let subLine: string | null = null;
-  if (!paintMode) {
+  if (!paintMode && !nameLabel) {
     if (hasReservation && opStatus === "libre") {
       subLine = `${extra!.reservation!.starts_at ? formatTime(extra!.reservation!.starts_at) : ""} · ${extra!.reservation!.party_size}p`;
     } else if (minutesOpen != null && minutesOpen >= 0) {
@@ -227,12 +253,12 @@ function ViewerTable({
         x={cx}
         y={subLine ? cy - 2 : cy + labelSize * 0.35}
         textAnchor="middle"
-        fontSize={labelSize}
+        fontSize={nameLabel ? labelSize * 0.86 : labelSize}
         fontWeight="700"
         fill="#18181b"
         style={{ userSelect: "none", pointerEvents: "none", fontFamily: "inherit" }}
       >
-        {table.label}
+        {nameLabel ?? table.label}
       </text>
 
       {/* Sub-línea: hora de reserva o tiempo abierta */}

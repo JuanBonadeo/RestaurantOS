@@ -12,6 +12,7 @@ import {
   MIN_PARTY_SIZE,
   partySizeFromKey,
 } from "@/lib/mozo/party-size-keys";
+import { CustomerSearchField } from "@/components/mozo/customer-search-field";
 import { sentarWalkIn } from "@/lib/mozo/walk-in";
 import { useEscapeToClose } from "@/lib/ui/use-escape-to-close";
 
@@ -181,14 +182,27 @@ function WalkInForm({
         </div>
 
         <div>
-          <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
-            Nombre (opcional)
+          <label
+            htmlFor="walkin-cliente"
+            className="text-[11px] font-bold uppercase tracking-wider text-zinc-500"
+          >
+            Cliente (opcional)
           </label>
-          <input
-            {...register("name")}
-            className="mt-1 h-12 w-full rounded-xl border border-zinc-200 bg-white px-3 text-base"
-            placeholder="Ej: Pedro"
-          />
+          {/* Spec 067: buscador de CLIENTES, no un campo suelto. Sigue
+              aceptando texto libre — un cliente nuevo no puede quedar
+              bloqueado detrás de un buscador. */}
+          <div className="mt-1">
+            <CustomerSearchField
+              id="walkin-cliente"
+              slug={businessSlug}
+              value={watch("name") ?? ""}
+              onChange={(v) => setValue("name", v)}
+              onPick={(c) => {
+                setValue("name", c.name?.trim() || "");
+                setValue("phone", c.phone ?? "");
+              }}
+            />
+          </div>
         </div>
 
         <div>

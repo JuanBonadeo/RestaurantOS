@@ -49,6 +49,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { BusinessRole } from "@/lib/admin/context";
 import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
+import { tableDisplayName } from "@/lib/mozo/table-display-name";
 import { MozoPedirClient } from "@/app/[business_slug]/mozo/mesa/[id]/pedir/pedir-client";
 import { CobrarDesktopClient } from "@/app/[business_slug]/admin/(authed)/mesa/[id]/cobrar/cobrar-desktop-client";
 import { CuentaClient } from "@/app/[business_slug]/mozo/mesa/[id]/cuenta/cuenta-client";
@@ -940,6 +941,9 @@ export function SalonDesktop({
         minutesOpen: t.opened_at
           ? (minutesSince(t.opened_at, now) ?? undefined)
           : undefined,
+        // Spec 067: sólo lo consume el plano si el salón tiene activado
+        // «mostrar el nombre del cliente».
+        customerName: tableDisplayName(reservation, order) ?? undefined,
         mozoInitial: mozoName ? initialsFromName(mozoName) : undefined,
         mozoColor: effectiveMozoId ? mozoColor(effectiveMozoId) : undefined,
         delay:
@@ -1837,12 +1841,9 @@ function ActiveTableRow({
     pidio_cuenta: "border-l-amber-500",
   };
   const tiempo = formatRelativeTime(minutes);
-  const partyName =
-    reservation?.customer_name ??
-    (order?.customer_name &&
-    !["Mesa", "Walk-in", "-"].includes(order.customer_name.trim())
-      ? order.customer_name
-      : null);
+  // Spec 067: mismo criterio que el plano — una sola definición de "quién está
+  // sentado acá", así la mesa y su detalle no dicen cosas distintas.
+  const partyName = tableDisplayName(reservation, order);
   const activeItemsCount = order
     ? order.items
         .filter((it) => it.cancelled_at === null)
