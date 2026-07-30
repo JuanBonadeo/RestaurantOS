@@ -461,9 +461,29 @@ export function MozoPedirClient({
     return out;
   }, [cart, productTabId, principalesSuperId, hasTopTab]);
 
+  // Secciones de la pestaña activa (una por categoría, o la lista del tab
+  // "Más pedidos"). Es lo que se ve sin búsqueda.
+  const tabSections: { category: CatalogCategory | null; products: CatalogProduct[] }[] =
+    useMemo(() => {
+      if (activeTab === TOP_TAB_ID) {
+        return topProducts.length > 0
+          ? [{ category: null, products: topProducts }]
+          : [];
+      }
+      const cats = categoriesBySuper[activeTab] ?? [];
+      return cats.map((c) => ({ category: c, products: c.products }));
+    }, [activeTab, topProducts, categoriesBySuper]);
+
   // ── Búsqueda (spec 068: el mismo buscador que cargar pedido y venta rápida) ──
+  // `browse` es lo visible sin búsqueda, aplanado en el orden en que se ve: el
+  // índice de teclado corre sobre eso igual que sobre los resultados (spec 073).
+  const browseProducts = useMemo(
+    () => tabSections.flatMap((s) => s.products),
+    [tabSections],
+  );
   const searchApi = useProductSearch({
     products: allProducts,
+    browse: browseProducts,
     storageKey: `mesa_web_${slug}`,
     onPick: (p) => setOpenProduct(p),
   });
@@ -522,18 +542,6 @@ export function MozoPedirClient({
       // ignorar (modo privado, cuota excedida, etc.)
     }
   }, [cart, cartCacheKey]);
-
-  const tabSections: { category: CatalogCategory | null; products: CatalogProduct[] }[] =
-    useMemo(() => {
-      if (isSearching) return [];
-      if (activeTab === TOP_TAB_ID) {
-        return topProducts.length > 0
-          ? [{ category: null, products: topProducts }]
-          : [];
-      }
-      const cats = categoriesBySuper[activeTab] ?? [];
-      return cats.map((c) => ({ category: c, products: c.products }));
-    }, [isSearching, activeTab, topProducts, categoriesBySuper]);
 
   // Tabs vecinas para los botones de navegación.
   const { prevTab, nextTab } = useMemo(() => {
@@ -990,6 +998,7 @@ export function MozoPedirClient({
               dailyMenus={dailyMenus}
               onPick={setOpenProduct}
               onPickDailyMenu={setOpenDailyMenu}
+              selectedProductId={selectedProductId}
             />
           )}
         </div>
@@ -1371,7 +1380,11 @@ function CatalogoStep({
       <ProductSearchInput api={searchApi} />
 
       {isSearching ? (
-        <SearchResults results={searchResults} onPick={onPick} />
+        <SearchResults
+          results={searchResults}
+          onPick={onPick}
+          selectedProductId={searchApi.selectedProductId}
+        />
       ) : tabsCount === 0 ? (
         <EmptyCatalog />
       ) : (
@@ -1382,6 +1395,7 @@ function CatalogoStep({
           dailyMenus={dailyMenus}
           onPick={onPick}
           onPickDailyMenu={onPickDailyMenu}
+          selectedProductId={searchApi.selectedProductId}
         />
       )}
     </div>
@@ -1423,6 +1437,7 @@ function TabView({
   dailyMenus,
   onPick,
   onPickDailyMenu,
+  selectedProductId,
 }: {
   tabSections: { category: CatalogCategory | null; products: CatalogProduct[] }[];
   activeTabLabel: string;
@@ -1430,6 +1445,10 @@ function TabView({
   dailyMenus: DailyMenuForMozo[];
   onPick: (p: CatalogProduct) => void;
   onPickDailyMenu: (m: DailyMenuForMozo) => void;
+  /** Producto navegado con ↓/↑ desde el buscador, sin haber tipeado nada
+   *  (spec 073). El índice corre sobre las secciones aplanadas, así que la
+   *  fila marcada puede caer en cualquiera de ellas. */
+  selectedProductId?: string;
 }) {
   const showDailyMenus = isTopTab && dailyMenus.length > 0;
   const isEmpty = tabSections.length === 0 && !showDailyMenus;
@@ -1489,7 +1508,13 @@ function TabView({
               {section.category.name}
             </h3>
           )}
-          <ProductGrid products={section.products} onPick={onPick} />
+          {/* Misma lista que los resultados de búsqueda: sin tipear nada ya se
+              navega con ↓/↑ y se agrega con Enter. Spec 073. */}
+          <ProductResultsList
+            products={section.products}
+            onPick={onPick}
+            selectedProductId={selectedProductId}
+          />
         </div>
       ))}
     </div>
@@ -1546,53 +1571,6 @@ function TabNav({
           </span>
         </button>
       )}
-    </div>
-  );
-}
-
-function ProductGrid({
-  products,
-  onPick,
-  selectedProductId,
-}: {
-  products: CatalogProduct[];
-  onPick: (p: CatalogProduct) => void;
-  selectedProductId?: string;
-}) {
-  // Mantiene visible el resultado navegado por teclado (spec 055).
-  const selectedRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    if (selectedProductId) {
-      selectedRef.current?.scrollIntoView({ block: "nearest" });
-    }
-  }, [selectedProductId]);
-  return (
-    <div className="grid grid-cols-2 gap-2.5">
-      {products.map((p) => {
-        const isSelected = p.id === selectedProductId;
-        return (
-          <button
-            key={p.id}
-            ref={isSelected ? selectedRef : undefined}
-            onClick={() => onPick(p)}
-            className={`flex min-h-[88px] flex-col justify-between rounded-2xl bg-white p-3 text-left transition active:scale-[0.97] active:bg-zinc-50 ${
-              isSelected ? "ring-2 ring-emerald-500" : "ring-1 ring-zinc-200"
-            }`}
-          >
-            <span className="line-clamp-2 text-sm font-semibold text-zinc-900">
-              {p.name}
-            </span>
-            <div className="mt-2 flex items-center justify-between">
-              <span className="text-sm font-bold text-emerald-700 tabular-nums">
-                {formatCurrency(p.price_cents)}
-              </span>
-              <span className="rounded-full bg-emerald-50 p-1 text-emerald-700">
-                <Plus className="h-3.5 w-3.5" />
-              </span>
-            </div>
-          </button>
-        );
-      })}
     </div>
   );
 }

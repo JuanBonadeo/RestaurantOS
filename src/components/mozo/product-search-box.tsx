@@ -37,6 +37,10 @@ const CARTA_HINT: Record<string, string> = {
  * unificado **los resultados** (`ProductResultsList`) porque el mismo bug de
  * flecha estaba escrito tres veces; esto cierra el resto.
  *
+ * Devuelve **una sola** `results` = lo que hay que mostrar, con o sin búsqueda
+ * (spec 073): el caller le pasa la lista de la categoría activa en `browse` y
+ * deja de decidir por su cuenta entre resultados y catálogo.
+ *
  * Es un **hook + un input**, no un componente que envuelva todo, porque en las
  * tres pantallas el buscador vive en un header fijo y los resultados en el área
  * que scrollea: un solo componente que renderice ambos tendría que pelearse con
@@ -49,12 +53,18 @@ const CARTA_HINT: Record<string, string> = {
  */
 export function useProductSearch({
   products,
+  browse,
   storageKey,
   onPick,
 }: {
   /** Candidatos: lo que ya pasó el filtro duro del server (`is_active` +
    *  `is_available` en `getCatalogForMozo`). El de la carta online es aparte. */
   products: CatalogProduct[];
+  /** Lo que se muestra **sin** búsqueda: los productos de la categoría o
+   *  pestaña activa, en el orden en que se ven (spec 073). Antes cada caller
+   *  hacía su `isSearching ? resultados : categoría` y sólo los resultados
+   *  tenían índice de teclado. */
+  browse: CatalogProduct[];
   /** Clave de `localStorage` del filtro de la carta online, ya scopeada por
    *  superficie + negocio: la PC de deliveries y la del salón quieren cosas
    *  distintas. */
@@ -84,23 +94,33 @@ export function useProductSearch({
 
   const isSearching = search.trim().length > 0;
 
+  /**
+   * Lo que hay que mostrar, buscando o no (spec 073). Antes esto era sólo los
+   * resultados de la búsqueda y el catálogo por categoría iba por afuera: eran
+   * dos modos distintos en la misma pantalla, y el de entrada —el que ves al
+   * abrir el panel— era el que no tenía teclado.
+   *
+   * El filtro de la carta online aplica a los dos: sin búsqueda los chips se
+   * mostraban igual pero no filtraban nada.
+   */
   const results = useMemo(() => {
-    if (!isSearching) return [];
     const q = search.trim().toLowerCase();
-    return products.filter((p) => {
-      if (!p.name.toLowerCase().includes(q)) return false;
+    const candidates = isSearching ? products : browse;
+    return candidates.filter((p) => {
+      if (isSearching && !p.name.toLowerCase().includes(q)) return false;
       if (cartaFilter === CARTA_EN_LINEA) return p.show_online;
       if (cartaFilter === CARTA_SOLO_LOCAL) return !p.show_online;
       return true;
     });
-  }, [products, search, cartaFilter, isSearching]);
+  }, [products, browse, search, cartaFilter, isSearching]);
 
+  // Vuelve al primero cuando cambia la lista visible: otra búsqueda, otra
+  // categoría o otro filtro.
   useEffect(() => {
     setSelectedIndex(resetSelection(results.length));
-  }, [results.length, search]);
+  }, [results]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (!isSearching) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setSelectedIndex((i) => moveSelection(i, 1, results.length));

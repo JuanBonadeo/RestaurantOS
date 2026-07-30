@@ -126,12 +126,30 @@ export function CargarPedidoSheet({
     () => catalog?.categories.flatMap((c) => c.products) ?? [],
     [catalog],
   );
+  const categoriesWithProducts = useMemo(
+    () => (catalog?.categories ?? []).filter((c) => c.products.length > 0),
+    [catalog],
+  );
+  // Lo que se ve sin búsqueda: la categoría activa. Va al hook, que decide
+  // entre esto y los resultados y le da índice de teclado a los dos (spec 073).
+  const browseProducts: CatalogProduct[] = useMemo(
+    () =>
+      categoriesWithProducts.find((c) => c.id === activeCategory)?.products ??
+      categoriesWithProducts[0]?.products ??
+      [],
+    [categoriesWithProducts, activeCategory],
+  );
   const searchApi = useProductSearch({
     products: allProducts,
+    browse: browseProducts,
     storageKey: `cargar_pedido_web_${slug}`,
     onPick: (p) => setOpenProduct(p),
   });
-  const { isSearching, results: searchResults, selectedProductId } = searchApi;
+  const {
+    isSearching,
+    results: catalogProducts,
+    selectedProductId,
+  } = searchApi;
 
   // Autofocus al buscador al abrir o al volver a la vista de carga.
   useEffect(() => {
@@ -161,15 +179,6 @@ export function CargarPedidoSheet({
 
   const cartTotal = cart.reduce((a, c) => a + c.line_subtotal_cents, 0);
   const cartCount = cart.reduce((a, c) => a + c.quantity, 0);
-
-  const categoriesWithProducts = (catalog?.categories ?? []).filter(
-    (c) => c.products.length > 0,
-  );
-  const catalogProducts: CatalogProduct[] = isSearching
-    ? searchResults
-    : (categoriesWithProducts.find((c) => c.id === activeCategory)?.products ??
-      categoriesWithProducts[0]?.products ??
-      []);
 
   function addToCart(item: AddToCartItem) {
     setCart((prev) => [...prev, { ...item, _key: crypto.randomUUID() }]);
@@ -417,36 +426,13 @@ export function CargarPedidoSheet({
                     {isSearching ? "Sin resultados" : "Sin productos"}
                   </p>
                 </div>
-              ) : isSearching ? (
-                // Buscando: lista de una columna navegable por ↓/↑. Spec 066.
+              ) : (
+                // Buscando o no, la misma lista navegable por ↓/↑. Spec 073.
                 <ProductResultsList
                   products={catalogProducts}
                   onPick={setOpenProduct}
                   selectedProductId={selectedProductId}
                 />
-              ) : (
-                // Catálogo por categoría: grilla de toque (sin teclado).
-                <div className="grid grid-cols-2 gap-2.5">
-                  {catalogProducts.map((p) => (
-                    <button
-                      key={p.id}
-                      onClick={() => setOpenProduct(p)}
-                      className="flex min-h-[84px] flex-col justify-between rounded-2xl bg-white p-3 text-left ring-1 ring-zinc-200 transition active:scale-[0.97] active:bg-zinc-50"
-                    >
-                      <span className="line-clamp-2 text-sm font-semibold text-zinc-900">
-                        {p.name}
-                      </span>
-                      <div className="mt-2 flex items-center justify-between">
-                        <span className="text-sm font-bold text-emerald-700 tabular-nums">
-                          {formatCurrency(p.price_cents)}
-                        </span>
-                        <span className="rounded-full bg-emerald-50 p-1 text-emerald-700">
-                          <Plus className="h-3.5 w-3.5" />
-                        </span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
               )}
             </div>
 

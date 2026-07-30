@@ -131,18 +131,26 @@ export function VentaRapidaPanel({
     () => categoriesWithProducts.flatMap((c) => c.products),
     [categoriesWithProducts],
   );
+  // Lo que se ve sin búsqueda: la categoría activa. Va al hook, que decide
+  // entre esto y los resultados y le da índice de teclado a los dos (spec 073).
+  const browseProducts: CatalogProduct[] = useMemo(
+    () =>
+      categoriesWithProducts.find((c) => c.id === activeCategory)?.products ??
+      categoriesWithProducts[0]?.products ??
+      [],
+    [categoriesWithProducts, activeCategory],
+  );
   const searchApi = useProductSearch({
     products: allProducts,
+    browse: browseProducts,
     storageKey: `venta_rapida_web_${slug}`,
     onPick: (p) => setOpenProduct(p),
   });
-  const { isSearching, results: searchResults, selectedProductId } = searchApi;
-
-  const visibleProducts: CatalogProduct[] = isSearching
-    ? searchResults
-    : (categoriesWithProducts.find((c) => c.id === activeCategory)?.products ??
-      categoriesWithProducts[0]?.products ??
-      []);
+  const {
+    isSearching,
+    results: visibleProducts,
+    selectedProductId,
+  } = searchApi;
 
   const subtotal = cart.reduce((a, c) => a + c.line_subtotal_cents, 0);
   const cartCount = cart.reduce((a, c) => a + c.quantity, 0);
@@ -337,36 +345,13 @@ export function VentaRapidaPanel({
               {isSearching ? "Sin resultados" : "Sin productos"}
             </p>
           </div>
-        ) : isSearching ? (
-          // Buscando: lista de una columna navegable por ↓/↑. Spec 066.
+        ) : (
+          // Buscando o no, la misma lista navegable por ↓/↑. Spec 073.
           <ProductResultsList
             products={visibleProducts}
             onPick={setOpenProduct}
             selectedProductId={selectedProductId}
           />
-        ) : (
-          // Catálogo por categoría: grilla de toque (sin teclado).
-          <div className="grid grid-cols-2 gap-2.5">
-            {visibleProducts.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => setOpenProduct(p)}
-                className="flex min-h-[84px] flex-col justify-between rounded-2xl bg-white p-3 text-left ring-1 ring-zinc-200 transition active:scale-[0.97] active:bg-zinc-50"
-              >
-                <span className="line-clamp-2 text-sm font-semibold text-zinc-900">
-                  {p.name}
-                </span>
-                <div className="mt-2 flex items-center justify-between">
-                  <span className="text-sm font-bold tabular-nums text-emerald-700">
-                    {formatCurrency(p.price_cents)}
-                  </span>
-                  <span className="rounded-full bg-emerald-50 p-1 text-emerald-700">
-                    <Plus className="h-3.5 w-3.5" />
-                  </span>
-                </div>
-              </button>
-            ))}
-          </div>
         )}
       </div>
 
