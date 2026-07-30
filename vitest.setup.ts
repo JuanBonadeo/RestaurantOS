@@ -3,6 +3,15 @@ import { config } from "dotenv";
 
 import "@testing-library/jest-dom/vitest";
 
+// jsdom no implementa `scrollIntoView`, y las listas navegables por teclado
+// (resultados del buscador, asistente del menú del día) lo llaman para mantener
+// la fila enfocada a la vista. Sin este stub, cualquier test que las renderice
+// revienta con "is not a function" aunque el comportamiento que se testea no
+// tenga nada que ver con el scroll.
+if (typeof Element !== "undefined" && !Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {};
+}
+
 // ── Dónde corren los tests de integración ────────────────────────────────
 //
 // Si existe `.env.test`, gana: los tests apuntan al stack local

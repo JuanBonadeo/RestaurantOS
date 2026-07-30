@@ -57,6 +57,8 @@ import type {
   CatalogSuperCategory,
 } from "@/lib/mozo/catalog-query";
 import type { DailyMenuForMozo } from "@/lib/mozo/daily-menus-query";
+import type { DailyMenuSelection } from "@/lib/mozo/daily-menu-steps";
+import { DailyMenuWizard } from "@/components/mozo/daily-menu-wizard";
 import {
   ProductSearchInput,
   useProductSearch,
@@ -89,15 +91,8 @@ type CartDailyMenuItem = {
   notes: string;
   line_subtotal_cents: number;
   seat_number: number | null;
-  selected_choices: {
-    choice_group_id: string;
-    choice_group_label: string;
-    product_id: string;
-    product_name: string;
-    /** Adicional de la opción en centavos (spec 29). 0 = incluida. */
-    extra_price_cents: number;
-    modifier_ids: string[];
-  }[];
+  /** Opciones elegidas en el asistente del menú del día (specs 29 / 072). */
+  selected_choices: DailyMenuSelection[];
 };
 type CartItem = CartProductItem | CartDailyMenuItem;
 
@@ -783,8 +778,8 @@ export function MozoPedirClient({
         embedded={embedded}
       />
 
-      {/* ─── Modal: agregar menú del día ─── */}
-      <DailyMenuModal
+      {/* ─── Asistente: agregar menú del día paso a paso (spec 072) ─── */}
+      <DailyMenuWizard
         menu={openDailyMenu}
         embedded={embedded}
         onClose={() => {
@@ -1654,231 +1649,6 @@ function DailyMenuCard({
         </div>
       </div>
     </button>
-  );
-}
-
-function DailyMenuModal({
-  menu,
-  onClose,
-  onAdd,
-  embedded = false,
-}: {
-  menu: DailyMenuForMozo | null;
-  onClose: () => void;
-  onAdd: (
-    menu: DailyMenuForMozo,
-    quantity: number,
-    selectedChoices: CartDailyMenuItem["selected_choices"],
-  ) => void;
-  embedded?: boolean;
-}) {
-  const [quantity, setQuantity] = useState(1);
-  const [selections, setSelections] = useState<
-    Map<string, CartDailyMenuItem["selected_choices"][number]>
-  >(new Map());
-
-  useEffect(() => {
-    if (menu) {
-      setQuantity(1);
-      setSelections(new Map());
-    }
-  }, [menu]);
-
-  if (!menu) return null;
-
-  const fixedComponents = menu.components.filter((c) => c.kind !== "choice");
-  const allChoicesResolved =
-    menu.choice_groups.length === 0 ||
-    menu.choice_groups.every((g) => selections.has(g.choice_group_id));
-  // Adicional de las opciones elegidas (spec 29).
-  const choicesDelta = [...selections.values()].reduce(
-    (acc, sc) => acc + (sc.extra_price_cents ?? 0),
-    0,
-  );
-  const lineTotal = (menu.price_cents + choicesDelta) * quantity;
-
-  const handleAdd = () => {
-    if (!allChoicesResolved) return;
-    onAdd(menu, quantity, [...selections.values()]);
-  };
-
-  return (
-    <div
-      onClick={onClose}
-      className={`${embedded ? "absolute" : "fixed"} inset-0 z-50 flex items-end justify-center bg-black/45 backdrop-blur-sm`}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className={`flex w-full max-w-md ${embedded ? "max-h-full" : "max-h-[92dvh]"} flex-col rounded-t-3xl bg-white shadow-2xl`}
-      >
-        <div className="flex justify-center py-2">
-          <span className="h-1 w-10 rounded-full bg-zinc-200" />
-        </div>
-
-        <div className="flex-1 overflow-y-auto">
-          {menu.image_url && (
-            <div className="px-5">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={menu.image_url}
-                alt=""
-                className="h-44 w-full rounded-2xl object-cover"
-              />
-            </div>
-          )}
-
-          <div className="px-5 pt-4">
-            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-emerald-700">
-              Menú del día
-            </p>
-            <h3 className="mt-0.5 font-heading text-xl font-extrabold leading-tight text-zinc-900">
-              {menu.name}
-            </h3>
-            {menu.description && (
-              <p className="mt-1 text-sm text-zinc-600">{menu.description}</p>
-            )}
-            <p className="mt-2 text-xl font-extrabold text-emerald-700 tabular-nums">
-              {formatCurrency(menu.price_cents)}
-            </p>
-          </div>
-
-          {fixedComponents.length > 0 && (
-            <div className="mt-4 px-5">
-              <p className="text-xs font-bold uppercase tracking-wide text-zinc-500">
-                Incluye
-              </p>
-              <ol className="mt-2 space-y-2">
-                {fixedComponents.map((c, idx) => (
-                  <li
-                    key={c.id}
-                    className="flex items-start gap-3 rounded-2xl bg-zinc-50 p-3 ring-1 ring-zinc-100"
-                  >
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white">
-                      {c.kind === "product" ? "✓" : idx + 1}
-                    </span>
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-zinc-900">
-                        {c.kind === "product" && c.product_name
-                          ? `${c.label}: ${c.product_name}`
-                          : c.label}
-                      </p>
-                      {c.description && (
-                        <p className="mt-0.5 text-xs text-zinc-600">
-                          {c.description}
-                        </p>
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            </div>
-          )}
-
-          {menu.choice_groups.map((group) => {
-            const selected = selections.get(group.choice_group_id);
-            return (
-              <div key={group.choice_group_id} className="mt-4 px-5">
-                <p className="text-xs font-bold uppercase tracking-wide text-emerald-700">
-                  {group.label}
-                </p>
-                <div className="mt-2 space-y-1.5">
-                  {group.options.map((opt) => {
-                    const isSelected = selected?.product_id === opt.product_id;
-                    return (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() =>
-                          setSelections((prev) => {
-                            const next = new Map(prev);
-                            next.set(group.choice_group_id, {
-                              choice_group_id: group.choice_group_id,
-                              choice_group_label: group.label,
-                              product_id: opt.product_id!,
-                              product_name: opt.product_name ?? opt.label,
-                              extra_price_cents: opt.extra_price_cents ?? 0,
-                              modifier_ids: [],
-                            });
-                            return next;
-                          })
-                        }
-                        className={`flex w-full items-center gap-3 rounded-2xl p-3 text-left transition ${
-                          isSelected
-                            ? "bg-emerald-50 ring-2 ring-emerald-500"
-                            : "bg-zinc-50 ring-1 ring-zinc-100"
-                        }`}
-                      >
-                        <span
-                          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${
-                            isSelected
-                              ? "bg-emerald-600"
-                              : "border-2 border-zinc-300"
-                          }`}
-                        >
-                          {isSelected && (
-                            <Check className="h-3 w-3 text-white" strokeWidth={3} />
-                          )}
-                        </span>
-                        <span
-                          className={`flex-1 text-sm ${
-                            isSelected
-                              ? "font-semibold text-zinc-900"
-                              : "text-zinc-700"
-                          }`}
-                        >
-                          {opt.product_name ?? opt.label}
-                        </span>
-                        {opt.extra_price_cents > 0 && (
-                          <span className="shrink-0 text-sm font-semibold text-zinc-500 tabular-nums">
-                            +{formatCurrency(opt.extra_price_cents)}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-
-          <div className="h-4" />
-        </div>
-
-        <div className="border-t border-zinc-200 bg-white px-5 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center rounded-full ring-1 ring-zinc-200">
-              <button
-                onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                className="flex h-11 w-11 items-center justify-center text-zinc-700 active:bg-zinc-50"
-                aria-label="Menos"
-              >
-                <Minus className="h-4 w-4" />
-              </button>
-              <span className="w-6 text-center text-sm font-bold tabular-nums">
-                {quantity}
-              </span>
-              <button
-                onClick={() => setQuantity(Math.min(99, quantity + 1))}
-                className="flex h-11 w-11 items-center justify-center text-zinc-700 active:bg-zinc-50"
-                aria-label="Más"
-              >
-                <Plus className="h-4 w-4" />
-              </button>
-            </div>
-            <button
-              disabled={!allChoicesResolved}
-              onClick={handleAdd}
-              className="flex h-12 flex-1 items-center justify-between rounded-2xl bg-emerald-600 px-4 text-white active:scale-[0.98] disabled:opacity-50"
-            >
-              <span className="text-base font-semibold">Agregar</span>
-              <span className="text-base font-bold tabular-nums">
-                {formatCurrency(lineTotal)}
-              </span>
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
   );
 }
 
