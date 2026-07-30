@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Eye, EyeOff, Pencil, Plus, Wallet } from "lucide-react";
+import { Eye, EyeOff, Pencil, Plus, ScrollText, Wallet } from "lucide-react";
 import { toast } from "sonner";
 
 import { Surface } from "@/components/admin/shell/page-shell";
@@ -40,7 +41,9 @@ type Props = {
  *  - Re-habilitar una pausada (botón "Habilitar").
  *
  * El día a día (sangrías, cortes, etc.) vive en
- * `/admin/operacion?tab=caja`. Acá solo se administra el catálogo.
+ * `/admin/operacion?tab=caja`. Acá solo se administra el catálogo — con la
+ * salida al libro de movimientos (spec 070), que es adonde se va a mirar y
+ * corregir lo que pasó por cada caja.
  */
 export function CajasClient({ slug, cajas }: Props) {
   const router = useRouter();
@@ -78,8 +81,15 @@ export function CajasClient({ slug, cajas }: Props) {
 
   return (
     <>
-      {/* Acción nueva caja arriba a la derecha. */}
-      <div className="flex justify-end">
+      {/* Acciones arriba a la derecha: el libro (lectura) y crear caja. */}
+      <div className="flex items-center justify-end gap-2">
+        <Link
+          href={`/${slug}/admin/operacion/movimientos`}
+          className="inline-flex items-center gap-2 rounded-full bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-200"
+        >
+          <ScrollText className="size-4" />
+          Ver movimientos
+        </Link>
         <button
           type="button"
           onClick={() => setCrearOpen(true)}
@@ -143,6 +153,7 @@ export function CajasClient({ slug, cajas }: Props) {
               <CajaRow
                 key={c.id}
                 caja={c}
+                slug={slug}
                 stripe={idx % 2 === 1}
                 onRenombrar={() => setEditing(c)}
                 onDeshabilitar={() => handleToggleActive(c, false)}
@@ -229,12 +240,14 @@ export function CajasClient({ slug, cajas }: Props) {
 
 function CajaRow({
   caja,
+  slug,
   stripe,
   onRenombrar,
   onDeshabilitar,
   onHacerDefault,
 }: {
   caja: Caja;
+  slug: string;
   stripe: boolean;
   onRenombrar: () => void;
   onDeshabilitar: () => void;
@@ -269,6 +282,16 @@ function CajaRow({
         </div>
       </div>
       <div className="flex items-center gap-1">
+        {/* Desde la config de esta caja al libro de ESTA caja: es la pregunta
+            que sigue («¿qué pasó por la barra?»), ya filtrada. */}
+        <Link
+          href={`/${slug}/admin/operacion/movimientos?caja=${caja.id}`}
+          className="inline-flex size-8 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
+          aria-label={`Ver movimientos de ${caja.name}`}
+          title="Ver movimientos de esta caja"
+        >
+          <ScrollText className="size-3.5" />
+        </Link>
         <button
           type="button"
           onClick={onRenombrar}
