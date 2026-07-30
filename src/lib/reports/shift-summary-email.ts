@@ -87,6 +87,13 @@ export function renderShiftSummaryEmail(summary: ShiftSummary): {
     a.responsable,
     a.hora,
   ]);
+  const correccionRows = summary.correcciones.map((c) => [
+    c.detalle,
+    c.cambio,
+    c.motivo,
+    c.responsable,
+    c.hora,
+  ]);
 
   const body = !summary.hasData
     ? `<p style="color:${C.muted};font-size:15px;">No hubo movimiento registrado en el día.</p>`
@@ -135,6 +142,15 @@ export function renderShiftSummaryEmail(summary: ShiftSummary): {
 
     ${sectionTitle("Anulaciones")}
     ${rowsTable(["Detalle", "Motivo", "Responsable", "Hora"], anulRows, "Sin anulaciones en el día. ✅")}
+
+    ${
+      // Sin correcciones no hay sección: el mail no gana nada diciendo que no
+      // pasó nada, y la sección vacía entrenaría a saltearla.
+      correccionRows.length > 0
+        ? `${sectionTitle("Correcciones de caja")}
+    ${rowsTable(["Detalle", "Cambio", "Motivo", "Responsable", "Hora"], correccionRows, "")}`
+        : ""
+    }
   `;
 
   const html = `<!doctype html><html><body style="margin:0;padding:0;background:${C.bg};">
@@ -188,5 +204,11 @@ function renderText(s: ShiftSummary): string {
   if (s.anulaciones.length === 0) lines.push("  (sin anulaciones)");
   for (const a of s.anulaciones)
     lines.push(`  - ${a.detalle} · ${a.motivo} · ${a.responsable} · ${a.hora}`);
+  if (s.correcciones.length > 0) {
+    lines.push("");
+    lines.push("CORRECCIONES DE CAJA");
+    for (const c of s.correcciones)
+      lines.push(`  - ${c.detalle}: ${c.cambio} · ${c.motivo} · ${c.responsable} · ${c.hora}`);
+  }
   return lines.join("\n");
 }

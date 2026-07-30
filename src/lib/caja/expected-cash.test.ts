@@ -69,4 +69,16 @@ describe("calculateExpectedCash", () => {
       }),
     ).toBe(200_000 + 150_000 + 80_000 + 50_000 - 70_000);
   });
+  it("un movimiento anulado no mueve el efectivo esperado (spec 070)", () => {
+    expect(
+      calculateExpectedCash({
+        last_closing_cash_cents: 100_000,
+        payments: [],
+        movimientos: [
+          { kind: "sangria", amount_cents: 50_000, cancelled_at: "2026-07-30T21:00:00Z" },
+          { kind: "ingreso", amount_cents: 20_000, cancelled_at: null },
+        ],
+      }),
+    ).toBe(100_000 + 20_000);
+  });
 });

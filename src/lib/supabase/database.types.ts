@@ -273,6 +273,70 @@ export type Database = {
         }
         Relationships: []
       }
+      caja_audit_log: {
+        Row: {
+          business_id: string
+          by_user_id: string | null
+          caja_id: string | null
+          created_at: string
+          entity_id: string
+          entity_type: string
+          field: string
+          from_value: string | null
+          id: string
+          reason: string
+          to_value: string | null
+        }
+        Insert: {
+          business_id: string
+          by_user_id?: string | null
+          caja_id?: string | null
+          created_at?: string
+          entity_id: string
+          entity_type: string
+          field: string
+          from_value?: string | null
+          id?: string
+          reason: string
+          to_value?: string | null
+        }
+        Update: {
+          business_id?: string
+          by_user_id?: string | null
+          caja_id?: string | null
+          created_at?: string
+          entity_id?: string
+          entity_type?: string
+          field?: string
+          from_value?: string | null
+          id?: string
+          reason?: string
+          to_value?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "caja_audit_log_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "caja_audit_log_by_user_id_fkey"
+            columns: ["by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "caja_audit_log_caja_id_fkey"
+            columns: ["caja_id"]
+            isOneToOne: false
+            referencedRelation: "cajas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       caja_cortes: {
         Row: {
           business_id: string
@@ -339,6 +403,9 @@ export type Database = {
           amount_cents: number
           business_id: string
           caja_id: string
+          cancelled_at: string | null
+          cancelled_by: string | null
+          cancelled_reason: string | null
           created_at: string
           created_by: string | null
           id: string
@@ -349,6 +416,9 @@ export type Database = {
           amount_cents: number
           business_id: string
           caja_id: string
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          cancelled_reason?: string | null
           created_at?: string
           created_by?: string | null
           id?: string
@@ -359,6 +429,9 @@ export type Database = {
           amount_cents?: number
           business_id?: string
           caja_id?: string
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          cancelled_reason?: string | null
           created_at?: string
           created_by?: string | null
           id?: string
@@ -366,6 +439,13 @@ export type Database = {
           reason?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "caja_movimientos_cancelled_by_fkey"
+            columns: ["cancelled_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "caja_movimientos_business_id_fkey"
             columns: ["business_id"]
@@ -3781,6 +3861,34 @@ export type Database = {
       adjust_stock_item: {
         Args: { p_delta: number; p_stock_item_id: string }
         Returns: number
+      }
+      corregir_movimiento_tx: {
+        Args: {
+          p_amount_cents: number
+          p_business_id: string
+          p_by_user_id: string
+          p_cancel: boolean
+          p_movimiento_id: string
+          p_reason: string
+        }
+        Returns: {
+          changed_fields: string[]
+          movimiento: Json
+        }[]
+      }
+      corregir_pago_tx: {
+        Args: {
+          p_business_id: string
+          p_by_user_id: string
+          p_patch: Json
+          p_payment_id: string
+          p_reason: string
+        }
+        Returns: {
+          changed_fields: string[]
+          fully_paid: boolean
+          payment: Json
+        }[]
       }
       fn_explode_ingredient: {
         Args: { p_ingredient_id: string; p_quantity: number }

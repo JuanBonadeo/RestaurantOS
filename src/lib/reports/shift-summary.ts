@@ -46,6 +46,25 @@ export type CancellationRow = {
   at: string; // ISO
 };
 
+/**
+ * Una corrección de caja del turno (spec 070). El mail las lista al lado de
+ * las anulaciones: son la otra forma de que un número del día cambie después
+ * de registrado, y el dueño tiene que poder verlas sin entrar al panel.
+ */
+export type CorrectionRow = {
+  entity: "payment" | "movimiento";
+  /** Columna corregida: 'method', 'amount_cents', 'cancelled'… */
+  field: string;
+  from_value: string | null;
+  to_value: string | null;
+  /** Nombre legible cuando el valor es un id (mozo, caja); lo resuelve el loader. */
+  from_label: string | null;
+  to_label: string | null;
+  reason: string;
+  responsable: string | null;
+  at: string; // ISO
+};
+
 export type ShiftCorte = {
   caja_name: string;
   encargado_name: string | null;
@@ -93,6 +112,8 @@ export type ShiftSummaryData = {
   cortes: ShiftCorte[];
   porMozo: ShiftMozo[];
   anulaciones: CancellationRow[];
+  /** Opcional: un resumen calculado antes de la spec 070 no tiene ninguna. */
+  correcciones?: CorrectionRow[];
 };
 
 // ── Modelo de vista (formateado, listo para el template) ────────────────
@@ -141,9 +162,45 @@ export type ShiftSummary = {
     responsable: string;
     hora: string;
   }[];
+  correcciones: {
+    detalle: string;
+    cambio: string;
+    motivo: string;
+    responsable: string;
+    hora: string;
+  }[];
   /** False si el día no tuvo movimiento (recaudación, pedidos ni cortes). */
   hasData: boolean;
 };
+
+const CAMPO_CORREGIDO: Record<string, string> = {
+  method: "método",
+  amount_cents: "monto",
+  tip_cents: "propina",
+  attributed_mozo_id: "mozo",
+  caja_id: "caja",
+  last_four: "últimos 4",
+  card_brand: "tarjeta",
+  notes: "nota",
+  cancelled: "estado",
+};
+
+/** Los centavos y los ids del log no se leen: se traducen. */
+export function valorCorregido(
+  field: string,
+  raw: string | null,
+  label: string | null,
+): string {
+  if (raw === null) return "—";
+  if (field === "amount_cents" || field === "tip_cents") {
+    return formatCurrency(Number(raw));
+  }
+  if (field === "method") {
+    return PAYMENT_METHOD_LABELS[raw as PaymentMethod] ?? raw;
+  }
+  if (field === "attributed_mozo_id" || field === "caja_id") return label ?? raw;
+  return raw;
+}
 
 function fmtHora(iso: string, timezone: string): string {
   try {
@@ -160,6 +217,7 @@ function fmtHora(iso: string, timezone: string): string {
  */
 export function buildShiftSummary(data: ShiftSummaryData): ShiftSummary {
   const { recaudacion, afip, operacion, cortes, porMozo, anulaciones } = data;
+  const correcciones = data.correcciones ?? [];
 
   const porMetodo: MetodoLine[] = METHOD_ORDER.filter(
     (m) => (recaudacion.por_metodo[m] ?? 0) > 0,
@@ -222,6 +280,13 @@ export function buildShiftSummary(data: ShiftSummaryData): ShiftSummary {
       motivo: a.reason?.trim() ? a.reason.trim() : "—",
       responsable: a.responsable?.trim() ? a.responsable.trim() : "—",
       hora: fmtHora(a.at, data.timezone),
+    })),
+    correcciones: correcciones.map((c) => ({
+      detalle: `${c.entity === "payment" ? "Cobro" : "Movimiento"} · ${CAMPO_CORREGIDO[c.field] ?? c.field}`,
+      cambio: `${valorCorregido(c.field, c.from_value, c.from_label)} → ${valorCorregido(c.field, c.to_value, c.to_label)}`,
+      motivo: c.reason.trim() || "—",
+      responsable: c.responsable?.trim() ? c.responsable.trim() : "—",
+      hora: fmtHora(c.at, data.timezone),
     })),
     hasData,
   };

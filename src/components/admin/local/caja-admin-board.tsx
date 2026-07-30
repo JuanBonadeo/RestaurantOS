@@ -362,9 +362,19 @@ function CajaCard({
             <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
               Movimientos del período
             </p>
-            <p className="text-xs font-semibold tabular-nums text-zinc-700">
-              {entries.length}
-            </p>
+            <div className="flex items-baseline gap-2">
+              {/* El período es el hot path del turno; el libro (spec 070) es el
+                  histórico con filtros, los anulados y la corrección. */}
+              <Link
+                href={`/${slug}/admin/operacion/movimientos?caja=${caja.id}`}
+                className="text-xs font-semibold text-zinc-500 underline-offset-2 hover:text-zinc-800 hover:underline"
+              >
+                Ver todos
+              </Link>
+              <p className="text-xs font-semibold tabular-nums text-zinc-700">
+                {entries.length}
+              </p>
+            </div>
           </div>
           {entries.length === 0 ? (
             <p className="mt-3 text-xs text-zinc-500">
@@ -372,13 +382,15 @@ function CajaCard({
             </p>
           ) : (
             <ul className="mt-3 max-h-[28rem] divide-y divide-zinc-100 overflow-y-auto rounded-lg ring-1 ring-zinc-200/70">
-              {entries.map((e) =>
-                e.kind === "cobro" ? (
-                  <CobroRow key={`p-${e.data.id}`} payment={e.data} />
+              {entries.map((e) => {
+                const dia = e.createdAt.slice(0, 10);
+                const href = `/${slug}/admin/operacion/movimientos?caja=${caja.id}&desde=${dia}`;
+                return e.kind === "cobro" ? (
+                  <CobroRow key={`p-${e.data.id}`} payment={e.data} href={href} />
                 ) : (
-                  <MovimientoRow key={`m-${e.data.id}`} mov={e.data} />
-                ),
-              )}
+                  <MovimientoRow key={`m-${e.data.id}`} mov={e.data} href={href} />
+                );
+              })}
             </ul>
           )}
         </section>
@@ -578,14 +590,21 @@ function VentasPorOrigen({
   );
 }
 
-function MovimientoRow({ mov }: { mov: CajaMovimiento }) {
+function MovimientoRow({ mov, href }: { mov: CajaMovimiento; href: string }) {
   const isSangria = mov.kind === "sangria";
   const time = new Date(mov.created_at).toLocaleTimeString("es-AR", {
     hour: "2-digit",
     minute: "2-digit",
   });
   return (
-    <li className="flex items-start gap-3 px-3 py-2.5">
+    <li>
+      <Link
+        href={href}
+        className={cn(
+          "flex items-start gap-3 px-3 py-2.5 transition hover:bg-zinc-50",
+          mov.cancelled_at && "opacity-50",
+        )}
+      >
       <span
         className={cn(
           "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full",
@@ -611,6 +630,7 @@ function MovimientoRow({ mov }: { mov: CajaMovimiento }) {
         </div>
         {mov.reason && <p className="mt-0.5 truncate text-xs text-zinc-500">{mov.reason}</p>}
       </div>
+      </Link>
     </li>
   );
 }
@@ -635,7 +655,7 @@ function methodIcon(method: PaymentMethod) {
   }
 }
 
-function CobroRow({ payment }: { payment: CajaPayment }) {
+function CobroRow({ payment, href }: { payment: CajaPayment; href: string }) {
   const Icon = methodIcon(payment.method);
   const time = new Date(payment.created_at).toLocaleTimeString("es-AR", {
     hour: "2-digit",
@@ -648,7 +668,12 @@ function CobroRow({ payment }: { payment: CajaPayment }) {
         (payment.order_number > 0 ? `#${payment.order_number}` : "Orden");
 
   return (
-    <li className="flex items-start gap-3 px-3 py-2.5">
+    <li>
+      {/* La línea es accionable: lleva al libro, que es donde se corrige. */}
+      <Link
+        href={href}
+        className="flex items-start gap-3 px-3 py-2.5 transition hover:bg-zinc-50"
+      >
       <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-zinc-700">
         <Icon className="size-3.5" strokeWidth={2.25} />
       </span>
@@ -676,6 +701,7 @@ function CobroRow({ payment }: { payment: CajaPayment }) {
           )}
         </div>
       </div>
+      </Link>
     </li>
   );
 }

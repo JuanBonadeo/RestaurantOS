@@ -10,6 +10,7 @@ import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 import type {
   CancellationRow,
+  CorrectionRow,
   ShiftCorte,
   ShiftMozo,
   ShiftSummaryData,
@@ -227,6 +228,12 @@ export async function loadShiftSummaryData(
     cancelledOrders,
   });
 
+  // ── Correcciones de caja del día (spec 070) ───────────────────────────
+  const correcciones = await loadCorrecciones(service, businessId, {
+    startIso,
+    endIso,
+  });
+
   return {
     businessName,
     timezone,
@@ -251,7 +258,88 @@ export async function loadShiftSummaryData(
     cortes,
     porMozo,
     anulaciones,
+    correcciones,
   };
+}
+
+/**
+ * Las correcciones del turno: qué línea de caja cambió, de qué a qué, quién y
+ * por qué. Los ids de mozo/caja se traducen acá — el log guarda el dato exacto,
+ * el mail necesita nombres.
+ */
+async function loadCorrecciones(
+  service: AnyClient,
+  businessId: string,
+  ctx: { startIso: string; endIso: string },
+): Promise<CorrectionRow[]> {
+  const { data } = await service
+    .from("caja_audit_log")
+    .select(
+      "entity_type, field, from_value, to_value, reason, by_user_id, created_at",
+    )
+    .eq("business_id", businessId)
+    .gte("created_at", ctx.startIso)
+    .lte("created_at", ctx.endIso)
+    .order("created_at", { ascending: true });
+
+  const rows = (data ?? []) as {
+    entity_type: "payment" | "movimiento";
+    field: string;
+    from_value: string | null;
+    to_value: string | null;
+    reason: string;
+    by_user_id: string | null;
+    created_at: string;
+  }[];
+  if (rows.length === 0) return [];
+
+  const actores = await resolveUserNames(
+    service,
+    rows.map((r) => r.by_user_id),
+  );
+
+  // Ids que hay que traducir a nombre (mozo o caja).
+  const idsALabelear = new Set<string>();
+  for (const r of rows) {
+    if (r.field === "attributed_mozo_id" || r.field === "caja_id") {
+      if (r.from_value) idsALabelear.add(r.from_value);
+      if (r.to_value) idsALabelear.add(r.to_value);
+    }
+  }
+  const labels = new Map<string, string>();
+  if (idsALabelear.size > 0) {
+    const lista = Array.from(idsALabelear);
+    const [{ data: users }, { data: cajas }] = await Promise.all([
+      service
+        .from("business_users")
+        .select("user_id, full_name")
+        .eq("business_id", businessId)
+        .in("user_id", lista),
+      service
+        .from("cajas")
+        .select("id, name")
+        .eq("business_id", businessId)
+        .in("id", lista),
+    ]);
+    for (const u of (users ?? []) as { user_id: string; full_name: string | null }[]) {
+      if (u.full_name) labels.set(u.user_id, u.full_name);
+    }
+    for (const c of (cajas ?? []) as { id: string; name: string }[]) {
+      labels.set(c.id, c.name);
+    }
+  }
+
+  return rows.map((r) => ({
+    entity: r.entity_type,
+    field: r.field,
+    from_value: r.from_value,
+    to_value: r.to_value,
+    from_label: r.from_value ? (labels.get(r.from_value) ?? null) : null,
+    to_label: r.to_value ? (labels.get(r.to_value) ?? null) : null,
+    reason: r.reason,
+    responsable: r.by_user_id ? (actores.get(r.by_user_id) ?? null) : null,
+    at: r.created_at,
+  }));
 }
 
 async function loadCancellations(

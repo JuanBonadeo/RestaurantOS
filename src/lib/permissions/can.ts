@@ -124,6 +124,18 @@ export function canMakeSangria(role: BusinessRole): boolean {
   return role === "admin" || role === "encargado";
 }
 
+/**
+ * Corregir una línea ya registrada en la caja — método, monto, propina, mozo
+ * atribuido o caja de un cobro; monto o anulación de una sangría/ingreso
+ * (spec 070). Mismo círculo que anular un cobro: encargado/admin.
+ *
+ * El mozo cobra pero no corrige: la corrección mueve el arqueo y la rendición
+ * de otro, así que es acto de supervisión, no de servicio.
+ */
+export function canCorregirCobro(role: BusinessRole): boolean {
+  return role === "admin" || role === "encargado";
+}
+
 export function canRendirMozo(role: BusinessRole): boolean {
   return role === "admin" || role === "encargado";
 }

@@ -14,7 +14,12 @@ import type {
   CajaCorte,
   CajaLiveStats,
   CajaMovimiento,
+  CajaMovimientoKind,
   CajaUserAssignment,
+  CorreccionLog,
+  LibroEntry,
+  LibroFiltros,
+  LibroTotales,
   MozoRendicion,
   PaymentMethod,
   PaymentMethodConfig,
@@ -140,7 +145,9 @@ export async function getMovimientosPeriodoActual(
 
   let query = service
     .from("caja_movimientos")
-    .select("id, caja_id, business_id, kind, amount_cents, reason, created_by, created_at")
+    .select(
+      "id, caja_id, business_id, kind, amount_cents, reason, created_by, created_at, cancelled_at, cancelled_reason",
+    )
     .eq("caja_id", cajaId)
     .eq("business_id", businessId)
     .order("created_at", { ascending: true });
@@ -277,9 +284,11 @@ export async function getCajaLiveStats(
     .eq("payment_status", "paid");
   paymentsQuery = paymentsQuery.gt("created_at", periodoDesdeFecha);
 
+  // `cancelled_at` viaja para que el efectivo esperado ignore los movimientos
+  // anulados (spec 070): siguen en el libro, pero no mueven la caja.
   let movQuery = service
     .from("caja_movimientos")
-    .select("kind, amount_cents")
+    .select("kind, amount_cents, cancelled_at")
     .eq("caja_id", cajaId);
   movQuery = movQuery.gt("created_at", periodoDesdeFecha);
 
@@ -309,6 +318,7 @@ export async function getCajaLiveStats(
   const movimientos = (movimientosRes.data ?? []) as Array<{
     kind: "sangria" | "ingreso";
     amount_cents: number;
+    cancelled_at: string | null;
   }>;
 
   const ventas_por_metodo: Record<PaymentMethod, number> = { ...EMPTY_BY_METHOD };
@@ -592,4 +602,414 @@ export async function getCajaUserAssignments(
       caja_name: cajaName,
     };
   });
+}
+
+// ── Libro de movimientos (spec 070) ─────────────────────────────
+
+/**
+ * Techo de filas por consulta. El libro es una herramienta de auditoría del
+ * turno / del día, no un export contable: si un rango se pasa de esto, se
+ * avisa (`truncado`) en vez de mentir con una lista cortada en silencio.
+ */
+const LIBRO_MAX_FILAS = 500;
+
+function descripcionDeOrden(o: {
+  delivery_type: string;
+  customer_name: string | null;
+  order_number: number;
+  table_label: string | null;
+}): string {
+  if (o.delivery_type === "dine_in" && o.table_label) return `Mesa ${o.table_label}`;
+  const nombre = o.customer_name?.trim();
+  if (nombre) return nombre;
+  return o.order_number > 0 ? `#${o.order_number}` : "Orden";
+}
+
+/**
+ * Todas las líneas de caja de un rango: cobros (incluidos los **anulados**, que
+ * hoy no se ven en ninguna pantalla) y movimientos, mezclados y ordenados del
+ * más nuevo al más viejo.
+ *
+ * Cada línea llega sabiendo si se puede corregir y, si no, por qué — que es lo
+ * que el encargado necesita leer para saber qué hacer en su lugar.
+ */
+export async function getLibroDeMovimientos(
+  businessId: string,
+  filtros: LibroFiltros,
+): Promise<{ entries: LibroEntry[]; totales: LibroTotales; truncado: boolean }> {
+  const service = db();
+  const cajas = await getCajasConEstado(businessId);
+  const cajaById = new Map(cajas.map((c) => [c.id, c]));
+
+  const quiereCobros = !filtros.tipo || filtros.tipo === "cobro";
+  const quiereMovs = !filtros.tipo || filtros.tipo !== "cobro";
+
+  let pagosQuery = service
+    .from("payments")
+    .select(
+      "id, caja_id, method, amount_cents, tip_cents, created_at, attributed_mozo_id, order_id, payment_status, refunded_reason, mp_payment_id, orders!inner(order_number, delivery_type, customer_name, table_id, tables!orders_table_id_fkey(label))",
+    )
+    .eq("business_id", businessId)
+    .in("payment_status", ["paid", "refunded"])
+    .gte("created_at", filtros.from)
+    .lte("created_at", filtros.to)
+    .order("created_at", { ascending: false })
+    .limit(LIBRO_MAX_FILAS);
+  if (filtros.cajaId) pagosQuery = pagosQuery.eq("caja_id", filtros.cajaId);
+  if (filtros.method) pagosQuery = pagosQuery.eq("method", filtros.method);
+  if (filtros.mozoId) pagosQuery = pagosQuery.eq("attributed_mozo_id", filtros.mozoId);
+
+  let movsQuery = service
+    .from("caja_movimientos")
+    .select(
+      "id, caja_id, kind, amount_cents, reason, created_at, cancelled_at, cancelled_reason",
+    )
+    .eq("business_id", businessId)
+    .gte("created_at", filtros.from)
+    .lte("created_at", filtros.to)
+    .order("created_at", { ascending: false })
+    .limit(LIBRO_MAX_FILAS);
+  if (filtros.cajaId) movsQuery = movsQuery.eq("caja_id", filtros.cajaId);
+  if (filtros.tipo === "sangria" || filtros.tipo === "ingreso") {
+    movsQuery = movsQuery.eq("kind", filtros.tipo);
+  }
+
+  const [pagosRes, movsRes] = await Promise.all([
+    quiereCobros ? pagosQuery : Promise.resolve({ data: [] }),
+    // Un filtro por método o por mozo es de cobros: una sangría no tiene
+    // ninguno de los dos, así que mostrarlas igual sería ruido.
+    quiereMovs && !filtros.method && !filtros.mozoId
+      ? movsQuery
+      : Promise.resolve({ data: [] }),
+  ]);
+
+  type PagoRow = {
+    id: string;
+    caja_id: string;
+    method: PaymentMethod;
+    amount_cents: number;
+    tip_cents: number;
+    created_at: string;
+    attributed_mozo_id: string | null;
+    order_id: string;
+    payment_status: string;
+    refunded_reason: string | null;
+    mp_payment_id: string | null;
+    orders:
+      | {
+          order_number: number;
+          delivery_type: string;
+          customer_name: string | null;
+          table_id: string | null;
+          tables: { label: string } | { label: string }[] | null;
+        }
+      | Array<{
+          order_number: number;
+          delivery_type: string;
+          customer_name: string | null;
+          table_id: string | null;
+          tables: { label: string } | { label: string }[] | null;
+        }>
+      | null;
+  };
+  type MovRow = {
+    id: string;
+    caja_id: string;
+    kind: CajaMovimientoKind;
+    amount_cents: number;
+    reason: string | null;
+    created_at: string;
+    cancelled_at: string | null;
+    cancelled_reason: string | null;
+  };
+
+  const pagos = (pagosRes.data ?? []) as unknown as PagoRow[];
+  const movs = (movsRes.data ?? []) as unknown as MovRow[];
+
+  // Datos de apoyo: nombres, correcciones previas, facturas y rendiciones.
+  const mozoIds = Array.from(
+    new Set(pagos.map((p) => p.attributed_mozo_id).filter((x): x is string => !!x)),
+  );
+  const orderIds = Array.from(new Set(pagos.map((p) => p.order_id)));
+  const entityIds = [...pagos.map((p) => p.id), ...movs.map((m) => m.id)];
+
+  const [nombresRes, auditRes, facturasRes, rendicionesRes] = await Promise.all([
+    mozoIds.length > 0
+      ? service
+          .from("business_users")
+          .select("user_id, full_name")
+          .eq("business_id", businessId)
+          .in("user_id", mozoIds)
+      : Promise.resolve({ data: [] }),
+    entityIds.length > 0
+      ? service
+          .from("caja_audit_log")
+          .select("entity_id")
+          .eq("business_id", businessId)
+          .in("entity_id", entityIds)
+      : Promise.resolve({ data: [] }),
+    orderIds.length > 0
+      ? service
+          .from("invoices")
+          .select("order_id")
+          .eq("business_id", businessId)
+          .eq("status", "authorized")
+          .in("order_id", orderIds)
+      : Promise.resolve({ data: [] }),
+    service
+      .from("mozo_rendiciones")
+      .select("mozo_id, created_at")
+      .eq("business_id", businessId)
+      .gte("created_at", filtros.from),
+  ]);
+
+  const nombreById = new Map(
+    ((nombresRes.data ?? []) as Array<{ user_id: string; full_name: string | null }>).map(
+      (u) => [u.user_id, u.full_name],
+    ),
+  );
+  const corregidos = new Set(
+    ((auditRes.data ?? []) as Array<{ entity_id: string }>).map((r) => r.entity_id),
+  );
+  const facturadas = new Set(
+    ((facturasRes.data ?? []) as Array<{ order_id: string }>).map((r) => r.order_id),
+  );
+  const rendiciones = (rendicionesRes.data ?? []) as Array<{
+    mozo_id: string;
+    created_at: string;
+  }>;
+
+  const entries: LibroEntry[] = [];
+
+  for (const p of pagos) {
+    const ord = Array.isArray(p.orders) ? p.orders[0] : p.orders;
+    const tbl = ord?.tables ? (Array.isArray(ord.tables) ? ord.tables[0] : ord.tables) : null;
+    const caja = cajaById.get(p.caja_id);
+    const anulado = p.payment_status === "refunded";
+    const esMp = p.mp_payment_id !== null || p.method === "mp_link" || p.method === "mp_qr";
+    const arqueado = caja
+      ? new Date(p.created_at).getTime() <= new Date(caja.periodo_desde).getTime()
+      : false;
+
+    let bloqueo: string | null = null;
+    if (anulado) bloqueo = "El cobro está anulado.";
+    else if (esMp) bloqueo = "Es un cobro de Mercado Pago: la acreditación la confirmó MP.";
+    else if (arqueado) bloqueo = "Ya entró en un arqueo cerrado.";
+
+    const advertencias: string[] = [];
+    if (!bloqueo) {
+      if (facturadas.has(p.order_id)) {
+        advertencias.push(
+          "La cuenta ya tiene factura emitida: se pueden corregir el método y el mozo, no el monto.",
+        );
+      }
+      const yaRindio = rendiciones.some(
+        (r) =>
+          r.mozo_id === p.attributed_mozo_id &&
+          new Date(r.created_at).getTime() > new Date(p.created_at).getTime(),
+      );
+      if (yaRindio) {
+        const nombre = p.attributed_mozo_id
+          ? nombreById.get(p.attributed_mozo_id) ?? "ese mozo"
+          : "ese mozo";
+        advertencias.push(`${nombre} ya rindió este cobro: no se puede cambiar el mozo.`);
+      }
+    }
+
+    entries.push({
+      tipo: "cobro",
+      id: p.id,
+      created_at: p.created_at,
+      caja_id: p.caja_id,
+      caja_name: caja?.name ?? "—",
+      amount_cents: Number(p.amount_cents),
+      tip_cents: Number(p.tip_cents),
+      method: p.method,
+      attributed_mozo_id: p.attributed_mozo_id,
+      attributed_mozo_name: p.attributed_mozo_id
+        ? nombreById.get(p.attributed_mozo_id) ?? null
+        : null,
+      descripcion: ord
+        ? descripcionDeOrden({
+            delivery_type: ord.delivery_type,
+            customer_name: ord.customer_name,
+            order_number: ord.order_number,
+            table_label: tbl?.label ?? null,
+          })
+        : "Orden",
+      order_id: p.order_id,
+      order_number: ord?.order_number ?? null,
+      anulado,
+      anulado_reason: p.refunded_reason,
+      corregido: corregidos.has(p.id),
+      bloqueo,
+      advertencias,
+    });
+  }
+
+  for (const m of movs) {
+    const caja = cajaById.get(m.caja_id);
+    const arqueado = caja
+      ? new Date(m.created_at).getTime() <= new Date(caja.periodo_desde).getTime()
+      : false;
+    let bloqueo: string | null = null;
+    if (m.cancelled_at) bloqueo = "El movimiento está anulado.";
+    else if (arqueado) bloqueo = "Ya entró en un arqueo cerrado.";
+
+    entries.push({
+      tipo: m.kind,
+      id: m.id,
+      created_at: m.created_at,
+      caja_id: m.caja_id,
+      caja_name: caja?.name ?? "—",
+      amount_cents: Number(m.amount_cents),
+      tip_cents: 0,
+      method: null,
+      attributed_mozo_id: null,
+      attributed_mozo_name: null,
+      descripcion: m.reason?.trim() || (m.kind === "sangria" ? "Sangría" : "Ingreso"),
+      order_id: null,
+      order_number: null,
+      anulado: m.cancelled_at !== null,
+      anulado_reason: m.cancelled_reason,
+      corregido: corregidos.has(m.id),
+      bloqueo,
+      advertencias: [],
+    });
+  }
+
+  const term = filtros.search?.trim().toLowerCase() ?? "";
+  const filtradas = term
+    ? entries.filter(
+        (e) =>
+          e.descripcion.toLowerCase().includes(term) ||
+          (e.order_number !== null && String(e.order_number).includes(term)) ||
+          (e.attributed_mozo_name ?? "").toLowerCase().includes(term),
+      )
+    : entries;
+
+  filtradas.sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  );
+
+  const totales: LibroTotales = {
+    cobrado_cents: 0,
+    propinas_cents: 0,
+    cobros_count: 0,
+    ingresos_cents: 0,
+    sangrias_cents: 0,
+    por_metodo: { ...EMPTY_BY_METHOD },
+  };
+  for (const e of filtradas) {
+    // Lo anulado se muestra, pero no suma: si sumara, el libro contradiría al
+    // arqueo, que ya lo ignora.
+    if (e.anulado) continue;
+    if (e.tipo === "cobro") {
+      totales.cobrado_cents += e.amount_cents;
+      totales.propinas_cents += e.tip_cents;
+      totales.cobros_count += 1;
+      if (e.method) {
+        totales.por_metodo[e.method] = (totales.por_metodo[e.method] ?? 0) + e.amount_cents;
+      }
+    } else if (e.tipo === "ingreso") {
+      totales.ingresos_cents += e.amount_cents;
+    } else {
+      totales.sangrias_cents += e.amount_cents;
+    }
+  }
+
+  return {
+    entries: filtradas,
+    totales,
+    truncado: pagos.length >= LIBRO_MAX_FILAS || movs.length >= LIBRO_MAX_FILAS,
+  };
+}
+
+/** El historial de correcciones de una línea, para el detalle. */
+export async function getCorreccionesDeLinea(
+  businessId: string,
+  entityType: "payment" | "movimiento",
+  entityId: string,
+): Promise<CorreccionLog[]> {
+  const service = db();
+  const { data } = await service
+    .from("caja_audit_log")
+    .select("id, field, from_value, to_value, reason, created_at, by_user_id")
+    .eq("business_id", businessId)
+    .eq("entity_type", entityType)
+    .eq("entity_id", entityId)
+    .order("created_at", { ascending: false });
+
+  const rows = (data ?? []) as Array<{
+    id: string;
+    field: string;
+    from_value: string | null;
+    to_value: string | null;
+    reason: string;
+    created_at: string;
+    by_user_id: string | null;
+  }>;
+  if (rows.length === 0) return [];
+
+  const userIds = Array.from(
+    new Set(rows.map((r) => r.by_user_id).filter((x): x is string => !!x)),
+  );
+  const { data: users } = await service
+    .from("business_users")
+    .select("user_id, full_name")
+    .eq("business_id", businessId)
+    .in("user_id", userIds);
+  const nombreById = new Map(
+    ((users ?? []) as Array<{ user_id: string; full_name: string | null }>).map((u) => [
+      u.user_id,
+      u.full_name,
+    ]),
+  );
+
+  return rows.map((r) => ({
+    id: r.id,
+    field: r.field,
+    from_value: r.from_value,
+    to_value: r.to_value,
+    reason: r.reason,
+    created_at: r.created_at,
+    by_name: r.by_user_id ? nombreById.get(r.by_user_id) ?? null : null,
+  }));
+}
+
+/**
+ * Traduce los ids que guarda la auditoría a algo legible. El log guarda ids
+ * (es el dato exacto); el encargado necesita nombres.
+ */
+export async function resolverNombresDeCorreccion(
+  businessId: string,
+  logs: CorreccionLog[],
+): Promise<Map<string, string>> {
+  const ids = new Set<string>();
+  for (const l of logs) {
+    if (l.field === "attributed_mozo_id" || l.field === "caja_id") {
+      if (l.from_value) ids.add(l.from_value);
+      if (l.to_value) ids.add(l.to_value);
+    }
+  }
+  const out = new Map<string, string>();
+  if (ids.size === 0) return out;
+
+  const service = db();
+  const lista = Array.from(ids);
+  const [usersRes, cajasRes] = await Promise.all([
+    service
+      .from("business_users")
+      .select("user_id, full_name")
+      .eq("business_id", businessId)
+      .in("user_id", lista),
+    service.from("cajas").select("id, name").eq("business_id", businessId).in("id", lista),
+  ]);
+  for (const u of (usersRes.data ?? []) as Array<{ user_id: string; full_name: string | null }>) {
+    if (u.full_name) out.set(u.user_id, u.full_name);
+  }
+  for (const c of (cajasRes.data ?? []) as Array<{ id: string; name: string }>) {
+    out.set(c.id, c.name);
+  }
+  return out;
 }

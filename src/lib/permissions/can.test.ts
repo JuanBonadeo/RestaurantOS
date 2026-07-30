@@ -9,6 +9,7 @@ import {
   canApplyDiscount,
   canCancelItem,
   canCargarPedido,
+  canCorregirCobro,
   canCrearPedidoFlash,
   canHacerCorte,
   canMakeSangria,
@@ -112,6 +113,15 @@ describe("permissions / canHacerCorte", () => {
     expect(canHacerCorte("admin")).toBe(true);
     expect(canHacerCorte("encargado")).toBe(true);
     expect(canHacerCorte("mozo")).toBe(false);
+  });
+});
+
+describe("permissions / canCorregirCobro", () => {
+  it("admin y encargado pueden, mozo y personal no", () => {
+    expect(canCorregirCobro("admin")).toBe(true);
+    expect(canCorregirCobro("encargado")).toBe(true);
+    expect(canCorregirCobro("mozo")).toBe(false);
+    expect(canCorregirCobro("personal")).toBe(false);
   });
 });
 

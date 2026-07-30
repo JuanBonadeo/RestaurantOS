@@ -199,4 +199,62 @@ describe("buildShiftSummary", () => {
     expect(s.recaudacion.porMetodo).toEqual([]);
     expect(s.anulaciones).toEqual([]);
   });
+  it("lista las correcciones de caja del turno con el cambio legible (spec 070)", () => {
+    const s = buildShiftSummary(
+      baseData({
+        correcciones: [
+          {
+            entity: "payment",
+            field: "method",
+            from_value: "cash",
+            to_value: "card_manual",
+            from_label: null,
+            to_label: null,
+            reason: "lo pagó con débito",
+            responsable: "Martín",
+            at: "2026-06-28T21:14:00-03:00",
+          },
+          {
+            entity: "payment",
+            field: "amount_cents",
+            from_value: "1500000",
+            to_value: "150000",
+            from_label: null,
+            to_label: null,
+            reason: "un cero de más",
+            responsable: null,
+            at: "2026-06-28T21:20:00-03:00",
+          },
+          {
+            entity: "payment",
+            field: "attributed_mozo_id",
+            from_value: "u-1",
+            to_value: "u-2",
+            from_label: "Ana",
+            to_label: "Bruno",
+            reason: "la mesa la atendió Bruno",
+            responsable: "Martín",
+            at: "2026-06-28T21:25:00-03:00",
+          },
+        ],
+      }),
+    );
+
+    expect(s.correcciones[0]).toMatchObject({
+      detalle: "Cobro · método",
+      cambio: "Efectivo → Tarjeta",
+      responsable: "Martín",
+    });
+    // `formatCurrency` usa espacio duro después del $: se compara sin él para
+    // que el test no dependa de un carácter invisible.
+    expect(s.correcciones[1].cambio.replace(/\u00a0/g, " ")).toBe(
+      "$ 15.000 → $ 1.500",
+    );
+    expect(s.correcciones[1].responsable).toBe("—");
+    expect(s.correcciones[2].cambio).toBe("Ana → Bruno");
+  });
+
+  it("sin correcciones, la lista queda vacía (el mail no muestra la sección)", () => {
+    expect(buildShiftSummary(baseData()).correcciones).toEqual([]);
+  });
 });

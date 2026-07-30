@@ -32,6 +32,73 @@ export type CajaMovimiento = {
   reason: string | null;
   created_by: string | null;
   created_at: string;
+  /** Anulado (spec 070): sigue visible en el libro, no cuenta para el arqueo. */
+  cancelled_at: string | null;
+  cancelled_reason: string | null;
+};
+
+// ── Libro de movimientos (spec 070) ─────────────────────────────
+
+export type LibroTipo = "cobro" | "sangria" | "ingreso";
+
+/**
+ * Una línea de caja, sea un cobro o un movimiento. El libro las muestra
+ * mezcladas y en orden cronológico, igual que el panel del período — pero con
+ * rango, filtros, lo anulado a la vista y la línea accionable.
+ */
+export type LibroEntry = {
+  tipo: LibroTipo;
+  id: string;
+  created_at: string;
+  caja_id: string;
+  caja_name: string;
+  /** Cobro: lo cobrado (propina incluida). Movimiento: el monto movido. */
+  amount_cents: number;
+  tip_cents: number;
+  method: PaymentMethod | null;
+  attributed_mozo_id: string | null;
+  attributed_mozo_name: string | null;
+  /** Mesa 12 · Juan Pérez · #128, o el motivo de la sangría. */
+  descripcion: string;
+  order_id: string | null;
+  order_number: number | null;
+  anulado: boolean;
+  anulado_reason: string | null;
+  /** Tiene al menos un renglón en `caja_audit_log`. */
+  corregido: boolean;
+  /** Por qué NO se puede corregir, en castellano. `null` = se puede. */
+  bloqueo: string | null;
+  /** Corregible, pero con límites (factura emitida, mozo que ya rindió). */
+  advertencias: string[];
+};
+
+export type LibroTotales = {
+  cobrado_cents: number;
+  propinas_cents: number;
+  cobros_count: number;
+  ingresos_cents: number;
+  sangrias_cents: number;
+  por_metodo: Record<PaymentMethod, number>;
+};
+
+export type LibroFiltros = {
+  from: string;
+  to: string;
+  cajaId?: string | null;
+  tipo?: LibroTipo | null;
+  method?: PaymentMethod | null;
+  mozoId?: string | null;
+  search?: string | null;
+};
+
+export type CorreccionLog = {
+  id: string;
+  field: string;
+  from_value: string | null;
+  to_value: string | null;
+  reason: string;
+  created_at: string;
+  by_name: string | null;
 };
 
 export type PaymentMethod =

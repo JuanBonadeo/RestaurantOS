@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-30
 
-**Status**: 📝 Especificada — sin implementar. Issue [#106](https://github.com/gachetponzellini/RestaurantOS-app/issues/106). Milestone: Post-demo · Growth & hardening.
+**Status**: ✅ Implementada (2026-07-30) — todo el alcance (US1 a US6, incluidos los P2). `pnpm typecheck`, `pnpm lint` y `pnpm build` verdes; `pnpm test` 995 pass / 140 skip (los 16 `*.integration.test.ts` fallan por falta del stack Supabase local — preexistente, no hay Docker en esta máquina). Migraciones `0031` + `0032` aplicadas al cloud y **verificadas ejecutando las RPC contra la base real** dentro de una transacción que se revierte. **Pendiente: verify en vivo con rol real** (T024). Issue [#106](https://github.com/gachetponzellini/RestaurantOS-app/issues/106). Milestone: Post-demo · Growth & hardening.
 
 **Input**: Pedido de Juan 2026-07-30 — *"hay que hacer una spec, para que las líneas de la caja sean editables, indicando un motivo, y que lo pueda hacer solo el encargado/admin, que puedan mover el monto, el método, y el mozo, creo que para esto también debería haber una lista de todos los movimientos"*.
 
