@@ -30,6 +30,7 @@ import { TrasladarMesaModal } from "@/components/mozo/trasladar-mesa-modal";
 import { WalkInModal } from "@/components/mozo/walk-in-modal";
 import { signOut } from "@/lib/auth/sign-out";
 import { anularMesa, transferTable, volverAPedir } from "@/lib/mozo/actions";
+import { tieneConsumo } from "@/lib/mozo/consumo";
 import type { MozoMember, MozoAttendance } from "@/lib/mozo/queries";
 import { type OperationalStatus } from "@/lib/mozo/state-machine";
 import { DELAY_COLORS, tableDelay } from "@/lib/comandas/mesa-demora";
@@ -337,6 +338,29 @@ export function MozoClient({
 
 
   // ── Handlers ──
+  /**
+   * Anula la mesa. `reason` vacío sólo vale para una mesa sin consumo: el
+   * server re-deriva eso contra la DB y rechaza el vacío si hay ítems (spec
+   * 071), así que acá no hay riesgo de saltearse el motivo con datos viejos.
+   */
+  const anular = useCallback(
+    async (tableId: string, reason: string) => {
+      setLoading(true);
+      const result = await anularMesa(tableId, reason, businessSlug);
+      setLoading(false);
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Mesa anulada.");
+      setAnularPrompt(null);
+      setAnularReason("");
+      setSelected(null);
+      router.refresh();
+    },
+    [businessSlug, router],
+  );
+
   const handleAnular = useCallback(async () => {
     if (!anularPrompt) return;
     const reason = anularReason.trim();
@@ -344,19 +368,23 @@ export function MozoClient({
       toast.error("Necesitamos un motivo.");
       return;
     }
-    setLoading(true);
-    const result = await anularMesa(anularPrompt.tableId, reason, businessSlug);
-    setLoading(false);
-    if (!result.ok) {
-      toast.error(result.error);
-      return;
-    }
-    toast.success("Mesa anulada.");
-    setAnularPrompt(null);
-    setAnularReason("");
-    setSelected(null);
-    router.refresh();
-  }, [anularPrompt, anularReason, businessSlug, router]);
+    await anular(anularPrompt.tableId, reason);
+  }, [anularPrompt, anularReason, anular]);
+
+  /**
+   * Punto de entrada del botón «Anular» (spec 071). Sin nada cargado se cierra
+   * directo; recién con consumo se pide el motivo.
+   */
+  const pedirAnular = useCallback(
+    (tableId: string, label: string) => {
+      if (!tieneConsumo(orderByTable[tableId]?.items)) {
+        void anular(tableId, "");
+        return;
+      }
+      setAnularPrompt({ tableId, label });
+    },
+    [orderByTable, anular],
+  );
 
   // Realtime + toasts iOS para notificaciones del mozo. La fuente de verdad
   // sigue siendo el server (revalidatePath en markRead/markAllRead), el
@@ -745,10 +773,7 @@ export function MozoClient({
                 <button
                   disabled={loading}
                   onClick={() =>
-                    setAnularPrompt({
-                      tableId: selectedSync.id,
-                      label: selectedSync.label,
-                    })
+                    pedirAnular(selectedSync.id, selectedSync.label)
                   }
                   className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-rose-50 px-3 text-sm font-semibold text-rose-700 ring-1 ring-rose-200 transition hover:bg-rose-100 active:scale-[0.97] disabled:opacity-60"
                 >

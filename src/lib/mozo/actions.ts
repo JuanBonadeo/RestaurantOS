@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { requireMozoActionContext } from "@/lib/mozo/auth";
+import { MOTIVO_MESA_SIN_CONSUMO, tieneConsumo } from "@/lib/mozo/consumo";
 import {
   canTransition,
   nextOpenedAt,
@@ -383,14 +384,19 @@ export async function liberarMesa(
 /**
  * Anular mesa: pasa a `libre` y marca todas las orders abiertas asociadas
  * como `cancelled` con motivo. Solo encargado/admin.
+ *
+ * **El motivo es obligatorio sólo si la mesa tiene consumo** (spec 071). Una
+ * mesa a la que no se le cargó nada se cierra directo: anular ahí es deshacer
+ * un click, no tirar comida. Quién decide eso es el server, no el cliente —
+ * un cliente con datos viejos podría mandar el motivo vacío en una mesa a la
+ * que le acaban de cargar algo, así que se re-deriva acá contra la DB.
  */
 export async function anularMesa(
   tableId: string,
   motivo: string,
   businessSlug: string,
 ): Promise<ActionResult<void>> {
-  const reason = motivo.trim();
-  if (!reason) return actionError("El motivo de anulación es obligatorio.");
+  const motivoDado = motivo.trim();
 
   const business = await getBusiness(businessSlug);
   if (!business) return actionError("Negocio no encontrado.");
@@ -411,6 +417,28 @@ export async function anularMesa(
   if (!canTransitionMesa(ctx.role, from, "libre")) {
     return actionError("Solo encargado o admin pueden anular una mesa.");
   }
+
+  // ¿Tiene consumo? Se pregunta a la DB, no al cliente (ver doc de arriba).
+  const { data: openOrders, error: openErr } = await service
+    .from("orders")
+    .select("id, order_items(cancelled_at)")
+    .eq("table_id", tableId)
+    .eq("business_id", business.id)
+    .eq("lifecycle_status", "open");
+  if (openErr) {
+    console.error("anularMesa openOrders", openErr);
+    return actionError("No pudimos leer el estado de la mesa.");
+  }
+  const items = ((openOrders ?? []) as { order_items?: { cancelled_at: string | null }[] }[])
+    .flatMap((o) => o.order_items ?? []);
+  const conConsumo = tieneConsumo(items);
+
+  if (conConsumo && !motivoDado) {
+    return actionError("El motivo de anulación es obligatorio.");
+  }
+  // Sin consumo y sin motivo: se registra uno del sistema. La auditoría nunca
+  // queda con el campo vacío, pero al encargado no se le pide nada.
+  const reason = motivoDado || MOTIVO_MESA_SIN_CONSUMO;
 
   // Cancelar orders abiertas de esta mesa. `.select("id")` devuelve las que
   // recién cancelamos → las usamos abajo para anular sus comandas.

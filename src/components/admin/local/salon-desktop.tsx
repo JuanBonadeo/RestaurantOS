@@ -66,6 +66,7 @@ import {
   type TableDelay,
 } from "@/lib/comandas/mesa-demora";
 import { anularMesa, assignMozoToTable } from "@/lib/mozo/actions";
+import { tieneConsumo } from "@/lib/mozo/consumo";
 import {
   loadPedirCatalog,
   loadTableComandas,
@@ -718,6 +719,41 @@ export function SalonDesktop({
   }, [floorPlans]);
 
   // ── Acciones server ──
+  /**
+   * Anula la mesa. `reason` vacío sólo vale para una mesa sin consumo: el
+   * server re-deriva eso contra la DB y rechaza el vacío si hay ítems (spec
+   * 071), así que acá no hay riesgo de saltearse el motivo con datos viejos.
+   */
+  const anular = useCallback(
+    (tableId: string, reason: string) => {
+      // Optimista: la mesa se libera al instante. Cerramos el prompt y la
+      // selección; el server reconcilia (o revertimos si falla).
+      setOptimisticStatus((prev) => ({
+        ...prev,
+        [tableId]: { operational_status: "libre" },
+      }));
+      setAnularPrompt(null);
+      setAnularReason("");
+      setSelectedId(null);
+      startTransition(async () => {
+        const r = await anularMesa(tableId, reason, slug);
+        if (!r.ok) {
+          toast.error(r.error);
+          setOptimisticStatus((prev) => {
+            if (!prev[tableId]) return prev;
+            const next = { ...prev };
+            delete next[tableId];
+            return next;
+          });
+          return;
+        }
+        toast.success("Mesa anulada.");
+        router.refresh();
+      });
+    },
+    [slug, router],
+  );
+
   const handleAnular = useCallback(() => {
     if (!anularPrompt) return;
     const reason = anularReason.trim();
@@ -725,32 +761,23 @@ export function SalonDesktop({
       toast.error("Indicá el motivo.");
       return;
     }
-    const { tableId } = anularPrompt;
-    // Optimista: la mesa se libera al instante. Cerramos el prompt y la
-    // selección; el server reconcilia (o revertimos si falla).
-    setOptimisticStatus((prev) => ({
-      ...prev,
-      [tableId]: { operational_status: "libre" },
-    }));
-    setAnularPrompt(null);
-    setAnularReason("");
-    setSelectedId(null);
-    startTransition(async () => {
-      const r = await anularMesa(tableId, reason, slug);
-      if (!r.ok) {
-        toast.error(r.error);
-        setOptimisticStatus((prev) => {
-          if (!prev[tableId]) return prev;
-          const next = { ...prev };
-          delete next[tableId];
-          return next;
-        });
+    anular(anularPrompt.tableId, reason);
+  }, [anularPrompt, anularReason, anular]);
+
+  /**
+   * Punto de entrada del botón «Anular» (spec 071). Sin nada cargado se cierra
+   * directo; recién con consumo se pide el motivo.
+   */
+  const pedirAnular = useCallback(
+    (tableId: string, label: string) => {
+      if (!tieneConsumo(orderByTable[tableId]?.items)) {
+        anular(tableId, "");
         return;
       }
-      toast.success("Mesa anulada.");
-      router.refresh();
-    });
-  }, [anularPrompt, anularReason, slug, router]);
+      setAnularPrompt({ tableId, label });
+    },
+    [orderByTable, anular],
+  );
 
   const handleSentarReserva = useCallback(
     (reservationId: string, tableId: string) => {
@@ -1281,9 +1308,7 @@ export function SalonDesktop({
               }}
               onTransfer={() => setTransferTableId(selected.id)}
               onTrasladar={() => setTrasladarTableId(selected.id)}
-              onAnular={() =>
-                setAnularPrompt({ tableId: selected.id, label: selected.label })
-              }
+              onAnular={() => pedirAnular(selected.id, selected.label)}
             />
           ) : (
             <>
