@@ -262,6 +262,13 @@ export function renderEscPos(lines: Line[]): string {
   // Reset de estilo + avance + corte parcial.
   out += GS + "!" + "\x00" + ESC + "E" + "\x00" + ESC + "a" + "\x00";
   out += "\n\n\n" + GS + "V" + "\x00";
+  // Init final: DEJAR LA IMPRESORA COMO ESTABA. `ESC 3` (interlineado) y
+  // `ESC SP` (espaciado lateral) son estados que quedan pegados en la comandera
+  // después del corte, así que el siguiente que imprima los hereda. En golf la
+  // misma comandera la comparte MaxiRest, que no manda `ESC @` al empezar: sus
+  // tickets salían con nuestro interlineado y nuestro ancho. Con esto, cada job
+  // devuelve la impresora a fábrica al terminar.
+  out += ESC + "@";
   return out;
 }
 

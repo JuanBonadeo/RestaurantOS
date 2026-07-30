@@ -168,6 +168,17 @@ describe("buildTicketLines · solo ASCII imprimible", () => {
   });
 });
 
+describe("renderEscPos · no le deja la impresora sucia al que sigue", () => {
+  it("abre y cierra con ESC @ (init)", () => {
+    const esc = renderEscPos(buildTicketLines(base));
+    expect(esc.startsWith("\x1b@")).toBe(true);
+    // Sin este init final, `ESC 3` (interlineado) y `ESC SP` (ancho) quedan
+    // pegados en la comandera y el próximo job los hereda — en golf, los
+    // tickets de MaxiRest, que comparte la misma impresora.
+    expect(esc.endsWith("\x1d" + "V" + "\x00" + "\x1b@")).toBe(true);
+  });
+});
+
 describe("buildComandaContent · base64", () => {
   it("escpos_b64 decodifica (latin1) exactamente a los bytes de renderEscPos", () => {
     const expected = renderEscPos(buildTicketLines(base));

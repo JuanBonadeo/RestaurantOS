@@ -268,6 +268,11 @@ function renderEscPos(lines) {
   // Reset de estilo + avance + corte parcial.
   out += GS + "!" + "\x00" + ESC + "E" + "\x00" + ESC + "a" + "\x00";
   out += "\n\n\n" + GS + "V" + "\x00";
+  // Init final: dejar la impresora como estaba. `ESC 3` (interlineado) y
+  // `ESC SP` (espaciado lateral) quedan pegados después del corte y los hereda
+  // el que imprima después — en golf, MaxiRest, que no manda `ESC @` al
+  // empezar. Sus tickets salían con nuestro interlineado y nuestro ancho.
+  out += ESC + "@";
   return out;
 }
 
