@@ -20,6 +20,9 @@ const item = (id: string, sub: number, cancelled = false): CuentaItem => ({
   cancelled_at: cancelled ? new Date().toISOString() : null,
   loaded_by: null,
   seat_number: null,
+  unit_price_cents: sub,
+  price_original_cents: null,
+  price_override_reason: null,
 });
 
 describe("calculateTotals", () => {

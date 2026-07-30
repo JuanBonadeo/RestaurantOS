@@ -53,7 +53,7 @@ export async function getCuentaForTable(
       // "Comensal N" (spec 36 · R-F1): sin él, la UI recibía undefined y la
       // feature quedaba inalcanzable pese a estar implementada.
       .select(
-        "id, product_name, quantity, subtotal_cents, notes, station_id, seat_number, cancelled_at, loaded_by",
+        "id, product_name, quantity, subtotal_cents, notes, station_id, seat_number, cancelled_at, loaded_by, unit_price_cents, price_original_cents, price_override_reason",
       )
       .eq("order_id", order.id)
       .order("id", { ascending: true }),

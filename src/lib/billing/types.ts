@@ -61,6 +61,14 @@ export type CuentaItem = {
   cancelled_at: string | null;
   loaded_by: string | null;
   seat_number: number | null;
+  /**
+   * Spec 069 — precio pisado por el encargado. `price_original_cents` null =
+   * la línea se cobra al precio de la carta. Quien cobra necesita ver por qué
+   * el número no coincide con la carta.
+   */
+  unit_price_cents: number;
+  price_original_cents: number | null;
+  price_override_reason: string | null;
 };
 
 export type CuentaTotals = {

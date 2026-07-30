@@ -22,23 +22,32 @@ Orden pensado para que **US1 sea entregable sola** (T001–T012). US2 (T013–T0
 
 ## US2 · Corregir el precio de un ítem ya enviado (P2)
 
-- [ ] **T013** Tests de `editarItemComanda` con precio: primer override, **segundo** override (que `price_original_cents` NO se pise), revertir con `null`, cambio de producto que limpia el override, ítem cancelado → error, orden cerrada → error. (FR-010..FR-014)
-- [ ] **T014** `editarItemComanda`: `priceOverrideCents` / `priceOverrideReason` en el patch, doble gate (`canModifyPostEnvio` + `canOverrideItemPrice`), la regla de "seteá `price_original_cents` solo si es null", el revert y el recálculo de totales.
-- [ ] **T015** El modal de edición del spec 049 suma el control de precio, con **loading explícito, no optimista** (frontera de plata, spec 21). (FR-018)
-- [ ] **T016** `cuenta-client.tsx`: marcar las líneas con precio modificado para quien cobra. (FR-019)
+- [x] **T013** Tests de `editarItemComanda` con precio: primer override, **segundo** override (que `price_original_cents` NO se pise), revertir con `null`, cambio de producto que limpia el override, ítem cancelado → error, orden cerrada → error. (FR-010..FR-014)
+- [x] **T014** `editarItemComanda`: `priceOverrideCents` / `priceOverrideReason` en el patch, doble gate (`canModifyPostEnvio` + `canOverrideItemPrice`), la regla de "seteá `price_original_cents` solo si es null", el revert y el recálculo de totales.
+- [x] **T015** El modal de edición del spec 049 suma el control de precio, con **loading explícito, no optimista** (frontera de plata, spec 21). (FR-018)
+- [x] **T016** `cuenta-client.tsx`: marcar las líneas con precio modificado para quien cobra. (FR-019)
 
 ## US3 · Registro legible (P2)
 
-- [ ] **T017** Tests de `getPriceOverrides`: scope por `business_id`, rango de fechas con timezone AR explícita, exclusión de órdenes canceladas, cálculo del delta.
-- [ ] **T018** `getPriceOverrides` en `src/lib/admin/` + `PriceOverridesSection` en `/admin/reportes`: tabla ordenada por `abs(delta)` desc, totales resignado/recargado **separados** (no netean), y no renderiza nada si está vacía. (FR-020, FR-021)
-- [ ] **T019** Chequear que `profit-query.ts` (ingeniería de menú) y top-products no rompan al ver márgenes reales en vez de precio de lista — es el comportamiento **correcto**, pero hay que confirmar que ninguna cuenta asume `unit_price_cents == products.price_cents`.
+- [x] **T017** Tests de `getPriceOverrides`: scope por `business_id`, rango de fechas con timezone AR explícita, exclusión de órdenes canceladas, cálculo del delta.
+- [x] **T018** `getPriceOverrides` en `src/lib/admin/` + `PriceOverridesSection` en `/admin/reportes`: tabla ordenada por `abs(delta)` desc, totales resignado/recargado **separados** (no netean), y no renderiza nada si está vacía. (FR-020, FR-021)
+- [x] **T019** Auditoría del cambio de significado de `unit_price_cents`. **Encontró un bug real, no sólo confirmó lo esperado:** `profit-query.ts` mezclaba ingreso real (de `order_items`) con margen de catálogo (de `getCosteoOverview` sobre `products.price_cents`) — un plato regalado tres veces mostraba «$0 facturado · 70% de margen» en la misma tarjeta y `classify()` lo mandaba al cuadrante **estrella**. Corregido con [`effective-margin.ts`](../../src/lib/admin/effective-margin.ts) (7 tests). Verificados correctos y sin cambios: `top-products.ts`, `reports-query.ts`, `dashboard-query.ts`, `customers-query.ts`, `getCosteoOverview` (su uso propio en `/admin/catalogo` SÍ quiere el precio de lista), el trigger de `ingredient_consumptions`, `staff-query.ts`, `cuenta-query.ts` y todo `src/lib/afip` (se factura lo que se cobra).
 
 ## Cierre
 
-- [ ] **T020** `pnpm typecheck` + `pnpm lint` + `pnpm build` verdes; `pnpm test` sin regresiones nuevas (los `*.integration.test.ts` fallan sin stack Supabase local — preexistente).
-- [ ] **T021** Wiki: [`features/cuenta.md`](../../../wiki/features/cuenta.md), [`features/mozo.md`](../../../wiki/features/mozo.md), [`features/admin.md`](../../../wiki/features/admin.md) (reporte) y [`dominio/schema.md`](../../../wiki/dominio/schema.md) (las 4 columnas + el nuevo significado de `unit_price_cents`). Log en `wiki/log.md`.
+- [x] **T020** `pnpm typecheck` + `pnpm lint` + `pnpm build` verdes; `pnpm test` sin regresiones nuevas (los `*.integration.test.ts` fallan sin stack Supabase local — preexistente).
+- [x] **T021** Wiki: [`features/cuenta.md`](../../../wiki/features/cuenta.md), [`features/mozo.md`](../../../wiki/features/mozo.md), [`features/admin.md`](../../../wiki/features/admin.md) (reporte) y [`dominio/schema.md`](../../../wiki/dominio/schema.md) (las 4 columnas + el nuevo significado de `unit_price_cents`). Log en `wiki/log.md`.
 - [ ] **T022** Verify en vivo con **rol real** (encargado, nunca service_role) en golf-jcr: cargar con override a $0 y a un precio mayor, cobrar la mesa, corregir un ítem ya enviado, y ver las filas en el reporte. Confirmar que el **mozo no ve el control**.
 - [ ] **T023** Comentar + cerrar la issue; checklist de qa-brain (`tipos/web.md`) antes de dar por terminado.
+
+## Verificación adversarial (2026-07-30)
+
+22 hallazgos reportados por 4 lentes independientes (plata, permisos, estado/UI, cumplimiento de spec), cada uno verificado por un refutador. **20 refutados** (preexistentes, o preferencias de presentación, o escenarios que un guard previo ya cortaba). **4 confirmados y corregidos:**
+
+1. **El reporte contaba plata de mesas anuladas.** `getPriceOverrides` excluía órdenes canceladas con `.neq("orders.status", "cancelled")`, pero anular o liberar una mesa escribe SÓLO `orders.lifecycle_status` — y no hay trigger que las sincronice. Para la población de este reporte (salón y mostrador) el filtro era un **no-op**: nunca excluía una fila. Una mesa anulada con un ítem a mitad de precio sumaba a «se dejó de cobrar» plata que nunca se cobró ni se resignó. Se filtra por las dos columnas + test que se pone rojo si se saca cualquiera.
+2. **Cambiar el producto dejaba el modal mintiendo.** El picker sólo patcheaba `productId`/`productName`; `catalogPriceCents` y `overrideCents` seguían siendo los del producto viejo. La pantalla decía «Precio de la carta $10.000 → se cobra $6.000» y al guardar el server (correctamente, FR-013) limpiaba el override y cobraba el precio del producto nuevo. Ahora el picker espeja lo que hace el server.
+3. **Corregir sólo el motivo se perdía en silencio.** `rowChanged` comparaba únicamente `overrideCents`, así que editar el texto del motivo sin mover el precio no marcaba la fila como cambiada y el patch nunca salía. El motivo es justamente el dato que audita el reporte.
+4. **El reporte traía «cuándo» y no lo mostraba.** `price_override_at` se seleccionaba, se mapeaba a `at` y quedaba como campo muerto; FR-020 lo pide explícito. Se agregó la columna, formateada en la timezone del negocio.
 
 ## Notas de implementación (2026-07-30)
 

@@ -21,6 +21,14 @@ export type LocalComandaItem = {
   kitchen_status: KitchenItemStatus;
   /** Ítem de combo / menú del día: no editable en fase 1 (spec 049). */
   is_combo: boolean;
+  /**
+   * Precio EFECTIVAMENTE cobrado por unidad (spec 069). El ticket de cocina no
+   * lleva precios; esto es para el modal de edición del encargado.
+   */
+  unit_price_cents: number;
+  /** Precio de catálogo si el encargado pisó el precio; null si nunca se tocó. */
+  price_original_cents: number | null;
+  price_override_reason: string | null;
 };
 
 export type LocalComanda = {
@@ -102,6 +110,7 @@ export async function getActiveComandas(
       order_items (
         id, product_id, product_name, quantity, notes, cancelled_at, cancelled_reason,
         kitchen_status, is_combo_component, parent_order_item_id, daily_menu_id,
+        unit_price_cents, price_original_cents, price_override_reason,
         order_item_modifiers ( modifier_name )
       )
     )
@@ -169,6 +178,9 @@ export async function getActiveComandas(
         is_combo_component: boolean | null;
         parent_order_item_id: string | null;
         daily_menu_id: string | null;
+        unit_price_cents: number;
+        price_original_cents: number | null;
+        price_override_reason: string | null;
         order_item_modifiers: { modifier_name: string }[] | null;
       } | null;
     }[] | null;
@@ -210,6 +222,10 @@ export async function getActiveComandas(
           Boolean(it.is_combo_component) ||
           Boolean(it.parent_order_item_id) ||
           Boolean(it.daily_menu_id),
+        unit_price_cents: Number(it.unit_price_cents),
+        price_original_cents:
+          it.price_original_cents == null ? null : Number(it.price_original_cents),
+        price_override_reason: it.price_override_reason,
       })),
   }));
 }

@@ -1319,6 +1319,15 @@ export type EditarItemComandaPatch = {
   notes?: string | null;
   /** Cambiar el producto del ítem (spec 049). Re-snapshotea nombre/precio. */
   productId?: string;
+  /**
+   * Precio a cobrar por esta línea (spec 069). **Tres estados**:
+   * - `undefined` → no se toca el precio; un override existente se conserva.
+   * - `null` → **revertir** al precio de catálogo actual y limpiar las 4
+   *   columnas de auditoría. No exige motivo: es deshacer, no cambiar.
+   * - `number` → nuevo override; exige `priceOverrideReason`.
+   */
+  priceOverrideCents?: number | null;
+  priceOverrideReason?: string | null;
 };
 
 /**
@@ -1346,19 +1355,42 @@ export async function editarItemComanda(
     return actionError("Solo encargado o admin pueden modificar una comanda.");
   }
 
+  // Precio por ítem (spec 069). `null` explícito = revertir, no necesita
+  // motivo ni gate de precio (deshacer es más débil que cambiar). Un número sí
+  // pasa por `validatePriceOverride`, que exige rol + motivo.
+  const revertPrice = patch.priceOverrideCents === null;
+  const priceValidation = revertPrice
+    ? ({ ok: true, override: null } as const)
+    : validatePriceOverride(
+        {
+          price_override_cents: patch.priceOverrideCents,
+          price_override_reason: patch.priceOverrideReason,
+        },
+        ctxResult.data.role,
+      );
+  if (!priceValidation.ok) return actionError(priceValidation.error);
+
   const service = createSupabaseServiceClient() as unknown as GenericClient;
 
   const { data: item } = await service
     .from("order_items")
     .select(
-      "id, order_id, product_id, product_name, unit_price_cents, quantity, notes, station_id, cancelled_at, is_combo_component, parent_order_item_id, daily_menu_id, orders!inner(business_id)",
+      "id, order_id, product_id, product_name, unit_price_cents, quantity, notes, station_id, cancelled_at, is_combo_component, parent_order_item_id, daily_menu_id, price_original_cents, orders!inner(business_id, lifecycle_status)",
     )
     .eq("id", orderItemId)
     .maybeSingle();
-  const itemBusinessId = (item as { orders?: { business_id: string } } | null)
-    ?.orders?.business_id;
-  if (!item || itemBusinessId !== business.id) {
+  const itemOrder = (
+    item as {
+      orders?: { business_id: string; lifecycle_status: string };
+    } | null
+  )?.orders;
+  if (!item || itemOrder?.business_id !== business.id) {
     return actionError("Item no encontrado.");
+  }
+  // La plata ya cobrada no se reescribe: una orden cerrada puede tener pagos,
+  // arqueo y rendición apoyados en ese total (spec 069, US2 escenario 5).
+  if (itemOrder.lifecycle_status !== "open") {
+    return actionError("La orden ya está cerrada.");
   }
   const it = item as unknown as {
     order_id: string;
@@ -1372,6 +1404,7 @@ export async function editarItemComanda(
     is_combo_component: boolean | null;
     parent_order_item_id: string | null;
     daily_menu_id: string | null;
+    price_original_cents: number | null;
   };
   if (it.cancelled_at) return actionError("El ítem está cancelado.");
   if (it.is_combo_component || it.parent_order_item_id || it.daily_menu_id) {
@@ -1389,10 +1422,17 @@ export async function editarItemComanda(
 
   // Cambio de producto (opcional): re-snapshot nombre/precio, conserva sector,
   // limpia modifiers del viejo.
-  let unitPrice = Number(it.unit_price_cents);
   let productId = it.product_id;
   let productName = it.product_name;
   let clearedModifiers = false;
+  let productChanged = false;
+  // Precio de CATÁLOGO de referencia de la línea. Si la línea ya tiene un
+  // override, el de catálogo está en `price_original_cents` — `unit_price_cents`
+  // es lo que se cobra, no lo que vale.
+  let catalogPrice =
+    it.price_original_cents != null
+      ? Number(it.price_original_cents)
+      : Number(it.unit_price_cents);
   if (patch.productId && patch.productId !== it.product_id) {
     const { data: prod } = await service
       .from("products")
@@ -1415,13 +1455,49 @@ export async function editarItemComanda(
     }
     productId = p.id;
     productName = p.name;
-    unitPrice = Number(p.price_cents);
+    catalogPrice = Number(p.price_cents);
+    productChanged = true;
     await service
       .from("order_item_modifiers")
       .delete()
       .eq("order_item_id", orderItemId);
     clearedModifiers = true;
+  } else if (revertPrice && it.product_id) {
+    // FR-012: volver al precio de catálogo **de hoy**, no al snapshot de
+    // cuando se pisó — si la carta subió en el medio, deshacer tiene que
+    // dejar la línea al precio vigente. Si el producto ya no existe, nos
+    // quedamos con el snapshot (`catalogPrice` ya lo tiene).
+    const { data: prod } = await service
+      .from("products")
+      .select("price_cents")
+      .eq("id", it.product_id)
+      .maybeSingle();
+    const p = prod as { price_cents: number } | null;
+    if (p) catalogPrice = Number(p.price_cents);
   }
+
+  // Tres estados del precio (ver `EditarItemComandaPatch`):
+  //   - no se toca Y no cambió el producto → se conserva el override tal cual
+  //     (ni siquiera se escriben las columnas, para no pisar el actor/motivo);
+  //   - cambió el producto sin override explícito → se limpia todo, porque el
+  //     motivo y el precio de lista eran del producto VIEJO. Sin esto el
+  //     reporte de precios modificados lista una fila fantasma;
+  //   - override nuevo o revert → se recalcula y se reescriben las 4 columnas.
+  const keepExistingPrice =
+    patch.priceOverrideCents === undefined && !productChanged;
+  const resolvedPrice = keepExistingPrice
+    ? null
+    : applyPriceOverride(
+        catalogPrice,
+        priceValidation.override,
+        ctxResult.data.userId,
+        // Producto nuevo = baseline nuevo: el `price_original_cents` viejo no
+        // aplica. Mismo producto = se respeta el original (FR-011).
+        productChanged ? null : it.price_original_cents,
+      );
+  const unitPrice = resolvedPrice
+    ? resolvedPrice.unit_price_cents
+    : Number(it.unit_price_cents);
 
   // Σ de modifiers vigentes (0 si se limpiaron por cambio de producto).
   let modsTotal = 0;
@@ -1436,7 +1512,7 @@ export async function editarItemComanda(
     );
   }
 
-  const subtotal = (unitPrice + modsTotal) * quantity;
+  const subtotal = lineSubtotalCents(unitPrice, modsTotal, quantity);
 
   const patchRow: Record<string, unknown> = {
     quantity,
@@ -1446,6 +1522,14 @@ export async function editarItemComanda(
     product_name: productName,
   };
   if (patch.notes !== undefined) patchRow.notes = patch.notes;
+  // Sólo se escriben si el precio se tocó — así una edición de cantidad no
+  // pisa el actor ni la fecha del override que ya estaba.
+  if (resolvedPrice) {
+    patchRow.price_original_cents = resolvedPrice.price_original_cents;
+    patchRow.price_override_at = resolvedPrice.price_override_at;
+    patchRow.price_override_by = resolvedPrice.price_override_by;
+    patchRow.price_override_reason = resolvedPrice.price_override_reason;
+  }
 
   const { error } = await service
     .from("order_items")

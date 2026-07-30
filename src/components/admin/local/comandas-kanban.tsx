@@ -9,6 +9,8 @@ import {
   useTransition,
 } from "react";
 import { toast } from "sonner";
+
+import { formatCurrency } from "@/lib/currency";
 import {
   Ban,
   ChefHat,
@@ -23,6 +25,7 @@ import {
   Plus,
   Printer,
   RotateCcw,
+  Tag,
   Trash2,
   Truck,
   Undo2,
@@ -1139,6 +1142,14 @@ type EditRow = {
   origProductId: string | null;
   origQuantity: number;
   origNotes: string;
+  // ── Precio por ítem (spec 069) ──
+  /** Precio de CATÁLOGO de la línea (lo que dice la carta). */
+  catalogPriceCents: number;
+  /** Precio pisado, o null si se cobra el de catálogo. */
+  overrideCents: number | null;
+  overrideReason: string;
+  origOverrideCents: number | null;
+  origOverrideReason: string;
 };
 
 function EditarComandaModal({
@@ -1166,6 +1177,15 @@ function EditarComandaModal({
         origProductId: it.product_id,
         origQuantity: it.quantity,
         origNotes: it.notes ?? "",
+        // `unit_price_cents` es lo COBRADO; el de catálogo vive en
+        // `price_original_cents` cuando la línea está pisada (spec 069).
+        catalogPriceCents: it.price_original_cents ?? it.unit_price_cents,
+        overrideCents:
+          it.price_original_cents == null ? null : it.unit_price_cents,
+        overrideReason: it.price_override_reason ?? "",
+        origOverrideCents:
+          it.price_original_cents == null ? null : it.unit_price_cents,
+        origOverrideReason: it.price_override_reason ?? "",
       })),
   );
   const [pending, startTransition] = useTransition();
@@ -1191,9 +1211,23 @@ function EditarComandaModal({
     r.removed ||
     r.quantity !== r.origQuantity ||
     r.notes.trim() !== r.origNotes.trim() ||
-    r.productId !== r.origProductId;
+    r.productId !== r.origProductId ||
+    r.overrideCents !== r.origOverrideCents ||
+    // Corregir SÓLO el motivo (sin mover el precio) también es un cambio: el
+    // motivo es el dato que audita el reporte.
+    (r.overrideCents !== null &&
+      r.overrideReason.trim() !== r.origOverrideReason.trim());
+
+  /**
+   * Una fila con precio pisado y motivo vacío no se puede guardar: el server
+   * la rechaza igual, pero cortarlo acá evita que el encargado descubra el
+   * problema recién después de esperar el round-trip (spec 21).
+   */
+  const priceIncomplete = (r: EditRow) =>
+    !r.removed && r.overrideCents !== null && r.overrideReason.trim() === "";
 
   const dirty = rows.some(rowChanged);
+  const blocked = rows.some(priceIncomplete);
 
   // Guardar: aplica quitar / editar por ítem y reimprime el ticket corregido.
   // Loading explícito (no optimista): frontera de plata (spec 21).
@@ -1214,6 +1248,16 @@ function EditarComandaModal({
           patch.notes = r.notes.trim() ? r.notes.trim() : null;
         if (r.productId && r.productId !== r.origProductId)
           patch.productId = r.productId;
+        const priceChanged =
+          r.overrideCents !== r.origOverrideCents ||
+          (r.overrideCents !== null &&
+            r.overrideReason.trim() !== r.origOverrideReason.trim());
+        if (priceChanged) {
+          // `null` = volver al precio de la carta (el server no pide motivo).
+          patch.priceOverrideCents = r.overrideCents;
+          patch.priceOverrideReason =
+            r.overrideCents === null ? null : r.overrideReason.trim();
+        }
         if (Object.keys(patch).length === 0) continue;
         const res = await editarItemComanda(slug, r.itemId, patch);
         if (!res.ok) {
@@ -1327,6 +1371,87 @@ function EditarComandaModal({
                     )}
                   </div>
 
+                  {/* Precio por ítem (spec 069). Inline y no en un modal
+                      anidado: este editor es batch — se tocan varias líneas y
+                      recién ahí se guarda — así que abrir un modal por línea
+                      rompería el gesto. */}
+                  {!r.isCombo && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-muted-foreground text-xs">
+                        Precio de la carta{" "}
+                        <span className="tabular-nums">
+                          {formatCurrency(r.catalogPriceCents)}
+                        </span>
+                      </span>
+                      {r.overrideCents === null ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            patchRow(r.itemId, {
+                              overrideCents: r.catalogPriceCents,
+                            })
+                          }
+                          disabled={pending}
+                          className="inline-flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-200 transition hover:bg-amber-50 disabled:opacity-50"
+                        >
+                          <Tag className="size-3" strokeWidth={2.5} />
+                          Cambiar el precio
+                        </button>
+                      ) : (
+                        <div className="flex flex-1 flex-wrap items-center gap-2">
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            min={0}
+                            step="any"
+                            value={r.overrideCents / 100}
+                            onChange={(e) => {
+                              const v = Number(e.target.value);
+                              patchRow(r.itemId, {
+                                overrideCents: Number.isFinite(v) && v >= 0
+                                  ? Math.round(v * 100)
+                                  : 0,
+                              });
+                            }}
+                            disabled={pending}
+                            aria-label={`Precio a cobrar de ${r.productName}`}
+                            className="border-input bg-background focus-visible:ring-ring h-8 w-24 rounded-lg border px-2 text-sm font-semibold tabular-nums outline-none focus-visible:ring-2"
+                          />
+                          <input
+                            type="text"
+                            value={r.overrideReason}
+                            onChange={(e) =>
+                              patchRow(r.itemId, { overrideReason: e.target.value })
+                            }
+                            disabled={pending}
+                            placeholder="Motivo (obligatorio)"
+                            aria-label={`Motivo del cambio de precio de ${r.productName}`}
+                            className={[
+                              "bg-background focus-visible:ring-ring h-8 min-w-0 flex-1 rounded-lg border px-2 text-xs outline-none focus-visible:ring-2",
+                              priceIncomplete(r)
+                                ? "border-rose-300"
+                                : "border-input",
+                            ].join(" ")}
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              patchRow(r.itemId, {
+                                overrideCents: null,
+                                overrideReason: "",
+                              })
+                            }
+                            disabled={pending}
+                            className="text-muted-foreground ring-border/70 hover:bg-muted/60 inline-flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] font-semibold ring-1 transition disabled:opacity-50"
+                          >
+                            <Undo2 className="size-3" strokeWidth={2.5} />
+                            Volver a la carta
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {pickerFor === r.itemId && (
                     <div className="ring-border/60 max-h-40 overflow-y-auto rounded-lg ring-1">
                       {loadingProducts && (
@@ -1347,6 +1472,15 @@ function EditarComandaModal({
                             patchRow(r.itemId, {
                               productId: p.id,
                               productName: p.name,
+                              // El server limpia el override al cambiar de
+                              // producto (el motivo y el precio de lista eran
+                              // del viejo, FR-013). Si acá no lo espejáramos,
+                              // el modal seguiría mostrando el precio anterior
+                              // y afirmaría que va a cobrar algo distinto de
+                              // lo que realmente se guarda.
+                              catalogPriceCents: p.price_cents,
+                              overrideCents: null,
+                              overrideReason: "",
                             });
                             setPickerFor(null);
                           }}
@@ -1395,7 +1529,7 @@ function EditarComandaModal({
           <button
             type="button"
             onClick={submit}
-            disabled={pending || !dirty}
+            disabled={pending || !dirty || blocked}
             className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-sky-600 px-4 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:opacity-50"
           >
             <Printer className="size-4" strokeWidth={2.5} />

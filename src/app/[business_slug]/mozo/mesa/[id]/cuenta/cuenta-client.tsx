@@ -312,6 +312,19 @@ export function CuentaClient({
                           Cancelado
                         </p>
                       )}
+                      {!cancelled && it.price_original_cents != null && (
+                        <p className="mt-0.5 text-xs font-medium text-amber-700">
+                          <span className="line-through opacity-60 tabular-nums">
+                            {formatCurrency(it.price_original_cents)}
+                          </span>{" "}
+                          <span className="tabular-nums">
+                            {formatCurrency(it.unit_price_cents)}
+                          </span>
+                          {it.price_override_reason
+                            ? ` · ${it.price_override_reason}`
+                            : ""}
+                        </p>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-1">

@@ -12,6 +12,7 @@ import { RangeSelector } from "@/components/admin/reports/range-selector";
 import { ReservationFunnelSection } from "@/components/admin/reports/reservation-funnel";
 import { RevenueChart } from "@/components/admin/reports/revenue-chart";
 import { StationTimingsSection } from "@/components/admin/reports/station-timings";
+import { PriceOverridesSection } from "@/components/admin/reports/price-overrides";
 import { SupplierOutflowSection } from "@/components/admin/reports/supplier-outflow";
 import { SummaryCards } from "@/components/admin/reports/summary-cards";
 import { TopProducts } from "@/components/admin/reports/top-products";
@@ -32,6 +33,7 @@ import {
 import { getMozoPerformance } from "@/lib/admin/staff-query";
 import { ensureAdminAccess } from "@/lib/admin/context";
 import { canSee } from "@/lib/permissions/sections";
+import { getPriceOverrides } from "@/lib/admin/price-overrides-query";
 import { getSupplierProductOutflow } from "@/lib/proveedores/queries";
 import { getBusiness } from "@/lib/tenant";
 
@@ -74,8 +76,16 @@ export default async function ReportesPage({
   const data = await getReportData(business.id, business.timezone, rangeInput);
   const { startIso, endIso } = data.summary;
 
-  const [menuEng, mozos, cash, fiscal, marketing, stations, supplierOutflow] =
-    await Promise.all([
+  const [
+    menuEng,
+    mozos,
+    cash,
+    fiscal,
+    marketing,
+    stations,
+    supplierOutflow,
+    priceOverrides,
+  ] = await Promise.all([
       getMenuEngineering(business.id, startIso, endIso),
       getMozoPerformance(business.id, startIso, endIso),
       getCashControl(business.id, startIso, endIso),
@@ -83,6 +93,7 @@ export default async function ReportesPage({
       getMarketingSummary(business.id, startIso, endIso),
       getStationTimings(business.id, startIso, endIso),
       getSupplierProductOutflow(business.id, startIso, endIso),
+      getPriceOverrides(business.id, startIso, endIso),
     ]);
 
   const isEmpty =
@@ -132,6 +143,10 @@ export default async function ReportesPage({
 
           <StationTimingsSection data={stations} />
 
+          <PriceOverridesSection
+            data={priceOverrides}
+            timezone={business.timezone}
+          />
           <SupplierOutflowSection data={supplierOutflow} />
 
           <div className="grid gap-5 lg:grid-cols-2">

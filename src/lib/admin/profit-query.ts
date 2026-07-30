@@ -1,6 +1,8 @@
 import "server-only";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+
+import { effectiveMargin } from "./effective-margin";
 import { getCosteoOverview } from "@/lib/ingredients/queries";
 
 // ── Rentabilidad agregada ─────────────────────────────────────────
@@ -155,17 +157,29 @@ export async function getMenuEngineering(
   }
 
   // Solo productos con receta cargada (tienen margen real) y con ventas.
+  //
+  // El margen se calcula sobre lo EFECTIVAMENTE cobrado, no sobre
+  // `products.price_cents` (spec 069): desde que el encargado puede pisar el
+  // precio de una línea, el margen de catálogo y la facturación real pueden
+  // divergir, y mezclarlos en la misma tarjeta manda un plato regalado al
+  // cuadrante "estrella". `priceCents` sigue siendo el de la carta — es el
+  // dato de referencia, no la base del margen.
   const base = costeo
     .filter((p) => p.hasRecipe && soldByProduct.has(p.productId))
     .map((p) => {
       const sold = soldByProduct.get(p.productId)!;
+      const margin = effectiveMargin({
+        revenueCents: sold.revenueCents,
+        unitsSold: sold.units,
+        foodCostCents: p.foodCostCents,
+      });
       return {
         productId: p.productId,
         productName: p.productName,
         categoryName: p.categoryName,
         unitsSold: sold.units,
-        marginPercent: p.marginPercent,
-        marginCents: p.marginCents,
+        marginPercent: margin.marginPercent,
+        marginCents: margin.marginCents,
         priceCents: p.priceCents,
         revenueCents: sold.revenueCents,
       };

@@ -145,7 +145,9 @@ beforeEach(() => {
       is_combo_component: false,
       parent_order_item_id: null,
       daily_menu_id: null,
-      orders: { business_id: "biz1" },
+      // Spec 069 — precio por ítem. Por defecto sin pisar.
+      price_original_cents: null,
+      orders: { business_id: "biz1", lifecycle_status: "open" },
     },
     orders: { tip_cents: 0, discount_cents: 0, delivery_fee_cents: 0 },
     products: {
@@ -300,6 +302,209 @@ describe("editarItemComanda (spec 049)", () => {
       business_id: "OTRO",
     };
     const res = await editarItemComanda("house", "i1", { quantity: 3 });
+    expect(res.ok).toBe(false);
+    expect(captured.updates).toHaveLength(0);
+  });
+});
+
+describe("editarItemComanda · precio por ítem (spec 069)", () => {
+  it("pisa el precio con motivo → cobra el nuevo y guarda el de lista", async () => {
+    const res = await editarItemComanda("house", "i1", {
+      priceOverrideCents: 300,
+      priceOverrideReason: "  cortesía por demora  ",
+    });
+    expect(res.ok).toBe(true);
+    const upd = captured.updates.find((u) => u.table === "order_items");
+    expect(upd?.vals).toMatchObject({
+      unit_price_cents: 300,
+      // El de lista al momento del primer override.
+      price_original_cents: 500,
+      price_override_reason: "cortesía por demora",
+      price_override_by: "u1",
+      // subtotal = 300 * quantity(2)
+      subtotal_cents: 600,
+    });
+    expect(upd?.vals.price_override_at).toBeTypeOf("string");
+  });
+
+  it("acepta $0 y acepta por encima del de lista — no hay tope", async () => {
+    const cero = await editarItemComanda("house", "i1", {
+      priceOverrideCents: 0,
+      priceOverrideReason: "cortesía",
+    });
+    expect(cero.ok).toBe(true);
+    expect(
+      captured.updates.find((u) => u.table === "order_items")?.vals,
+    ).toMatchObject({ unit_price_cents: 0, subtotal_cents: 0 });
+
+    captured.updates = [];
+    const caro = await editarItemComanda("house", "i1", {
+      priceOverrideCents: 9_999,
+      priceOverrideReason: "pescado del día",
+    });
+    expect(caro.ok).toBe(true);
+    expect(
+      captured.updates.find((u) => u.table === "order_items")?.vals,
+    ).toMatchObject({ unit_price_cents: 9_999 });
+  });
+
+  it("un SEGUNDO override no pisa el precio de lista original", async () => {
+    // La línea ya venía pisada: se cobra 300, la lista era 500.
+    const items = state.order_items as Record<string, unknown>;
+    items.unit_price_cents = 300;
+    items.price_original_cents = 500;
+
+    const res = await editarItemComanda("house", "i1", {
+      priceOverrideCents: 100,
+      priceOverrideReason: "segundo ajuste",
+    });
+    expect(res.ok).toBe(true);
+    const upd = captured.updates.find((u) => u.table === "order_items");
+    // El delta del reporte se mide contra la LISTA (500), no contra el ajuste
+    // anterior (300) — si no, el segundo cambio esconde al primero.
+    expect(upd?.vals).toMatchObject({
+      unit_price_cents: 100,
+      price_original_cents: 500,
+      price_override_reason: "segundo ajuste",
+    });
+  });
+
+  it("sin motivo → rechazado y no persiste nada", async () => {
+    for (const reason of [undefined, "", "   "]) {
+      captured.updates = [];
+      const res = await editarItemComanda("house", "i1", {
+        priceOverrideCents: 300,
+        priceOverrideReason: reason,
+      });
+      expect(res.ok).toBe(false);
+      expect(res.ok === false && res.error).toMatch(/motivo/i);
+      expect(captured.updates).toHaveLength(0);
+    }
+  });
+
+  it("precio negativo o no entero → rechazado", async () => {
+    for (const cents of [-1, 10.5]) {
+      captured.updates = [];
+      const res = await editarItemComanda("house", "i1", {
+        priceOverrideCents: cents,
+        priceOverrideReason: "x",
+      });
+      expect(res.ok).toBe(false);
+      expect(captured.updates).toHaveLength(0);
+    }
+  });
+
+  it("mozo → rechazado aunque mande motivo", async () => {
+    currentRole = "mozo";
+    const res = await editarItemComanda("house", "i1", {
+      priceOverrideCents: 0,
+      priceOverrideReason: "cortesía",
+    });
+    expect(res.ok).toBe(false);
+    expect(captured.updates).toHaveLength(0);
+  });
+
+  it("null explícito → vuelve al precio de catálogo y limpia las 4 columnas", async () => {
+    const items = state.order_items as Record<string, unknown>;
+    items.unit_price_cents = 300;
+    items.price_original_cents = 500;
+    // El producto vivo de la línea (p1) vale 500 en el catálogo de hoy.
+    (state.products as Record<string, unknown>) = {
+      id: "p1",
+      name: "Milanesa",
+      price_cents: 500,
+      business_id: "biz1",
+      is_active: true,
+      is_available: true,
+    };
+
+    const res = await editarItemComanda("house", "i1", {
+      priceOverrideCents: null,
+    });
+    expect(res.ok).toBe(true);
+    const upd = captured.updates.find((u) => u.table === "order_items");
+    expect(upd?.vals).toMatchObject({
+      unit_price_cents: 500,
+      price_original_cents: null,
+      price_override_at: null,
+      price_override_by: null,
+      price_override_reason: null,
+      subtotal_cents: 1000,
+    });
+  });
+
+  it("revertir NO exige motivo — es deshacer, no cambiar", async () => {
+    const items = state.order_items as Record<string, unknown>;
+    items.unit_price_cents = 300;
+    items.price_original_cents = 500;
+    const res = await editarItemComanda("house", "i1", {
+      priceOverrideCents: null,
+    });
+    expect(res.ok).toBe(true);
+  });
+
+  it("cambiar el producto LIMPIA el override (si no viene uno nuevo)", async () => {
+    // Regresión: sin esto, la línea queda con el motivo y el price_original
+    // del producto VIEJO, y el reporte lista una fila fantasma.
+    const items = state.order_items as Record<string, unknown>;
+    items.unit_price_cents = 300;
+    items.price_original_cents = 500;
+    items.price_override_reason = "pescado del día";
+
+    const res = await editarItemComanda("house", "i1", { productId: "p2" });
+    expect(res.ok).toBe(true);
+    const upd = captured.updates.find((u) => u.table === "order_items");
+    expect(upd?.vals).toMatchObject({
+      product_id: "p2",
+      product_name: "Napolitana",
+      unit_price_cents: 800,
+      price_original_cents: null,
+      price_override_at: null,
+      price_override_by: null,
+      price_override_reason: null,
+    });
+  });
+
+  it("cambiar producto CON override explícito → se pisa contra la lista del nuevo", async () => {
+    const res = await editarItemComanda("house", "i1", {
+      productId: "p2",
+      priceOverrideCents: 400,
+      priceOverrideReason: "media porción",
+    });
+    expect(res.ok).toBe(true);
+    const upd = captured.updates.find((u) => u.table === "order_items");
+    expect(upd?.vals).toMatchObject({
+      product_id: "p2",
+      unit_price_cents: 400,
+      // La lista del producto NUEVO (800), no la del viejo (500).
+      price_original_cents: 800,
+      price_override_reason: "media porción",
+    });
+  });
+
+  it("cambiar sólo la cantidad CONSERVA el precio pisado", async () => {
+    const items = state.order_items as Record<string, unknown>;
+    items.unit_price_cents = 300;
+    items.price_original_cents = 500;
+
+    const res = await editarItemComanda("house", "i1", { quantity: 3 });
+    expect(res.ok).toBe(true);
+    const upd = captured.updates.find((u) => u.table === "order_items");
+    // 300 * 3, no 500 * 3.
+    expect(upd?.vals).toMatchObject({ unit_price_cents: 300, subtotal_cents: 900 });
+    // Y no toca las columnas de auditoría.
+    expect(upd?.vals).not.toHaveProperty("price_override_reason");
+  });
+
+  it("orden ya cerrada → rechazado (la plata cobrada no se reescribe)", async () => {
+    (state.order_items as Record<string, unknown>).orders = {
+      business_id: "biz1",
+      lifecycle_status: "closed",
+    };
+    const res = await editarItemComanda("house", "i1", {
+      priceOverrideCents: 0,
+      priceOverrideReason: "cortesía",
+    });
     expect(res.ok).toBe(false);
     expect(captured.updates).toHaveLength(0);
   });
