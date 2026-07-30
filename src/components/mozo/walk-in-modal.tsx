@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowLeft, Minus, Plus, X } from "lucide-react";
@@ -42,7 +42,8 @@ type Props = {
  *
  * Teclado: `+`/`−`/dígitos mueven Personas (salvo escribiendo en un campo de
  * texto) y el foco arranca en «Abrir mesa», así el caso común —mesa para 2—
- * es Enter y listo.
+ * es Enter y listo. El buscador de cliente NO se lleva el foco acá: si lo
+ * hiciera, el cursor quedaría en un `INPUT` y los atajos numéricos morirían.
  */
 function WalkInForm({
   tableId,
@@ -66,10 +67,23 @@ function WalkInForm({
 
   const partySize = watch("partySize");
 
-  // Spec 068 FR-002: el foco arranca en el **cliente** (lo pasa `CustomerFields`
-  // con `autoFocus`), no en «Abrir mesa» como en la spec 066. Enter sigue
-  // abriendo la mesa —Enter en un input de un form dispara el submit—, pero los
-  // atajos 1-9/+/− no aplican mientras se escribe el nombre: ahí un 4 es un 4.
+  // El foco arranca en «Abrir mesa», NO en el buscador de cliente.
+  //
+  // La spec 068 (FR-002) lo había movido al cliente, y con eso rompió el
+  // keyboard-first de la 066 sin que se notara: `handleKeyDown` sale por el
+  // early return de `INPUT`, así que con el cursor en el buscador las teclas
+  // 1-9/+/− dejaban de mover Personas — el atajo seguía existiendo en el
+  // código pero era inalcanzable. Revertido por pedido de Juan (2026-07-30):
+  // abrir una mesa es sobre todo decir cuánta gente se sienta, y el caso común
+  // —mesa para 2— vuelve a ser **Enter y listo**. El nombre del cliente es
+  // opcional y se tipea después, con un Tab.
+  //
+  // En los otros dos flujos del bloque unificado (nueva reserva, cargar
+  // pedido) el foco en el cliente SÍ se conserva: ahí no hay atajos numéricos
+  // que pisar y el cliente es el primer dato real del formulario.
+  useEffect(() => {
+    submitRef.current?.focus();
+  }, []);
 
   const onSubmit = async (values: FormInput) => {
     setSubmitting(true);
@@ -186,7 +200,6 @@ function WalkInForm({
           phone={watch("phone") ?? ""}
           onNameChange={(v) => setValue("name", v)}
           onPhoneChange={(v) => setValue("phone", v)}
-          autoFocus
         />
 
         <div>

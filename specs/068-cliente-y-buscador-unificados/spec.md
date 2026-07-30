@@ -36,11 +36,15 @@ Lo usan **walk-in**, **nueva reserva** y **cargar pedido**. La regla vive en un 
 
 El componente es **controlado** (`name`, `phone` los tiene el caller, que ya los maneja con react-hook-form o `useState` según el caso) y avisa por callbacks: `onNameChange`, `onPhoneChange`, `onPick`, `onClear`. El estado de "hay un cliente elegido" vive **adentro**: es del componente, no del formulario.
 
-### FR-002 — Al abrir mesa y al abrir nueva reserva, el foco arranca en el cliente
+### FR-002 — ~~Al abrir mesa y~~ al abrir nueva reserva, el foco arranca en el cliente
 
-Las dos pantallas enfocan el campo Cliente al montarse, para poder tipear el nombre sin tocar nada.
+> 🔴 **REVERTIDO PARA «ABRIR MESA» el 2026-07-30**, por pedido de Juan al probarlo: *"en la parte de abrir una mesa que no entre con el focus en el buscador, en el resto sí pero ahí no"*. Sigue vigente para **nueva reserva** y para **cargar pedido**.
+>
+> Por qué falló en la práctica: abrir una mesa es sobre todo decir **cuánta gente se sienta** — el nombre del cliente es opcional y muchas veces no se carga. Con el foco en el buscador, el caso común (mesa para 2 = Enter) seguía andando, pero los atajos `1`-`9`/`+`/`−` de la [spec 066](../066-teclado-operacion/) quedaban **inalcanzables**: `handleKeyDown` sale por el early return de `INPUT`, así que el atajo existía en el código y no se podía usar. Un keyboard-first que hay que desactivar con el mouse antes de usar el teclado no es keyboard-first.
+>
+> Estado actual: en «abrir mesa» el foco vuelve a «Abrir mesa» (066 FR-005), blindado con tests de componente en [`walk-in-modal.test.tsx`](../../src/components/mozo/walk-in-modal.test.tsx).
 
-> ⚠️ **Esto revierte parte de la [spec 066](../066-teclado-operacion/) FR-005**, que enfocaba «Abrir mesa» para que el caso "mesa para 2" fuera un Enter. Se conserva lo esencial: **Enter sigue abriendo la mesa** (Enter en un input de un `<form>` dispara el submit). Lo que se pierde son los atajos `1`-`9` / `+` / `−` **mientras el foco está en el cliente**: ahí un `4` es un cuatro. Siguen funcionando con el foco fuera del texto, y el quick-pick de 1-6 y el stepper siguen a un toque. Decisión de Juan, explícita.
+En «Nueva reserva» y «Cargar pedido», el campo Cliente se enfoca al montarse, para poder tipear el nombre sin tocar nada. Ahí no hay atajos numéricos que pisar y el cliente es el primer dato real del formulario.
 
 ### FR-003 — Enter crea la reserva
 
