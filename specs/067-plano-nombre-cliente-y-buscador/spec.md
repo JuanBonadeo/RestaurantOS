@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-30
 
-**Status**: 🚧 En implementación. Issue [#104](https://github.com/gachetponzellini/RestaurantOS-app/issues/104). Milestone: Post-demo · Growth & hardening.
+**Status**: ✅ Implementado (2026-07-30) — `pnpm typecheck`, `pnpm lint` y `pnpm build` verdes; `pnpm test` 894 pass / 140 skip (los 16 `*.integration.test.ts` fallan por falta del stack Supabase local, preexistente). Migración `0029` aplicada al cloud y verificada por SQL. **Pendiente:** verify en vivo con rol real. Issue [#104](https://github.com/gachetponzellini/RestaurantOS-app/issues/104). Milestone: Post-demo · Growth & hardening.
 
 **Input**: Pedido de Juan 2026-07-30 — *"hay que agregar la posiblidad a la hora de modificar un plano de que muestre el nombre del cliente sentado, y que no muestre lo otro… y ademas habria que hacer que cuando sienta a alguien aparezca el buscador de clent, y que bsuque solo clientes pq se quejaron, que aparecian productos ahi"*.
 
@@ -49,8 +49,23 @@ Un nombre largo no puede desbordar el dibujo ni encogerse hasta ser ilegible. Se
 El walk-in reemplaza el campo libre «Nombre» por un **buscador de clientes**: desde 2 caracteres consulta `buscarClientes` (debounce 300ms) y ofrece los resultados con nombre + teléfono. Elegir uno completa nombre y teléfono de una.
 
 - **No es obligatorio elegir.** Lo tipeado vale como nombre del walk-in: un cliente nuevo no puede quedar bloqueado detrás de un buscador. Es la razón por la que esto es un buscador con texto libre y no un `<select>`.
+- **Con un cliente elegido, el teléfono NO se edita** (FR-007).
 - **Busca sólo clientes.** El componente es de clientes y sólo llama a `buscarClientes` — que consulta `customers` scopeada por `business_id` con gate de staff. Ningún camino de esta pantalla puede devolver un producto.
 - **Teclado** (coherente con [spec 066](../066-teclado-operacion/)): ↓/↑ recorren los resultados, Enter elige el marcado, Escape cierra la lista sin cerrar el panel. Los atajos de cantidad de personas (`+`/`−`/dígitos) siguen sin aplicar mientras se escribe en un campo de texto.
+
+### FR-007 — Elegido un cliente, su teléfono queda bloqueado
+
+Feedback de Juan sobre la primera versión: *"el telofono, si elige un cliente no lo deberia de dejar de modificarlo, no tendria sentido"*. Correcto, y no es cosmético: el teléfono es **la clave con la que se identifica al cliente** (`sentarWalkIn` hace `upsert` por `(business_id, phone)`). Editarlo con un cliente elegido no le cambia el teléfono a ese cliente: apunta a **otro**, y crea uno nuevo sin que nadie se entere.
+
+Con un cliente del CRM elegido, entonces:
+
+- el campo Teléfono queda **de sólo lectura**, con el rótulo «Teléfono · del cliente elegido»;
+- un botón **«Quitar»** suelta la identidad: limpia el teléfono y deja el nombre como texto libre. Es la salida cuando el contacto es otro;
+- escribir a mano en el campo Cliente también suelta la identidad (dejaste de ser ese cliente).
+
+Actualizarle el teléfono a un cliente existente es una operación de **CRM** y vive en su ficha, no en el camino caliente de sentar gente.
+
+**La misma regla se aplica a las otras dos superficies que eligen cliente**, que tenían el mismo agujero: «Cargar pedido» ([`cargar-pedido-sheet.tsx`](../../src/components/admin/cargar-pedido-sheet.tsx)) y «Nueva reserva» ([`new-reservation-modal.tsx`](../../src/components/admin/local/new-reservation-modal.tsx)). Arreglar sólo el walk-in habría dejado dos lugares con exactamente el problema que Juan señaló.
 
 ### FR-006 — Nada más cambia
 
@@ -62,7 +77,7 @@ No se toca `sentarWalkIn` ni su contrato: elegir un cliente existente sólo **pr
 
 **D2 — "Solo el nombre" con fallback obligatorio.** Es lo que pidió Juan, pero una mesa sin etiqueta ninguna sería un bug de usabilidad, no una decisión de diseño: por eso FR-002 fija el fallback a número + tiempo cuando no hay nombre. La opción cambia *qué* se muestra, nunca deja de mostrar algo.
 
-**D3 — El fix de "aparecían productos" es de foco, no de query.** Se verificó: `buscarClientes` sólo lee `customers`. Poner el buscador de clientes en el momento de sentar ataca la causa (el encargado tipeando un nombre en la caja de productos porque era la que tenía el cursor). Reordenar el foco dentro del sheet de cargar pedido es otra discusión — y ese archivo está en obra por la spec 066.
+**D3 — El fix de "aparecían productos" es de foco, no de query.** Se verificó: `buscarClientes` sólo lee `customers`. Poner el buscador de clientes en el momento de sentar ataca la causa (el encargado tipeando un nombre en la caja de productos porque era la que tenía el cursor). Reordenar el foco dentro del sheet de cargar pedido (que hoy arranca en el buscador de productos) es otra discusión y **queda pendiente**.
 
 **D4 — Elegir un cliente no crea un vínculo nuevo.** Prellenar nombre + teléfono aprovecha el upsert que `sentarWalkIn` ya hace. Un `orders.customer_id` explícito sería más rico (historial por mesa) pero es cambio de datos y de contrato para un beneficio que nadie pidió todavía.
 
@@ -77,8 +92,9 @@ No se toca `sentarWalkIn` ni su contrato: elegir un cliente existente sólo **pr
 - `src/components/mozo/floor-plan-viewer.tsx` — render del nombre (FR-002/004).
 - `src/components/admin/local/salon-desktop.tsx` — pasa `customerName` en los extras y reusa el helper.
 - `src/components/mozo/customer-search-field.tsx` **(nuevo)** — el buscador de clientes.
-- `src/components/mozo/walk-in-modal.tsx` — lo usa en lugar del input libre.
+- `src/components/mozo/walk-in-modal.tsx` — lo usa en lugar del input libre; teléfono bloqueado con cliente elegido.
+- `src/components/admin/cargar-pedido-sheet.tsx` y `src/components/admin/local/new-reservation-modal.tsx` — misma regla de teléfono bloqueado (FR-007).
 
-**No toca:** `sentarWalkIn`, `buscarClientes`, el sheet de cargar pedido (en obra por la spec 066), colores de estado, demora, reservas.
+**No toca:** `sentarWalkIn`, `buscarClientes`, el orden del foco dentro del sheet de cargar pedido (la causa real de "aparecían productos" — queda pendiente), colores de estado, demora, motor de reservas.
 
 > ⚠️ **Solapamiento con [spec 066](../066-teclado-operacion/) ([#103](https://github.com/gachetponzellini/RestaurantOS-app/issues/103)).** `walk-in-modal.tsx` y `salon-desktop.tsx` están siendo editados en paralelo por esa spec. Juan decidió avanzar igual sobre el mismo working tree. Las ediciones de esta spec son aditivas y en regiones distintas.

@@ -207,6 +207,17 @@ export function CargarPedidoSheet({
     );
   }
 
+  /**
+   * Soltar el cliente del CRM (spec 067): se limpia el teléfono —su identidad—
+   * y las direcciones guardadas, que ya no le corresponden a nadie. El nombre
+   * queda como texto libre.
+   */
+  function quitarCliente() {
+    setClientePicked(null);
+    setCustomerPhone("");
+    setClienteDirecciones([]);
+  }
+
   function pickCliente(c: ClienteMatch) {
     setCustomerName(c.name ?? "");
     setCustomerPhone(c.phone);
@@ -606,19 +617,40 @@ export function CargarPedidoSheet({
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-zinc-600">
-                    Teléfono{" "}
-                    {deliveryType === "delivery" ? "(requerido)" : "(opcional)"}
-                  </label>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <label className="text-xs font-semibold text-zinc-600">
+                      Teléfono{" "}
+                      {clientePicked
+                        ? "· del cliente elegido"
+                        : deliveryType === "delivery"
+                          ? "(requerido)"
+                          : "(opcional)"}
+                    </label>
+                    {clientePicked && (
+                      <button
+                        type="button"
+                        onClick={quitarCliente}
+                        className="text-xs font-semibold text-zinc-400 underline underline-offset-2 transition hover:text-zinc-700"
+                      >
+                        Quitar
+                      </button>
+                    )}
+                  </div>
+                  {/* Spec 067: con un cliente del CRM elegido el teléfono no se
+                      edita — es la clave con la que se lo identifica, no un dato
+                      más. «Quitar» suelta la identidad y vuelve a mano. */}
                   <input
                     type="tel"
                     value={customerPhone}
-                    onChange={(e) => {
-                      setCustomerPhone(e.target.value);
-                      setClientePicked(null);
-                    }}
+                    readOnly={!!clientePicked}
+                    aria-readonly={!!clientePicked}
+                    onChange={(e) => setCustomerPhone(e.target.value)}
                     placeholder="11 5555 1234"
-                    className="mt-1 block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+                    className={`mt-1 block h-10 w-full rounded-xl border px-3 text-sm focus:outline-none ${
+                      clientePicked
+                        ? "cursor-not-allowed border-zinc-200 bg-zinc-100 text-zinc-600"
+                        : "border-zinc-200 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                    }`}
                   />
                 </div>
                 {deliveryType === "delivery" && (

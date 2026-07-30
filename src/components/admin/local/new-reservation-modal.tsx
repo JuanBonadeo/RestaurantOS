@@ -93,6 +93,9 @@ export function ReservaForm({
   // Buscar cliente existente (reusa buscarClientes de spec 054).
   const [clientQuery, setClientQuery] = useState("");
   const [clientResults, setClientResults] = useState<ClienteMatch[]>([]);
+  // Cliente del CRM elegido (spec 067): mientras haya uno, el teléfono queda
+  // bloqueado — es su identidad, no un dato más de esta reserva.
+  const [clientePicked, setClientePicked] = useState<ClienteMatch | null>(null);
 
   // Modo + servicios (spec 059). mode=null → cargando.
   const [mode, setMode] = useState<ReservationMode | null>(null);
@@ -145,8 +148,16 @@ export function ReservaForm({
   function pickCliente(c: ClienteMatch) {
     setName(c.name ?? "");
     setPhone(c.phone);
+    setClientePicked(c);
     setClientQuery("");
     setClientResults([]);
+  }
+
+  /** Soltar el cliente elegido: se limpia el teléfono (su identidad) y el
+   *  nombre queda como texto libre. */
+  function quitarCliente() {
+    setClientePicked(null);
+    setPhone("");
   }
 
   // Servicios aplicables a la fecha elegida (día exacto o "todos los días").
@@ -422,18 +433,44 @@ export function ReservaForm({
           <label className={LABEL_CLS}>Nombre *</label>
           <input
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => {
+              setName(e.target.value);
+              // Escribir a mano es dejar de ser ese cliente del CRM.
+              if (clientePicked) setClientePicked(null);
+            }}
             className={INPUT_CLS}
             placeholder="Ej: Pedro García"
           />
         </div>
 
         <div>
-          <label className={LABEL_CLS}>Teléfono (opcional)</label>
+          <div className="flex items-baseline justify-between gap-2">
+            <label className={LABEL_CLS}>
+              {clientePicked
+                ? "Teléfono · del cliente elegido"
+                : "Teléfono (opcional)"}
+            </label>
+            {clientePicked && (
+              <button
+                type="button"
+                onClick={quitarCliente}
+                className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 underline underline-offset-2 transition hover:text-zinc-700"
+              >
+                Quitar
+              </button>
+            )}
+          </div>
+          {/* Spec 067: con un cliente del CRM elegido el teléfono no se edita. */}
           <input
             value={phone}
+            readOnly={!!clientePicked}
+            aria-readonly={!!clientePicked}
             onChange={(e) => setPhone(e.target.value)}
-            className={INPUT_CLS}
+            className={
+              clientePicked
+                ? `${INPUT_CLS} cursor-not-allowed bg-zinc-100 text-zinc-600`
+                : INPUT_CLS
+            }
             placeholder="+54 9 …"
             inputMode="tel"
           />

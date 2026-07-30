@@ -13,6 +13,7 @@ import {
   partySizeFromKey,
 } from "@/lib/mozo/party-size-keys";
 import { CustomerSearchField } from "@/components/mozo/customer-search-field";
+import type { ClienteMatch } from "@/lib/admin/customers-actions";
 import { sentarWalkIn } from "@/lib/mozo/walk-in";
 import { useEscapeToClose } from "@/lib/ui/use-escape-to-close";
 
@@ -52,6 +53,9 @@ function WalkInForm({
   variant,
 }: Omit<Props, "onClose"> & { variant: "modal" | "panel" }) {
   const [submitting, setSubmitting] = useState(false);
+  // Cliente del CRM elegido en el buscador (spec 067). Mientras haya uno, el
+  // teléfono queda bloqueado: es la clave del upsert, no un dato más.
+  const [picked, setPicked] = useState<ClienteMatch | null>(null);
   const submitRef = useRef<HTMLButtonElement>(null);
   const {
     register,
@@ -65,6 +69,16 @@ function WalkInForm({
   });
 
   const partySize = watch("partySize");
+
+  /**
+   * Soltar el cliente del CRM: se limpia el teléfono (es su identidad, la clave
+   * del upsert) y el nombre queda como texto libre. Actualizarle el teléfono a
+   * un cliente es una operación de CRM y vive en su ficha, no acá.
+   */
+  const quitarCliente = () => {
+    setPicked(null);
+    setValue("phone", "");
+  };
 
   // Foco inicial en la acción primaria: Enter abre la mesa sin tocar nada más.
   // FR-005. `preventScroll` para que el panel del salón no salte.
@@ -196,22 +210,48 @@ function WalkInForm({
               id="walkin-cliente"
               slug={businessSlug}
               value={watch("name") ?? ""}
-              onChange={(v) => setValue("name", v)}
+              onChange={(v) => {
+                setValue("name", v);
+                // Escribir a mano es dejar de ser ese cliente del CRM.
+                if (picked) setPicked(null);
+              }}
               onPick={(c) => {
                 setValue("name", c.name?.trim() || "");
                 setValue("phone", c.phone ?? "");
+                setPicked(c);
               }}
             />
           </div>
         </div>
 
         <div>
-          <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
-            Teléfono (opcional · entra al CRM)
-          </label>
+          <div className="flex items-baseline justify-between gap-2">
+            <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
+              {picked ? "Teléfono · del cliente elegido" : "Teléfono (opcional · entra al CRM)"}
+            </label>
+            {picked && (
+              <button
+                type="button"
+                onClick={quitarCliente}
+                className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 underline underline-offset-2 transition hover:text-zinc-700"
+              >
+                Quitar
+              </button>
+            )}
+          </div>
+          {/* Spec 067: con un cliente del CRM elegido el teléfono NO se edita.
+              El teléfono es la clave con la que `sentarWalkIn` hace el upsert:
+              cambiarlo acá no editaría a ese cliente, apuntaría a otro. Si el
+              contacto es otro, «Quitar» suelta la identidad y vuelve a mano. */}
           <input
             {...register("phone")}
-            className="mt-1 h-12 w-full rounded-xl border border-zinc-200 bg-white px-3 text-base"
+            readOnly={!!picked}
+            aria-readonly={!!picked}
+            className={`mt-1 h-12 w-full rounded-xl border px-3 text-base ${
+              picked
+                ? "cursor-not-allowed border-zinc-200 bg-zinc-100 text-zinc-600"
+                : "border-zinc-200 bg-white"
+            }`}
             placeholder="+54 9 …"
             inputMode="tel"
           />

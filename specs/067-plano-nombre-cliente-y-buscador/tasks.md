@@ -11,6 +11,7 @@
 - [x] **T009** `walk-in-modal.tsx`: el campo «Nombre» pasa a ser «Cliente» con el buscador; elegir un cliente prellena nombre + teléfono.
 - [x] **T010** `pnpm typecheck` + `pnpm lint` + `pnpm build` verdes; `pnpm test` 894 pass / 140 skip (los 16 `*.integration.test.ts` fallan por falta del stack Supabase local — preexistente).
 - [x] **T011** Wiki: [`features/mesas-qr.md`](../../../wiki/features/mesas-qr.md) / [`features/admin.md`](../../../wiki/features/admin.md) y [`features/mozo.md`](../../../wiki/features/mozo.md).
+- [x] **T013** Fast-follow (feedback de Juan): con un cliente del CRM elegido, el **teléfono queda de sólo lectura** + botón «Quitar» que suelta la identidad. Aplicado también a `cargar-pedido-sheet.tsx` y `new-reservation-modal.tsx`, que tenían el mismo agujero.
 - [ ] **T012** Verify en vivo con rol real: activar la opción en un salón de golf-jcr, sentar a alguien y chequear que el plano muestre el nombre; y que el buscador del walk-in traiga clientes (nunca productos).
 
 ## Notas
