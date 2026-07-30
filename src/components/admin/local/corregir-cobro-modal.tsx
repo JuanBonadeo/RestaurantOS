@@ -150,18 +150,18 @@ export function CorregirCobroModal({
 
   return (
     <Dialog open={open} onOpenChange={(o) => (pending ? null : onOpenChange(o))}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-h-[90vh] overflow-y-auto text-base sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>
+          <DialogTitle className="text-lg">
             {esCobro ? "Corregir cobro" : "Corregir movimiento"}
-            <span className="ml-2 text-sm font-normal text-zinc-500">
+            <span className="ml-2 text-base font-normal text-zinc-500">
               · {entry.descripcion}
             </span>
           </DialogTitle>
         </DialogHeader>
 
         {entry.advertencias.length > 0 && (
-          <div className="rounded-xl bg-amber-50 p-3 text-xs text-amber-900 ring-1 ring-amber-200">
+          <div className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
             {entry.advertencias.map((a) => (
               <p key={a} className="flex items-start gap-1.5">
                 <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
@@ -174,13 +174,21 @@ export function CorregirCobroModal({
         <div className="grid gap-4">
           {esCobro && (
             <div className="grid gap-1.5">
-              <Label>Método</Label>
+              <Label className="text-sm">Método</Label>
               <Select
                 value={method ?? undefined}
                 onValueChange={(v) => setMethod(v as PaymentMethod)}
               >
-                <SelectTrigger>
-                  <SelectValue placeholder="Elegí un método" />
+                <SelectTrigger className="h-11 w-full text-base">
+                  {/* `SelectValue` sin render function imprime el VALOR, que
+                      acá es un id: el trigger mostraba el uuid del mozo y de
+                      la caja. La etiqueta se resuelve a mano. */}
+                  <SelectValue placeholder="Elegí un método">
+                    {(value) =>
+                      METODOS.find((m) => m.value === value)?.label ??
+                      "Elegí un método"
+                    }
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {METODOS.map((m) => (
@@ -194,12 +202,12 @@ export function CorregirCobroModal({
           )}
 
           {!esCobro && (
-            <label className="flex items-center gap-2 rounded-xl bg-zinc-50 p-3 text-sm ring-1 ring-zinc-200">
+            <label className="flex items-center gap-3 rounded-xl bg-zinc-50 p-4 text-base ring-1 ring-zinc-200">
               <input
                 type="checkbox"
                 checked={anular}
                 onChange={(e) => setAnular(e.target.checked)}
-                className="size-4"
+                className="size-5"
               />
               <span>
                 Anular el movimiento — deja de contar para el arqueo, pero sigue
@@ -210,9 +218,9 @@ export function CorregirCobroModal({
 
           <div className="grid grid-cols-2 gap-3">
             <div className="grid gap-1.5">
-              <Label>Monto{facturada && esCobro ? " (facturado)" : ""}</Label>
+              <Label className="text-sm">Monto{facturada && esCobro ? " (facturado)" : ""}</Label>
               <div className="relative">
-                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base font-semibold text-zinc-400">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-lg font-semibold text-zinc-400">
                   $
                 </span>
                 <Input
@@ -221,15 +229,15 @@ export function CorregirCobroModal({
                   value={amount}
                   disabled={anular || (esCobro && facturada)}
                   onChange={(e) => setAmount(e.target.value)}
-                  className="pl-7 text-base tabular-nums"
+                  className="h-12 pl-8 text-lg font-semibold tabular-nums"
                 />
               </div>
             </div>
             {esCobro && (
               <div className="grid gap-1.5">
-                <Label>De propina</Label>
+                <Label className="text-sm">De propina</Label>
                 <div className="relative">
-                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base font-semibold text-zinc-400">
+                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-lg font-semibold text-zinc-400">
                     $
                   </span>
                   <Input
@@ -238,7 +246,7 @@ export function CorregirCobroModal({
                     value={tip}
                     disabled={facturada}
                     onChange={(e) => setTip(e.target.value)}
-                    className="pl-7 text-base tabular-nums"
+                    className="h-12 pl-8 text-lg font-semibold tabular-nums"
                   />
                 </div>
               </div>
@@ -246,7 +254,7 @@ export function CorregirCobroModal({
           </div>
 
           {esCobro && (
-            <p className="-mt-2 text-[11px] text-zinc-500">
+            <p className="-mt-2 text-sm text-zinc-500">
               La propina viaja dentro del monto: {formatCurrency(entry.amount_cents)}{" "}
               incluye {formatCurrency(entry.tip_cents)} de propina.
             </p>
@@ -255,14 +263,20 @@ export function CorregirCobroModal({
           {esCobro && (
             <>
               <div className="grid gap-1.5">
-                <Label>Mozo atribuido</Label>
+                <Label className="text-sm">Mozo atribuido</Label>
                 <Select
                   value={mozoId}
                   onValueChange={(v) => setMozoId(v ?? SIN_MOZO)}
                   disabled={mozoBloqueado}
                 >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Sin mozo" />
+                  <SelectTrigger className="h-11 w-full text-base">
+                    <SelectValue placeholder="Sin mozo">
+                      {(value) =>
+                        !value || value === SIN_MOZO
+                          ? "Sin mozo"
+                          : (mozos.find((m) => m.id === value)?.name ?? "Sin mozo")
+                      }
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={SIN_MOZO}>Sin mozo</SelectItem>
@@ -277,13 +291,17 @@ export function CorregirCobroModal({
 
               {cajas.length > 1 && (
                 <div className="grid gap-1.5">
-                  <Label>Caja</Label>
+                  <Label className="text-sm">Caja</Label>
                   <Select
                     value={cajaId}
                     onValueChange={(v) => setCajaId(v ?? cajaId)}
                   >
-                    <SelectTrigger>
-                      <SelectValue />
+                    <SelectTrigger className="h-11 w-full text-base">
+                      <SelectValue>
+                        {(value) =>
+                          cajas.find((c) => c.id === value)?.name ?? "Caja"
+                        }
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {cajas.map((c) => (
@@ -298,11 +316,12 @@ export function CorregirCobroModal({
 
               {(method === "transfer" || method === "other") && (
                 <div className="grid gap-1.5">
-                  <Label>
+                  <Label className="text-sm">
                     {method === "transfer" ? "Alias / referencia" : "Nota"}
                     <span className="ml-1 text-rose-600">*</span>
                   </Label>
                   <Input
+                    className="h-11 text-base"
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
                     placeholder={method === "transfer" ? "alias.mp" : "Detalle"}
@@ -313,26 +332,27 @@ export function CorregirCobroModal({
           )}
 
           <div className="grid gap-1.5">
-            <Label>
+            <Label className="text-sm">
               Motivo<span className="ml-1 text-rose-600">*</span>
             </Label>
             <Textarea
+              className="text-base"
               value={motivo}
               onChange={(e) => setMotivo(e.target.value)}
-              rows={2}
+              rows={3}
               placeholder="Ej: lo pagó con débito, no en efectivo"
             />
           </div>
 
           {esCobro && nuevoMonto !== entry.amount_cents && (
-            <p className="text-[11px] text-zinc-600">
+            <p className="text-sm text-zinc-600">
               El recargo o descuento por método registrado en el cobro{" "}
               <strong>no se recalcula</strong>: se corrige cuánto entró, no cómo
               se compuso el precio.
             </p>
           )}
           {!montoValido && (
-            <p className="text-[11px] text-rose-600">
+            <p className="text-sm font-medium text-rose-600">
               El monto tiene que ser mayor a cero y la propina no puede superarlo.
             </p>
           )}
@@ -341,12 +361,17 @@ export function CorregirCobroModal({
         <DialogFooter>
           <Button
             variant="ghost"
+            className="h-11 px-5 text-base"
             disabled={pending}
             onClick={() => onOpenChange(false)}
           >
             Cancelar
           </Button>
-          <Button disabled={!puedeConfirmar} onClick={confirmar}>
+          <Button
+            className="h-11 px-5 text-base"
+            disabled={!puedeConfirmar}
+            onClick={confirmar}
+          >
             {pending
               ? "Corrigiendo…"
               : cambios.length > 0

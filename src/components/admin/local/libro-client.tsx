@@ -159,32 +159,32 @@ export function LibroClient({
   }
 
   const selectClass =
-    "h-9 rounded-lg border border-zinc-200 bg-white px-2 text-sm text-zinc-800";
+    "h-10 rounded-lg border border-zinc-200 bg-white px-2.5 text-base text-zinc-800";
 
   return (
     <div className="space-y-4">
       {/* Filtros */}
       <div className="flex flex-wrap items-end gap-3 rounded-2xl bg-white p-4 ring-1 ring-zinc-200/70">
         <div className="grid gap-1">
-          <Label className="text-[11px] text-zinc-500">Desde</Label>
+          <Label className="text-xs text-zinc-500">Desde</Label>
           <Input
             type="date"
             value={filtros.desde}
-            className="h-9 w-[9.5rem]"
+            className="h-10 w-[10.5rem] text-base"
             onChange={(e) => aplicar({ desde: e.target.value })}
           />
         </div>
         <div className="grid gap-1">
-          <Label className="text-[11px] text-zinc-500">Hasta</Label>
+          <Label className="text-xs text-zinc-500">Hasta</Label>
           <Input
             type="date"
             value={filtros.hasta}
-            className="h-9 w-[9.5rem]"
+            className="h-10 w-[10.5rem] text-base"
             onChange={(e) => aplicar({ hasta: e.target.value })}
           />
         </div>
         <div className="grid gap-1">
-          <Label className="text-[11px] text-zinc-500">Caja</Label>
+          <Label className="text-xs text-zinc-500">Caja</Label>
           <select
             className={selectClass}
             value={filtros.caja}
@@ -199,7 +199,7 @@ export function LibroClient({
           </select>
         </div>
         <div className="grid gap-1">
-          <Label className="text-[11px] text-zinc-500">Tipo</Label>
+          <Label className="text-xs text-zinc-500">Tipo</Label>
           <select
             className={selectClass}
             value={filtros.tipo}
@@ -212,7 +212,7 @@ export function LibroClient({
           </select>
         </div>
         <div className="grid gap-1">
-          <Label className="text-[11px] text-zinc-500">Método</Label>
+          <Label className="text-xs text-zinc-500">Método</Label>
           <select
             className={selectClass}
             value={filtros.metodo}
@@ -227,7 +227,7 @@ export function LibroClient({
           </select>
         </div>
         <div className="grid gap-1">
-          <Label className="text-[11px] text-zinc-500">Mozo</Label>
+          <Label className="text-xs text-zinc-500">Mozo</Label>
           <select
             className={selectClass}
             value={filtros.mozo}
@@ -242,11 +242,11 @@ export function LibroClient({
           </select>
         </div>
         <div className="grid flex-1 gap-1">
-          <Label className="text-[11px] text-zinc-500">Buscar</Label>
+          <Label className="text-xs text-zinc-500">Buscar</Label>
           <Input
             defaultValue={filtros.q}
             placeholder="Mesa, cliente o # de orden"
-            className="h-9"
+            className="h-10 text-base"
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 aplicar({ q: (e.target as HTMLInputElement).value });
@@ -281,7 +281,7 @@ export function LibroClient({
       </div>
 
       {truncado && (
-        <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900 ring-1 ring-amber-200">
+        <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900 ring-1 ring-amber-200">
           El rango tiene más movimientos de los que entran en una pantalla: se
           muestran los más recientes. Acotá las fechas para verlos todos.
         </p>
@@ -290,7 +290,7 @@ export function LibroClient({
       {/* Lista */}
       <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-zinc-200/70">
         {entries.length === 0 ? (
-          <p className="p-8 text-center text-sm text-zinc-500">
+          <p className="p-10 text-center text-base text-zinc-500">
             No hubo movimientos en este período.
           </p>
         ) : (
@@ -303,11 +303,11 @@ export function LibroClient({
                   <button
                     type="button"
                     onClick={() => setDetalle(e)}
-                    className="flex w-full items-start gap-3 px-4 py-3 text-left transition hover:bg-zinc-50"
+                    className="flex w-full items-start gap-3.5 px-4 py-3.5 text-left transition hover:bg-zinc-50"
                   >
                     <span
                       className={cn(
-                        "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full",
+                        "mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full",
                         e.anulado
                           ? "bg-zinc-100 text-zinc-400"
                           : esSangria
@@ -317,24 +317,24 @@ export function LibroClient({
                               : "bg-zinc-100 text-zinc-700",
                       )}
                     >
-                      <Icon className="size-4" strokeWidth={2.25} />
+                      <Icon className="size-4.5" strokeWidth={2.25} />
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-baseline justify-between gap-2">
                         <p
                           className={cn(
-                            "truncate text-sm font-semibold text-zinc-900",
+                            "truncate text-base font-semibold text-zinc-900",
                             e.anulado && "text-zinc-400 line-through",
                           )}
                         >
                           {e.descripcion}
-                          <span className="ml-1.5 text-[10px] font-normal tabular-nums text-zinc-400">
+                          <span className="ml-2 text-xs font-normal tabular-nums text-zinc-400">
                             {fecha(e.created_at)} {hora(e.created_at)}
                           </span>
                         </p>
                         <p
                           className={cn(
-                            "shrink-0 text-sm font-bold tabular-nums",
+                            "shrink-0 text-base font-bold tabular-nums",
                             e.anulado
                               ? "text-zinc-400 line-through"
                               : esSangria
@@ -347,7 +347,7 @@ export function LibroClient({
                         </p>
                       </div>
                       <div className="flex items-baseline justify-between gap-2">
-                        <p className="truncate text-xs text-zinc-500">
+                        <p className="truncate text-sm text-zinc-500">
                           {e.tipo === "cobro" && e.method
                             ? METHOD_LABEL[e.method]
                             : esSangria
@@ -364,17 +364,17 @@ export function LibroClient({
                         </p>
                         <span className="flex shrink-0 items-center gap-1.5">
                           {e.tip_cents > 0 && !e.anulado && (
-                            <span className="text-[11px] tabular-nums text-emerald-700">
+                            <span className="text-sm tabular-nums text-emerald-700">
                               +{formatCurrency(e.tip_cents)} propina
                             </span>
                           )}
                           {e.corregido && (
-                            <span className="rounded-full bg-sky-50 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700">
+                            <span className="rounded-full bg-sky-50 px-2 py-0.5 text-xs font-semibold text-sky-700">
                               corregido
                             </span>
                           )}
                           {e.anulado && (
-                            <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-500">
+                            <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-semibold text-zinc-500">
                               anulado
                             </span>
                           )}
@@ -429,13 +429,13 @@ function Totalizador({
 }) {
   return (
     <div className="rounded-2xl bg-white p-4 ring-1 ring-zinc-200/70">
-      <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">
         {label}
       </p>
-      <p className="mt-1 text-2xl font-bold tracking-tight tabular-nums text-zinc-900">
+      <p className="mt-1 text-3xl font-bold tracking-tight tabular-nums text-zinc-900">
         {value}
       </p>
-      <p className="mt-0.5 text-xs text-zinc-500">{hint}</p>
+      <p className="mt-0.5 text-sm text-zinc-500">{hint}</p>
     </div>
   );
 }
@@ -483,7 +483,7 @@ function DetalleSheet({
     <Sheet open onOpenChange={(o) => !o && onClose()}>
       <SheetContent side="right" className="w-full sm:max-w-md">
         <SheetHeader>
-          <SheetTitle>{entry.descripcion}</SheetTitle>
+          <SheetTitle className="text-lg">{entry.descripcion}</SheetTitle>
         </SheetHeader>
 
         <div className="space-y-4 px-4 pb-6">
@@ -491,7 +491,7 @@ function DetalleSheet({
             <p className="text-3xl font-bold tabular-nums text-zinc-900">
               {formatCurrency(entry.amount_cents)}
             </p>
-            <p className="mt-1 text-xs text-zinc-600">
+            <p className="mt-1 text-sm text-zinc-600">
               {entry.tipo === "cobro" && entry.method
                 ? METHOD_LABEL[entry.method]
                 : entry.tipo === "sangria"
@@ -503,19 +503,19 @@ function DetalleSheet({
               {fecha(entry.created_at)} {hora(entry.created_at)}
             </p>
             {entry.tip_cents > 0 && (
-              <p className="mt-1 text-xs text-emerald-700">
+              <p className="mt-1 text-sm text-emerald-700">
                 Incluye {formatCurrency(entry.tip_cents)} de propina
               </p>
             )}
             {entry.attributed_mozo_name && (
-              <p className="mt-1 text-xs text-zinc-600">
+              <p className="mt-1 text-sm text-zinc-600">
                 Atribuido a {entry.attributed_mozo_name}
               </p>
             )}
           </div>
 
           {entry.anulado && (
-            <div className="rounded-xl bg-zinc-100 p-3 text-xs text-zinc-700">
+            <div className="rounded-xl bg-zinc-100 p-3 text-sm text-zinc-700">
               <p className="font-semibold">Anulado</p>
               {entry.anulado_reason && <p className="mt-0.5">{entry.anulado_reason}</p>}
             </div>
@@ -524,7 +524,7 @@ function DetalleSheet({
           {/* Por qué no se puede corregir: decirlo es parte del trabajo — un
               botón escondido no explica nada. */}
           {entry.bloqueo && (
-            <p className="flex items-start gap-2 rounded-xl bg-zinc-50 p-3 text-xs text-zinc-600 ring-1 ring-zinc-200">
+            <p className="flex items-start gap-2 rounded-xl bg-zinc-50 p-3 text-sm text-zinc-600 ring-1 ring-zinc-200">
               <Lock className="mt-0.5 size-3.5 shrink-0" />
               <span>
                 No se puede corregir: {entry.bloqueo}{" "}
@@ -538,7 +538,7 @@ function DetalleSheet({
             entry.advertencias.map((a) => (
               <p
                 key={a}
-                className="rounded-xl bg-amber-50 p-3 text-xs text-amber-900 ring-1 ring-amber-200"
+                className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200"
               >
                 {a}
               </p>
@@ -546,17 +546,17 @@ function DetalleSheet({
 
           {entry.corregido && (
             <div>
-              <p className="flex items-center gap-1.5 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+              <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">
                 <History className="size-3.5" /> Historial
               </p>
               {cargando ? (
-                <p className="mt-2 text-xs text-zinc-500">Cargando…</p>
+                <p className="mt-2 text-sm text-zinc-500">Cargando…</p>
               ) : (
                 <ul className="mt-2 space-y-2">
                   {logs.map((l) => (
                     <li
                       key={l.id}
-                      className="rounded-xl bg-white p-3 text-xs ring-1 ring-zinc-200/70"
+                      className="rounded-xl bg-white p-3 text-sm ring-1 ring-zinc-200/70"
                     >
                       <p className="font-semibold text-zinc-800">
                         {CAMPO_LABEL[l.field] ?? l.field}:{" "}
@@ -564,7 +564,7 @@ function DetalleSheet({
                         {valorLegible(l.field, l.to_value, l.to_label)}
                       </p>
                       <p className="mt-0.5 text-zinc-600">{l.reason}</p>
-                      <p className="mt-0.5 text-[11px] text-zinc-400">
+                      <p className="mt-0.5 text-xs text-zinc-400">
                         {l.by_name ?? "—"} · {fecha(l.created_at)} {hora(l.created_at)}
                       </p>
                     </li>
@@ -575,7 +575,7 @@ function DetalleSheet({
           )}
 
           {puedeCorregir && !entry.bloqueo && (
-            <Button className="w-full" onClick={() => onCorregir(entry)}>
+            <Button className="h-12 w-full text-base" onClick={() => onCorregir(entry)}>
               <Pencil className="size-4" /> Corregir
             </Button>
           )}
