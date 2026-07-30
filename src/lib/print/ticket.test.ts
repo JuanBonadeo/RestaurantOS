@@ -39,6 +39,9 @@ const base: TicketComanda = {
   ],
 };
 
+/** El separador; el encabezado va arriba, los ítems abajo. */
+const RULE_TEXT = "------------------------";
+
 const cases: Record<keyof typeof fixtures, TicketComanda> = {
   normal: base,
   anulada: { ...base, cancelled: true, cancelled_reason: "cliente se fue" },
@@ -68,7 +71,10 @@ describe("buildTicketLines · ítems grandes y espaciados", () => {
   });
 
   it("corta el nombre por palabra a 11 col en vez de desbordar", () => {
-    const lines = buildTicketLines(base).filter((l) => l.size === "xl");
+    const rule = buildTicketLines(base).findIndex((l) => l.text === RULE_TEXT);
+    const lines = buildTicketLines(base)
+      .slice(rule)
+      .filter((l) => l.size === "xl");
     expect(lines.map((l) => l.text)).toEqual([
       "1x Milanesa",
       "napolitana",
@@ -87,7 +93,7 @@ describe("buildTicketLines · ítems grandes y espaciados", () => {
 
   it("deja 3 renglones entre la línea separadora y el primer ítem, y 3 al final", () => {
     const texts = buildTicketLines(base).map((l) => l.text);
-    const rule = texts.lastIndexOf("------------------------");
+    const rule = texts.lastIndexOf(RULE_TEXT);
     expect(texts.slice(rule + 1, rule + 4)).toEqual(["", "", ""]);
     expect(texts[rule + 4]).toBe("1x Milanesa");
     expect(texts.slice(-3)).toEqual(["", "", ""]);
@@ -101,6 +107,33 @@ describe("buildTicketLines · ítems grandes y espaciados", () => {
     }).filter((l) => l.size === "xl");
     expect(lines.map((l) => l.text).join("")).toContain("Supercalifragilistico");
     for (const l of lines) expect(l.text.length).toBeLessThanOrEqual(11);
+  });
+});
+
+describe("buildTicketLines · todo en cuerpo grande", () => {
+  it("el encabezado y los avisos van en el tamaño más grande (xl)", () => {
+    const head = buildTicketLines(base).filter((l) => l.align === "center");
+    expect(head.find((l) => l.text === "COCINA")).toMatchObject({ size: "xl", bold: true });
+    expect(head.find((l) => l.text === "MESA 5")).toMatchObject({ size: "xl", bold: true });
+
+    const anulada = buildTicketLines(cases.anulada).map((l) => `${l.size}:${l.text}`);
+    expect(anulada).toContain("xl:ANULADA");
+    expect(anulada).toContain("xl:NO PREPARAR");
+    expect(buildTicketLines(cases.reimpresion).map((l) => `${l.size}:${l.text}`)).toContain(
+      "xl:REIMPRESION",
+    );
+  });
+
+  it("nada sale en cuerpo normal salvo las líneas separadoras y los blancos", () => {
+    for (const c of Object.values(cases))
+      for (const l of buildTicketLines(c))
+        if ((l.size ?? "sm") === "sm") expect([RULE_TEXT, ""]).toContain(l.text);
+  });
+
+  it("un sector de nombre largo se corta por palabra, no lo parte la impresora", () => {
+    const lines = buildTicketLines({ ...base, station_name: "Postres y cafe" });
+    const head = lines.filter((l) => l.size === "xl" && l.align === "center");
+    expect(head.slice(0, 2).map((l) => l.text)).toEqual(["POSTRES Y", "CAFE"]);
   });
 });
 

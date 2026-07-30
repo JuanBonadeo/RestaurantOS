@@ -68,8 +68,18 @@ describe("buildControlTicketLines", () => {
     // y ahí se pierde plata. Es la razón de ser del papel.
     const lines = buildControlTicketLines(base());
     const cobro = lines.find((l) => l.text.startsWith("A COBRAR:"));
-    expect(cobro?.size).toBe("tall");
+    expect(cobro?.size).toBe("xl");
     expect(cobro?.bold).toBe(true);
+    // El monto va abajo, en el mismo tamaño (a doble ancho no entran juntos).
+    expect(lines[lines.indexOf(cobro!) + 1]).toMatchObject({
+      text: "112000.00",
+      size: "xl",
+    });
+  });
+
+  it("nada sale en cuerpo normal salvo las líneas separadoras", () => {
+    for (const l of buildControlTicketLines(base()))
+      if ((l.size ?? "sm") === "sm") expect(l.text).toMatch(/^-*$/);
   });
 
   it("desglosa subtotal, envío y descuento; omite los que son cero", () => {
@@ -86,18 +96,18 @@ describe("buildControlTicketLines", () => {
 
   it("un delivery lleva dirección y línea de repartidor; un retiro no", () => {
     const del = text(base());
-    expect(del).toContain("DELIVERY #123");
+    expect(del).toContain("DELIVERY\n#123"); // a doble ancho entra en dos renglones
     expect(del).toContain("Repartidor:");
     expect(del).toContain("Direccion: Calle 123");
 
     const ret = text(base({ delivery_type: "pickup" }));
-    expect(ret).toContain("RETIRO #123");
+    expect(ret).toContain("RETIRO #123"); // 11 col justas: no se parte
     expect(ret).not.toContain("Repartidor:");
     expect(ret).not.toContain("Direccion:");
   });
 
   it("muestra la hora de entrega de un programado, y si no «lo antes posible»", () => {
-    expect(text(base())).toContain("ENTREGA: lo antes posible");
+    expect(text(base())).toContain("ENTREGA: lo antes\nposible");
     const prog = text(base({ scheduled_at: "2026-07-28T20:30:00-03:00" }));
     expect(prog).toContain("ENTREGA: 28/07 20:30");
   });
@@ -122,7 +132,7 @@ describe("buildControlTicketLines", () => {
   });
 
   it("marca la reimpresión", () => {
-    expect(text(base({ reprint: true }))).toContain("*** REIMPRESION ***");
+    expect(text(base({ reprint: true }))).toContain("REIMPRESION");
   });
 
   it("cierra con el pie de no-factura (no es un comprobante fiscal)", () => {

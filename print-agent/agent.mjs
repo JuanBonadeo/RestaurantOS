@@ -173,34 +173,44 @@ function ticketLines(c) {
     for (let i = 0; i < n; i++) push("");
   };
 
+  // Avisos y encabezado en el tamaño más grande (doble alto + doble ancho,
+  // wrap a COLS.xl): es lo que la cocina lee de lejos. Sin los `***`: a doble
+  // ancho no entran en el renglón.
+  const banner = (text) => {
+    for (const l of wrap(text, COLS.xl)) push(l, { size: "xl", bold: true, align: "center" });
+  };
+
   // Spec 049: comanda anulada → ticket ANULADA destacado para que cocina
   // descarte lo que ya tenía impreso. Campo aditivo: un agente viejo no recibe
   // `c.cancelled` y reimprime el ticket normal (degradación aceptable).
   if (c.cancelled) {
-    push("*** ANULADA ***", { size: "tall", bold: true, align: "center" });
+    banner("ANULADA");
     push(RULE);
   } else if (c.reprint) {
     // Spec 35: reimpresión (por editar o por reimprimir manual). Aviso a cocina
     // de que este ticket reemplaza a uno que ya tenía impreso, para que no
     // prepare dos veces. En la anulada no va: su propio ticket ya lo comunica.
-    push("*** REIMPRESION ***", { size: "tall", bold: true, align: "center" });
-    push("reemplaza al anterior", { size: "sm", bold: true, align: "center" });
+    banner("REIMPRESION");
+    push("reemplaza al anterior", { size: "tall", bold: true, align: "center" });
     push(RULE);
   }
 
   // Sector / estación + mesa: lo primero que lee la cocina, bien grande.
-  push(String(c.station_name).toUpperCase(), { size: "tall", bold: true, align: "center" });
-  push(`MESA ${c.table_label}`, { size: "tall", bold: true, align: "center" });
-  push(`Tanda ${c.batch}`, { size: "sm", bold: true, align: "center" });
+  banner(String(c.station_name).toUpperCase());
+  banner(`MESA ${c.table_label}`);
+  push(`Tanda ${c.batch}`, { size: "tall", bold: true, align: "center" });
 
-  // Metadata chica (referencia, no operativa).
-  push(`Comanda #${String(c.comanda_id).slice(0, 8)}`);
+  // Metadata de referencia: lo más chico del ticket, pero igual en doble alto
+  // (nada sale en cuerpo normal salvo las líneas separadoras).
+  push(`Comanda #${String(c.comanda_id).slice(0, 8)}`, { size: "tall" });
   try {
-    push(new Date(c.emitted_at).toLocaleString("es-AR"));
+    push(new Date(c.emitted_at).toLocaleString("es-AR"), { size: "tall" });
   } catch {
     /* fecha opcional */
   }
-  if (c.cancelled && c.cancelled_reason) push(`Motivo: ${c.cancelled_reason}`, { bold: true });
+  if (c.cancelled && c.cancelled_reason)
+    for (const l of wrap(`Motivo: ${c.cancelled_reason}`, COLS.tall))
+      push(l, { size: "tall", bold: true });
 
   push(RULE);
   pad(EDGE_PADDING); // aire entre la línea y el primer ítem
@@ -218,13 +228,13 @@ function ticketLines(c) {
     if (it.notes)
       for (const l of wrap(`obs: ${it.notes}`, COLS.tall)) push(l, { size: "tall", bold: true });
   });
-  if (items.length === 0) push("(sin items)");
+  if (items.length === 0) banner("(sin items)");
 
   pad(EDGE_PADDING); // aire entre el último ítem y el corte (o la línea del pie)
 
   if (c.cancelled) {
     push(RULE);
-    push("*** NO PREPARAR ***", { size: "tall", bold: true, align: "center" });
+    banner("NO PREPARAR");
   }
   return L;
 }
