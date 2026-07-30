@@ -82,3 +82,46 @@ describe("fitNameToTable", () => {
     expect(out.length).toBeGreaterThan(0);
   });
 });
+
+/**
+ * El plano «Pedidos de Mostrador» de golf-jcr es una grilla de 60 cuentas de
+ * 116x66 (spec 067 en uso real, 2026-07-30). Estos casos fijan que un nombre
+ * de verdad ENTRE en ese slot: si alguien cambia el tamaño de las mesas o la
+ * fórmula del viewer, el test lo canta antes que el encargado.
+ *
+ * La cuenta es la misma que hace `floor-plan-viewer`:
+ *   labelSize = min(w, h) * 0.22
+ *   maxChars  = w / (labelSize * 0.58)
+ */
+const MOSTRADOR_W = 116;
+const MOSTRADOR_H = 66;
+const mostradorMaxChars =
+  MOSTRADOR_W / (Math.min(MOSTRADOR_W, MOSTRADOR_H) * 0.22 * 0.58);
+
+describe("fitNameToTable — slot del plano de mostrador (116x66)", () => {
+  it("entran ~13 caracteres", () => {
+    expect(Math.floor(mostradorMaxChars)).toBe(13);
+  });
+
+  it("un apellido común entra entero", () => {
+    for (const name of ["Gutiérrez", "Rodríguez", "Fernández", "Pérez"]) {
+      expect(fitNameToTable(name, mostradorMaxChars)).toBe(name);
+    }
+  });
+
+  it("un nombre y apellido corto entra entero", () => {
+    expect(fitNameToTable("Ana Paula", mostradorMaxChars)).toBe("Ana Paula");
+  });
+
+  it("un nombre largo cae a la primera palabra, legible", () => {
+    expect(fitNameToTable("María Fernanda Gutiérrez", mostradorMaxChars)).toBe(
+      "María",
+    );
+  });
+
+  it("una sola palabra larguísima se trunca con elipsis, no desborda", () => {
+    const out = fitNameToTable("Wolfeschlegelsteinhausen", mostradorMaxChars);
+    expect(out.length).toBeLessThanOrEqual(13);
+    expect(out.endsWith("…")).toBe(true);
+  });
+});
