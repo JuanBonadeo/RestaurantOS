@@ -28,6 +28,7 @@ export function CustomerSearchField({
   onChange,
   onPick,
   id = "cliente",
+  autoFocus = false,
   placeholder = "Buscar cliente o escribir un nombre…",
   inputClassName = "h-12 w-full rounded-xl border border-zinc-200 bg-white pl-9 pr-3 text-base",
 }: {
@@ -37,6 +38,8 @@ export function CustomerSearchField({
   /** Eligió un cliente existente: el caller decide qué prellenar. */
   onPick: (cliente: ClienteMatch) => void;
   id?: string;
+  /** Spec 068 FR-002: el foco arranca acá al abrir mesa / nueva reserva. */
+  autoFocus?: boolean;
   placeholder?: string;
   inputClassName?: string;
 }) {
@@ -48,6 +51,18 @@ export function CustomerSearchField({
   // elegido, el effect dispararía otra búsqueda y la lista reaparecería sola.
   const justPicked = useRef(false);
   const boxRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Foco inicial. `preventScroll` para que el panel del salón no salte al
+  // montarse dentro del `<aside>`.
+  useEffect(() => {
+    if (!autoFocus) return;
+    const t = setTimeout(
+      () => inputRef.current?.focus({ preventScroll: true }),
+      0,
+    );
+    return () => clearTimeout(t);
+  }, [autoFocus]);
 
   useEffect(() => {
     if (justPicked.current) {
@@ -116,6 +131,7 @@ export function CustomerSearchField({
     <div ref={boxRef} className="relative">
       <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
       <input
+        ref={inputRef}
         id={id}
         value={value}
         onChange={(e) => onChange(e.target.value)}

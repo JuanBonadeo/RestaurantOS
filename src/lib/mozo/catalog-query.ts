@@ -41,6 +41,10 @@ export type CatalogProduct = {
   price_cents: number;
   image_url: string | null;
   sort_order: number;
+  /** Spec 068: `products.show_online` — si el producto se vende por la carta
+   *  pública. Alimenta el filtro «va / no va a la web» del buscador; NO es un
+   *  filtro duro (el duro es `is_active` + `is_available`, abajo). */
+  show_online: boolean;
   modifier_groups: CatalogModifierGroup[];
 };
 
@@ -89,7 +93,7 @@ export async function getCatalogForMozo(
       supabase
         .from("products")
         .select(
-          "id, category_id, name, description, price_cents, image_url, sort_order, modifier_groups(id, name, min_selection, max_selection, is_required, sort_order, modifiers(id, group_id, name, price_delta_cents, is_available, sort_order))",
+          "id, category_id, name, description, price_cents, image_url, sort_order, show_online, modifier_groups(id, name, min_selection, max_selection, is_required, sort_order, modifiers(id, group_id, name, price_delta_cents, is_available, sort_order))",
         )
         .eq("business_id", businessId)
         .eq("is_active", true)
@@ -105,6 +109,7 @@ export async function getCatalogForMozo(
     price_cents: Number(p.price_cents),
     image_url: p.image_url,
     sort_order: p.sort_order,
+    show_online: p.show_online ?? true,
     modifier_groups: (p.modifier_groups ?? [])
       .slice()
       .sort((a, b) => a.sort_order - b.sort_order)

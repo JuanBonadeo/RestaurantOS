@@ -1,22 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   ArrowLeft,
   Bike,
   Loader2,
   Minus,
   Plus,
-  Search,
   ShoppingBag,
   Trash2,
-  User,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import {
-  buscarClientes,
   getClienteDirecciones,
   type ClienteDireccion,
   type ClienteMatch,
@@ -24,11 +21,15 @@ import {
 import { formatCurrency } from "@/lib/currency";
 import type { CatalogForMozo, CatalogProduct } from "@/lib/mozo/catalog-query";
 import { loadPedirCatalog } from "@/lib/mozo/pedir-panel-data";
-import { moveSelection, resetSelection } from "@/lib/mozo/product-search";
 import { confirmarPedido } from "@/lib/orders/confirm-order";
 import { cargarPedidoStaff } from "@/lib/orders/staff-order";
 import { ProductModal, type AddToCartItem } from "@/components/mozo/product-modal";
+import { CustomerFields } from "@/components/shared/customer-fields";
 import { ProductResultsList } from "@/components/mozo/product-results-list";
+import {
+  ProductSearchInput,
+  useProductSearch,
+} from "@/components/mozo/product-search-box";
 
 type CartItem = AddToCartItem & { _key: string };
 type DeliveryType = "pickup" | "delivery";
@@ -66,8 +67,6 @@ export function CargarPedidoSheet({
   const [catalogError, setCatalogError] = useState<string | null>(null);
 
   const [view, setView] = useState<View>("carga");
-  const [search, setSearch] = useState("");
-  const [selectedIndex, setSelectedIndex] = useState(0);
   const [activeCategory, setActiveCategory] = useState<string>("");
   const [openProduct, setOpenProduct] = useState<CatalogProduct | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -78,11 +77,6 @@ export function CargarPedidoSheet({
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [deliveryNotes, setDeliveryNotes] = useState("");
 
-  // Selector de cliente existente.
-  const [clienteQuery, setClienteQuery] = useState("");
-  const [clienteResults, setClienteResults] = useState<ClienteMatch[]>([]);
-  const [clienteLoading, setClienteLoading] = useState(false);
-  const [clientePicked, setClientePicked] = useState<string | null>(null);
   const [clienteDirecciones, setClienteDirecciones] = useState<
     ClienteDireccion[]
   >([]);
@@ -109,21 +103,18 @@ export function CargarPedidoSheet({
     });
   }, [open, slug, catalog, loadingCatalog]);
 
-  const isSearching = search.trim().length > 0;
-
-  const allProducts: CatalogProduct[] =
-    catalog?.categories.flatMap((c) => c.products) ?? [];
-  const searchResults: CatalogProduct[] = isSearching
-    ? allProducts.filter((p) =>
-        p.name.toLowerCase().includes(search.trim().toLowerCase()),
-      )
-    : [];
-
-  // Reset del índice del teclado al cambiar los resultados.
-  useEffect(() => {
-    setSelectedIndex(resetSelection(searchResults.length));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search]);
+  // Spec 068: mismo buscador que la mesa y que venta rápida — filtrado,
+  // teclado y filtro «va / no va a la web» viven en `useProductSearch`.
+  const allProducts: CatalogProduct[] = useMemo(
+    () => catalog?.categories.flatMap((c) => c.products) ?? [],
+    [catalog],
+  );
+  const searchApi = useProductSearch({
+    products: allProducts,
+    storageKey: `cargar_pedido_web_${slug}`,
+    onPick: (p) => setOpenProduct(p),
+  });
+  const { isSearching, results: searchResults, selectedProductId } = searchApi;
 
   // Autofocus al buscador al abrir o al volver a la vista de carga.
   useEffect(() => {
@@ -133,38 +124,19 @@ export function CargarPedidoSheet({
     }
   }, [open, view]);
 
-  // Debounce de la búsqueda de clientes.
-  useEffect(() => {
-    const q = clienteQuery.trim();
-    if (q.length < 2) {
-      setClienteResults([]);
-      return;
-    }
-    setClienteLoading(true);
-    const t = setTimeout(async () => {
-      const r = await buscarClientes(slug, q);
-      setClienteResults(r.ok ? r.data : []);
-      setClienteLoading(false);
-    }, 300);
-    return () => clearTimeout(t);
-  }, [clienteQuery, slug]);
-
   function focusSearch() {
     setTimeout(() => searchRef.current?.focus(), 0);
   }
 
   function reset() {
     setView("carga");
-    setSearch("");
+    searchApi.setSearch("");
     setCart([]);
     setDeliveryType("pickup");
     setCustomerName("");
     setCustomerPhone("");
     setDeliveryAddress("");
     setDeliveryNotes("");
-    setClienteQuery("");
-    setClienteResults([]);
-    setClientePicked(null);
     setClienteDirecciones([]);
   }
 
@@ -213,7 +185,6 @@ export function CargarPedidoSheet({
    * queda como texto libre.
    */
   function quitarCliente() {
-    setClientePicked(null);
     setCustomerPhone("");
     setClienteDirecciones([]);
   }
@@ -221,9 +192,6 @@ export function CargarPedidoSheet({
   function pickCliente(c: ClienteMatch) {
     setCustomerName(c.name ?? "");
     setCustomerPhone(c.phone);
-    setClientePicked(c.id);
-    setClienteQuery("");
-    setClienteResults([]);
     setClienteDirecciones([]);
     // Traemos las direcciones guardadas para prellenar la de delivery (editable).
     getClienteDirecciones(slug, c.id).then((r) => {
@@ -361,38 +329,7 @@ export function CargarPedidoSheet({
           <>
             {/* ─── Buscador fijo + categorías (spec 055) ─── */}
             <div className="shrink-0 space-y-2 border-b border-zinc-200 bg-white px-3 py-2.5">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                <input
-                  ref={searchRef}
-                  type="text"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (!isSearching) return;
-                    if (e.key === "ArrowDown") {
-                      e.preventDefault();
-                      setSelectedIndex((i) =>
-                        moveSelection(i, 1, searchResults.length),
-                      );
-                    } else if (e.key === "ArrowUp") {
-                      e.preventDefault();
-                      setSelectedIndex((i) =>
-                        moveSelection(i, -1, searchResults.length),
-                      );
-                    } else if (e.key === "Enter") {
-                      const pick = searchResults[selectedIndex];
-                      if (pick) {
-                        e.preventDefault();
-                        setOpenProduct(pick);
-                      }
-                    }
-                  }}
-                  placeholder="Buscar producto..."
-                  aria-label="Buscar producto"
-                  className="block h-11 w-full rounded-2xl border border-zinc-200 bg-white pl-9 pr-3 text-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
-                />
-              </div>
+              <ProductSearchInput api={searchApi} inputRef={searchRef} />
               {!isSearching && categoriesWithProducts.length > 1 && (
                 <div className="flex items-center gap-2">
                   <label
@@ -440,7 +377,7 @@ export function CargarPedidoSheet({
                 <ProductResultsList
                   products={catalogProducts}
                   onPick={setOpenProduct}
-                  selectedProductId={searchResults[selectedIndex]?.id}
+                  selectedProductId={selectedProductId}
                 />
               ) : (
                 // Catálogo por categoría: grilla de toque (sin teclado).
@@ -560,99 +497,30 @@ export function CargarPedidoSheet({
           /* ─── Vista datos: cliente + entrega ─── */
           <>
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3 py-3">
-              {/* Buscar cliente existente */}
-              <section className="space-y-2 rounded-2xl bg-white p-3 ring-1 ring-zinc-200">
-                <p className="text-xs font-semibold text-zinc-600">
-                  Cliente {clientePicked && "· elegido de la lista"}
-                </p>
-                <div className="relative">
-                  <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                  <input
-                    type="text"
-                    value={clienteQuery}
-                    onChange={(e) => setClienteQuery(e.target.value)}
-                    placeholder="Buscar cliente existente (nombre o teléfono)…"
-                    className="block h-10 w-full rounded-xl border border-zinc-200 bg-white pl-9 pr-9 text-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
-                  />
-                  {clienteLoading && (
-                    <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-zinc-400" />
-                  )}
-                </div>
-                {clienteResults.length > 0 && (
-                  <ul className="divide-y divide-zinc-100 overflow-hidden rounded-xl ring-1 ring-zinc-200">
-                    {clienteResults.map((c) => (
-                      <li key={c.id}>
-                        <button
-                          onClick={() => pickCliente(c)}
-                          className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left active:bg-zinc-50"
-                        >
-                          <span className="truncate text-sm font-semibold text-zinc-900">
-                            {c.name ?? "Sin nombre"}
-                          </span>
-                          <span className="shrink-0 text-xs text-zinc-500 tabular-nums">
-                            {c.phone}
-                          </span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
-
-              {/* Datos (editables; se prellenan si elegís un cliente) */}
+              {/* Spec 068: mismo bloque de cliente que abrir mesa y nueva
+                  reserva — un solo buscador, y la regla del teléfono bloqueado
+                  con un cliente elegido (spec 067) vive en `CustomerFields`. */}
               <section className="space-y-2.5 rounded-2xl bg-white p-3 ring-1 ring-zinc-200">
-                <div>
-                  <label className="text-xs font-semibold text-zinc-600">
-                    Nombre {deliveryType === "pickup" && "(opcional)"}
-                  </label>
-                  <input
-                    type="text"
-                    value={customerName}
-                    onChange={(e) => {
-                      setCustomerName(e.target.value);
-                      setClientePicked(null);
-                    }}
-                    placeholder="Mostrador"
-                    className="mt-1 block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
-                  />
-                </div>
-                <div>
-                  <div className="flex items-baseline justify-between gap-2">
-                    <label className="text-xs font-semibold text-zinc-600">
-                      Teléfono{" "}
-                      {clientePicked
-                        ? "· del cliente elegido"
-                        : deliveryType === "delivery"
-                          ? "(requerido)"
-                          : "(opcional)"}
-                    </label>
-                    {clientePicked && (
-                      <button
-                        type="button"
-                        onClick={quitarCliente}
-                        className="text-xs font-semibold text-zinc-400 underline underline-offset-2 transition hover:text-zinc-700"
-                      >
-                        Quitar
-                      </button>
-                    )}
-                  </div>
-                  {/* Spec 067: con un cliente del CRM elegido el teléfono no se
-                      edita — es la clave con la que se lo identifica, no un dato
-                      más. «Quitar» suelta la identidad y vuelve a mano. */}
-                  <input
-                    type="tel"
-                    value={customerPhone}
-                    readOnly={!!clientePicked}
-                    aria-readonly={!!clientePicked}
-                    onChange={(e) => setCustomerPhone(e.target.value)}
-                    placeholder="11 5555 1234"
-                    className={`mt-1 block h-10 w-full rounded-xl border px-3 text-sm focus:outline-none ${
-                      clientePicked
-                        ? "cursor-not-allowed border-zinc-200 bg-zinc-100 text-zinc-600"
-                        : "border-zinc-200 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
-                    }`}
-                  />
-                </div>
+                <CustomerFields
+                  slug={slug}
+                  idPrefix="cargar"
+                  name={customerName}
+                  phone={customerPhone}
+                  onNameChange={setCustomerName}
+                  onPhoneChange={setCustomerPhone}
+                  onPick={pickCliente}
+                  onClear={quitarCliente}
+                  nameLabel={
+                    deliveryType === "pickup" ? "Cliente (opcional)" : "Cliente"
+                  }
+                  phoneLabel={
+                    deliveryType === "delivery"
+                      ? "Teléfono (requerido)"
+                      : "Teléfono (opcional)"
+                  }
+                  labelClassName="text-xs font-semibold text-zinc-600"
+                  inputClassName="block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+                />
                 {deliveryType === "delivery" && (
                   <div>
                     <label className="text-xs font-semibold text-zinc-600">
@@ -752,7 +620,7 @@ export function CargarPedidoSheet({
           onAdd={(item) => {
             addToCart(item);
             setOpenProduct(null);
-            setSearch("");
+            searchApi.setSearch("");
             focusSearch();
           }}
           embedded

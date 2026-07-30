@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowLeft, Minus, Plus, X } from "lucide-react";
@@ -12,8 +12,7 @@ import {
   MIN_PARTY_SIZE,
   partySizeFromKey,
 } from "@/lib/mozo/party-size-keys";
-import { CustomerSearchField } from "@/components/mozo/customer-search-field";
-import type { ClienteMatch } from "@/lib/admin/customers-actions";
+import { CustomerFields } from "@/components/shared/customer-fields";
 import { sentarWalkIn } from "@/lib/mozo/walk-in";
 import { useEscapeToClose } from "@/lib/ui/use-escape-to-close";
 
@@ -53,9 +52,6 @@ function WalkInForm({
   variant,
 }: Omit<Props, "onClose"> & { variant: "modal" | "panel" }) {
   const [submitting, setSubmitting] = useState(false);
-  // Cliente del CRM elegido en el buscador (spec 067). Mientras haya uno, el
-  // teléfono queda bloqueado: es la clave del upsert, no un dato más.
-  const [picked, setPicked] = useState<ClienteMatch | null>(null);
   const submitRef = useRef<HTMLButtonElement>(null);
   const {
     register,
@@ -70,25 +66,10 @@ function WalkInForm({
 
   const partySize = watch("partySize");
 
-  /**
-   * Soltar el cliente del CRM: se limpia el teléfono (es su identidad, la clave
-   * del upsert) y el nombre queda como texto libre. Actualizarle el teléfono a
-   * un cliente es una operación de CRM y vive en su ficha, no acá.
-   */
-  const quitarCliente = () => {
-    setPicked(null);
-    setValue("phone", "");
-  };
-
-  // Foco inicial en la acción primaria: Enter abre la mesa sin tocar nada más.
-  // FR-005. `preventScroll` para que el panel del salón no salte.
-  useEffect(() => {
-    const t = setTimeout(
-      () => submitRef.current?.focus({ preventScroll: true }),
-      0,
-    );
-    return () => clearTimeout(t);
-  }, []);
+  // Spec 068 FR-002: el foco arranca en el **cliente** (lo pasa `CustomerFields`
+  // con `autoFocus`), no en «Abrir mesa» como en la spec 066. Enter sigue
+  // abriendo la mesa —Enter en un input de un form dispara el submit—, pero los
+  // atajos 1-9/+/− no aplican mientras se escribe el nombre: ahí un 4 es un 4.
 
   const onSubmit = async (values: FormInput) => {
     setSubmitting(true);
@@ -195,67 +176,18 @@ function WalkInForm({
           )}
         </div>
 
-        <div>
-          <label
-            htmlFor="walkin-cliente"
-            className="text-[11px] font-bold uppercase tracking-wider text-zinc-500"
-          >
-            Cliente (opcional)
-          </label>
-          {/* Spec 067: buscador de CLIENTES, no un campo suelto. Sigue
-              aceptando texto libre — un cliente nuevo no puede quedar
-              bloqueado detrás de un buscador. */}
-          <div className="mt-1">
-            <CustomerSearchField
-              id="walkin-cliente"
-              slug={businessSlug}
-              value={watch("name") ?? ""}
-              onChange={(v) => {
-                setValue("name", v);
-                // Escribir a mano es dejar de ser ese cliente del CRM.
-                if (picked) setPicked(null);
-              }}
-              onPick={(c) => {
-                setValue("name", c.name?.trim() || "");
-                setValue("phone", c.phone ?? "");
-                setPicked(c);
-              }}
-            />
-          </div>
-        </div>
-
-        <div>
-          <div className="flex items-baseline justify-between gap-2">
-            <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
-              {picked ? "Teléfono · del cliente elegido" : "Teléfono (opcional · entra al CRM)"}
-            </label>
-            {picked && (
-              <button
-                type="button"
-                onClick={quitarCliente}
-                className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 underline underline-offset-2 transition hover:text-zinc-700"
-              >
-                Quitar
-              </button>
-            )}
-          </div>
-          {/* Spec 067: con un cliente del CRM elegido el teléfono NO se edita.
-              El teléfono es la clave con la que `sentarWalkIn` hace el upsert:
-              cambiarlo acá no editaría a ese cliente, apuntaría a otro. Si el
-              contacto es otro, «Quitar» suelta la identidad y vuelve a mano. */}
-          <input
-            {...register("phone")}
-            readOnly={!!picked}
-            aria-readonly={!!picked}
-            className={`mt-1 h-12 w-full rounded-xl border px-3 text-base ${
-              picked
-                ? "cursor-not-allowed border-zinc-200 bg-zinc-100 text-zinc-600"
-                : "border-zinc-200 bg-white"
-            }`}
-            placeholder="+54 9 …"
-            inputMode="tel"
-          />
-        </div>
+        {/* Spec 068: el bloque de cliente es el mismo en abrir mesa, nueva
+            reserva y cargar pedido — incluida la regla de la spec 067 de que
+            el teléfono no se edita con un cliente del CRM elegido. */}
+        <CustomerFields
+          slug={businessSlug}
+          idPrefix="walkin"
+          name={watch("name") ?? ""}
+          phone={watch("phone") ?? ""}
+          onNameChange={(v) => setValue("name", v)}
+          onPhoneChange={(v) => setValue("phone", v)}
+          autoFocus
+        />
 
         <div>
           <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">

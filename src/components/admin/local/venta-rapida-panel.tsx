@@ -6,7 +6,6 @@ import {
   Minus,
   Plus,
   Receipt,
-  Search,
   Store,
   Trash2,
   X,
@@ -15,6 +14,10 @@ import { toast } from "sonner";
 
 import { ProductModal, type AddToCartItem } from "@/components/mozo/product-modal";
 import { ProductResultsList } from "@/components/mozo/product-results-list";
+import {
+  ProductSearchInput,
+  useProductSearch,
+} from "@/components/mozo/product-search-box";
 import { emitInvoice } from "@/lib/afip/emit-invoice";
 import { calculateAdjustment } from "@/lib/billing/adjustment";
 import type { Caja, PaymentMethod, PaymentMethodConfig } from "@/lib/caja/types";
@@ -22,7 +25,6 @@ import { useCajaPreferida } from "@/lib/caja/use-caja-preferida";
 import { formatCurrency } from "@/lib/currency";
 import type { CatalogForMozo, CatalogProduct } from "@/lib/mozo/catalog-query";
 import { loadPedirCatalog } from "@/lib/mozo/pedir-panel-data";
-import { moveSelection, resetSelection } from "@/lib/mozo/product-search";
 import {
   iniciarVentaMostrador,
   venderMostrador,
@@ -67,8 +69,6 @@ export function VentaRapidaPanel({
   const [methodConfigs, setMethodConfigs] = useState<PaymentMethodConfig[]>([]);
   const [initError, setInitError] = useState<string | null>(null);
 
-  const [search, setSearch] = useState("");
-  const [selectedIndex, setSelectedIndex] = useState(0);
   const [activeCategory, setActiveCategory] = useState<string>("");
   const [openProduct, setOpenProduct] = useState<CatalogProduct | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -120,26 +120,23 @@ export function VentaRapidaPanel({
     return () => clearTimeout(t);
   }, []);
 
-  const isSearching = search.trim().length > 0;
-
   const categoriesWithProducts = useMemo(
     () => (catalog?.categories ?? []).filter((c) => c.products.length > 0),
     [catalog],
   );
 
-  const searchResults: CatalogProduct[] = useMemo(() => {
-    if (!isSearching) return [];
-    const q = search.trim().toLowerCase();
-    return categoriesWithProducts
-      .flatMap((c) => c.products)
-      .filter((p) => p.name.toLowerCase().includes(q));
-  }, [isSearching, search, categoriesWithProducts]);
-
-  // Reset del índice del teclado al cambiar los resultados.
-  useEffect(() => {
-    setSelectedIndex(resetSelection(searchResults.length));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search]);
+  // Spec 068: el buscador (filtrado + teclado + filtro de la web) es el mismo
+  // de la mesa y de cargar pedido.
+  const allProducts = useMemo(
+    () => categoriesWithProducts.flatMap((c) => c.products),
+    [categoriesWithProducts],
+  );
+  const searchApi = useProductSearch({
+    products: allProducts,
+    storageKey: `venta_rapida_web_${slug}`,
+    onPick: (p) => setOpenProduct(p),
+  });
+  const { isSearching, results: searchResults, selectedProductId } = searchApi;
 
   const visibleProducts: CatalogProduct[] = isSearching
     ? searchResults
@@ -166,7 +163,7 @@ export function VentaRapidaPanel({
 
   function addToCart(item: AddToCartItem) {
     setCart((prev) => [...prev, { ...item, _key: crypto.randomUUID() }]);
-    setSearch("");
+    searchApi.setSearch("");
     focusSearch();
   }
 
@@ -245,7 +242,7 @@ export function VentaRapidaPanel({
       });
       // Listo para el próximo cliente: carrito limpio, foco en el buscador.
       setCart([]);
-      setSearch("");
+      searchApi.setSearch("");
       focusSearch();
     });
   }
@@ -299,38 +296,7 @@ export function VentaRapidaPanel({
 
       {/* ─── Buscador + categorías ─── */}
       <div className="shrink-0 space-y-2 border-b border-zinc-200 bg-white px-3 py-2.5">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-          <input
-            ref={searchRef}
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => {
-              if (!isSearching) return;
-              if (e.key === "ArrowDown") {
-                e.preventDefault();
-                setSelectedIndex((i) =>
-                  moveSelection(i, 1, searchResults.length),
-                );
-              } else if (e.key === "ArrowUp") {
-                e.preventDefault();
-                setSelectedIndex((i) =>
-                  moveSelection(i, -1, searchResults.length),
-                );
-              } else if (e.key === "Enter") {
-                const pick = searchResults[selectedIndex];
-                if (pick) {
-                  e.preventDefault();
-                  setOpenProduct(pick);
-                }
-              }
-            }}
-            placeholder="Buscar producto…"
-            aria-label="Buscar producto"
-            className="block h-11 w-full rounded-2xl border border-zinc-200 bg-white pl-9 pr-3 text-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
-          />
-        </div>
+        <ProductSearchInput api={searchApi} inputRef={searchRef} autoFocus />
         {!isSearching && categoriesWithProducts.length > 1 && (
           <div className="flex items-center gap-2">
             <label
@@ -376,7 +342,7 @@ export function VentaRapidaPanel({
           <ProductResultsList
             products={visibleProducts}
             onPick={setOpenProduct}
-            selectedProductId={searchResults[selectedIndex]?.id}
+            selectedProductId={selectedProductId}
           />
         ) : (
           // Catálogo por categoría: grilla de toque (sin teclado).

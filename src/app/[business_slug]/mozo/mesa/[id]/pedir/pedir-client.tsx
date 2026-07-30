@@ -23,7 +23,6 @@ import {
   Plus,
   Salad,
   Sandwich,
-  Search,
   Send,
   ShoppingBag,
   Soup,
@@ -57,7 +56,11 @@ import type {
   CatalogSuperCategory,
 } from "@/lib/mozo/catalog-query";
 import type { DailyMenuForMozo } from "@/lib/mozo/daily-menus-query";
-import { moveSelection, resetSelection } from "@/lib/mozo/product-search";
+import {
+  ProductSearchInput,
+  useProductSearch,
+  type ProductSearchApi,
+} from "@/components/mozo/product-search-box";
 import { canCancelItem } from "@/lib/permissions/can";
 
 import { ProductModal, type AddToCartItem } from "@/components/mozo/product-modal";
@@ -389,7 +392,6 @@ export function MozoPedirClient({
   // ── State ──
   const [step, setStep] = useState<Step>("catalogo");
   const [activeTab, setActiveTab] = useState<TabId>(tabs[0]?.id ?? TOP_TAB_ID);
-  const [search, setSearch] = useState("");
   const [openProduct, setOpenProduct] = useState<CatalogProduct | null>(null);
   const [openDailyMenu, setOpenDailyMenu] = useState<DailyMenuForMozo | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -408,7 +410,6 @@ export function MozoPedirClient({
   const searchRef = useRef<HTMLInputElement>(null);
   // Índice del resultado resaltado para navegar la búsqueda con ↓/↑ y abrirlo
   // con Enter.
-  const [selectedIndex, setSelectedIndex] = useState(0);
 
   // Si la tab activa desaparece (admin cambió el catálogo entre cargas),
   // saltar a la primera disponible.
@@ -443,20 +444,18 @@ export function MozoPedirClient({
     return out;
   }, [cart, productTabId, principalesSuperId, hasTopTab]);
 
-  // ── Búsqueda y productos del tab activo ──
-  const isSearching = search.trim().length > 0;
-
-  const searchResults: CatalogProduct[] = useMemo(() => {
-    if (!isSearching) return [];
-    const q = search.trim().toLowerCase();
-    return allProducts.filter((p) => p.name.toLowerCase().includes(q));
-  }, [search, allProducts, isSearching]);
-
-  // Al (re)generarse la lista de resultados —p. ej. al cambiar el texto— la
-  // selección vuelve al primero (o a "sin selección" si no hay). Spec 055.
-  useEffect(() => {
-    setSelectedIndex(resetSelection(searchResults.length));
-  }, [searchResults]);
+  // ── Búsqueda (spec 068: el mismo buscador que cargar pedido y venta rápida) ──
+  const searchApi = useProductSearch({
+    products: allProducts,
+    storageKey: `mesa_web_${slug}`,
+    onPick: (p) => setOpenProduct(p),
+  });
+  const {
+    setSearch,
+    isSearching,
+    results: searchResults,
+    selectedProductId,
+  } = searchApi;
 
   // Foco al buscador al montar, SOLO en el sidebar embebido: en la tablet del
   // mozo (full-screen) abriría el teclado virtual tapando la vista. FR-002.
@@ -882,50 +881,7 @@ export function MozoPedirClient({
 
         {/* Buscador fijo + categorías secundarias. FR-001/003/014. */}
         <div className="shrink-0 space-y-2 border-b border-zinc-200 bg-white px-3 py-2.5">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-            <input
-              ref={searchRef}
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => {
-                if (!isSearching) return;
-                if (e.key === "ArrowDown") {
-                  e.preventDefault();
-                  setSelectedIndex((i) =>
-                    moveSelection(i, 1, searchResults.length),
-                  );
-                } else if (e.key === "ArrowUp") {
-                  e.preventDefault();
-                  setSelectedIndex((i) =>
-                    moveSelection(i, -1, searchResults.length),
-                  );
-                } else if (e.key === "Enter") {
-                  const pick = searchResults[selectedIndex];
-                  if (pick) {
-                    e.preventDefault();
-                    setOpenProduct(pick);
-                  }
-                }
-              }}
-              placeholder="Buscar producto..."
-              aria-label="Buscar producto"
-              className="block h-11 w-full rounded-2xl border border-zinc-200 bg-white pl-9 pr-9 text-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
-            />
-            {search.length > 0 && (
-              <button
-                onClick={() => {
-                  setSearch("");
-                  searchRef.current?.focus();
-                }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-zinc-400 active:bg-zinc-100"
-                aria-label="Limpiar"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
-          </div>
+          <ProductSearchInput api={searchApi} inputRef={searchRef} />
           {!isSearching && tabs.length > 1 && (
             <div className="flex items-center gap-2">
               <label
@@ -957,7 +913,7 @@ export function MozoPedirClient({
             <SearchResults
               results={searchResults}
               onPick={setOpenProduct}
-              selectedProductId={searchResults[selectedIndex]?.id}
+              selectedProductId={selectedProductId}
             />
           ) : tabs.length === 0 ? (
             <EmptyCatalog />
@@ -1220,8 +1176,7 @@ export function MozoPedirClient({
       <main className={mainClass}>
         {step === "catalogo" ? (
           <CatalogoStep
-            search={search}
-            setSearch={setSearch}
+            searchApi={searchApi}
             isSearching={isSearching}
             searchResults={searchResults}
             tabSections={tabSections}
@@ -1300,8 +1255,7 @@ export function MozoPedirClient({
 // ─────────────────────────────────────────────────────────────────────────
 
 function CatalogoStep({
-  search,
-  setSearch,
+  searchApi,
   isSearching,
   searchResults,
   tabSections,
@@ -1312,8 +1266,7 @@ function CatalogoStep({
   onPickDailyMenu,
   tabsCount,
 }: {
-  search: string;
-  setSearch: (v: string) => void;
+  searchApi: ProductSearchApi;
   isSearching: boolean;
   searchResults: CatalogProduct[];
   tabSections: { category: CatalogCategory | null; products: CatalogProduct[] }[];
@@ -1326,25 +1279,7 @@ function CatalogoStep({
 }) {
   return (
     <div className="space-y-3">
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Buscar producto..."
-          className="block h-11 w-full rounded-2xl border border-zinc-200 bg-white pl-9 pr-3 text-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
-        />
-        {search.length > 0 && (
-          <button
-            onClick={() => setSearch("")}
-            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-zinc-400 active:bg-zinc-100"
-            aria-label="Limpiar"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        )}
-      </div>
+      <ProductSearchInput api={searchApi} />
 
       {isSearching ? (
         <SearchResults results={searchResults} onPick={onPick} />
