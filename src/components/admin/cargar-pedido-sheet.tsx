@@ -121,7 +121,7 @@ export function CargarPedidoSheet({
   }, [open, slug, catalog, loadingCatalog]);
 
   // Spec 068: mismo buscador que la mesa y que venta rápida — filtrado,
-  // teclado y filtro «va / no va a la web» viven en `useProductSearch`.
+  // teclado y filtro de la carta online viven en `useProductSearch`.
   const allProducts: CatalogProduct[] = useMemo(
     () => catalog?.categories.flatMap((c) => c.products) ?? [],
     [catalog],

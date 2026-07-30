@@ -7,15 +7,33 @@ import type { CatalogProduct } from "@/lib/mozo/catalog-query";
 import { moveSelection, resetSelection } from "@/lib/mozo/product-search";
 import { useStickyFilter } from "@/lib/ui/use-sticky-filter";
 
-export const WEB_ALL = "all";
-const WEB_OPTIONS = ["web", "no-web"];
+export const CARTA_ALL = "all";
+/**
+ * Filtro por `products.show_online` (spec 068, FR-005).
+ *
+ * El vocabulario es **el mismo que el form del producto**, que ya dice
+ * «Mostrar en la carta online» y explica que al desmarcarlo *"el producto
+ * desaparece de la carta que ve el cliente pero el mozo lo sigue teniendo para
+ * cargar en la mesa"*. Los ids describen al producto, no al flag: «va a la
+ * web» no significaba nada para quien está cargando un pedido.
+ */
+const CARTA_EN_LINEA = "en-carta";
+const CARTA_SOLO_LOCAL = "solo-local";
+const CARTA_OPTIONS = [CARTA_EN_LINEA, CARTA_SOLO_LOCAL];
+
+const CARTA_HINT: Record<string, string> = {
+  [CARTA_EN_LINEA]:
+    "Solo lo que el cliente ve y puede pedir desde la carta online.",
+  [CARTA_SOLO_LOCAL]:
+    "Solo lo que NO se publica en la carta online: se carga únicamente desde acá.",
+};
 
 /**
  * Buscador de productos de los tres flujos de carga (spec 068, FR-004/005):
  * mesa (`pedir-client`), cargar pedido y venta rápida de mostrador.
  *
  * Concentra lo que estaba copiado tres veces: el filtrado por nombre, el índice
- * de teclado (↓/↑/Enter) y el filtro «va / no va a la web». La spec 066 ya había
+ * de teclado (↓/↑/Enter) y el filtro de la carta online. La spec 066 ya había
  * unificado **los resultados** (`ProductResultsList`) porque el mismo bug de
  * flecha estaba escrito tres veces; esto cierra el resto.
  *
@@ -35,24 +53,25 @@ export function useProductSearch({
   onPick,
 }: {
   /** Candidatos: lo que ya pasó el filtro duro del server (`is_active` +
-   *  `is_available` en `getCatalogForMozo`). El filtro de la web es aparte. */
+   *  `is_available` en `getCatalogForMozo`). El de la carta online es aparte. */
   products: CatalogProduct[];
-  /** Clave de `localStorage` del filtro de la web, ya scopeada por superficie
-   *  + negocio: la PC de deliveries y la del salón quieren cosas distintas. */
+  /** Clave de `localStorage` del filtro de la carta online, ya scopeada por
+   *  superficie + negocio: la PC de deliveries y la del salón quieren cosas
+   *  distintas. */
   storageKey: string;
   onPick: (product: CatalogProduct) => void;
 }) {
   const [search, setSearch] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
 
-  const [webFilter, setWebFilter] = useStickyFilter<string>(
+  const [cartaFilter, setCartaFilter] = useStickyFilter<string>(
     storageKey,
-    WEB_ALL,
-    WEB_OPTIONS,
+    CARTA_ALL,
+    CARTA_OPTIONS,
   );
 
   // Sólo tiene sentido ofrecer el filtro si el catálogo tiene de los dos tipos.
-  const showWebFilter = useMemo(() => {
+  const showCartaFilter = useMemo(() => {
     let online = false;
     let offline = false;
     for (const p of products) {
@@ -70,11 +89,11 @@ export function useProductSearch({
     const q = search.trim().toLowerCase();
     return products.filter((p) => {
       if (!p.name.toLowerCase().includes(q)) return false;
-      if (webFilter === "web") return p.show_online;
-      if (webFilter === "no-web") return !p.show_online;
+      if (cartaFilter === CARTA_EN_LINEA) return p.show_online;
+      if (cartaFilter === CARTA_SOLO_LOCAL) return !p.show_online;
       return true;
     });
-  }, [products, search, webFilter, isSearching]);
+  }, [products, search, cartaFilter, isSearching]);
 
   useEffect(() => {
     setSelectedIndex(resetSelection(results.length));
@@ -105,16 +124,18 @@ export function useProductSearch({
     selectedIndex,
     selectedProductId: results[selectedIndex]?.id,
     handleKeyDown,
-    webFilter,
-    setWebFilter,
-    showWebFilter,
+    cartaFilter,
+    setCartaFilter,
+    showCartaFilter,
+    cartaHint: CARTA_HINT[cartaFilter] ?? null,
   };
 }
 
 export type ProductSearchApi = ReturnType<typeof useProductSearch>;
 
 /**
- * Input del buscador + los chips del filtro de la web. Uno solo para las tres
+ * Input del buscador + los chips del filtro de la carta online. Uno solo para
+ * las tres
  * pantallas (antes eran tres inputs con el mismo `onKeyDown` copiado).
  */
 export function ProductSearchInput({
@@ -134,8 +155,15 @@ export function ProductSearchInput({
 }) {
   const ownRef = useRef<HTMLInputElement>(null);
   const inputRef = externalRef ?? ownRef;
-  const { search, setSearch, handleKeyDown, showWebFilter, webFilter, setWebFilter } =
-    api;
+  const {
+    search,
+    setSearch,
+    handleKeyDown,
+    showCartaFilter,
+    cartaFilter,
+    setCartaFilter,
+    cartaHint,
+  } = api;
 
   useEffect(() => {
     if (!autoFocus) return;
@@ -150,10 +178,10 @@ export function ProductSearchInput({
     <button
       key={id}
       type="button"
-      onClick={() => setWebFilter(id)}
-      aria-pressed={webFilter === id}
+      onClick={() => setCartaFilter(id)}
+      aria-pressed={cartaFilter === id}
       className={`rounded-full px-2.5 py-1 text-xs font-semibold transition ${
-        webFilter === id
+        cartaFilter === id
           ? "bg-zinc-900 text-white"
           : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
       }`}
@@ -192,14 +220,21 @@ export function ProductSearchInput({
         )}
       </div>
 
-      {showWebFilter && (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
-            Carta web
-          </span>
-          {chip(WEB_ALL, "Todos")}
-          {chip("web", "Va a la web")}
-          {chip("no-web", "No va")}
+      {showCartaFilter && (
+        <div className="space-y-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+              Carta online
+            </span>
+            {chip(CARTA_ALL, "Todos")}
+            {chip(CARTA_EN_LINEA, "En la carta online")}
+            {chip(CARTA_SOLO_LOCAL, "Solo para el local")}
+          </div>
+          {/* La explicación aparece sólo cuando hay un filtro puesto: con
+              «Todos» no hay nada que aclarar y sería ruido permanente. */}
+          {cartaHint && (
+            <p className="text-[11px] leading-snug text-zinc-500">{cartaHint}</p>
+          )}
         </div>
       )}
     </>

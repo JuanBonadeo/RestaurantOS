@@ -42,7 +42,7 @@ export type CatalogProduct = {
   image_url: string | null;
   sort_order: number;
   /** Spec 068: `products.show_online` — si el producto se vende por la carta
-   *  pública. Alimenta el filtro «va / no va a la web» del buscador; NO es un
+   *  pública. Alimenta el filtro de la carta online del buscador; NO es un
    *  filtro duro (el duro es `is_active` + `is_available`, abajo). */
   show_online: boolean;
   modifier_groups: CatalogModifierGroup[];

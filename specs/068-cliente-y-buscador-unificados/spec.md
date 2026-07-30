@@ -59,18 +59,22 @@ Lo usan las tres superficies de carga: **mesa** (`pedir-client`, en sus dos vist
 
 **Por qué hook + input y no un componente que envuelva todo:** en las tres pantallas el buscador vive en un header fijo y los resultados en el área que scrollea. Un componente que renderizara ambos tendría que pelearse con tres layouts distintos, o forzarlos a uno solo. El `inputRef` es opcional para los callers que devuelven el foco al buscador tras agregar un producto.
 
-### FR-005 — Filtro «va / no va a la web»
+### FR-005 — Filtro de la carta online
 
 El buscador suma un filtro de tres posiciones sobre `products.show_online`:
 
-| Opción | Qué muestra |
-|---|---|
-| **Todos** (default) | todo lo que ya pasó el filtro duro |
-| **Va a la web** | `show_online = true` |
-| **No va a la web** | `show_online = false` |
+| Opción | Qué muestra | Explicación al pie |
+|---|---|---|
+| **Todos** (default) | todo lo que ya pasó el filtro duro | — |
+| **En la carta online** | `show_online = true` | *"Solo lo que el cliente ve y puede pedir desde la carta online."* |
+| **Solo para el local** | `show_online = false` | *"Solo lo que NO se publica en la carta online: se carga únicamente desde acá."* |
+
+**El vocabulario es el del form del producto, no uno nuevo** (fast-follow 2026-07-30 — *"no se entiende lo de va a la Web y no va, yo los renombraria"*). El form ya dice «Mostrar en la carta online» y explica que al desmarcarlo *"el producto desaparece de la carta que ve el cliente pero el mozo lo sigue teniendo para cargar en la mesa"*. Las etiquetas describen **al producto** ("está en la carta online" / "es solo para el local"), no al flag; «va a la web» no le decía nada a quien está cargando un pedido.
+
+La explicación al pie aparece **sólo con un filtro puesto**: con «Todos» no hay nada que aclarar y sería ruido permanente en un header ya apretado.
 
 - Es **aparte** del filtro hardcodeado de `getCatalogForMozo` (`is_active` + `is_available`), que **se conserva tal cual**: eso es "el producto existe y hoy se puede vender", y no es negociable desde la UI.
-- Se guarda **por máquina + negocio** (`useStickyFilter`, [spec 065](../065-filtros-salon-y-catalogo/)), con clave por superficie: la PC que carga deliveries puede quedar fijada en «Va a la web» sin afectar a la comandera del salón.
+- Se guarda **por máquina + negocio** (`useStickyFilter`, [spec 065](../065-filtros-salon-y-catalogo/)), con clave por superficie: la PC que carga deliveries puede quedar fijada en «En la carta online» sin afectar a la comandera del salón.
 - Sólo se muestra si el negocio **tiene** productos de los dos tipos: un catálogo entero visible online no necesita el control.
 
 `CatalogProduct` y `getCatalogForMozo` suman `show_online`. Sin migración: la columna existe (`boolean not null default true`).
@@ -85,7 +89,7 @@ Es unificación y filtrado de **presentación**. No cambia permisos, ni el contr
 
 **D2 — `CustomerFields` es controlado pero se guarda solo lo suyo.** `name` y `phone` los tiene el caller porque ya los tiene (RHF en el walk-in, `useState` en los otros dos). Lo que sí vive adentro es **qué cliente está elegido**, porque es el estado del que depende la regla del teléfono y ningún caller lo necesita para otra cosa — salvo «Cargar pedido», que además usa el id para traer las direcciones guardadas, y por eso `onPick` entrega el cliente entero.
 
-**D3 — El filtro de la web es de tres posiciones, no un checkbox.** "No va a la web" es una consulta real ("¿qué tengo sin publicar?"), no sólo el complemento. Con un checkbox habría que elegir cuál de las dos preguntas se puede hacer.
+**D3 — Tres posiciones, no un checkbox.** "Solo para el local" es una consulta real ("¿qué tengo sin publicar?"), no sólo el complemento. Con un checkbox habría que elegir cuál de las dos preguntas se puede hacer.
 
 **D4 — El filtro se persiste por superficie, no globalmente.** El puesto que carga deliveries y el que toma pedidos en el salón quieren cosas distintas, y en el mismo negocio pueden ser dos máquinas.
 
