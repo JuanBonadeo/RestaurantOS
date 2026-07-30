@@ -575,9 +575,14 @@ function TabsInner({
   return (
     <div className="fixed inset-x-0 bottom-0 top-14 z-30 flex flex-col bg-zinc-50 transition-[left] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] md:left-[var(--admin-sidebar-width,60px)] md:top-0">
       {/* El selector va pegado a las tabs, NO en la esquina derecha: ahí flota
-          la campana de notificaciones del panel admin y se chocaban. */}
-      <div className="border-border/60 flex items-center gap-3 overflow-x-auto border-b bg-white/95 px-3 py-3 pr-16 backdrop-blur sm:px-4 sm:pr-20">
-        {tabsBar}
+          la campana de notificaciones del panel admin y se chocaban.
+
+          El `overflow-x-auto` va SOLO en las tabs, no en la barra entera: un
+          contenedor que scrollea en X establece un contexto de recorte también
+          en Y, y con la barra entera scrolleando el desplegable del selector
+          quedaba cortado (no tapado — por eso subirle el z-index no servía). */}
+      <div className="border-border/60 flex items-center gap-3 border-b bg-white/95 px-3 py-3 pr-16 backdrop-blur sm:px-4 sm:pr-20">
+        <div className="min-w-0 overflow-x-auto">{tabsBar}</div>
         {showSalonFilter && (
           <SalonSelector
             salones={salones}
