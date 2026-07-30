@@ -28,6 +28,7 @@ import {
   Soup,
   Sparkles,
   Star,
+  Tag,
   Trash2,
   Users,
   UtensilsCrossed,
@@ -61,12 +62,23 @@ import {
   useProductSearch,
   type ProductSearchApi,
 } from "@/components/mozo/product-search-box";
-import { canCancelItem } from "@/lib/permissions/can";
+import { PriceOverrideModal } from "@/components/shared/price-override-modal";
+import { canCancelItem, canOverrideItemPrice } from "@/lib/permissions/can";
 
 import { ProductModal, type AddToCartItem } from "@/components/mozo/product-modal";
 import { ProductResultsList } from "@/components/mozo/product-results-list";
 
-type CartProductItem = AddToCartItem & { _key: string; seat_number: number | null };
+type CartProductItem = AddToCartItem & {
+  _key: string;
+  seat_number: number | null;
+  /**
+   * Precio pisado para este pedido (spec 069). `unit_price_cents` sigue siendo
+   * el de catálogo — así el modal puede mostrar contra qué se comparó y el
+   * «volver al precio de la carta» no necesita re-consultar nada.
+   */
+  price_override_cents?: number | null;
+  price_override_reason?: string | null;
+};
 type CartDailyMenuItem = {
   _key: string;
   kind: "daily_menu";
@@ -91,6 +103,16 @@ type CartItem = CartProductItem | CartDailyMenuItem;
 
 function isDailyMenuCart(c: CartItem): c is CartDailyMenuItem {
   return "kind" in c && c.kind === "daily_menu";
+}
+
+/**
+ * Precio unitario que se va a cobrar: el pisado por el encargado si lo hay,
+ * si no el de catálogo (spec 069). Todo recálculo de subtotal pasa por acá —
+ * si alguno usara `unit_price_cents` directo, cambiar la cantidad revertiría
+ * el precio pisado en silencio.
+ */
+function effectiveUnitPriceCents(c: CartProductItem): number {
+  return c.price_override_cents ?? c.unit_price_cents;
 }
 
 type Props = {
@@ -564,11 +586,42 @@ export function MozoPedirClient({
             (a, m) => a + m.price_delta_cents,
             0,
           );
-          const newLine = (c.unit_price_cents + modsTotal) * nextQty;
+          const newLine = (effectiveUnitPriceCents(c) + modsTotal) * nextQty;
           return { ...c, quantity: nextQty, line_subtotal_cents: newLine };
         })
         .filter((c) => c.quantity > 0),
     );
+  };
+
+  // ── Precio por ítem (spec 069) ──
+  const userCanEditPrice = canOverrideItemPrice(role);
+  const [priceTargetKey, setPriceTargetKey] = useState<string | null>(null);
+  const priceTarget = cart.find(
+    (c): c is CartProductItem => c._key === priceTargetKey && !isDailyMenuCart(c),
+  );
+
+  /** `cents` null = volver al precio de la carta. */
+  const setLinePrice = (key: string, cents: number | null, reason: string) => {
+    setCart((prev) =>
+      prev.map((c) => {
+        if (c._key !== key || isDailyMenuCart(c)) return c;
+        const next: CartProductItem = {
+          ...c,
+          price_override_cents: cents,
+          price_override_reason: cents === null ? null : reason,
+        };
+        const modsTotal = next.modifiers.reduce(
+          (a, m) => a + m.price_delta_cents,
+          0,
+        );
+        // El precio pisado reemplaza sólo la base: los adicionales siguen
+        // cobrándose (misma regla que el server en `lineSubtotalCents`).
+        next.line_subtotal_cents =
+          (effectiveUnitPriceCents(next) + modsTotal) * next.quantity;
+        return next;
+      }),
+    );
+    setPriceTargetKey(null);
   };
 
   // ── Acciones server ──
@@ -601,6 +654,9 @@ export function MozoPedirClient({
         seat_number: c.seat_number,
         // _key estable de la línea → idempotencia server (spec 42).
         client_line_key: c._key,
+        // Precio pisado (spec 069). El server revalida rol + motivo.
+        price_override_cents: c.price_override_cents ?? null,
+        price_override_reason: c.price_override_reason ?? null,
       };
     });
     startTransition(async () => {
@@ -764,6 +820,20 @@ export function MozoPedirClient({
       />
 
       {/* ─── Modal: cancelar item ─── */}
+      {priceTarget && (
+        <PriceOverrideModal
+          productName={priceTarget.product_name}
+          catalogPriceCents={priceTarget.unit_price_cents}
+          currentOverrideCents={priceTarget.price_override_cents}
+          currentReason={priceTarget.price_override_reason}
+          onConfirm={(cents, reason) =>
+            setLinePrice(priceTarget._key, cents, reason)
+          }
+          onClear={() => setLinePrice(priceTarget._key, null, "")}
+          onClose={() => setPriceTargetKey(null)}
+        />
+      )}
+
       {cancelTarget && (
         <div
           onClick={() => {
@@ -967,11 +1037,33 @@ export function MozoPedirClient({
                         &quot;{c.notes}&quot;
                       </p>
                     )}
+                    {!isDailyMenuCart(c) && c.price_override_cents != null && (
+                      <p className="truncate text-[11px] font-medium text-amber-700">
+                        <span className="line-through opacity-60">
+                          {formatCurrency(c.unit_price_cents)}
+                        </span>{" "}
+                        → {formatCurrency(c.price_override_cents)} ·{" "}
+                        {c.price_override_reason}
+                      </p>
+                    )}
                   </div>
                   <span className="shrink-0 text-xs font-semibold text-emerald-700 tabular-nums">
                     {formatCurrency(c.line_subtotal_cents)}
                   </span>
                   <div className="flex shrink-0 items-center gap-1">
+                    {userCanEditPrice && !isDailyMenuCart(c) && (
+                      <button
+                        onClick={() => setPriceTargetKey(c._key)}
+                        className={`flex h-8 w-8 items-center justify-center rounded-full ring-1 active:scale-95 ${
+                          c.price_override_cents != null
+                            ? "bg-amber-100 text-amber-700 ring-amber-300"
+                            : "bg-white text-zinc-500 ring-zinc-200"
+                        }`}
+                        aria-label={`Cambiar el precio de ${c.product_name}`}
+                      >
+                        <Tag className="h-4 w-4" />
+                      </button>
+                    )}
                     <button
                       onClick={() => changeQuantity(c._key, -1)}
                       disabled={c.quantity <= 1}
@@ -1204,6 +1296,8 @@ export function MozoPedirClient({
             }
             onChangeQty={changeQuantity}
             onRemove={removeFromCart}
+            userCanEditPrice={userCanEditPrice}
+            onEditPrice={setPriceTargetKey}
             onCancelItem={(id, name) =>
               setCancelTarget({ orderItemId: id, productName: name })
             }
@@ -1815,6 +1909,8 @@ function ResumenStep({
   onItemSeatChange,
   onChangeQty,
   onRemove,
+  userCanEditPrice,
+  onEditPrice,
   onCancelItem,
   onAdvance,
   onAddMore,
@@ -1830,6 +1926,8 @@ function ResumenStep({
   onItemSeatChange: (key: string, seat: number | null) => void;
   onChangeQty: (key: string, delta: number) => void;
   onRemove: (key: string) => void;
+  userCanEditPrice: boolean;
+  onEditPrice: (key: string) => void;
   onCancelItem: (orderItemId: string, productName: string) => void;
   onAdvance: (comandaId: string) => void;
   onAddMore: () => void;
@@ -1928,7 +2026,29 @@ function ResumenStep({
                     <p className="mt-1 text-xs font-semibold text-emerald-700 tabular-nums">
                       {formatCurrency(c.line_subtotal_cents)}
                     </p>
+                    {!isDailyMenuCart(c) && c.price_override_cents != null && (
+                      <p className="mt-0.5 text-xs font-medium text-amber-700">
+                        <span className="line-through opacity-60">
+                          {formatCurrency(c.unit_price_cents)}
+                        </span>{" "}
+                        → {formatCurrency(c.price_override_cents)} ·{" "}
+                        {c.price_override_reason}
+                      </p>
+                    )}
                   </div>
+                  {userCanEditPrice && !isDailyMenuCart(c) && (
+                    <button
+                      onClick={() => onEditPrice(c._key)}
+                      className={`rounded-full p-2 ${
+                        c.price_override_cents != null
+                          ? "bg-amber-100 text-amber-700"
+                          : "text-zinc-400 active:bg-zinc-100"
+                      }`}
+                      aria-label={`Cambiar el precio de ${c.product_name}`}
+                    >
+                      <Tag className="h-4 w-4" />
+                    </button>
+                  )}
                   <button
                     onClick={() => onRemove(c._key)}
                     className="rounded-full p-2 text-zinc-400 active:bg-red-50 active:text-red-600"

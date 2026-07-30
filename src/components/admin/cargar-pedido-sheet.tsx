@@ -8,6 +8,7 @@ import {
   Minus,
   Plus,
   ShoppingBag,
+  Tag,
   Trash2,
   X,
 } from "lucide-react";
@@ -25,13 +26,24 @@ import { confirmarPedido } from "@/lib/orders/confirm-order";
 import { cargarPedidoStaff } from "@/lib/orders/staff-order";
 import { ProductModal, type AddToCartItem } from "@/components/mozo/product-modal";
 import { CustomerFields } from "@/components/shared/customer-fields";
+import { PriceOverrideModal } from "@/components/shared/price-override-modal";
 import { ProductResultsList } from "@/components/mozo/product-results-list";
 import {
   ProductSearchInput,
   useProductSearch,
 } from "@/components/mozo/product-search-box";
 
-type CartItem = AddToCartItem & { _key: string };
+type CartItem = AddToCartItem & {
+  _key: string;
+  /** Precio pisado para este pedido (spec 069). */
+  price_override_cents?: number | null;
+  price_override_reason?: string | null;
+};
+
+/** Precio que se va a cobrar: el pisado si lo hay, si no el de catálogo. */
+function effectiveUnitPriceCents(c: CartItem): number {
+  return c.price_override_cents ?? c.unit_price_cents;
+}
 type DeliveryType = "pickup" | "delivery";
 type View = "carga" | "datos";
 
@@ -70,6 +82,11 @@ export function CargarPedidoSheet({
   const [activeCategory, setActiveCategory] = useState<string>("");
   const [openProduct, setOpenProduct] = useState<CatalogProduct | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
+  // ── Precio por ítem (spec 069) ──
+  // Sin gate de rol acá: llegar a este sheet ya exige `canCargarPedido`
+  // (admin/encargado), que es exactamente el mismo conjunto que
+  // `canOverrideItemPrice`. El server revalida igual en `cargarPedidoStaff`.
+  const [priceTargetKey, setPriceTargetKey] = useState<string | null>(null);
 
   const [deliveryType, setDeliveryType] = useState<DeliveryType>("pickup");
   const [customerName, setCustomerName] = useState("");
@@ -173,10 +190,35 @@ export function CargarPedidoSheet({
         return {
           ...c,
           quantity: nextQty,
-          line_subtotal_cents: (c.unit_price_cents + modsTotal) * nextQty,
+          line_subtotal_cents:
+            (effectiveUnitPriceCents(c) + modsTotal) * nextQty,
         };
       }),
     );
+  }
+
+  const priceTarget = cart.find((c) => c._key === priceTargetKey);
+
+  /** `cents` null = volver al precio de la carta. */
+  function setLinePrice(key: string, cents: number | null, reason: string) {
+    setCart((prev) =>
+      prev.map((c) => {
+        if (c._key !== key) return c;
+        const next: CartItem = {
+          ...c,
+          price_override_cents: cents,
+          price_override_reason: cents === null ? null : reason,
+        };
+        const modsTotal = next.modifiers.reduce(
+          (a, m) => a + m.price_delta_cents,
+          0,
+        );
+        next.line_subtotal_cents =
+          (effectiveUnitPriceCents(next) + modsTotal) * next.quantity;
+        return next;
+      }),
+    );
+    setPriceTargetKey(null);
   }
 
   /**
@@ -230,6 +272,9 @@ export function CargarPedidoSheet({
           quantity: c.quantity,
           notes: c.notes || undefined,
           modifier_ids: c.modifiers.map((m) => m.id),
+          // Precio pisado (spec 069). El server revalida rol + motivo.
+          price_override_cents: c.price_override_cents ?? null,
+          price_override_reason: c.price_override_reason ?? null,
         })),
       });
       if (!r.ok) {
@@ -437,11 +482,31 @@ export function CargarPedidoSheet({
                             &quot;{c.notes}&quot;
                           </p>
                         )}
+                        {c.price_override_cents != null && (
+                          <p className="truncate text-[11px] font-medium text-amber-700">
+                            <span className="line-through opacity-60">
+                              {formatCurrency(c.unit_price_cents)}
+                            </span>{" "}
+                            → {formatCurrency(c.price_override_cents)} ·{" "}
+                            {c.price_override_reason}
+                          </p>
+                        )}
                       </div>
                       <span className="shrink-0 text-xs font-semibold text-emerald-700 tabular-nums">
                         {formatCurrency(c.line_subtotal_cents)}
                       </span>
                       <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          onClick={() => setPriceTargetKey(c._key)}
+                          className={`flex h-7 w-7 items-center justify-center rounded-full ring-1 active:scale-95 ${
+                            c.price_override_cents != null
+                              ? "bg-amber-100 text-amber-700 ring-amber-300"
+                              : "text-zinc-500 ring-zinc-200 active:bg-zinc-100"
+                          }`}
+                          aria-label={`Cambiar el precio de ${c.product_name}`}
+                        >
+                          <Tag className="h-3.5 w-3.5" />
+                        </button>
                         <button
                           onClick={() => changeQty(c._key, -1)}
                           disabled={c.quantity <= 1}
@@ -607,6 +672,20 @@ export function CargarPedidoSheet({
               </button>
             </footer>
           </>
+        )}
+
+        {priceTarget && (
+          <PriceOverrideModal
+            productName={priceTarget.product_name}
+            catalogPriceCents={priceTarget.unit_price_cents}
+            currentOverrideCents={priceTarget.price_override_cents}
+            currentReason={priceTarget.price_override_reason}
+            onConfirm={(cents, reason) =>
+              setLinePrice(priceTarget._key, cents, reason)
+            }
+            onClear={() => setLinePrice(priceTarget._key, null, "")}
+            onClose={() => setPriceTargetKey(null)}
+          />
         )}
 
         {/* Modal de producto — scopeado al panel (embedded → overlay absolute). */}

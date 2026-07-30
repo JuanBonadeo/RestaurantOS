@@ -4,21 +4,21 @@ Orden pensado para que **US1 sea entregable sola** (T001–T012). US2 (T013–T0
 
 ## Datos y permisos
 
-- [ ] **T001** Migración `0030_precio_override_por_item.sql`: las 4 columnas en `order_items` (`price_original_cents`, `price_override_at`, `price_override_by`, `price_override_reason`) + índice parcial + `comment on column` en las 4 y en `unit_price_cents` (pasa a significar "precio efectivamente cobrado"). **Aplicar al cloud** (`tjfufswzsxfujcpoxapx`) por MCP y verificar contra `information_schema`. (FR-001, FR-002)
-- [ ] **T002** Regenerar `src/lib/supabase/database.types.ts` **por MCP** (`generate_typescript_types`). ⚠️ NO usar `pnpm db:types` — está roto y trunca el archivo.
-- [ ] **T003** Test rojo en `can.test.ts` para `canOverrideItemPrice` (admin ✅, encargado ✅, mozo ❌, personal ❌) → implementar en `can.ts`. (FR-003)
+- [x] **T001** Migración `0030_precio_override_por_item.sql`: las 4 columnas en `order_items` (`price_original_cents`, `price_override_at`, `price_override_by`, `price_override_reason`) + índice parcial + `comment on column` en las 4 y en `unit_price_cents` (pasa a significar "precio efectivamente cobrado"). **Aplicar al cloud** (`tjfufswzsxfujcpoxapx`) por MCP y verificar contra `information_schema`. (FR-001, FR-002)
+- [x] **T002** Regenerar `src/lib/supabase/database.types.ts` **por MCP** (`generate_typescript_types`). ⚠️ NO usar `pnpm db:types` — está roto y trunca el archivo.
+- [x] **T003** Test rojo en `can.test.ts` para `canOverrideItemPrice` (admin ✅, encargado ✅, mozo ❌, personal ❌) → implementar en `can.ts`. (FR-003)
 
 ## US1 · Cambiar el precio al cargar (P1)
 
-- [ ] **T004** Tests de `enviarComanda` con override: override a $0, override mayor al de lista, motivo vacío → error, override de un mozo → error, override negativo/no entero → Zod, override + adicionales (subtotal `(override + mods) * qty`), override sobre `daily_menu` → error. (FR-004..FR-007)
-- [ ] **T005** `EnviarComandaItem` + schema Zod: `price_override_cents` / `price_override_reason`, con la regla cruzada (motivo obligatorio si hay precio; motivo suelto sin precio → error).
-- [ ] **T006** `enviarComanda`: gate `canOverrideItemPrice`, insert con las 4 columnas, subtotal con la base overrideada, rechazo de combos. (FR-005..FR-007)
-- [ ] **T007** Test que blinda que el **checkout público** con `price_override_cents` en el payload inserta la línea a **precio de lista**. (FR-009, SC-005)
-- [ ] **T008** `persist-order`: aceptar el override únicamente por el camino de staff; el input público no lee el campo. (FR-009)
-- [ ] **T009** `cargarPedidoStaff`: mismo gate + misma validación, propagado a `persist-order`. (FR-008)
-- [ ] **T010** `stores/cart.ts`: `CartItem` suma `price_override_cents?` / `price_override_reason?` + tests del store (setear, limpiar, que sobreviva el persist).
-- [ ] **T011** Modal de override (componente nuevo compartido): precio de lista de referencia, teclado numérico para el precio nuevo, motivo obligatorio con confirmar deshabilitado si está vacío, «Volver al precio de lista» si ya hay uno. (FR-016)
-- [ ] **T012** Enganchar el modal en `pedir-client.tsx` y `cargar-pedido-sheet.tsx`, solo con `canOverrideItemPrice(role)`; línea con override = precio de lista tachado + precio nuevo destacado + motivo abajo. (FR-015, FR-017)
+- [x] **T004** Tests de `enviarComanda` con override: override a $0, override mayor al de lista, motivo vacío → error, override de un mozo → error, override negativo/no entero → Zod, override + adicionales (subtotal `(override + mods) * qty`), override sobre `daily_menu` → error. (FR-004..FR-007)
+- [x] **T005** `EnviarComandaItem` + schema Zod: `price_override_cents` / `price_override_reason`, con la regla cruzada (motivo obligatorio si hay precio; motivo suelto sin precio → error).
+- [x] **T006** `enviarComanda`: gate `canOverrideItemPrice`, insert con las 4 columnas, subtotal con la base overrideada, rechazo de combos. (FR-005..FR-007)
+- [x] **T007** Test que blinda que el **checkout público** con `price_override_cents` en el payload inserta la línea a **precio de lista**. (FR-009, SC-005)
+- [x] **T008** `persist-order`: aceptar el override únicamente por el camino de staff; el input público no lee el campo. (FR-009)
+- [x] **T009** `cargarPedidoStaff`: mismo gate + misma validación, propagado a `persist-order`. (FR-008)
+- [x] **T010** ~~`stores/cart.ts`~~ **No aplica.** El spec asumía que la carga de staff usaba el store zustand; no es así: `stores/cart.ts` es el carrito **público** (checkout del comensal, persistido en localStorage) y los dos carritos de staff (`pedir-client.tsx`, `cargar-pedido-sheet.tsx`) son `useState` local. Los campos se agregaron a esos dos tipos locales. Tocar el store público habría sido justo lo contrario de la spec.
+- [x] **T011** Modal de override (componente nuevo compartido): precio de lista de referencia, teclado numérico para el precio nuevo, motivo obligatorio con confirmar deshabilitado si está vacío, «Volver al precio de lista» si ya hay uno. (FR-016)
+- [x] **T012** Enganchar el modal en `pedir-client.tsx` y `cargar-pedido-sheet.tsx`, solo con `canOverrideItemPrice(role)`; línea con override = precio de lista tachado + precio nuevo destacado + motivo abajo. (FR-015, FR-017)
 
 ## US2 · Corregir el precio de un ítem ya enviado (P2)
 
@@ -39,6 +39,14 @@ Orden pensado para que **US1 sea entregable sola** (T001–T012). US2 (T013–T0
 - [ ] **T021** Wiki: [`features/cuenta.md`](../../../wiki/features/cuenta.md), [`features/mozo.md`](../../../wiki/features/mozo.md), [`features/admin.md`](../../../wiki/features/admin.md) (reporte) y [`dominio/schema.md`](../../../wiki/dominio/schema.md) (las 4 columnas + el nuevo significado de `unit_price_cents`). Log en `wiki/log.md`.
 - [ ] **T022** Verify en vivo con **rol real** (encargado, nunca service_role) en golf-jcr: cargar con override a $0 y a un precio mayor, cobrar la mesa, corregir un ítem ya enviado, y ver las filas en el reporte. Confirmar que el **mozo no ve el control**.
 - [ ] **T023** Comentar + cerrar la issue; checklist de qa-brain (`tipos/web.md`) antes de dar por terminado.
+
+## Notas de implementación (2026-07-30)
+
+- **`useState` después de un early return**: la primera versión del enganche en `cargar-pedido-sheet.tsx` declaraba el estado del modal debajo de `if (!open) return null`. Lo cazó `react-hooks/rules-of-hooks` en el lint, no los tests. El estado quedó arriba del early return y el derivado (`priceTarget`) abajo.
+- **`changeQuantity` revertía el precio pisado**: los dos carritos recalculaban el subtotal con `unit_price_cents` (catálogo), así que tocar la cantidad después de pisar el precio volvía al de lista en silencio. Se centralizó en `effectiveUnitPriceCents()` en ambos.
+- **`cargar-pedido-sheet.tsx` no recibe `role`** y no hizo falta: llegar ahí ya exige `canCargarPedido` (admin/encargado), el mismo conjunto que `canOverrideItemPrice`. Documentado en el código para que no parezca un gate faltante.
+- **`database.types.ts` está desactualizado en el repo** (le falta `show_customer_name` de la 067, `is_default`, `is_business_manager`, un FK de `reservations`). Se lo viene parcheando a mano. Se tocó **sólo** lo de esta spec para no arrastrar drift ajeno; regenerarlo entero es tarea aparte.
+- **`price_original_cents` es `bigint`**, no `integer`: `unit_price_cents` ya era `bigint` y dos columnas del mismo dato no pueden tener techos distintos.
 
 ## Notas
 
