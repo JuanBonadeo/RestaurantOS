@@ -1,8 +1,16 @@
 "use client";
 
-import { Suspense, use, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  Suspense,
+  use,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { MapPin } from "lucide-react";
+import { Check, ChevronDown, MapPin } from "lucide-react";
 
 import { CajaAdminBoard } from "@/components/admin/local/caja-admin-board";
 import { ComandasKanban } from "@/components/admin/local/comandas-kanban";
@@ -36,8 +44,8 @@ import type {
 } from "@/app/[business_slug]/admin/(authed)/operacion/data";
 import type { BusinessRole } from "@/lib/admin/context";
 import type { SalonOption } from "@/lib/admin/floor-plan/queries";
-import { SALON_ALL } from "@/lib/admin/salon-filter";
-import { useStickyFilter } from "@/lib/ui/use-sticky-filter";
+import { salonFilterStorageKey } from "@/lib/admin/salon-filter";
+import { useStickyMultiFilter } from "@/lib/ui/use-sticky-filter";
 import { cn } from "@/lib/utils";
 
 type Tab =
@@ -158,7 +166,7 @@ function SalonPanel({
   businessId,
   currentUserId,
   role,
-  pinnedPlanId,
+  visiblePlanIds,
   distribuirOpen,
   onDistribuirOpen,
   onDistribuirClose,
@@ -168,7 +176,7 @@ function SalonPanel({
   businessId: string;
   currentUserId: string;
   role: BusinessRole;
-  pinnedPlanId: string | null;
+  visiblePlanIds: string[];
   distribuirOpen: boolean;
   onDistribuirOpen: () => void;
   onDistribuirClose: () => void;
@@ -178,7 +186,7 @@ function SalonPanel({
     <SalonDesktop
       slug={slug}
       businessId={businessId}
-      pinnedPlanId={pinnedPlanId}
+      visiblePlanIds={visiblePlanIds}
       floorPlans={floorPlans}
       dineInOrders={dineInOrders}
       reservations={reservations}
@@ -218,14 +226,14 @@ function ComandasPanel({
   promise,
   slug,
   businessId,
-  salonId,
-  salonName,
+  salonIds,
+  salonLabel,
 }: {
   promise: Promise<ComandasData>;
   slug: string;
   businessId: string;
-  salonId: string;
-  salonName: string | null;
+  salonIds: string[];
+  salonLabel: string | null;
 }) {
   const { initialComandas, stations, mozos, printAgentLastSeenAt } =
     use(promise);
@@ -237,8 +245,8 @@ function ComandasPanel({
       stations={stations}
       mozos={mozos}
       printAgentLastSeenAt={printAgentLastSeenAt}
-      salonId={salonId}
-      salonName={salonName}
+      salonIds={salonIds}
+      salonLabel={salonLabel}
     />
   );
 }
@@ -291,12 +299,12 @@ function ReservasPanel({
   promise,
   slug,
   timezone,
-  salonId,
+  salonIds,
 }: {
   promise: Promise<ReservasData>;
   slug: string;
   timezone: string;
-  salonId: string;
+  salonIds: string[];
 }) {
   const { date, rows, floorPlans, activeTables } = use(promise);
   return (
@@ -307,7 +315,7 @@ function ReservasPanel({
       timezone={timezone}
       floorPlans={floorPlans}
       activeTables={activeTables}
-      salonId={salonId}
+      salonIds={salonIds}
       // Embebida en el operativo: el navegador de fechas se queda acá
       // (`?tab=reservas&date=…`) en vez de saltar a /admin/reservas.
       datePath={`/${slug}/admin/operacion`}
@@ -337,42 +345,116 @@ function FichajePanel({
  *
  * Un solo control para las tres tabs que tienen salón. La elección se recuerda
  * por máquina: la tablet de la terraza mira la terraza.
+ *
+ * **Multi-selección** (fast-follow 2026-07-30): un encargado puede cubrir dos
+ * salones a la vez, así que son checkboxes y no un `<select>`. Ninguno marcado
+ * = todos; no hay opción "Todos" que se pueda combinar con las otras y quedar
+ * en un estado contradictorio — el botón «Ver todos» simplemente vacía.
+ *
+ * Vive **pegado a las tabs** (izquierda) a propósito: en la esquina superior
+ * derecha flota la campana de notificaciones del panel admin y se chocaban.
  */
 function SalonSelector({
   salones,
-  value,
-  onChange,
+  selected,
+  onToggle,
+  onClear,
 }: {
   salones: SalonOption[];
-  value: string;
-  onChange: (v: string) => void;
+  selected: string[];
+  onToggle: (id: string) => void;
+  onClear: () => void;
 }) {
-  const filtrando = value !== SALON_ALL;
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const filtrando = selected.length > 0;
+
+  // Cerrar al tocar afuera / con Escape. Sin librería: es un menú de 3 líneas.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!boxRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const label = !filtrando
+    ? "Todos los salones"
+    : selected.length === 1
+      ? (salones.find((s) => s.id === selected[0])?.name ?? "1 salón")
+      : `${selected.length} salones`;
+
   return (
-    <label
-      className={cn(
-        "inline-flex shrink-0 items-center gap-1.5 rounded-xl px-2.5 py-2 text-sm font-semibold ring-1 transition",
-        // Filtrando = estado "no estás viendo todo": tiene que cantar.
-        filtrando
-          ? "bg-amber-50 text-amber-900 ring-amber-300"
-          : "bg-white text-zinc-500 ring-zinc-200/70",
-      )}
-    >
-      <MapPin className="size-4 shrink-0" strokeWidth={2.5} />
-      <span className="sr-only">Filtrar por salón</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="cursor-pointer border-0 bg-transparent pr-1 text-sm font-semibold outline-none"
+    <div ref={boxRef} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-label="Filtrar por salón"
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-xl px-2.5 py-2 text-sm font-semibold ring-1 transition",
+          // Filtrando = estado "no estás viendo todo": tiene que cantar.
+          filtrando
+            ? "bg-amber-50 text-amber-900 ring-amber-300"
+            : "bg-white text-zinc-500 ring-zinc-200/70 hover:text-zinc-900",
+        )}
       >
-        <option value={SALON_ALL}>Todos los salones</option>
-        {salones.map((s) => (
-          <option key={s.id} value={s.id}>
-            {s.name}
-          </option>
-        ))}
-      </select>
-    </label>
+        <MapPin className="size-4 shrink-0" strokeWidth={2.5} />
+        <span className="whitespace-nowrap">{label}</span>
+        <ChevronDown className="size-3.5 shrink-0 opacity-60" strokeWidth={3} />
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full z-50 mt-1.5 min-w-52 rounded-xl bg-white p-1 shadow-lg ring-1 ring-zinc-200">
+          <button
+            type="button"
+            onClick={onClear}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm font-semibold transition",
+              filtrando
+                ? "text-zinc-500 hover:bg-zinc-50"
+                : "bg-zinc-100 text-zinc-900",
+            )}
+          >
+            Todos los salones
+          </button>
+          <div className="my-1 h-px bg-zinc-100" />
+          {salones.map((s) => {
+            const on = selected.includes(s.id);
+            return (
+              <button
+                key={s.id}
+                type="button"
+                role="checkbox"
+                aria-checked={on}
+                onClick={() => onToggle(s.id)}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
+              >
+                <span
+                  className={cn(
+                    "flex size-4 shrink-0 items-center justify-center rounded border transition",
+                    on
+                      ? "border-amber-500 bg-amber-500 text-white"
+                      : "border-zinc-300",
+                  )}
+                >
+                  {on && <Check className="size-3" strokeWidth={4} />}
+                </span>
+                {s.name}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -415,16 +497,20 @@ function TabsInner({
   const [distribuirOpen, setDistribuirOpen] = useState(false);
 
   // ── Filtro por salón (spec 065) ──
-  // Preferencia por máquina + negocio. Gobierna Mesas, Comandas y Reservas; las
-  // pills cuentan sobre el mismo dato filtrado (FR-006).
+  // Preferencia por máquina + negocio, multi-selección (vacío = todos).
+  // Gobierna Mesas, Comandas y Reservas; las pills cuentan sobre el mismo dato
+  // filtrado (FR-006).
   const salonIds = useMemo(() => salones.map((s) => s.id), [salones]);
-  const [salonId, setSalonId] = useStickyFilter(
-    `operacion_salon_${businessId}`,
-    SALON_ALL,
+  const [salonFilter, toggleSalon, clearSalones] = useStickyMultiFilter(
+    salonFilterStorageKey(businessId),
     salonIds,
   );
-  const salonName =
-    salones.find((s) => s.id === salonId)?.name ?? null;
+  const salonLabel =
+    salonFilter.length === 1
+      ? (salones.find((s) => s.id === salonFilter[0])?.name ?? null)
+      : salonFilter.length > 1
+        ? `${salonFilter.length} salones`
+        : null;
   // Con un solo salón no hay nada que elegir.
   const showSalonFilter =
     salones.length > 1 && SALON_FILTERABLE.includes(active);
@@ -437,21 +523,21 @@ function TabsInner({
       <TabButton
         active={active === "salon"}
         onClick={() => setTab("salon")}
-        count={<Pill promise={salon} compute={(d) => countSalonOcupadas(d.floorPlans, salonId)} />}
+        count={<Pill promise={salon} compute={(d) => countSalonOcupadas(d.floorPlans, salonFilter)} />}
       >
         Mesas
       </TabButton>
       <TabButton
         active={active === "reservas"}
         onClick={() => setTab("reservas")}
-        count={<Pill promise={reservas} compute={(d) => countReservasPorSentar(d.rows, salonId)} />}
+        count={<Pill promise={reservas} compute={(d) => countReservasPorSentar(d.rows, salonFilter)} />}
       >
         Reservas
       </TabButton>
       <TabButton
         active={active === "comandas"}
         onClick={() => setTab("comandas")}
-        count={<Pill promise={comandas} compute={(d) => countComandasActivas(d.initialComandas, salonId)} />}
+        count={<Pill promise={comandas} compute={(d) => countComandasActivas(d.initialComandas, salonFilter)} />}
       >
         Comandas
       </TabButton>
@@ -488,13 +574,16 @@ function TabsInner({
 
   return (
     <div className="fixed inset-x-0 bottom-0 top-14 z-30 flex flex-col bg-zinc-50 transition-[left] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] md:left-[var(--admin-sidebar-width,60px)] md:top-0">
-      <div className="border-border/60 flex items-center justify-between gap-3 overflow-x-auto border-b bg-white/95 px-3 py-3 backdrop-blur sm:px-4">
+      {/* El selector va pegado a las tabs, NO en la esquina derecha: ahí flota
+          la campana de notificaciones del panel admin y se chocaban. */}
+      <div className="border-border/60 flex items-center gap-3 overflow-x-auto border-b bg-white/95 px-3 py-3 pr-16 backdrop-blur sm:px-4 sm:pr-20">
         {tabsBar}
         {showSalonFilter && (
           <SalonSelector
             salones={salones}
-            value={salonId}
-            onChange={setSalonId}
+            selected={salonFilter}
+            onToggle={toggleSalon}
+            onClear={clearSalones}
           />
         )}
       </div>
@@ -508,7 +597,7 @@ function TabsInner({
                 businessId={businessId}
                 currentUserId={currentUserId}
                 role={role}
-                pinnedPlanId={salonId === SALON_ALL ? null : salonId}
+                visiblePlanIds={salonFilter}
                 distribuirOpen={distribuirOpen}
                 onDistribuirOpen={() => setDistribuirOpen(true)}
                 onDistribuirClose={() => setDistribuirOpen(false)}
@@ -537,7 +626,7 @@ function TabsInner({
                 promise={reservas}
                 slug={slug}
                 timezone={timezone}
-                salonId={salonId}
+                salonIds={salonFilter}
               />
             </Suspense>
           </ErrorBoundary>
@@ -549,8 +638,8 @@ function TabsInner({
                 promise={comandas}
                 slug={slug}
                 businessId={businessId}
-                salonId={salonId}
-                salonName={salonName}
+                salonIds={salonFilter}
+                salonLabel={salonLabel}
               />
             </Suspense>
           </ErrorBoundary>

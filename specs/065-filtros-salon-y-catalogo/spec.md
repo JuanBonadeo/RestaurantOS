@@ -20,11 +20,13 @@ Hoy lo único que se filtra por salón es la tab **Mesas**: `SalonDesktop` tiene
 
 ### FR-001 — Un solo selector de salón, arriba, para todo el operativo
 
-La barra de tabs de `/admin/operacion` incorpora un selector de salón: **«Todos los salones»** + una opción por `floor_plan` del negocio.
+La barra de tabs de `/admin/operacion` incorpora un selector de salón con **casilleros**: se pueden marcar **varios salones a la vez** (fast-follow 2026-07-30 — un encargado puede cubrir dos), más un botón **«Todos los salones»** que desmarca todo.
 
+- **Ninguno marcado = todos.** No hay un valor centinela `"all"` que se pueda combinar con salones marcados y quedar en un estado contradictorio: la lista vacía *es* «sin filtro».
+- El selector va **pegado a las tabs, a la izquierda** — en la esquina superior derecha flota la campana de notificaciones del panel admin y se chocaban.
 - Con **un solo salón** el selector no se muestra (no hay nada que elegir).
-- La elección se guarda **por máquina y por negocio** en `localStorage`, clave `operacion_salon_${businessId}`. Sobrevive al refresh y al cierre del navegador; no se sincroniza entre dispositivos (es una preferencia de puesto, no del usuario — misma política que [`useCajaPreferida`](../../src/lib/caja/use-caja-preferida.ts)).
-- Si el salón guardado ya no existe (plano borrado), cae a «Todos» sin romper.
+- La elección se guarda **por máquina y por negocio** en `localStorage`, clave `operacion_salones_${businessId}` (ids separados por coma). Sobrevive al refresh y al cierre del navegador; no se sincroniza entre dispositivos (es una preferencia de puesto, no del usuario — misma política que [`useCajaPreferida`](../../src/lib/caja/use-caja-preferida.ts)).
+- Los salones guardados que ya no existen (plano borrado) se descartan al leer; si no queda ninguno, vuelve a «Todos» sin romper.
 - El valor inicial del render es «Todos» y la preferencia se aplica en un effect: el HTML del server y el del primer render del cliente coinciden (sin mismatch de hidratación).
 
 ### FR-002 — El filtro sólo se muestra donde aplica
@@ -33,19 +35,23 @@ El selector se muestra únicamente con las tabs **Mesas**, **Comandas** y **Rese
 
 Es la parte que evita el peor error posible de esta feature: que alguien cierre caja creyendo que el total en pantalla está filtrado por su salón. Un control que no aplica no se muestra.
 
-### FR-003 — Mesas: el salón elegido queda fijado
+### FR-003 — Mesas: la selección acota qué planos se pueden ver
 
-Con un salón elegido, `SalonDesktop` muestra ese plano y **esconde su selector interno** (deja de haber dos controles para lo mismo). Con «Todos», vuelve a comportarse como hoy: sus propias pestañas de salón, con su preferencia local.
+Un plano es un dibujo: no se pueden mostrar dos a la vez. Así que la selección **acota** en vez de fijar.
 
-### FR-004 — Comandas: sólo las del salón elegido
+- **Un salón elegido** → `SalonDesktop` muestra ese plano y **esconde su selector interno** (deja de haber dos controles para lo mismo).
+- **Dos o más** → el selector interno queda, pero **sólo con los elegidos**: la encargada que cubre dos salones alterna entre esos dos y no ve los demás.
+- **Ninguno** → como hoy: todos los salones, con su preferencia local.
+
+### FR-004 — Comandas: sólo las de los salones elegidos
 
 La tab Comandas filtra por el salón de la mesa de la orden (`comandas → orders → tables → floor_plan_id`).
 
-Las comandas **sin mesa** (delivery, retiro, venta rápida de mostrador) no pertenecen a ningún salón: con un salón elegido **no se muestran**, y el kanban avisa cuántas ocultó — *«N comandas de delivery / mostrador ocultas por el filtro»*. El aviso es el requisito, no un adorno: sin él, filtrar por salón haría desaparecer comandas reales de cocina sin ninguna señal.
+Las comandas **sin mesa** (delivery, retiro, venta rápida de mostrador) no pertenecen a ningún salón: con cualquier salón elegido **no se muestran**, y el kanban avisa cuántas ocultó — *«N comandas de delivery / mostrador ocultas por el filtro»*. El aviso es el requisito, no un adorno: sin él, filtrar por salón haría desaparecer comandas reales de cocina sin ninguna señal.
 
 El filtro «ver solo las fallidas» (spec 35) y el de salón se **componen**: filtrar por salón no puede esconder una alerta de impresión que corresponde a ese salón.
 
-### FR-005 — Reservas: sólo las del salón elegido
+### FR-005 — Reservas: sólo las de los salones elegidos
 
 La tab Reservas filtra por la zona de la reserva: la del `floor_plan` de su mesa, o —si no tiene mesa asignada (modo flexible, [spec 059](../059-reservas-modo-flexible/))— la de su `floor_plan_id` propio. Una reserva sin mesa **y** sin zona queda fuera de cualquier salón puntual y sólo se ve en «Todos».
 
@@ -79,6 +85,8 @@ El campo de búsqueda arranca vacío siempre. Una búsqueda guardada de ayer que
 Es filtrado de **presentación**, en el cliente, sobre datos que el rol ya tiene derecho a ver. Sin migración, sin cambio de RLS, sin recorte de permisos: una encargada filtrada a «Salón A» sigue pudiendo elegir «Todos». Si en el futuro hace falta *asignar* una encargada a un salón (permiso, no preferencia), es otra spec.
 
 ## Decisiones
+
+**D0 — Multi-selección con casilleros, no un `<select>`.** Un `<select>` simple obliga a "o este salón o todos", y el caso real de golf-house es una encargada que cubre dos. Los casilleros además hacen visible el estado combinado sin abrir el menú (el botón dice «2 salones»).
 
 **D1 — Preferencia por máquina, no por usuario.** Se guarda en `localStorage`, no en la DB. El puesto físico es lo que define qué salón mira: la tablet de la terraza mira la terraza, la del comedor mira el comedor, la use quien la use. Es también la política que ya siguen la caja preferida y el plano del mozo, y no requiere migración.
 

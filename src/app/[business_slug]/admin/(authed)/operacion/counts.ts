@@ -1,7 +1,7 @@
 import type { LocalComanda } from "@/lib/admin/local-query";
 import type { AdminOrder } from "@/lib/admin/orders-query";
 import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
-import { SALON_ALL, matchesSalon, reservaSalonId } from "@/lib/admin/salon-filter";
+import { matchesSalon, reservaSalonId } from "@/lib/admin/salon-filter";
 import type { CajaConEstado, RendicionMozoPendiente } from "@/lib/caja/types";
 import type { ReservationStatus } from "@/lib/reservations/types";
 import type { PresentEmployee } from "@/lib/rrhh/clock-actions";
@@ -27,15 +27,16 @@ export function countPedidosNuevos(orders: AdminOrder[]): number {
 /**
  * Comandas activas = todavía no entregadas.
  *
- * `salon` (spec 065) recorta al salón elegido en el shell; las comandas sin
- * mesa (delivery / retiro / mostrador) sólo cuentan en «Todos».
+ * `salones` (spec 065) recorta a los salones elegidos en el shell (lista vacía
+ * = todos); las comandas sin mesa (delivery / retiro / mostrador) sólo cuentan
+ * sin filtro.
  */
 export function countComandasActivas(
   comandas: LocalComanda[],
-  salon: string = SALON_ALL,
+  salones: readonly string[] = [],
 ): number {
   return comandas.filter(
-    (c) => c.status !== "entregado" && matchesSalon(salon, c.floor_plan_id),
+    (c) => c.status !== "entregado" && matchesSalon(salones, c.floor_plan_id),
   ).length;
 }
 
@@ -45,10 +46,10 @@ export function countComandasActivas(
  */
 export function countSalonOcupadas(
   floorPlans: FloorPlanWithTables[],
-  salon: string = SALON_ALL,
+  salones: readonly string[] = [],
 ): number {
   return floorPlans
-    .filter((fp) => matchesSalon(salon, fp.plan.id))
+    .filter((fp) => matchesSalon(salones, fp.plan.id))
     .flatMap((fp) => fp.tables.filter((t) => t.status === "active"))
     .filter((t) => (t.operational_status ?? "libre") !== "libre").length;
 }
@@ -80,10 +81,10 @@ export function countReservasPorSentar(
     tables?: { floor_plans?: { id: string } | null } | null;
     floor_plan_id?: string | null;
   }[],
-  salon: string = SALON_ALL,
+  salones: readonly string[] = [],
 ): number {
   return rows.filter(
-    (r) => r.status === "confirmed" && matchesSalon(salon, reservaSalonId(r)),
+    (r) => r.status === "confirmed" && matchesSalon(salones, reservaSalonId(r)),
   ).length;
 }
 

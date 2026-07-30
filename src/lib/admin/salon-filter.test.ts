@@ -1,21 +1,28 @@
 import { describe, expect, it } from "vitest";
 
-import { SALON_ALL, matchesSalon, reservaSalonId } from "./salon-filter";
+import { matchesSalon, reservaSalonId } from "./salon-filter";
 
 describe("matchesSalon", () => {
-  it("«Todos» deja pasar todo, incluso lo que no tiene salón", () => {
-    expect(matchesSalon(SALON_ALL, "terraza")).toBe(true);
-    expect(matchesSalon(SALON_ALL, null)).toBe(true);
+  it("la selección vacía deja pasar todo, incluso lo que no tiene salón", () => {
+    expect(matchesSalon([], "terraza")).toBe(true);
+    expect(matchesSalon([], null)).toBe(true);
   });
 
-  it("un salón puntual deja pasar sólo lo suyo", () => {
-    expect(matchesSalon("terraza", "terraza")).toBe(true);
-    expect(matchesSalon("terraza", "comedor")).toBe(false);
+  it("un salón elegido deja pasar sólo lo suyo", () => {
+    expect(matchesSalon(["terraza"], "terraza")).toBe(true);
+    expect(matchesSalon(["terraza"], "comedor")).toBe(false);
   });
 
-  it("lo que no pertenece a ningún salón queda fuera de un salón puntual", () => {
+  it("dos salones a la vez dejan pasar los dos", () => {
+    expect(matchesSalon(["terraza", "comedor"], "terraza")).toBe(true);
+    expect(matchesSalon(["terraza", "comedor"], "comedor")).toBe(true);
+    expect(matchesSalon(["terraza", "comedor"], "quincho")).toBe(false);
+  });
+
+  it("lo que no pertenece a ningún salón queda fuera de cualquier selección", () => {
     // Delivery / retiro / mostrador: la comanda no tiene mesa.
-    expect(matchesSalon("terraza", null)).toBe(false);
+    expect(matchesSalon(["terraza"], null)).toBe(false);
+    expect(matchesSalon(["terraza", "comedor"], null)).toBe(false);
   });
 });
 

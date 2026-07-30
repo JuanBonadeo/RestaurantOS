@@ -194,7 +194,7 @@ export function SalonDesktop({
   mozos,
   currentUserId,
   role,
-  pinnedPlanId = null,
+  visiblePlanIds = [],
   distribuirOpen = false,
   onDistribuirOpen,
   onDistribuirClose,
@@ -207,11 +207,11 @@ export function SalonDesktop({
   mozos: MozoMember[];
   currentUserId: string;
   role: BusinessRole;
-  /** Spec 065: salón fijado desde el filtro del operativo. Cuando viene, manda
-   *  sobre la preferencia local y el selector propio se esconde (un solo
-   *  control para lo mismo). `null` = «Todos» → el componente vuelve a elegir
-   *  su salón como siempre. */
-  pinnedPlanId?: string | null;
+  /** Spec 065: salones elegidos en el filtro del operativo. Con uno solo, el
+   *  plano queda fijado ahí y el selector propio se esconde (un solo control
+   *  para lo mismo). Con dos o más, el selector queda pero sólo con esos.
+   *  Vacío = «Todos» → el componente se comporta como siempre. */
+  visiblePlanIds?: string[];
   /** Modo "Distribuir mozos" (paint mode). El sidebar derecho muestra la
    *  paleta de mozos y el plano grande tiñe mesas por mozo + tap asigna. */
   distribuirOpen?: boolean;
@@ -527,24 +527,34 @@ export function SalonDesktop({
     }
   };
 
-  // Spec 065: el salón fijado desde el filtro del operativo manda sobre la
-  // preferencia interna (que se conserva intacta para cuando se vuelve a
-  // «Todos»). Si el id fijado no existe acá, se ignora en vez de romper.
-  const effectivePlanId =
-    pinnedPlanId && floorPlans.some((p) => p.plan.id === pinnedPlanId)
-      ? pinnedPlanId
-      : activePlanId;
+  // Spec 065: los salones elegidos en el filtro del operativo acotan lo que
+  // este panel puede mostrar. Con la lista vacía —o si ninguno de los elegidos
+  // existe acá— se ve todo, en vez de romper con un plano fantasma.
+  const shownPlans = useMemo(() => {
+    if (visiblePlanIds.length === 0) return floorPlans;
+    const only = floorPlans.filter((p) => visiblePlanIds.includes(p.plan.id));
+    return only.length > 0 ? only : floorPlans;
+  }, [floorPlans, visiblePlanIds]);
+
+  // Con un solo salón elegido el plano queda fijado ahí (y el selector propio
+  // desaparece: sería un segundo control para lo mismo). Con dos, el selector
+  // queda pero sólo con esos dos — que es justo el caso de la encargada que
+  // cubre dos salones.
+  const effectivePlanId = shownPlans.some((p) => p.plan.id === activePlanId)
+    ? activePlanId
+    : (shownPlans[0]?.plan.id ?? activePlanId);
 
   // Cambiar de salón desde el filtro del operativo también limpia la selección
   // (igual que `setActivePlan`): una mesa seleccionada de otro salón dejaría el
   // sidebar mostrando algo que ya no está en el plano.
+  const visibleSig = visiblePlanIds.join(",");
   useEffect(() => {
     setSelectedId(null);
-  }, [pinnedPlanId]);
+  }, [visibleSig]);
 
   // Plano + mesas del salón activo.
   const active =
-    floorPlans.find((p) => p.plan.id === effectivePlanId) ?? floorPlans[0];
+    shownPlans.find((p) => p.plan.id === effectivePlanId) ?? shownPlans[0];
   const plan = active?.plan;
 
   // Aplica el overlay optimista (patch parcial) sobre una mesa. Solo pisa las
@@ -976,13 +986,13 @@ export function SalonDesktop({
 
   return (
     <div className="flex h-full flex-col gap-4">
-      {/* ── Selector de salón (solo si hay >1 y el operativo no fijó uno) ── */}
-      {floorPlans.length > 1 && !pinnedPlanId && (
+      {/* ── Selector de salón (solo si queda más de uno para elegir) ── */}
+      {shownPlans.length > 1 && (
         <SegmentedSelector
           ariaLabel="Seleccionar salón"
-          activeId={activePlanId}
+          activeId={effectivePlanId}
           onSelect={setActivePlan}
-          items={floorPlans.map(({ plan, tables }) => ({
+          items={shownPlans.map(({ plan, tables }) => ({
             id: plan.id,
             label: plan.name,
             count: tables.filter((t) => t.status === "active").length,

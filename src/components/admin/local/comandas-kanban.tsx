@@ -46,7 +46,7 @@ import type {
   SwappableProduct,
 } from "@/lib/comandas/actions";
 import type { LocalComanda, LocalStation } from "@/lib/admin/local-query";
-import { SALON_ALL, matchesSalon } from "@/lib/admin/salon-filter";
+import { matchesSalon } from "@/lib/admin/salon-filter";
 import type { ComandaStatus } from "@/lib/comandas/types";
 import {
   Dialog,
@@ -219,8 +219,8 @@ export function ComandasKanban({
   stations: initialStations,
   mozos: initialMozos,
   printAgentLastSeenAt: initialPrintAgentLastSeenAt,
-  salonId = SALON_ALL,
-  salonName = null,
+  salonIds = [],
+  salonLabel = null,
 }: {
   slug: string;
   businessId: string;
@@ -228,10 +228,10 @@ export function ComandasKanban({
   stations: LocalStation[];
   mozos: MozoMember[];
   printAgentLastSeenAt: string | null;
-  /** Spec 065: salón elegido en el operativo. `"all"` = sin filtro. */
-  salonId?: string;
-  /** Nombre del salón elegido, para los textos. `null` con «Todos». */
-  salonName?: string | null;
+  /** Spec 065: salones elegidos en el operativo. Vacío = sin filtro. */
+  salonIds?: string[];
+  /** Etiqueta de la selección, para los textos. `null` sin filtro. */
+  salonLabel?: string | null;
 }) {
   // Filtro "solo fallidas": lo activa la alerta de fallos de impresión (spec
   // 35) para ir directo a las comandas con `print_failed_at`.
@@ -420,22 +420,22 @@ export function ComandasKanban({
   // Todo lo que sigue (saturación por sector, alerta de impresión, kanban) mira
   // `visibles`, no `comandas`: la tab y sus números tienen que contar lo mismo.
   const visibles = useMemo(
-    () => comandas.filter((c) => matchesSalon(salonId, c.floor_plan_id)),
-    [comandas, salonId],
+    () => comandas.filter((c) => matchesSalon(salonIds, c.floor_plan_id)),
+    [comandas, salonIds],
   );
 
   // Comandas activas que el filtro dejó afuera por no tener mesa (delivery,
   // retiro, mostrador). Esconderlas en silencio sería el riesgo real de esta
   // feature: una comanda de cocina que nadie mira. Se avisan.
   const ocultasSinSalon = useMemo(() => {
-    if (salonId === SALON_ALL) return 0;
+    if (salonIds.length === 0) return 0;
     return comandas.filter(
       (c) =>
         c.floor_plan_id === null &&
         c.status !== "entregado" &&
         c.items.some((it) => !it.cancelled_at),
     ).length;
-  }, [comandas, salonId]);
+  }, [comandas, salonIds]);
 
   // Mapas derivados.
   const stationStyleById = useMemo(() => {
@@ -511,10 +511,10 @@ export function ComandasKanban({
       {/* ── Salud del print agent (spec 35) ── */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <AgentHealthPill lastSeenAt={printAgentLastSeenAt} />
-        {salonId !== SALON_ALL && (
+        {salonIds.length > 0 && (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-900 ring-1 ring-amber-200">
             <MapPin className="size-3.5 shrink-0" strokeWidth={2.5} />
-            Solo {salonName ?? "un salón"}
+            Solo {salonLabel ?? "un salón"}
             {ocultasSinSalon > 0 && (
               <span className="font-medium text-amber-800">
                 ·{" "}

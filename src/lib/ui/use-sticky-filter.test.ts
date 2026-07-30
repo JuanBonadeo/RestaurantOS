@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 
-import { useStickyFilter } from "./use-sticky-filter";
+import { useStickyFilter, useStickyMultiFilter } from "./use-sticky-filter";
 
 // Mismo stub que `use-caja-preferida.test.ts`: jsdom no expone `localStorage`
 // en este entorno. Lo que se testea es la política de persistencia, no la
@@ -97,5 +97,55 @@ describe("useStickyFilter", () => {
     const { result } = renderHook(() => useStickyFilter(KEY, "all", SALONES));
     act(() => result.current[1]("terraza"));
     expect(result.current[0]).toBe("terraza");
+  });
+});
+
+const MKEY = "operacion_salones_biz-1";
+
+describe("useStickyMultiFilter", () => {
+  beforeEach(() => {
+    vi.stubGlobal("localStorage", fakeStorage());
+  });
+
+  it("sin preferencia arranca vacío (= todos)", () => {
+    const { result } = renderHook(() => useStickyMultiFilter(MKEY, SALONES));
+    expect(result.current[0]).toEqual([]);
+  });
+
+  it("permite elegir dos a la vez y los persiste", () => {
+    const { result } = renderHook(() => useStickyMultiFilter(MKEY, SALONES));
+    act(() => result.current[1]("terraza"));
+    act(() => result.current[1]("comedor"));
+    expect(result.current[0]).toEqual(["terraza", "comedor"]);
+    expect(localStorage.getItem(MKEY)).toBe("terraza,comedor");
+  });
+
+  it("toggle saca el que ya estaba", () => {
+    localStorage.setItem(MKEY, "terraza,comedor");
+    const { result } = renderHook(() => useStickyMultiFilter(MKEY, SALONES));
+    act(() => result.current[1]("terraza"));
+    expect(result.current[0]).toEqual(["comedor"]);
+  });
+
+  it("quedar sin ninguno borra la clave (vacío = todos)", () => {
+    localStorage.setItem(MKEY, "terraza");
+    const { result } = renderHook(() => useStickyMultiFilter(MKEY, SALONES));
+    act(() => result.current[1]("terraza"));
+    expect(result.current[0]).toEqual([]);
+    expect(localStorage.getItem(MKEY)).toBeNull();
+  });
+
+  it("descarta los guardados que ya no existen", () => {
+    localStorage.setItem(MKEY, "terraza,salon-borrado");
+    const { result } = renderHook(() => useStickyMultiFilter(MKEY, SALONES));
+    expect(result.current[0]).toEqual(["terraza"]);
+  });
+
+  it("clear() vacía y borra la clave", () => {
+    localStorage.setItem(MKEY, "terraza,comedor");
+    const { result } = renderHook(() => useStickyMultiFilter(MKEY, SALONES));
+    act(() => result.current[2]());
+    expect(result.current[0]).toEqual([]);
+    expect(localStorage.getItem(MKEY)).toBeNull();
   });
 });

@@ -8,7 +8,7 @@ import { CalendarPlus, Check, Clock, Pencil, Search, UserPlus, X } from "lucide-
 import { toast } from "sonner";
 
 import { NewReservationModal } from "@/components/admin/local/new-reservation-modal";
-import { SALON_ALL, matchesSalon, reservaSalonId } from "@/lib/admin/salon-filter";
+import { matchesSalon, reservaSalonId } from "@/lib/admin/salon-filter";
 import {
   sentarReserva,
   updateReservationDetails,
@@ -151,7 +151,7 @@ export function AdminDayList({
   timezone,
   floorPlans,
   activeTables,
-  salonId = SALON_ALL,
+  salonIds = [],
   datePath,
 }: {
   slug: string;
@@ -161,10 +161,10 @@ export function AdminDayList({
   floorPlans: Array<{ id: string; name: string }>;
   activeTables: FloorTable[];
   /**
-   * Spec 065: salón elegido en `/admin/operacion`. `"all"` = sin filtro (es lo
+   * Spec 065: salones elegidos en `/admin/operacion`. Vacío = sin filtro (es lo
    * que usa la página `/admin/reservas`, que no tiene selector propio).
    */
-  salonId?: string;
+  salonIds?: string[];
   /**
    * Ruta a la que apunta el navegador de fechas. Default: la página
    * `/admin/reservas`. La tab de Operación pasa `/admin/operacion` para que
@@ -191,8 +191,8 @@ export function AdminDayList({
   // acá para abajo `rows` YA es lo del salón elegido, así que los totales de la
   // cabecera, los chips de estado y la lista no pueden discrepar entre sí.
   const rows = useMemo(
-    () => allRows.filter((r) => matchesSalon(salonId, reservaSalonId(r))),
-    [allRows, salonId],
+    () => allRows.filter((r) => matchesSalon(salonIds, reservaSalonId(r))),
+    [allRows, salonIds],
   );
 
   function setDate(next: string) {

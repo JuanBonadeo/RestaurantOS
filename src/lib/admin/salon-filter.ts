@@ -4,24 +4,31 @@
  * Helpers **puros** compartidos por las tabs de `/admin/operacion` y por los
  * contadores de sus pills, para que la pill y la tab no puedan discrepar: un
  * badge que dice 12 sobre una tab que muestra 3 es peor que no tener badge.
+ *
+ * El filtro es **multi-selección** (fast-follow del 2026-07-30): el encargado
+ * que cubre dos salones los marca a los dos. La lista **vacía** significa
+ * «todos» — no hay un valor centinela; "no filtré nada" y "los quiero todos"
+ * son lo mismo, y así el estado vacío no puede dejar la pantalla en blanco.
  */
 
-/** Valor "sin filtro" del selector de salón. */
-export const SALON_ALL = "all";
+/** Clave de la preferencia, scopeada por negocio. */
+export function salonFilterStorageKey(businessId: string): string {
+  return `operacion_salones_${businessId}`;
+}
 
 /**
- * ¿Esta entidad entra en el salón elegido?
+ * ¿Esta entidad entra en la selección?
  *
  * `entitySalonId === null` = no pertenece a ningún salón (delivery, retiro,
- * mostrador, reserva sin mesa ni zona). Con «Todos» entra; con un salón
- * puntual, no.
+ * mostrador, reserva sin mesa ni zona). Con la selección vacía entra; con
+ * salones elegidos, no.
  */
 export function matchesSalon(
-  filter: string,
+  selected: readonly string[],
   entitySalonId: string | null,
 ): boolean {
-  if (filter === SALON_ALL) return true;
-  return entitySalonId === filter;
+  if (selected.length === 0) return true;
+  return entitySalonId !== null && selected.includes(entitySalonId);
 }
 
 /**

@@ -9,7 +9,6 @@ import {
   countReservasPorSentar,
   countSalonOcupadas,
 } from "./counts";
-import { SALON_ALL } from "@/lib/admin/salon-filter";
 import type { LocalComanda } from "@/lib/admin/local-query";
 import type { AdminOrder } from "@/lib/admin/orders-query";
 import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
@@ -126,9 +125,9 @@ describe("operacion/counts — filtro por salón (spec 065)", () => {
       comandaEn("entregado", "terraza"),
       comandaEn("pendiente", null), // delivery / mostrador
     ];
-    expect(countComandasActivas(comandas, SALON_ALL)).toBe(4);
-    expect(countComandasActivas(comandas, "terraza")).toBe(2);
-    expect(countComandasActivas(comandas, "comedor")).toBe(1);
+    expect(countComandasActivas(comandas, [])).toBe(4);
+    expect(countComandasActivas(comandas, ["terraza"])).toBe(2);
+    expect(countComandasActivas(comandas, ["comedor"])).toBe(1);
   });
 
   it("countComandasActivas: sin filtro explícito se comporta como «Todos»", () => {
@@ -144,9 +143,9 @@ describe("operacion/counts — filtro por salón (spec 065)", () => {
         table("active", "pidio_cuenta"),
       ]),
     ];
-    expect(countSalonOcupadas(floorPlans, SALON_ALL)).toBe(3);
-    expect(countSalonOcupadas(floorPlans, "terraza")).toBe(1);
-    expect(countSalonOcupadas(floorPlans, "comedor")).toBe(2);
+    expect(countSalonOcupadas(floorPlans, [])).toBe(3);
+    expect(countSalonOcupadas(floorPlans, ["terraza"])).toBe(1);
+    expect(countSalonOcupadas(floorPlans, ["comedor"])).toBe(2);
   });
 
   it("countReservasPorSentar: con un salón puntual sólo las de ese salón", () => {
@@ -156,17 +155,47 @@ describe("operacion/counts — filtro por salón (spec 065)", () => {
       reservaEn("seated", "terraza"),
       reservaEn("confirmed", null), // sin mesa ni zona
     ];
-    expect(countReservasPorSentar(rows, SALON_ALL)).toBe(3);
-    expect(countReservasPorSentar(rows, "terraza")).toBe(1);
+    expect(countReservasPorSentar(rows, [])).toBe(3);
+    expect(countReservasPorSentar(rows, ["terraza"])).toBe(1);
   });
 
   it("un salón sin nada da 0, no el total sin filtrar", () => {
     expect(
-      countComandasActivas([comandaEn("pendiente", "terraza")], "quincho"),
+      countComandasActivas([comandaEn("pendiente", "terraza")], ["quincho"]),
     ).toBe(0);
     expect(
-      countReservasPorSentar([reservaEn("confirmed", "terraza")], "quincho"),
+      countReservasPorSentar([reservaEn("confirmed", "terraza")], ["quincho"]),
     ).toBe(0);
-    expect(countSalonOcupadas([planDe("terraza", [table("active", "ocupada")])], "quincho")).toBe(0);
+    expect(countSalonOcupadas([planDe("terraza", [table("active", "ocupada")])], ["quincho"])).toBe(0);
+  });
+});
+
+describe("operacion/counts — dos salones a la vez (fast-follow 065)", () => {
+  it("countComandasActivas suma los dos salones elegidos, no los demás", () => {
+    const comandas = [
+      comandaEn("pendiente", "terraza"),
+      comandaEn("pendiente", "comedor"),
+      comandaEn("pendiente", "quincho"),
+      comandaEn("pendiente", null),
+    ];
+    expect(countComandasActivas(comandas, ["terraza", "comedor"])).toBe(2);
+  });
+
+  it("countSalonOcupadas mira los dos planos elegidos", () => {
+    const floorPlans = [
+      planDe("terraza", [table("active", "ocupada")]),
+      planDe("comedor", [table("active", "pidio_cuenta")]),
+      planDe("quincho", [table("active", "ocupada")]),
+    ];
+    expect(countSalonOcupadas(floorPlans, ["terraza", "comedor"])).toBe(2);
+  });
+
+  it("countReservasPorSentar cuenta las de los dos", () => {
+    const rows = [
+      reservaEn("confirmed", "terraza"),
+      reservaEn("confirmed", "comedor"),
+      reservaEn("confirmed", "quincho"),
+    ];
+    expect(countReservasPorSentar(rows, ["terraza", "comedor"])).toBe(2);
   });
 });
