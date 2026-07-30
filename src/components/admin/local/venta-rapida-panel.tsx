@@ -14,6 +14,7 @@ import {
 import { toast } from "sonner";
 
 import { ProductModal, type AddToCartItem } from "@/components/mozo/product-modal";
+import { ProductResultsList } from "@/components/mozo/product-results-list";
 import { emitInvoice } from "@/lib/afip/emit-invoice";
 import { calculateAdjustment } from "@/lib/billing/adjustment";
 import type { Caja, PaymentMethod, PaymentMethodConfig } from "@/lib/caja/types";
@@ -370,32 +371,35 @@ export function VentaRapidaPanel({
               {isSearching ? "Sin resultados" : "Sin productos"}
             </p>
           </div>
+        ) : isSearching ? (
+          // Buscando: lista de una columna navegable por ↓/↑. Spec 066.
+          <ProductResultsList
+            products={visibleProducts}
+            onPick={setOpenProduct}
+            selectedProductId={searchResults[selectedIndex]?.id}
+          />
         ) : (
+          // Catálogo por categoría: grilla de toque (sin teclado).
           <div className="grid grid-cols-2 gap-2.5">
-            {visibleProducts.map((p, idx) => {
-              const isSelected = isSearching && idx === selectedIndex;
-              return (
-                <button
-                  key={p.id}
-                  onClick={() => setOpenProduct(p)}
-                  className={`flex min-h-[84px] flex-col justify-between rounded-2xl bg-white p-3 text-left transition active:scale-[0.97] active:bg-zinc-50 ${
-                    isSelected ? "ring-2 ring-emerald-500" : "ring-1 ring-zinc-200"
-                  }`}
-                >
-                  <span className="line-clamp-2 text-sm font-semibold text-zinc-900">
-                    {p.name}
+            {visibleProducts.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => setOpenProduct(p)}
+                className="flex min-h-[84px] flex-col justify-between rounded-2xl bg-white p-3 text-left ring-1 ring-zinc-200 transition active:scale-[0.97] active:bg-zinc-50"
+              >
+                <span className="line-clamp-2 text-sm font-semibold text-zinc-900">
+                  {p.name}
+                </span>
+                <div className="mt-2 flex items-center justify-between">
+                  <span className="text-sm font-bold tabular-nums text-emerald-700">
+                    {formatCurrency(p.price_cents)}
                   </span>
-                  <div className="mt-2 flex items-center justify-between">
-                    <span className="text-sm font-bold tabular-nums text-emerald-700">
-                      {formatCurrency(p.price_cents)}
-                    </span>
-                    <span className="rounded-full bg-emerald-50 p-1 text-emerald-700">
-                      <Plus className="h-3.5 w-3.5" />
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
+                  <span className="rounded-full bg-emerald-50 p-1 text-emerald-700">
+                    <Plus className="h-3.5 w-3.5" />
+                  </span>
+                </div>
+              </button>
+            ))}
           </div>
         )}
       </div>

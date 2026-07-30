@@ -30,7 +30,7 @@ import { FloorPlanViewer, type TableExtra } from "@/components/mozo/floor-plan-v
 import { OrderSummaryCard } from "@/components/mozo/order-summary-card";
 import { TransferTableModal } from "@/components/mozo/transfer-table-modal";
 import { TrasladarMesaModal } from "@/components/mozo/trasladar-mesa-modal";
-import { WalkInModal } from "@/components/mozo/walk-in-modal";
+import { WalkInPanel } from "@/components/mozo/walk-in-modal";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -1201,6 +1201,30 @@ export function SalonDesktop({
                 {pedirLoading ? "Cargando catálogo…" : "…"}
               </div>
             )
+          ) : walkInTableId ? (
+            /* Abrir mesa (spec 066): panel, no overlay — el plano queda a la
+               vista y el foco arranca en «Abrir mesa», así el recorrido
+               mesa → Enter → Enter no toca el mouse. */
+            <WalkInPanel
+              tableId={walkInTableId}
+              tableLabel={
+                tables.find((t) => t.id === walkInTableId)?.label ?? "?"
+              }
+              businessSlug={slug}
+              onClose={() => setWalkInTableId(null)}
+              onSuccess={() => {
+                // Optimista: la mesa que abrimos pasa a ocupada en el acto.
+                setOptimisticStatus((prev) => ({
+                  ...prev,
+                  [walkInTableId]: {
+                    operational_status: "ocupada",
+                    opened_at: new Date().toISOString(),
+                  },
+                }));
+                setWalkInTableId(null);
+                router.refresh();
+              }}
+            />
           ) : ventaRapidaOpen ? (
             <VentaRapidaPanel
               slug={slug}
@@ -1298,30 +1322,6 @@ export function SalonDesktop({
       </div>
 
       {/* ── Modales ── */}
-      {walkInTableId && (
-        <WalkInModal
-          tableId={walkInTableId}
-          tableLabel={
-            tables.find((t) => t.id === walkInTableId)?.label ?? "?"
-          }
-          businessSlug={slug}
-          onClose={() => setWalkInTableId(null)}
-          onSuccess={() => {
-            // Optimista: la mesa que abrimos pasa a ocupada en el acto.
-            if (walkInTableId) {
-              setOptimisticStatus((prev) => ({
-                ...prev,
-                [walkInTableId]: {
-                  operational_status: "ocupada",
-                  opened_at: new Date().toISOString(),
-                },
-              }));
-            }
-            setWalkInTableId(null);
-            router.refresh();
-          }}
-        />
-      )}
       {transferTableId && (
         <TransferTableModal
           tableId={transferTableId}
@@ -2127,6 +2127,19 @@ function TableDetail({
   const c = STATUS_COLORS[status];
   const minutes = minutesSince(table.opened_at, now);
 
+  // Foco en la acción primaria al cambiar de mesa (spec 066, FR-007). Va sobre
+  // el contenedor del footer y no sobre el botón porque cuál es el primario
+  // depende del estado; `preventScroll` para que el sidebar no salte.
+  const primaryRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      primaryRef.current
+        ?.querySelector<HTMLButtonElement>("button:not([disabled])")
+        ?.focus({ preventScroll: true });
+    }, 0);
+    return () => clearTimeout(t);
+  }, [table.id]);
+
   const canWalkIn = status === "libre";
   const canTransfer =
     status !== "libre" &&
@@ -2293,8 +2306,12 @@ function TableDetail({
 
       {/* Footer: la acción PRIMARIA grande queda a la vista; el resto
           (secundarias + Anular) va a un menú de tres puntos (⋯), mismo patrón
-          que las cards de comandas para que el panel ocupe poco. */}
-      <div className="border-border/60 border-t p-3">
+          que las cards de comandas para que el panel ocupe poco.
+
+          El botón primario se enfoca al seleccionar la mesa (spec 066, FR-007):
+          click en el plano → Enter → sigue el flujo (walk-in / pedido / cobro)
+          sin volver al mouse. */}
+      <div ref={primaryRef} className="border-border/60 border-t p-3">
         {(() => {
           // Mismo estilo que el drawer del mozo: h-14 rounded-2xl con shadow.
           const primaryClass =

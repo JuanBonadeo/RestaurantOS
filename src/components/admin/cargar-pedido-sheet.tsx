@@ -28,6 +28,7 @@ import { moveSelection, resetSelection } from "@/lib/mozo/product-search";
 import { confirmarPedido } from "@/lib/orders/confirm-order";
 import { cargarPedidoStaff } from "@/lib/orders/staff-order";
 import { ProductModal, type AddToCartItem } from "@/components/mozo/product-modal";
+import { ProductResultsList } from "@/components/mozo/product-results-list";
 
 type CartItem = AddToCartItem & { _key: string };
 type DeliveryType = "pickup" | "delivery";
@@ -423,32 +424,35 @@ export function CargarPedidoSheet({
                     {isSearching ? "Sin resultados" : "Sin productos"}
                   </p>
                 </div>
+              ) : isSearching ? (
+                // Buscando: lista de una columna navegable por ↓/↑. Spec 066.
+                <ProductResultsList
+                  products={catalogProducts}
+                  onPick={setOpenProduct}
+                  selectedProductId={searchResults[selectedIndex]?.id}
+                />
               ) : (
+                // Catálogo por categoría: grilla de toque (sin teclado).
                 <div className="grid grid-cols-2 gap-2.5">
-                  {catalogProducts.map((p, idx) => {
-                    const isSelected = isSearching && idx === selectedIndex;
-                    return (
-                      <button
-                        key={p.id}
-                        onClick={() => setOpenProduct(p)}
-                        className={`flex min-h-[84px] flex-col justify-between rounded-2xl bg-white p-3 text-left transition active:scale-[0.97] active:bg-zinc-50 ${
-                          isSelected ? "ring-2 ring-emerald-500" : "ring-1 ring-zinc-200"
-                        }`}
-                      >
-                        <span className="line-clamp-2 text-sm font-semibold text-zinc-900">
-                          {p.name}
+                  {catalogProducts.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => setOpenProduct(p)}
+                      className="flex min-h-[84px] flex-col justify-between rounded-2xl bg-white p-3 text-left ring-1 ring-zinc-200 transition active:scale-[0.97] active:bg-zinc-50"
+                    >
+                      <span className="line-clamp-2 text-sm font-semibold text-zinc-900">
+                        {p.name}
+                      </span>
+                      <div className="mt-2 flex items-center justify-between">
+                        <span className="text-sm font-bold text-emerald-700 tabular-nums">
+                          {formatCurrency(p.price_cents)}
                         </span>
-                        <div className="mt-2 flex items-center justify-between">
-                          <span className="text-sm font-bold text-emerald-700 tabular-nums">
-                            {formatCurrency(p.price_cents)}
-                          </span>
-                          <span className="rounded-full bg-emerald-50 p-1 text-emerald-700">
-                            <Plus className="h-3.5 w-3.5" />
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  })}
+                        <span className="rounded-full bg-emerald-50 p-1 text-emerald-700">
+                          <Plus className="h-3.5 w-3.5" />
+                        </span>
+                      </div>
+                    </button>
+                  ))}
                 </div>
               )}
             </div>

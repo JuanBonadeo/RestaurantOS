@@ -61,6 +61,7 @@ import { moveSelection, resetSelection } from "@/lib/mozo/product-search";
 import { canCancelItem } from "@/lib/permissions/can";
 
 import { ProductModal, type AddToCartItem } from "@/components/mozo/product-modal";
+import { ProductResultsList } from "@/components/mozo/product-results-list";
 
 type CartProductItem = AddToCartItem & { _key: string; seat_number: number | null };
 type CartDailyMenuItem = {
@@ -1381,8 +1382,9 @@ function SearchResults({
       </div>
     );
   }
+  // Lista de una columna (no grilla): así ↓ baja de verdad. Spec 066, FR-001.
   return (
-    <ProductGrid
+    <ProductResultsList
       products={results}
       onPick={onPick}
       selectedProductId={selectedProductId}
