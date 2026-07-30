@@ -166,3 +166,58 @@ describe("StaffOrderInput (spec 054)", () => {
     }
   });
 });
+
+// ── Spec 069 · precio por ítem sólo por el camino de staff ────────────────
+//
+// La defensa central de la spec es estructural: el override vive en el schema
+// de staff y NO en el público. Si alguien agregara los campos a
+// `OrderProductItem` "para reusar", estos tests se ponen rojos.
+
+describe("precio por ítem (spec 069) — separación público / staff", () => {
+  const staffBase = {
+    business_slug: "golf-jcr",
+    delivery_type: "pickup" as const,
+  };
+  const withOverride = {
+    product_id: UUID,
+    quantity: 1,
+    modifier_ids: [],
+    price_override_cents: 0,
+    price_override_reason: "cortesía",
+  };
+
+  it("el checkout público DESCARTA el precio pisado del payload", () => {
+    const result = CreateOrderInput.safeParse({ ...base, items: [withOverride] });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const item = result.data.items[0];
+      // El comensal no puede fijar el precio ni aunque lo mande: Zod lo strippea
+      // y `persistOrder` cobra el de catálogo.
+      expect("price_override_cents" in item).toBe(false);
+      expect("price_override_reason" in item).toBe(false);
+    }
+  });
+
+  it("el schema de staff SÍ lo conserva", () => {
+    const result = StaffOrderInput.safeParse({
+      ...staffBase,
+      items: [withOverride],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const item = result.data.items[0] as Record<string, unknown>;
+      expect(item.price_override_cents).toBe(0);
+      expect(item.price_override_reason).toBe("cortesía");
+    }
+  });
+
+  it("el schema de staff rechaza precios negativos y no enteros", () => {
+    for (const cents of [-1, 10.5]) {
+      const result = StaffOrderInput.safeParse({
+        ...staffBase,
+        items: [{ ...withOverride, price_override_cents: cents }],
+      });
+      expect(result.success).toBe(false);
+    }
+  });
+});

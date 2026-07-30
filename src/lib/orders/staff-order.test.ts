@@ -40,7 +40,13 @@ function lastPersistCall() {
   const call = persistOrderMock.mock.calls.at(-1) as unknown as [
     CreateOrderInput,
     string | null | undefined,
-    { mozoId?: string | null } | undefined,
+    (
+      | {
+          mozoId?: string | null;
+          priceOverrides?: ({ cents: number; reason: string } | null)[];
+        }
+      | undefined
+    ),
   ];
   return { mapped: call[0], userId: call[1], options: call[2] };
 }
@@ -99,7 +105,7 @@ describe("cargarPedidoStaff — defaults de mostrador y auditoría", () => {
     });
     // Auditoría: se registra quién cargó el pedido (userId + mozoId).
     expect(userId).toBe("u1");
-    expect(options).toEqual({ mozoId: "u1" });
+    expect(options?.mozoId).toBe("u1");
   });
 
   it("respeta el nombre cargado por el encargado", async () => {
@@ -146,5 +152,64 @@ describe("cargarPedidoStaff — defaults de mostrador y auditoría", () => {
     });
     expect(res.ok).toBe(false);
     expect(persistOrderMock).not.toHaveBeenCalled();
+  });
+});
+
+// ── Spec 069 · precio por ítem con motivo ─────────────────────────────────
+
+describe("cargarPedidoStaff — precio por ítem (spec 069)", () => {
+  const conPrecio = (extra: Record<string, unknown>) => ({
+    business_slug: "golf-jcr",
+    delivery_type: "pickup" as const,
+    items: [{ product_id: UUID, quantity: 1, modifier_ids: [], ...extra }],
+  });
+
+  it("el encargado pisa el precio y viaja por opciones, no en los items", async () => {
+    const res = await cargarPedidoStaff(
+      conPrecio({ price_override_cents: 0, price_override_reason: "  cortesía  " }),
+    );
+    expect(res.ok).toBe(true);
+
+    const { mapped, options } = lastPersistCall();
+    // El precio NO viaja dentro del input que persistOrder valida como público.
+    expect(options?.priceOverrides).toEqual([{ cents: 0, reason: "cortesía" }]);
+    expect(mapped.items[0]).not.toHaveProperty("price_override_cents");
+  });
+
+  it("acepta un precio por encima del de lista — no hay tope", async () => {
+    const res = await cargarPedidoStaff(
+      conPrecio({
+        price_override_cents: 9_999_999,
+        price_override_reason: "pescado del día",
+      }),
+    );
+    expect(res.ok).toBe(true);
+  });
+
+  it("el mozo ni llega al precio — este camino ya es encargado/admin", async () => {
+    // `canCargarPedido` corta antes que el gate de precio: en mostrador el mozo
+    // no carga pedidos en absoluto. Su gate de precio se prueba donde sí opera
+    // (`enviarComanda`, mesa) y en `price-override.test.ts`.
+    currentRole = "mozo";
+    const res = await cargarPedidoStaff(
+      conPrecio({ price_override_cents: 500, price_override_reason: "x" }),
+    );
+    expect(res.ok).toBe(false);
+    expect(persistOrderMock).not.toHaveBeenCalled();
+  });
+
+  it("sin motivo se rechaza y no persiste nada", async () => {
+    const res = await cargarPedidoStaff(
+      conPrecio({ price_override_cents: 500, price_override_reason: "   " }),
+    );
+    expect(res.ok).toBe(false);
+    expect(res.ok === false && res.error).toMatch(/motivo/i);
+    expect(persistOrderMock).not.toHaveBeenCalled();
+  });
+
+  it("sin override, priceOverrides queda todo en null", async () => {
+    const res = await cargarPedidoStaff(conPrecio({}));
+    expect(res.ok).toBe(true);
+    expect(lastPersistCall().options?.priceOverrides).toEqual([null]);
   });
 });

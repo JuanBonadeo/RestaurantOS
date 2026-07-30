@@ -53,6 +53,25 @@ export function canMarkRotura(role: BusinessRole): boolean {
 }
 
 /**
+ * Cobrar una línea a un precio distinto al de catálogo, sólo para ese pedido
+ * (spec 069): plato fuera de carta, cortesía a $0, media porción, error de la
+ * carta impresa, precio pactado. Exige motivo, como anular mesa o cancelar
+ * item.
+ *
+ * Encargado/admin. El mozo ve el precio efectivo pero no lo puede tocar: es
+ * plata, y el registro (quién / cuándo / por qué) sólo sirve como control si
+ * la superficie es chica.
+ *
+ * A diferencia de `canApplyDiscount`, acá NO hay tope por porcentaje —
+ * decisión de Juan 2026-07-30. El override puede ser $0 o quedar por encima
+ * del precio de lista (plato fuera de carta más caro). El control es el rol
+ * más el reporte de precios modificados, no un límite duro.
+ */
+export function canOverrideItemPrice(role: BusinessRole): boolean {
+  return role === "admin" || role === "encargado";
+}
+
+/**
  * Reimprimir / reintentar la impresión de una comanda desde operación (spec
  * 35). Gestión del local: encargado/admin. El mozo ya recibe la notificación
  * de fallo (spec 33) pero no dispara la reimpresión en Fase 1.

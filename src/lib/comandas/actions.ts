@@ -26,6 +26,13 @@ import { getBusiness } from "@/lib/tenant";
 
 import { resolveComboUpcharge } from "@/lib/orders/combo-pricing";
 
+import {
+  applyPriceOverride,
+  lineSubtotalCents,
+  validatePriceOverride,
+  type PriceOverride,
+  type PriceOverrideInput,
+} from "./price-override";
 import { createComandasForItems } from "./route-items";
 import { resolveStation } from "./routing";
 import type { ComandaStatus, KitchenItemStatus } from "./types";
@@ -45,6 +52,13 @@ export type EnviarComandaItem = {
   seat_number?: number | null;
   /** _key estable de la línea del carrito. Idempotencia (spec 42). */
   client_line_key?: string | null;
+  /**
+   * Precio a cobrar por esta línea, sólo para este pedido (spec 069). Si viene,
+   * pisa el precio de catálogo y exige `price_override_reason`. Gateado por
+   * `canOverrideItemPrice` — encargado/admin.
+   */
+  price_override_cents?: number | null;
+  price_override_reason?: string | null;
 };
 
 export type EnviarComandaDailyMenuItem = {
@@ -181,6 +195,46 @@ export async function enviarComanda(
   const dailyMenuItems = input.items.filter(
     (i): i is EnviarComandaDailyMenuItem => i.kind === "daily_menu",
   );
+
+  // ── Precio por ítem (spec 069) ───────────────────────────────────────────
+  // Sólo resolvemos el rol si alguna línea trae override: el camino normal no
+  // paga el costo del lookup ni cambia de gate.
+  const priceOverrideByLine = new Map<number, PriceOverride | null>();
+  const anyOverride =
+    productItems.some(
+      (i) => i.price_override_cents != null || i.price_override_reason != null,
+    ) ||
+    // El precio de un combo vive en el padre y sus hijos van a $0; overridearlo
+    // rompe el desglose. Fuera de alcance en fase 1, igual que la edición de
+    // combos del spec 049. Se rechaza por defensa, no sólo ocultando la UI.
+    dailyMenuItems.some(
+      (i) =>
+        (i as unknown as PriceOverrideInput).price_override_cents != null ||
+        (i as unknown as PriceOverrideInput).price_override_reason != null,
+    );
+
+  if (anyOverride) {
+    if (
+      dailyMenuItems.some(
+        (i) =>
+          (i as unknown as PriceOverrideInput).price_override_cents != null ||
+          (i as unknown as PriceOverrideInput).price_override_reason != null,
+      )
+    ) {
+      return actionError(
+        "El precio de un menú del día no se puede cambiar por ítem.",
+      );
+    }
+
+    const ctxResult = await requireMozoActionContext(business.id);
+    if (!ctxResult.ok) return ctxResult;
+
+    for (const [idx, item] of productItems.entries()) {
+      const validation = validatePriceOverride(item, ctxResult.data.role);
+      if (!validation.ok) return actionError(validation.error);
+      priceOverrideByLine.set(idx, validation.override);
+    }
+  }
 
   const productIds = [...new Set(productItems.map((i) => i.product_id))];
   const { data: productRows } = await service
@@ -354,7 +408,7 @@ export async function enviarComanda(
   // gestiona directo. Decisión 2026-05-07.
   const itemsByStation = new Map<string, string[]>();
 
-  for (const inputItem of productItems) {
+  for (const [idx, inputItem] of productItems.entries()) {
     // Idempotencia (spec 42): línea ya enviada → saltear (no reinsertar).
     if (
       inputItem.client_line_key &&
@@ -372,8 +426,19 @@ export async function enviarComanda(
     const modIds = inputItem.modifier_ids ?? [];
     const mods = modIds.map((id) => modifierById.get(id)!);
     const modsTotal = mods.reduce((a, m) => a + Number(m.price_delta_cents), 0);
-    const subtotal =
-      (Number(product.price_cents) + modsTotal) * inputItem.quantity;
+
+    // Spec 069: el precio efectivo puede no ser el de catálogo. `resolvedPrice`
+    // trae `unit_price_cents` (lo que se cobra) + las 4 columnas de auditoría.
+    const resolvedPrice = applyPriceOverride(
+      Number(product.price_cents),
+      priceOverrideByLine.get(idx) ?? null,
+      user.id,
+    );
+    const subtotal = lineSubtotalCents(
+      resolvedPrice.unit_price_cents,
+      modsTotal,
+      inputItem.quantity,
+    );
 
     const seatNum =
       inputItem.seat_number != null && inputItem.seat_number >= 1
@@ -392,7 +457,7 @@ export async function enviarComanda(
         order_id: orderId,
         product_id: product.id,
         product_name: product.name,
-        unit_price_cents: product.price_cents,
+        ...resolvedPrice,
         quantity: inputItem.quantity,
         notes: inputItem.notes ?? null,
         subtotal_cents: subtotal,

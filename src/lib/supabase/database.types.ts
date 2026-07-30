@@ -2046,6 +2046,10 @@ export type Database = {
           notes: string | null
           order_id: string
           parent_order_item_id: string | null
+          price_original_cents: number | null
+          price_override_at: string | null
+          price_override_by: string | null
+          price_override_reason: string | null
           product_id: string | null
           product_name: string
           quantity: number
@@ -2068,6 +2072,10 @@ export type Database = {
           notes?: string | null
           order_id: string
           parent_order_item_id?: string | null
+          price_original_cents?: number | null
+          price_override_at?: string | null
+          price_override_by?: string | null
+          price_override_reason?: string | null
           product_id?: string | null
           product_name: string
           quantity: number
@@ -2090,6 +2098,10 @@ export type Database = {
           notes?: string | null
           order_id?: string
           parent_order_item_id?: string | null
+          price_original_cents?: number | null
+          price_override_at?: string | null
+          price_override_by?: string | null
+          price_override_reason?: string | null
           product_id?: string | null
           product_name?: string
           quantity?: number
@@ -2125,6 +2137,13 @@ export type Database = {
             columns: ["parent_order_item_id"]
             isOneToOne: false
             referencedRelation: "order_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "order_items_price_override_by_fkey"
+            columns: ["price_override_by"]
+            isOneToOne: false
+            referencedRelation: "users"
             referencedColumns: ["id"]
           },
           {

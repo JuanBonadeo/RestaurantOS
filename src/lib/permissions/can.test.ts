@@ -18,6 +18,7 @@ import {
   canMarkRotura,
   canMoveTable,
   canModifyPostEnvio,
+  canOverrideItemPrice,
   canRendirMozo,
   canSeatReservation,
 } from "./can";
@@ -43,6 +44,15 @@ describe("permissions / canCancelItem", () => {
     expect(canCancelItem("admin")).toBe(true);
     expect(canCancelItem("encargado")).toBe(true);
     expect(canCancelItem("mozo")).toBe(false);
+  });
+});
+
+describe("permissions / canOverrideItemPrice", () => {
+  it("admin y encargado pueden, mozo y personal no", () => {
+    expect(canOverrideItemPrice("admin")).toBe(true);
+    expect(canOverrideItemPrice("encargado")).toBe(true);
+    expect(canOverrideItemPrice("mozo")).toBe(false);
+    expect(canOverrideItemPrice("personal")).toBe(false);
   });
 });
 

@@ -32,6 +32,31 @@ const OrderDailyMenuItem = z.object({
 export const OrderItemInput = z.union([OrderProductItem, OrderDailyMenuItem]);
 export type OrderItemInput = z.infer<typeof OrderItemInput>;
 
+/**
+ * Ítem cargado por staff (spec 069): igual al público, más el precio por ítem
+ * que el encargado puede pisar para ese pedido.
+ *
+ * Deliberadamente **separado** de `OrderProductItem` en vez de agregarle los
+ * campos: `OrderProductItem` es el que valida el checkout público y el chatbot.
+ * Si el override viviera ahí, un payload público con `price_override_cents`
+ * pasaría el schema y toda la defensa quedaría colgando de que ningún caller se
+ * olvide de limpiarlo. Con dos schemas, el pedido del comensal no puede
+ * expresar un precio ni aunque quiera.
+ *
+ * El gate de rol y el motivo obligatorio los aplica `validatePriceOverride`
+ * en la action — acá sólo la forma.
+ */
+const StaffOrderProductItem = OrderProductItem.extend({
+  price_override_cents: z.number().int().min(0).nullable().optional(),
+  price_override_reason: z.string().max(300).nullable().optional(),
+});
+
+export const StaffOrderItemInput = z.union([
+  StaffOrderProductItem,
+  OrderDailyMenuItem,
+]);
+export type StaffOrderItemInput = z.infer<typeof StaffOrderItemInput>;
+
 export const CreateOrderInput = z
   .object({
     business_slug: z.string().min(1),
@@ -96,7 +121,7 @@ export const StaffOrderInput = z
     customer_phone: z.string().max(20).optional(),
     delivery_address: z.string().max(200).optional(),
     delivery_notes: z.string().max(500).optional(),
-    items: z.array(OrderItemInput).min(1),
+    items: z.array(StaffOrderItemInput).min(1),
   })
   .superRefine((data, ctx) => {
     if (data.delivery_type === "delivery") {

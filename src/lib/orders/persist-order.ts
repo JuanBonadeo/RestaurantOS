@@ -6,6 +6,11 @@ import { formatCurrency } from "@/lib/currency";
 import { createNotification } from "@/lib/notifications/create";
 import { createPreference } from "@/lib/payments/mercadopago";
 import { validatePromoCode } from "@/lib/promos/validate";
+import {
+  applyPriceOverride,
+  lineSubtotalCents,
+  type PriceOverride,
+} from "@/lib/comandas/price-override";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 import type {
@@ -47,6 +52,17 @@ export async function persistOrder(
      * callers del checkout público lo omiten → `null` (comportamiento idéntico).
      */
     mozoId?: string | null;
+    /**
+     * Precios pisados por línea (spec 069), indexados por posición en
+     * `data.items`. Llega SÓLO por el camino de staff (`cargarPedidoStaff`),
+     * que ya validó rol + motivo con `validatePriceOverride`.
+     *
+     * Va por opciones y no dentro de `data.items` a propósito: el input del
+     * checkout público es el mismo tipo, y así no hay forma de que un payload
+     * del comensal exprese un precio. Si el caller público lo omite (siempre),
+     * el comportamiento es idéntico al de antes de la spec.
+     */
+    priceOverrides?: (PriceOverride | null)[];
   },
 ): Promise<ActionResult<CreateOrderResult>> {
   const supabase = createSupabaseServiceClient();
@@ -253,6 +269,11 @@ export async function persistOrder(
         daily_menu_snapshot: null;
         product_name: string;
         unit_price_cents: number;
+        /** Spec 069 — null salvo que el encargado haya pisado el precio. */
+        price_original_cents: number | null;
+        price_override_at: string | null;
+        price_override_by: string | null;
+        price_override_reason: string | null;
         quantity: number;
         notes: string | null;
         subtotal_cents: number;
@@ -292,7 +313,7 @@ export async function persistOrder(
   // combo no es válida (validación server-side del adicional, spec 29).
   let subtotalCents = 0;
   const lines: OrderLine[] = [];
-  for (const inputItem of data.items) {
+  for (const [itemIdx, inputItem] of data.items.entries()) {
     if (inputItem.kind === "daily_menu") {
       const menu = menuById.get(inputItem.daily_menu_id)!;
 
@@ -380,8 +401,20 @@ export async function persistOrder(
       };
     });
     const modsTotal = modLines.reduce((a, m) => a + m.price_delta_cents, 0);
-    const lineSubtotal =
-      (product.price_cents + modsTotal) * inputItem.quantity;
+
+    // Spec 069: el precio efectivo puede no ser el de catálogo si el encargado
+    // lo pisó al cargar. Sin override (todo el checkout público) esto devuelve
+    // el precio de catálogo y las 4 columnas en null.
+    const resolvedPrice = applyPriceOverride(
+      product.price_cents,
+      options?.priceOverrides?.[itemIdx] ?? null,
+      userId ?? "",
+    );
+    const lineSubtotal = lineSubtotalCents(
+      resolvedPrice.unit_price_cents,
+      modsTotal,
+      inputItem.quantity,
+    );
     subtotalCents += lineSubtotal;
     lines.push({
       kind: "product",
@@ -389,7 +422,7 @@ export async function persistOrder(
       daily_menu_id: null,
       daily_menu_snapshot: null,
       product_name: product.name,
-      unit_price_cents: product.price_cents,
+      ...resolvedPrice,
       quantity: inputItem.quantity,
       notes: inputItem.notes ?? null,
       subtotal_cents: lineSubtotal,
@@ -570,6 +603,16 @@ export async function persistOrder(
         quantity: line.quantity,
         notes: line.notes,
         subtotal_cents: line.subtotal_cents,
+        // Spec 069. Los combos no llevan override (el precio vive en el padre),
+        // así que van en null por el `kind`.
+        ...(line.kind === "product"
+          ? {
+              price_original_cents: line.price_original_cents,
+              price_override_at: line.price_override_at,
+              price_override_by: line.price_override_by,
+              price_override_reason: line.price_override_reason,
+            }
+          : {}),
       })
       .select("id")
       .single();
