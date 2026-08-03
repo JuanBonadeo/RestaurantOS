@@ -33,11 +33,11 @@ Tres fases que pueden entrar por separado: **P1** es lo que hoy tiene cero tecla
 
 ## P3 · Cuenta, cobro y descubribilidad
 
-- [ ] T19 · `cuenta-client.tsx` (modo `embedded`) — zonas líneas → acciones → Cobrar, `Esc` al detalle (FR-017).
-- [ ] T20 · `cobro-form.tsx` — selector de método con flechas + dígitos `1`–`9`, con el número visible en cada método (FR-018). **Toca plata → test primero** del guard: `Enter` en el selector elige y no cobra (FR-020).
-- [ ] T21 · `cobrar-desktop-client.tsx` — `Esc` de dos niveles (método elegido → selector; sin método → cuenta) (FR-019) y `⌘/Ctrl+Enter` que cobra respetando `pending` (FR-020).
-- [ ] T22 · `src/components/admin/local/atajos-help.tsx` **(nuevo)** — panel `?` con los atajos del modo activo, `absolute` dentro del `<aside>`, cierra con `Esc`, más un botón `⌨` en el header (FR-022).
-- [ ] T23 · Chips `kbd` inline en acción primaria del detalle, botón de volver y estado vacío del carrito (FR-021).
+- [x] T19 · `cuenta-client.tsx` (modo `embedded`) — ↑/↓ recorren los controles vía `useArrowFocus`; `Esc` al detalle lo maneja la cadena de modos del `<aside>` (FR-017).
+- [x] T20 · `cobro-form.tsx` — selector de método con flechas + dígitos `1`–`9`, con el número visible en cada método (FR-018). **Toca plata → test primero** del guard: `Enter` en el selector elige y no cobra (FR-020).
+- [x] T21 · El `Esc` de dos niveles y el `⌘/Ctrl+Enter` viven en `cobro-form.tsx`, no en `cobrar-desktop-client.tsx`: el estado `method` es del form, y el `stopPropagation` tiene que salir de ahí para que el `<aside>` no cierre el panel entero (FR-019/020). Además, elegir método ahora **mueve el foco** al botón de confirmar — sin eso el foco se caía al `<body>` y ni Esc ni ⌘Enter llegaban.
+- [x] T22 · `src/components/admin/local/atajos-help.tsx` **(nuevo)** — panel `?` con los atajos del modo activo, `absolute` dentro del `<aside>`, cierra con `Esc`, más un botón `⌨` en el header (FR-022).
+- [x] T23 · Chips `kbd` inline en acción primaria del detalle, botón de volver y estado vacío del carrito (FR-021).
 
 ## Cierre
 

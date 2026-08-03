@@ -8,6 +8,7 @@ import {
   Ban,
   ClipboardList,
   Clock,
+  Keyboard,
   MapPin,
   MoreVertical,
   MoveRight,
@@ -21,6 +22,10 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import {
+  AtajosHelp,
+  type ModoPanel,
+} from "@/components/admin/local/atajos-help";
 import { NuevaReservaPanel } from "@/components/admin/local/nueva-reserva-panel";
 import { ReservationsPanel } from "@/components/admin/local/reservations-panel";
 import { SegmentedSelector } from "@/components/admin/local/segmented-selector";
@@ -1058,23 +1063,49 @@ export function SalonDesktop({
     selectedId,
   ]);
 
+  // ── Panel de atajos (`?`) ──
+  const [atajosOpen, setAtajosOpen] = useState(false);
+  /** Qué modo está mostrando el panel: se listan sus atajos, no todos. */
+  const modoPanel: ModoPanel = cobroTable
+    ? "cobro"
+    : cuentaTable
+      ? "cuenta"
+      : pedirTable
+        ? "pedir"
+        : walkInTableId
+          ? "walkin"
+          : ventaRapidaOpen
+            ? "venta"
+            : selectedId
+              ? "detalle"
+              : "lista";
+
   const handleAsideKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key !== "Escape" && e.key !== "Backspace") return;
+      const el = e.target as HTMLElement;
+      const escribiendo =
+        el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable;
       // Con un modal abierto adentro del panel (alta de producto, asistente del
-      // menú) el Esc es suyo: lo cierra él y el panel no se mueve.
-      if ((e.target as HTMLElement).closest?.("[role='dialog']")) return;
-      if (e.key === "Backspace") {
-        const el = e.target as HTMLElement;
-        const escribiendo =
-          el.tagName === "INPUT" ||
-          el.tagName === "TEXTAREA" ||
-          el.isContentEditable;
-        if (escribiendo) return;
+      // menú) las teclas son suyas: las maneja él y el panel no se mueve.
+      const enDialog = !!el.closest?.("[role='dialog']");
+
+      if (e.key === "?" && !escribiendo && !enDialog) {
+        e.preventDefault();
+        setAtajosOpen(true);
+        return;
       }
+      if (atajosOpen && e.key === "Escape") {
+        e.preventDefault();
+        setAtajosOpen(false);
+        return;
+      }
+
+      if (e.key !== "Escape" && e.key !== "Backspace") return;
+      if (enDialog) return;
+      if (e.key === "Backspace" && escribiendo) return;
       if (cerrarModoActual()) e.preventDefault();
     },
-    [cerrarModoActual],
+    [cerrarModoActual, atajosOpen],
   );
 
   // Extras para el FloorPlanViewer.
@@ -1264,8 +1295,11 @@ export function SalonDesktop({
             detalle. Cobro y pedir son terminales por mesa (excluyentes). */}
         <aside
           onKeyDown={handleAsideKeyDown}
-          className="bg-card ring-border/60 flex min-h-0 flex-col overflow-hidden rounded-2xl ring-1"
+          className="bg-card ring-border/60 relative flex min-h-0 flex-col overflow-hidden rounded-2xl ring-1"
         >
+          {atajosOpen && (
+            <AtajosHelp modo={modoPanel} onClose={() => setAtajosOpen(false)} />
+          )}
           {showNewReservation ? (
             <NuevaReservaPanel
               slug={slug}
@@ -1505,6 +1539,7 @@ export function SalonDesktop({
                   setSelectedId(null);
                   setVentaRapidaOpen(true);
                 }}
+                onAtajos={() => setAtajosOpen(true)}
                 editPlanHref={
                   canAssignMozo(role) && active?.plan.id
                     ? `/${slug}/admin/salones/${active.plan.id}`
@@ -1856,6 +1891,7 @@ function ActiveTablesList({
   onDistribuir,
   canVentaRapida,
   onVentaRapida,
+  onAtajos,
   editPlanHref,
 }: {
   /** Mesas ya agrupadas y ordenadas por `groupTablesForSidebar`. El orden lo
@@ -1875,6 +1911,8 @@ function ActiveTablesList({
   /** Venta de kiosko/barra sin mesa (spec 058). Encargado / admin. */
   canVentaRapida: boolean;
   onVentaRapida: () => void;
+  /** Abre el panel de atajos — el mismo que `?` (spec 075, FR-022). */
+  onAtajos: () => void;
   /** Link al editor del plano del salón activo. Si null, no se muestra. */
   editPlanHref: string | null;
 }) {
@@ -1923,8 +1961,7 @@ function ActiveTablesList({
             {totalActivas} {totalActivas === 1 ? "activa" : "activas"} · {total} totales
           </p>
         </div>
-        {canVentaRapida || canDistribuir || editPlanHref ? (
-          <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
             {canVentaRapida && (
               <button
                 type="button"
@@ -1945,6 +1982,17 @@ function ActiveTablesList({
                 Distribuir mozos
               </button>
             )}
+            {/* El teclado es el camino rápido de este panel; el botón es para
+                descubrirlo con el mouse. Mismo panel que abre `?`. */}
+            <button
+              type="button"
+              onClick={onAtajos}
+              aria-label="Ver atajos de teclado"
+              title="Atajos de teclado (?)"
+              className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2.5 py-1.5 text-[11px] font-semibold text-zinc-600 ring-1 ring-zinc-200 transition hover:bg-zinc-200"
+            >
+              <Keyboard className="size-3" />?
+            </button>
             {editPlanHref && (
               // Icon-only: es la acción menos frecuente de las tres y así las
               // otras dos entran en un solo renglón.
@@ -1957,12 +2005,7 @@ function ActiveTablesList({
                 <Pencil className="size-3" />
               </Link>
             )}
-          </div>
-        ) : (
-          <p className="text-muted-foreground text-[11px]">
-            Tocá una mesa para ver el detalle
-          </p>
-        )}
+        </div>
       </header>
       <div className="flex-1 overflow-y-auto pb-3">
         {total === 0 ? (
@@ -2505,6 +2548,13 @@ function TableDetail({
           // Mismo estilo que el drawer del mozo: h-14 rounded-2xl con shadow.
           const primaryClass =
             "flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 text-base font-semibold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-60";
+          // El primario se enfoca solo al abrir el detalle: el chip cuenta que
+          // con Enter alcanza (spec 075, FR-021).
+          const enterHint = (
+            <kbd className="rounded bg-white/20 px-1.5 py-0.5 text-[10px] font-semibold">
+              ↵
+            </kbd>
+          );
           // Cobrar pasa por el flujo de cuenta (propina/descuento/dividir →
           // cobro), igual que el mozo. Un solo botón primario, naranja.
           const primaryAmberClass =
@@ -2519,6 +2569,7 @@ function TableDetail({
               <button type="button" onClick={onSentarReserva} disabled={pending} className={primaryClass}>
                 <UserCheck className="h-5 w-5" />
                 Sentar reserva
+                {enterHint}
               </button>
             );
           } else if (canWalkIn) {
@@ -2526,6 +2577,7 @@ function TableDetail({
               <button type="button" onClick={onWalkIn} disabled={pending} className={primaryClass}>
                 <UserPlus className="h-5 w-5" />
                 Sentar walk-in
+                {enterHint}
               </button>
             );
           } else if (canShowCuenta && (status === "pidio_cuenta" || hasItems)) {
@@ -2533,6 +2585,7 @@ function TableDetail({
               <button type="button" onClick={onPedirCuenta} disabled={pending} className={primaryAmberClass}>
                 <Receipt className="h-5 w-5" />
                 Cobrar
+                {enterHint}
               </button>
             );
           } else if (canPedir) {
@@ -2540,6 +2593,7 @@ function TableDetail({
               <button type="button" onClick={() => onCargarPedido()} disabled={pending} className={primaryClass}>
                 <ClipboardList className="h-5 w-5" />
                 Cargar pedido
+                {enterHint}
               </button>
             );
           }

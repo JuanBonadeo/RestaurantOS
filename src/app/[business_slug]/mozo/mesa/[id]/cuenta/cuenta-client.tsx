@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Lock, Receipt, Scissors, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
@@ -12,6 +12,7 @@ import {
   limpiarDivision,
 } from "@/lib/billing/cuenta-actions";
 import { sumActiveItems } from "@/lib/billing/totals";
+import { useArrowFocus } from "@/lib/ui/use-arrow-focus";
 import type { CuentaState } from "@/lib/billing/types";
 import { formatCurrency } from "@/lib/currency";
 import { canApplyDiscount, canCancelItem } from "@/lib/permissions/can";
@@ -180,8 +181,16 @@ export function CuentaClient({
   const tramoDescuento =
     role === "mozo" ? "10%" : role === "encargado" ? "25%" : "sin límite";
 
+  // ↑/↓ recorren los controles de la cuenta —líneas, dividir, propina,
+  // descuento, Cobrar— sin cambiar a Tab (spec 075, FR-017). Sólo en el panel
+  // del salón: la versión full-screen del mozo es táctil.
+  const panelRef = useRef<HTMLDivElement>(null);
+  const handleArrows = useArrowFocus(panelRef);
+
   return (
     <div
+      ref={panelRef}
+      onKeyDown={embedded ? handleArrows : undefined}
       className={cn(
         embedded
           ? "flex h-full min-h-0 flex-col"

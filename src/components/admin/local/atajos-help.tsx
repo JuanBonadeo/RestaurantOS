@@ -1,0 +1,151 @@
+"use client";
+
+import { Keyboard, X } from "lucide-react";
+
+/**
+ * Los atajos del panel de la operación, a la vista — spec 075, FR-022.
+ *
+ * Se abre con `?` desde cualquier lado del `<aside>` y muestra **los del modo
+ * activo**: un encargado que está cobrando no necesita leer los del carrito.
+ * Sin esto, todo lo que las specs 055/066/075 construyeron sólo lo sabe usar
+ * quien leyó las specs.
+ *
+ * Se renderiza `absolute` dentro del panel (no `fixed`): igual que el
+ * `ProductModal` en modo embebido, tapa el panel y deja el plano del salón a la
+ * vista.
+ */
+
+export type ModoPanel =
+  | "lista"
+  | "detalle"
+  | "pedir"
+  | "walkin"
+  | "venta"
+  | "cuenta"
+  | "cobro";
+
+type Atajo = { teclas: string[]; que: string };
+
+const COMUNES: Atajo[] = [
+  { teclas: ["↑", "↓"], que: "Moverse. En el borde pasa a la zona de al lado" },
+  { teclas: ["Enter"], que: "Abrir o confirmar lo que está marcado" },
+  { teclas: ["Esc"], que: "Volver un paso atrás" },
+  { teclas: ["?"], que: "Esta ayuda" },
+];
+
+const POR_MODO: Record<ModoPanel, Atajo[]> = {
+  lista: [
+    { teclas: ["Enter"], que: "Abrir la mesa o sentar la reserva marcada" },
+  ],
+  detalle: [
+    { teclas: ["Enter"], que: "La acción grande de la mesa" },
+    { teclas: ["Esc"], que: "Volver a la lista, parado en la misma mesa" },
+  ],
+  pedir: [
+    { teclas: ["A-Z"], que: "Escribir busca, desde donde estés" },
+    {
+      teclas: ["↓"],
+      que: "Del buscador al catálogo, y del catálogo al pedido",
+    },
+    { teclas: ["←", "→"], que: "Cantidad de la línea del pedido" },
+    { teclas: ["1-9"], que: "Fijar la cantidad de la línea" },
+    { teclas: ["Supr"], que: "Quitar la línea" },
+    { teclas: ["⌘", "Enter"], que: "Enviar la comanda" },
+  ],
+  walkin: [
+    { teclas: ["1-9"], que: "Cuánta gente se sienta" },
+    { teclas: ["+", "−"], que: "Una persona más o menos" },
+    { teclas: ["Enter"], que: "Abrir la mesa" },
+  ],
+  venta: [
+    { teclas: ["A-Z"], que: "Escribir busca, desde donde estés" },
+    { teclas: ["←", "→"], que: "Cantidad de la línea" },
+    { teclas: ["Supr"], que: "Quitar la línea" },
+  ],
+  cuenta: [{ teclas: ["Enter"], que: "Pasar a cobrar" }],
+  cobro: [
+    { teclas: ["1-9"], que: "Elegir el método de pago por su número" },
+    { teclas: ["Esc"], que: "Volver a elegir método" },
+    { teclas: ["⌘", "Enter"], que: "Cobrar" },
+  ],
+};
+
+const TITULO: Record<ModoPanel, string> = {
+  lista: "Mesas y reservas",
+  detalle: "Detalle de la mesa",
+  pedir: "Cargar pedido",
+  walkin: "Abrir mesa",
+  venta: "Venta rápida",
+  cuenta: "Cuenta",
+  cobro: "Cobro",
+};
+
+export function AtajosHelp({
+  modo,
+  onClose,
+}: {
+  modo: ModoPanel;
+  onClose: () => void;
+}) {
+  const atajos = [...POR_MODO[modo], ...COMUNES];
+  return (
+    <div
+      className="absolute inset-0 z-50 flex items-end bg-black/40 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Atajos de teclado"
+        onClick={(e) => e.stopPropagation()}
+        className="max-h-full w-full overflow-y-auto rounded-t-3xl bg-white p-4 shadow-2xl"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.14em] text-zinc-500 uppercase">
+              <Keyboard className="size-3.5" />
+              Atajos
+            </p>
+            <h3 className="font-heading text-base font-bold text-zinc-900">
+              {TITULO[modo]}
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Cerrar atajos"
+            className="rounded-full p-1.5 text-zinc-500 transition hover:bg-zinc-100"
+            autoFocus
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+
+        <ul className="mt-3 space-y-1.5">
+          {atajos.map((a) => (
+            <li
+              key={a.teclas.join("+") + a.que}
+              className="flex items-center gap-3 text-sm"
+            >
+              <span className="flex w-24 shrink-0 justify-start gap-1">
+                {a.teclas.map((t) => (
+                  <kbd
+                    key={t}
+                    className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-bold text-zinc-700 ring-1 ring-zinc-200"
+                  >
+                    {t}
+                  </kbd>
+                ))}
+              </span>
+              <span className="min-w-0 flex-1 text-zinc-600">{a.que}</span>
+            </li>
+          ))}
+        </ul>
+
+        <p className="mt-3 text-[11px] text-zinc-400">
+          Tab y Shift+Tab siguen funcionando como siempre.
+        </p>
+      </div>
+    </div>
+  );
+}

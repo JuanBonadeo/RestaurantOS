@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import { CobroForm, type CobroSubmit } from "./cobro-form";
 import type { Caja, PaymentMethodConfig } from "@/lib/caja/types";
@@ -211,5 +212,117 @@ describe("<CobroForm /> — la propina sale de donde corresponda", () => {
     confirm();
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
     expect(onSubmit.mock.calls[0][0].tipCents).toBe(2_000);
+  });
+});
+
+/**
+ * El selector de método por teclado (spec 075, FR-018/019/020). Es un camino
+ * nuevo hacia un botón que mueve plata, así que lo primero que se fija es que
+ * **elegir no cobre**.
+ */
+describe("<CobroForm /> — elegir método con el teclado", () => {
+  const metodos = () =>
+    screen.getAllByRole("button").filter((b) => b.dataset.metodo === "true");
+  const enPaso2 = () =>
+    screen.queryByRole("button", { name: /confirmar/i }) !== null;
+
+  it("un dígito elige el método de esa posición y NO cobra", async () => {
+    const user = userEvent.setup();
+    const { onSubmit } = setup();
+
+    metodos()[0].focus();
+    await user.keyboard("2");
+
+    expect(enPaso2()).toBe(true);
+    expect(screen.getByText("Tarjeta")).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("Enter sobre un método elige y NO cobra", async () => {
+    const user = userEvent.setup();
+    const { onSubmit } = setup();
+
+    metodos()[0].focus();
+    await user.keyboard("{Enter}");
+
+    expect(enPaso2()).toBe(true);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("↓ baja una fila de la grilla y → se mueve de a uno", async () => {
+    const user = userEvent.setup();
+    setup();
+
+    const grilla = metodos();
+    grilla[0].focus();
+    await user.keyboard("{ArrowDown}");
+    expect(grilla[2]).toHaveFocus();
+
+    await user.keyboard("{ArrowRight}");
+    expect(grilla[3]).toHaveFocus();
+  });
+
+  it("un dígito más allá del último método no hace nada", async () => {
+    const user = userEvent.setup();
+    const { onSubmit } = setup({ allowedMethods: ["cash", "card_manual"] });
+
+    metodos()[0].focus();
+    await user.keyboard("9");
+
+    expect(enPaso2()).toBe(false);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("Esc vuelve al selector de método sin cobrar", async () => {
+    const user = userEvent.setup();
+    const { onSubmit } = setup();
+
+    metodos()[0].focus();
+    await user.keyboard("1");
+    expect(enPaso2()).toBe(true);
+
+    await user.keyboard("{Escape}");
+    expect(enPaso2()).toBe(false);
+    expect(metodos().length).toBeGreaterThan(0);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("Esc no se escapa al panel de arriba mientras hay método elegido", async () => {
+    const user = userEvent.setup();
+    const onEscDelPanel = vi.fn();
+    const onSubmit = vi.fn(async (_i: CobroSubmit) => okResult);
+    render(
+      <div onKeyDown={(e) => e.key === "Escape" && onEscDelPanel()}>
+        <CobroForm
+          amountDueCents={10_000}
+          cajas={[CAJA]}
+          cajaId={CAJA.id}
+          methodConfigs={[]}
+          onSubmit={onSubmit}
+        />
+      </div>,
+    );
+
+    screen
+      .getAllByRole("button")
+      .filter((b) => b.dataset.metodo === "true")[0]
+      .focus();
+    await user.keyboard("1");
+    await user.keyboard("{Escape}");
+
+    // El panel no se enteró: ese Esc era del cobro.
+    expect(onEscDelPanel).not.toHaveBeenCalled();
+  });
+
+  it("⌘Enter cobra una sola vez", async () => {
+    const user = userEvent.setup();
+    const { onSubmit } = setup();
+
+    metodos()[0].focus();
+    await user.keyboard("1");
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ method: "cash" });
   });
 });

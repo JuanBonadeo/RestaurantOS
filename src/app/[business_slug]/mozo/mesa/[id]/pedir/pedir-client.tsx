@@ -1141,7 +1141,8 @@ export function MozoPedirClient({
 
           {cart.length === 0 ? (
             <p className="px-3 pb-2.5 pt-1 text-xs text-zinc-500">
-              Todavía no cargaste nada. Buscá arriba y agregá con Enter.
+              Todavía no cargaste nada. Buscá arriba y agregá con Enter; con ↓
+              bajás al catálogo y de ahí a lo cargado.
             </p>
           ) : (
             <ul

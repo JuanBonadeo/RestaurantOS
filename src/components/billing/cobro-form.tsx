@@ -17,6 +17,8 @@ import { calculateAdjustment } from "@/lib/billing/adjustment";
 import { isCashShortPayment } from "@/lib/billing/totals";
 import type { Caja, PaymentMethod, PaymentMethodConfig } from "@/lib/caja/types";
 import { formatCurrency } from "@/lib/currency";
+import { indexFromDigit } from "@/lib/ui/roving";
+import { useRovingList } from "@/lib/ui/use-roving-list";
 import { cn } from "@/lib/utils";
 
 // ============================================================================
@@ -177,6 +179,32 @@ export function CobroForm<T = unknown>({
     return true;
   });
 
+  // Selector de método navegable con flechas (grilla de 2 columnas) — spec 075.
+  const metodoZona = useRovingList<HTMLButtonElement>({
+    length: methods.length,
+    columns: 2,
+  });
+
+  // Elegir método desmonta el selector: sin esto el foco se cae al `<body>` y
+  // el Esc y el ⌘Enter del paso 2 dejan de llegar. Va al botón de confirmar,
+  // que es la acción del paso (mismo criterio que `ProductModal`).
+  const confirmRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!method) return;
+    const t = setTimeout(
+      () => confirmRef.current?.focus({ preventScroll: true }),
+      0,
+    );
+    return () => clearTimeout(t);
+  }, [method]);
+
+  /** Volver al selector dejando el foco en el método que estaba elegido. */
+  const volverAlSelector = () => {
+    const i = methods.findIndex((m) => m.value === method);
+    setMethod(null);
+    setTimeout(() => metodoZona.focusIndex(i < 0 ? 0 : i), 0);
+  };
+
   // Al elegir método, el monto arranca en lo que hay que pagar con su ajuste.
   // Si el usuario ya lo tocó a mano, se respeta.
   useEffect(() => {
@@ -336,8 +364,23 @@ export function CobroForm<T = unknown>({
     return (
       <div className="space-y-3">
         <CajaPicker cajas={cajas} cajaId={cajaId} onChange={onCajaChange} />
-        <div className="grid grid-cols-2 gap-2">
-          {methods.map((m) => {
+        {/* Grilla navegable con flechas y, sobre todo, con dígitos: en la caja
+            en hora pico «efectivo» es apretar 1 (spec 075, FR-018). El número
+            va escrito en cada método para que se aprenda solo.
+
+            Enter acá SÓLO elige — el cobro se dispara desde Confirmar, del
+            paso siguiente (FR-020). */}
+        <div
+          onKeyDown={(e) => {
+            if (metodoZona.handleKeyDown(e)) return;
+            const i = indexFromDigit(e.key, methods.length);
+            if (i === null) return;
+            e.preventDefault();
+            setMethod(methods[i].value);
+          }}
+          className="grid grid-cols-2 gap-2"
+        >
+          {methods.map((m, i) => {
             const adj =
               methodConfigs.find((c) => c.method === m.value)
                 ?.adjustment_percent ?? 0;
@@ -351,12 +394,24 @@ export function CobroForm<T = unknown>({
                 key={m.value}
                 type="button"
                 onClick={() => setMethod(m.value)}
+                data-metodo="true"
+                {...metodoZona.itemProps(i)}
                 className={cn(
-                  "flex flex-col items-start gap-1 rounded-2xl bg-white p-3 text-left ring-1 ring-zinc-200 transition hover:ring-zinc-300 active:scale-[0.98]",
+                  "flex flex-col items-start gap-1 rounded-2xl bg-white p-3 text-left outline-none ring-1 ring-zinc-200 transition hover:ring-zinc-300 active:scale-[0.98]",
+                  "focus-visible:ring-2 focus-visible:ring-zinc-900",
                   touch && "p-4",
                 )}
               >
-                <Icon className={cn("size-4 text-zinc-500", touch && "size-5")} />
+                <div className="flex w-full items-center justify-between gap-2">
+                  <Icon
+                    className={cn("size-4 text-zinc-500", touch && "size-5")}
+                  />
+                  {i < 9 && (
+                    <kbd className="rounded bg-zinc-100 px-1 text-[10px] font-bold text-zinc-500">
+                      {i + 1}
+                    </kbd>
+                  )}
+                </div>
                 <span
                   className={cn(
                     "text-sm font-semibold text-zinc-900",
@@ -389,7 +444,26 @@ export function CobroForm<T = unknown>({
   const MetaIcon = meta.icon;
 
   return (
-    <div className="space-y-4">
+    <div
+      onKeyDown={(e) => {
+        // Esc con un método ya elegido vuelve al selector, no cierra el panel
+        // entero (spec 075, FR-019): el `stopPropagation` corta la cadena de
+        // modos del `<aside>` un nivel más arriba.
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          e.preventDefault();
+          volverAlSelector();
+          return;
+        }
+        // ⌘/Ctrl+Enter cobra desde cualquier campo, con el mismo guard de
+        // `isRegistering` que el botón (FR-020, anti-doble-cobro spec 41/42).
+        if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !confirmDisabled) {
+          e.preventDefault();
+          handleConfirm();
+        }
+      }}
+      className="space-y-4"
+    >
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <MetaIcon className="size-4 text-zinc-500" />
@@ -398,13 +472,16 @@ export function CobroForm<T = unknown>({
         <button
           type="button"
           onClick={() => {
-            setMethod(null);
+            volverAlSelector();
             setHasSetAmount(false);
             onCancel?.();
           }}
           className="text-xs font-semibold text-zinc-500 underline"
         >
           Cambiar
+          <kbd className="ml-1 rounded bg-zinc-100 px-1 text-[10px] font-bold text-zinc-500">
+            Esc
+          </kbd>
         </button>
       </div>
 
@@ -550,6 +627,7 @@ export function CobroForm<T = unknown>({
       )}
 
       <button
+        ref={confirmRef}
         type="button"
         disabled={confirmDisabled}
         onClick={handleConfirm}
