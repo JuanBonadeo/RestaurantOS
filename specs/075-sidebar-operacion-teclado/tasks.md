@@ -21,15 +21,15 @@ Tres fases que pueden entrar por separado: **P1** es lo que hoy tiene cero tecla
 
 ## P2 · Cargar pedido, venta rápida y walk-in
 
-- [ ] T10 · `product-results-list.tsx` — de resaltado virtual (`selectedProductId`) a lista roving con foco real (FR-002/005). Mantener la firma para los tres callers.
-- [ ] T11 · `product-search-box.tsx` · `useProductSearch` — `↓` en el input entra a la lista, `↑` desde el primer resultado vuelve al input con el cursor al final (FR-010/011). El índice virtual queda sólo para el modo táctil.
-- [ ] T12 · `pedir-client.tsx` (rama `embedded`, líneas ~907-1127) — encadenar buscador → resultados/catálogo → carrito → enviar (FR-010).
-- [ ] T13 · `pedir-client.tsx` — línea del carrito operable: `←`/`→` y `−`/`+` cantidad, `Supr` quita, `Enter` abre el editor de precio (FR-012).
-- [ ] T14 · `pedir-client.tsx` · `TabView` — grilla de catálogo navegable en 2-D con `gridNextIndex` (FR-013). Las columnas se leen del layout (2), no se hardcodean en la lógica pura.
-- [ ] T15 · «Escribir vuelve al buscador» (FR-014) — un handler compartido por las zonas de resultados/catálogo/carrito, salteando las teclas que ya tienen significado en la zona.
-- [ ] T16 · `venta-rapida-panel.tsx` — hereda las mismas zonas (buscador → resultados → carrito) + caja/método → Cobrar.
-- [ ] T17 · `walk-in-modal.tsx` · `WalkInPanel` — `↑`/`↓` entre Personas / Nombre / Notas / Abrir mesa + `Esc` al detalle (FR-016), sin tocar `+`/`−`/dígitos ni el Enter que abre.
-- [ ] T18 · Tests de componente (Testing Library + `userEvent.keyboard`): handoff buscador→resultados→carrito y vuelta; `→` sube la cantidad de una línea; una letra desde el carrito vuelve al buscador y la escribe.
+- [x] T10 · `product-results-list.tsx` — de resaltado virtual (`selectedProductId`) a lista roving con foco real (FR-002/005). Mantener la firma para los tres callers.
+- [x] T11 · `product-search-box.tsx` · `useProductSearch` — `↓` en el input entra a la lista, `↑` desde el primer resultado vuelve al input con el cursor al final (FR-010/011). El índice virtual queda sólo para el modo táctil.
+- [x] T12 · `pedir-client.tsx` (rama `embedded`, líneas ~907-1127) — encadenar buscador → resultados/catálogo → carrito → enviar (FR-010).
+- [x] T13 · `lib/mozo/use-cart-zone.ts` **(nuevo)** + test — línea del carrito operable: `←`/`→` y `−`/`+` cantidad, dígito la fija, `Supr` quita, `Enter` abre el editor de precio (FR-012). Lo comparten mesa, venta rápida y cargar pedido.
+- [x] T14 · ~~Grilla 2-D~~ **no hacía falta**: desde la spec 073 el catálogo por categoría usa `ProductResultsList`, que ya es de una sola columna. `gridNextIndex` se escribió, quedó sin consumidor y se sacó junto con sus tests. Lo que sí se hizo: el catálogo y los menús del día son **una sola zona** con los resultados, y se filtra por el mismo criterio que `results` (antes `TabView` mostraba productos que el filtro de la carta online había sacado del índice de teclado).
+- [x] T15 · «Escribir vuelve al buscador» (FR-014) — un handler compartido por las zonas de resultados/catálogo/carrito, salteando las teclas que ya tienen significado en la zona.
+- [x] T16 · `venta-rapida-panel.tsx` — hereda las mismas zonas (buscador → resultados → carrito) + caja/método → Cobrar.
+- [x] T17 · `walk-in-modal.tsx` · `WalkInPanel` — `↑`/`↓` entre Personas / Nombre / Notas / Abrir mesa + `Esc` al detalle (FR-016), sin tocar `+`/`−`/dígitos ni el Enter que abre.
+- [x] T18 · Tests de componente (Testing Library + `userEvent.keyboard`): handoff buscador→resultados→carrito y vuelta; `→` sube la cantidad de una línea; una letra desde el carrito vuelve al buscador y la escribe.
 
 ## P3 · Cuenta, cobro y descubribilidad
 

@@ -26,7 +26,7 @@ Quedó a mitad de camino, y justo la mitad que falta es la que se toca primero e
 
 2. **El carrito está a seis Tabs.** En la carga, el foco vive **siempre** en el `<input>` del buscador y ↑/↓ mueven un resaltado **virtual** sobre los resultados. El pedido en armado —el que la spec 055 puso a la vista justamente para poder controlarlo— sólo se toca con el mouse: corregir una cantidad o sacar una línea obliga a soltar el teclado en medio de la carga.
 
-3. **El catálogo por categoría sigue siendo una grilla ciega.** La spec 073 lo hizo navegable (`browse` entra al mismo índice que los resultados), pero se renderiza en `grid-cols-2` y no hay ←/→: la spec 066 descartó usarlas *porque el foco estaba en el campo de texto*. Es una restricción del modelo de foco viejo, no de la grilla.
+3. **El catálogo y los menús del día no son el mismo recorrido.** La spec 073 metió el catálogo en el índice de teclado, pero los menús del día quedaron afuera y el filtro de la carta online sacaba productos del índice **sin** sacarlos de la pantalla: el resaltado podía caer en algo que no se veía.
 
 4. **Cuenta y cobro no tienen nada.** Ni una flecha, ni Esc, ni atajo para elegir el método de pago ([`cobro-form.tsx`](../../src/components/billing/cobro-form.tsx) pinta los métodos como una grilla de botones que sólo se clickean). Es la parte que **toca plata** y la más lenta del recorrido.
 
@@ -56,7 +56,7 @@ Es la pieza central de la spec: hoy cada panel inventa lo suyo. Se define una ve
 | Tecla | Qué hace |
 |---|---|
 | `↑` / `↓` | Mover dentro de la zona activa. **En el borde pasa a la zona vecina** (no se traba) |
-| `←` / `→` | En grillas: mover de columna. Sobre una línea del carrito: `−` / `+` cantidad |
+| `←` / `→` | Sobre una línea del carrito: `−` / `+` cantidad |
 | `Enter` / `Espacio` | Activar lo que está enfocado |
 | `Esc` | Subir un nivel en la cadena de modos (cobro → cuenta → detalle → lista → deseleccionar) |
 | `Backspace` | Igual que `Esc`, salvo escribiendo en un campo |
@@ -75,7 +75,7 @@ Se adopta **zona activa con foco real**: `↓` desde el buscador **baja** a los 
 
 Consecuencias que se aprovechan:
 
-- Con el foco fuera del campo de texto, `←`/`→` quedan libres → la grilla del catálogo puede navegarse en 2-D y las líneas del carrito pueden cambiar cantidad con `←`/`→`. La restricción que la 066 documentó desaparece con el modelo nuevo.
+- Con el foco fuera del campo de texto, `←`/`→` y `Supr` quedan libres → una línea del carrito se opera parado encima. La restricción que la 066 documentó (no tocar ←/→ para no robarle el cursor a quien tipea) desaparece con el modelo nuevo.
 - Como el foco sale del buscador, hace falta la vuelta barata: **cualquier letra** devuelve el foco al buscador y empieza a escribir. Sin eso, salir de la zona del buscador se sentiría como una trampa.
 - `Tab`/`Shift+Tab` siguen funcionando como salida estándar (accesibilidad): las flechas son el camino rápido, no el único.
 
@@ -83,7 +83,7 @@ Consecuencias que se aprovechan:
 
 ### Contrato compartido
 
-- **FR-001**: DEBE existir una **lógica pura y testeada** de navegación por índice que, además de mover con clamp, informe cuándo el movimiento **sale** de la lista por arriba o por abajo (para el handoff entre zonas), cuándo se mueve en una **grilla de N columnas** (↓ = ±N, ← / → = ±1) y cuándo una tecla es un **dígito** que selecciona la opción N. Extiende lo que ya existe en [`product-search.ts`](../../src/lib/mozo/product-search.ts) (`clampIndex` / `moveSelection` / `resetSelection`) y absorbe `optionIndexFromKey` de [`daily-menu-steps.ts`](../../src/lib/mozo/daily-menu-steps.ts), que hoy vive en el módulo del menú del día pero es genérico.
+- **FR-001**: DEBE existir una **lógica pura y testeada** de navegación por índice que, además de mover con clamp, informe cuándo el movimiento **sale** de la lista por arriba o por abajo (para el handoff entre zonas) y cuándo una tecla es un **dígito** que selecciona la opción N. Extiende lo que ya existe en [`product-search.ts`](../../src/lib/mozo/product-search.ts) (`clampIndex` / `moveSelection` / `resetSelection`) y absorbe `optionIndexFromKey` de [`daily-menu-steps.ts`](../../src/lib/mozo/daily-menu-steps.ts), que hoy vive en el módulo del menú del día pero es genérico.
 
 - **FR-002**: DEBE existir un hook de lista con **foco real** (roving): registra los elementos, mueve el foco, mantiene el activo a la vista con `scrollIntoView({ block: "nearest" })` y expone el handoff hacia la zona anterior/siguiente. Un solo elemento de la lista queda en el orden de tabulación (`tabIndex=0`), el resto `-1`.
 
@@ -115,11 +115,15 @@ Consecuencias que se aprovechan:
 
 - **FR-011**: `↑` desde el primer resultado DEBE devolver el foco al buscador **conservando el texto y dejando el cursor al final** (no seleccionar todo, no limpiar).
 
-- **FR-012**: Sobre una línea del carrito, `→` y `+` DEBEN sumar cantidad, `←` y `−` restar (respetando el rango 1–99 existente), `Supr` DEBE quitar la línea y `Enter` DEBE abrir el editor de precio si el rol lo permite. Es lo que vuelve el carrito operable sin mouse.
+- **FR-012**: Sobre una línea del carrito, `→` y `+` DEBEN sumar cantidad, `←` y `−` restar (respetando el rango 1–99 existente), un dígito `1`–`9` DEBE fijarla, `Supr` DEBE quitar la línea y `Enter` DEBE abrir el editor de precio si el rol lo permite. El elemento que recibe el foco es **la línea entera**, no sus botones.
 
-- **FR-013**: El catálogo por categoría (sin búsqueda) DEBE conservar la grilla de 2 columnas y navegarse en 2-D: `↓`/`↑` mueven de fila, `←`/`→` de columna. La densidad táctil del mozo no se toca.
+  `Backspace` **no** borra la línea: en este panel ya sube un nivel en la cadena de modos (FR-004), y que además borrara plata cargada sería una trampa.
 
-- **FR-014**: Escribiendo una **letra o número imprimible** con el foco en resultados, catálogo o carrito, el foco DEBE volver al buscador y ese carácter DEBE quedar escrito. (No aplica a las teclas que ya tienen significado en la zona: `+`, `−` y dígitos sobre una línea del carrito.)
+- **FR-013**: El catálogo por categoría (sin búsqueda) DEBE ser la misma zona que los resultados, con los menús del día encabezándola: un solo `↓` recorre menús, secciones de categoría y productos sin cortes.
+
+  *Al implementar se verificó que la grilla de 2 columnas que esta spec daba por existente ya no está: la [spec 073](../073-catalogo-como-los-resultados/) unificó el catálogo con `ProductResultsList`, que es de una sola columna. No hay navegación 2-D que hacer — `↓` ya baja de verdad. Por eso `gridNextIndex` se escribió, quedó sin consumidores y se sacó.*
+
+- **FR-014**: Escribiendo una **letra** con el foco en resultados, catálogo o carrito, el foco DEBE volver al buscador y ese carácter DEBE quedar escrito. No aplica a las teclas que ya tienen significado en la zona: `+`, `−` y los dígitos sobre una línea del carrito son cantidad.
 
 - **FR-015**: `⌘/Ctrl+Enter` DEBE seguir enviando la comanda desde cualquier zona del panel, respetando el anti-doble-envío existente (specs [041](../041-mozo-instantaneo/)/[042](../042-enviar-comanda-idempotente/)).
 
@@ -153,7 +157,7 @@ Consecuencias que se aprovechan:
 
 1. **Recorrido completo sin mouse**, con el rol real (encargado, PC del salón): `↓↓` elegir mesa → `Enter` → `Enter` (abrir) → cargar 3 productos (dos por búsqueda, uno con modificadores) → `↓` al carrito → `→` subir una cantidad → `⌘Enter` enviar → `Esc` → `Enter` (cuenta) → elegir método con un dígito → `⌘Enter` cobrar.
 2. Con el foco en un resultado, apretar una letra vuelve al buscador y la escribe.
-3. En el catálogo por categoría, `↓` baja una fila (no se va al costado) y `←`/`→` cambian de columna.
+3. Con el foco en una línea del carrito, `→` sube la cantidad y `Supr` la quita; una letra devuelve el foco al buscador y la escribe.
 4. `Esc` sube exactamente un nivel de la cadena de modos, y el foco queda en el elemento que había abierto ese modo.
 5. `?` muestra los atajos del modo activo; `Esc` lo cierra.
 6. Ningún camino de teclado cobra dos veces ni envía dos comandas.

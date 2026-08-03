@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useRef } from "react";
 import { Plus } from "lucide-react";
 
 import { formatCurrency } from "@/lib/currency";
@@ -19,39 +18,43 @@ import type { CatalogProduct } from "@/lib/mozo/catalog-query";
  * usuario el cursor del texto que está tipeando. En fila, ↓ baja y listo.
  *
  * La densidad no se pierde: una fila compacta ocupa lo mismo que media grilla
- * de tarjetas de 84px. El catálogo por categoría (sin búsqueda activa) sigue
- * siendo grilla — ahí no hay índice de teclado, es superficie de toque.
+ * de tarjetas de 84px. Desde la spec 073 el catálogo por categoría usa esta
+ * misma lista, así que no queda ninguna grilla de productos: ↓ baja y listo.
+ *
+ * Spec 075: las filas dejaron de tener un resaltado virtual y pasaron a recibir
+ * **foco real** (`itemProps`, que arma el caller con `useRovingList`). Con el
+ * foco parado en la fila, ←/→ y Supr quedan libres para operar sobre ella.
  */
 export function ProductResultsList({
   products,
   onPick,
-  selectedProductId,
+  enterTargetId,
+  itemProps,
 }: {
   products: CatalogProduct[];
   onPick: (p: CatalogProduct) => void;
-  /** Resultado navegado por teclado: se marca y se mantiene a la vista. */
-  selectedProductId?: string;
+  /** El que abre Enter desde el buscador (el primero de la lista): se marca
+   *  para que se vea qué va a pasar antes de apretar. */
+  enterTargetId?: string;
+  /**
+   * Props de teclado de la fila, por id de producto (spec 075). Las da el
+   * caller porque la zona navegable puede abarcar más que esta lista — en la
+   * mesa arranca con los menús del día y sigue con varias secciones de
+   * categoría, todas parte del mismo recorrido de ↓.
+   */
+  itemProps?: (productId: string) => Partial<React.ComponentProps<"button">>;
 }) {
-  const selectedRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    if (selectedProductId) {
-      selectedRef.current?.scrollIntoView({ block: "nearest" });
-    }
-  }, [selectedProductId]);
-
   return (
     <ul className="space-y-1.5">
       {products.map((p) => {
-        const isSelected = p.id === selectedProductId;
+        const isEnterTarget = p.id === enterTargetId;
         return (
           <li key={p.id}>
             <button
-              ref={isSelected ? selectedRef : undefined}
               onClick={() => onPick(p)}
-              aria-current={isSelected ? "true" : undefined}
-              className={`flex w-full items-center gap-2.5 rounded-xl bg-white px-3 py-2.5 text-left transition active:scale-[0.99] active:bg-zinc-50 ${
-                isSelected ? "ring-2 ring-emerald-500" : "ring-1 ring-zinc-200"
+              {...itemProps?.(p.id)}
+              className={`flex w-full items-center gap-2.5 rounded-xl bg-white px-3 py-2.5 text-left outline-none transition active:scale-[0.99] active:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-emerald-500 ${
+                isEnterTarget ? "ring-2 ring-emerald-500" : "ring-1 ring-zinc-200"
               }`}
             >
               <span className="min-w-0 flex-1 truncate text-sm font-semibold text-zinc-900">

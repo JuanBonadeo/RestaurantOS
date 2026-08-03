@@ -13,11 +13,9 @@ import { useRovingList } from "./use-roving-list";
 function DosZonas({
   arriba = ["A1", "A2"],
   abajo = ["B1", "B2"],
-  columns = 1,
 }: {
   arriba?: string[];
   abajo?: string[];
-  columns?: number;
 }) {
   const zonaB = useRovingList<HTMLButtonElement>({
     length: abajo.length,
@@ -25,7 +23,6 @@ function DosZonas({
   });
   const zonaA = useRovingList<HTMLButtonElement>({
     length: arriba.length,
-    columns,
     onExitDown: () => zonaB.focusFirst(),
   });
 
@@ -114,18 +111,6 @@ describe("useRovingList", () => {
 
     await user.keyboard("{Home}");
     expect(screen.getByRole("button", { name: "A1" })).toHaveFocus();
-  });
-
-  it("en grilla, ↓ baja una fila y → se mueve de a uno", async () => {
-    const user = userEvent.setup();
-    render(<DosZonas arriba={["A1", "A2", "A3", "A4"]} columns={2} />);
-
-    await user.click(screen.getByRole("button", { name: "A1" }));
-    await user.keyboard("{ArrowDown}");
-    expect(screen.getByRole("button", { name: "A3" })).toHaveFocus();
-
-    await user.keyboard("{ArrowRight}");
-    expect(screen.getByRole("button", { name: "A4" })).toHaveFocus();
   });
 
   it("solo el elemento activo queda en el orden de tabulación", async () => {

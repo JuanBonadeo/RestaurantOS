@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { clampIndex } from "@/lib/mozo/product-search";
-import { gridNextIndex, nextIndex, type RovingMove } from "./roving";
+import { nextIndex, type RovingMove } from "./roving";
 
 /**
  * Lista navegable con **foco real** (roving tabindex) — spec 075, FR-002/005.
@@ -25,14 +25,11 @@ import { gridNextIndex, nextIndex, type RovingMove } from "./roving";
  */
 export function useRovingList<T extends HTMLElement = HTMLElement>({
   length,
-  columns = 1,
   onExitUp,
   onExitDown,
 }: {
   /** Cuántos elementos tiene la zona ahora mismo. */
   length: number;
-  /** `1` = lista (default). `>1` = grilla: ↓/↑ mueven de fila, ←/→ de a uno. */
-  columns?: number;
   /** El borde de arriba le pasa el foco a la zona anterior. */
   onExitUp?: () => void;
   /** El borde de abajo le pasa el foco a la zona siguiente. */
@@ -111,20 +108,18 @@ export function useRovingList<T extends HTMLElement = HTMLElement>({
       }
 
       const move =
-        columns > 1
-          ? gridNextIndex(index, e.key, length, columns)
-          : e.key === "ArrowDown"
-            ? nextIndex(index, 1, length)
-            : e.key === "ArrowUp"
-              ? nextIndex(index, -1, length)
-              : null;
+        e.key === "ArrowDown"
+          ? nextIndex(index, 1, length)
+          : e.key === "ArrowUp"
+            ? nextIndex(index, -1, length)
+            : null;
       if (!move) return false;
 
       e.preventDefault();
       applyMove(move);
       return true;
     },
-    [columns, index, length, focusIndex, applyMove],
+    [index, length, focusIndex, applyMove],
   );
 
   /**

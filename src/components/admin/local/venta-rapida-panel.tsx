@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import {
   Loader2,
   Minus,
@@ -14,6 +21,9 @@ import { toast } from "sonner";
 
 import { ProductModal, type AddToCartItem } from "@/components/mozo/product-modal";
 import { ProductResultsList } from "@/components/mozo/product-results-list";
+import { useCartZone } from "@/lib/mozo/use-cart-zone";
+import { isPrintableKey } from "@/lib/ui/roving";
+import { useRovingList } from "@/lib/ui/use-roving-list";
 import {
   ProductSearchInput,
   useProductSearch,
@@ -145,12 +155,10 @@ export function VentaRapidaPanel({
     browse: browseProducts,
     storageKey: `venta_rapida_web_${slug}`,
     onPick: (p) => setOpenProduct(p),
+    // ↓ baja el foco al catálogo (spec 075): mismas zonas que la carga de mesa.
+    onEnterResults: () => catalogo.focusFirst(),
   });
-  const {
-    isSearching,
-    results: visibleProducts,
-    selectedProductId,
-  } = searchApi;
+  const { isSearching, results: visibleProducts, enterTargetId } = searchApi;
 
   const subtotal = cart.reduce((a, c) => a + c.line_subtotal_cents, 0);
   const cartCount = cart.reduce((a, c) => a + c.quantity, 0);
@@ -165,9 +173,32 @@ export function VentaRapidaPanel({
   const { adjustmentCents: ajusteCents, finalCents: totalACobrar } =
     calculateAdjustment(subtotal, ajustePercent);
 
-  function focusSearch() {
-    setTimeout(() => searchRef.current?.focus(), 0);
-  }
+  const focusSearch = useCallback(() => {
+    setTimeout(() => {
+      const input = searchRef.current;
+      if (!input) return;
+      input.focus();
+      // Cursor al final: volver del catálogo con ↑ deja seguir tipeando.
+      const end = input.value.length;
+      input.setSelectionRange(end, end);
+    }, 0);
+  }, []);
+
+  /** Escribir desde el catálogo o el carrito vuelve al buscador (FR-014). */
+  const escribirEnBuscador = useCallback(
+    (char: string) => {
+      searchApi.setSearch((s) => s + char);
+      focusSearch();
+    },
+    [searchApi, focusSearch],
+  );
+
+  // ── Zonas del panel (spec 075): buscador → catálogo → carrito → cobrar ──
+  const catalogo = useRovingList<HTMLButtonElement>({
+    length: visibleProducts.length,
+    onExitUp: focusSearch,
+    onExitDown: () => carrito.focusFirst(),
+  });
 
   function addToCart(item: AddToCartItem) {
     setCart((prev) => [...prev, { ...item, _key: crypto.randomUUID() }]);
@@ -197,6 +228,26 @@ export function VentaRapidaPanel({
       }),
     );
   }
+
+  // El carrito, operable con el teclado (spec 075): ←/→ cantidad, dígito la
+  // fija, Supr quita.
+  const carrito = useCartZone({
+    length: cart.length,
+    onExitUp: () => catalogo.focusLast(),
+    onQuantityDelta: (i, delta) => {
+      const line = cart[i];
+      if (line) changeQty(line._key, delta);
+    },
+    onQuantitySet: (i, quantity) => {
+      const line = cart[i];
+      if (line) changeQty(line._key, quantity - line.quantity);
+    },
+    onRemove: (i) => {
+      const line = cart[i];
+      if (line) removeFromCart(line._key);
+    },
+    onType: escribirEnBuscador,
+  });
 
   const canCobrar = cart.length > 0 && !!cajaId && !pending && !initError;
 
@@ -330,7 +381,16 @@ export function VentaRapidaPanel({
       </div>
 
       {/* ─── Productos ─── */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+      <div
+        onKeyDown={(e) => {
+          if (catalogo.handleKeyDown(e)) return;
+          if (isPrintableKey(e)) {
+            e.preventDefault();
+            escribirEnBuscador(e.key);
+          }
+        }}
+        className="min-h-0 flex-1 overflow-y-auto px-3 py-3"
+      >
         {loadingCatalog ? (
           <div className="flex h-40 items-center justify-center text-zinc-400">
             <Loader2 className="h-6 w-6 animate-spin" />
@@ -350,7 +410,11 @@ export function VentaRapidaPanel({
           <ProductResultsList
             products={visibleProducts}
             onPick={setOpenProduct}
-            selectedProductId={selectedProductId}
+            enterTargetId={enterTargetId}
+            itemProps={(id) => {
+              const i = visibleProducts.findIndex((p) => p.id === id);
+              return i < 0 ? {} : catalogo.itemProps(i);
+            }}
           />
         )}
       </div>
@@ -373,11 +437,16 @@ export function VentaRapidaPanel({
             Buscá arriba y agregá con Enter. Se cobra sin abrir mesa.
           </p>
         ) : (
-          <ul className="max-h-32 space-y-1 overflow-y-auto px-3 py-2">
-            {cart.map((c) => (
+          <ul
+            onKeyDown={carrito.handleKeyDown}
+            className="max-h-32 space-y-1 overflow-y-auto px-3 py-2"
+          >
+            {cart.map((c, i) => (
               <li
                 key={c._key}
-                className="flex items-center gap-2 rounded-xl bg-zinc-50 px-2.5 py-1.5 ring-1 ring-zinc-100"
+                {...carrito.itemProps(i)}
+                aria-label={`${c.product_name}, cantidad ${c.quantity}. ← y → cambian la cantidad, Supr la quita.`}
+                className="flex items-center gap-2 rounded-xl bg-zinc-50 px-2.5 py-1.5 outline-none ring-1 ring-zinc-100 focus-visible:ring-2 focus-visible:ring-emerald-500"
               >
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-zinc-900">

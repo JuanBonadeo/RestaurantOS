@@ -1,17 +1,19 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { useState } from "react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { useRef, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ProductSearchInput, useProductSearch } from "./product-search-box";
 import type { CatalogProduct } from "@/lib/mozo/catalog-query";
+import { useRovingList } from "@/lib/ui/use-roving-list";
 
 /**
- * El buscador compartido por los tres flujos de carga (specs 066/068/073).
+ * El buscador compartido por los tres flujos de carga (specs 066/068/073/075).
  *
- * Lo que se cubre acá es la spec 073: **sin escribir nada**, la lista visible
- * es la de la categoría activa (`browse`), ya tiene índice de teclado y el
- * filtro de la carta online la filtra. Antes ↓/↑ sólo funcionaban con una
- * búsqueda activa y los chips del filtro se mostraban sin hacer nada.
+ * Cubre dos cosas: que **sin escribir nada** la lista visible sea la de la
+ * categoría activa y la filtre el filtro de la carta online (spec 073), y que
+ * `↓` baje el **foco** a esa lista en vez de mover un resaltado virtual
+ * (spec 075) — con `↑` en el primero volviendo al buscador sin perder el texto.
  */
 
 function product(
@@ -49,19 +51,31 @@ function Harness({
   // Una clave por montaje (no por render): el filtro de la carta online es
   // sticky en localStorage y si la clave cambiara se resetearía sola.
   const [storageKey] = useState(() => `test_${seq++}`);
+  const searchRef = useRef<HTMLInputElement>(null);
   const api = useProductSearch({
     products: ALL,
     browse,
     storageKey,
     onPick,
+    onEnterResults: () => zona.focusFirst(),
+  });
+  const zona = useRovingList<HTMLButtonElement>({
+    length: api.results.length,
+    onExitUp: () => searchRef.current?.focus(),
   });
   return (
     <div>
-      <ProductSearchInput api={api} />
-      <ul>
-        {api.results.map((p) => (
-          <li key={p.id} data-selected={p.id === api.selectedProductId}>
-            {p.name}
+      <ProductSearchInput api={api} inputRef={searchRef} />
+      <ul onKeyDown={zona.handleKeyDown}>
+        {api.results.map((p, i) => (
+          <li key={p.id}>
+            <button
+              type="button"
+              data-enter-target={p.id === api.enterTargetId}
+              {...zona.itemProps(i)}
+            >
+              {p.name}
+            </button>
           </li>
         ))}
       </ul>
@@ -70,61 +84,81 @@ function Harness({
 }
 
 const input = () => screen.getByLabelText("Buscar producto");
-const rows = () => screen.getAllByRole("listitem").map((li) => li.textContent);
-const selected = () =>
-  screen.getAllByRole("listitem").find((li) => li.dataset.selected === "true")
-    ?.textContent;
+const rows = () =>
+  screen.getAllByRole("listitem").map((li) => li.textContent);
+const enterTarget = () =>
+  screen
+    .getAllByRole("button")
+    .find((b) => b.dataset.enterTarget === "true")?.textContent;
 
-describe("buscador de productos · catálogo sin buscar (spec 073)", () => {
+describe("buscador de productos", () => {
   it("sin escribir nada, la lista visible es la de la categoría activa", () => {
     render(<Harness browse={[MILANESA, NAPOLITANA]} />);
     expect(rows()).toEqual(["Milanesa", "Napolitana"]);
   });
 
-  it("el índice arranca en el primero aunque no haya búsqueda", () => {
+  it("marca el primero como el que abre Enter", () => {
     render(<Harness />);
-    expect(selected()).toBe("Milanesa");
+    expect(enterTarget()).toBe("Milanesa");
   });
 
-  it("↓/↑ mueven sobre el catálogo, sin haber tipeado nada", () => {
+  it("↓ baja el foco a la lista y sigue bajando de a uno", async () => {
+    const user = userEvent.setup();
     render(<Harness />);
-    fireEvent.keyDown(input(), { key: "ArrowDown" });
-    expect(selected()).toBe("Napolitana");
-    fireEvent.keyDown(input(), { key: "ArrowUp" });
-    expect(selected()).toBe("Milanesa");
-    // Clamp: no se pasa del primero.
-    fireEvent.keyDown(input(), { key: "ArrowUp" });
-    expect(selected()).toBe("Milanesa");
+
+    input().focus();
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Milanesa" })).toHaveFocus();
+    });
+
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("button", { name: "Napolitana" })).toHaveFocus();
   });
 
-  it("Enter agrega el seleccionado sin búsqueda activa", () => {
+  it("↑ en el primer resultado vuelve al buscador sin perder lo tipeado", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+
+    input().focus();
+    await user.keyboard("mila");
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Milanesa" })).toHaveFocus();
+    });
+
+    await user.keyboard("{ArrowUp}");
+    expect(input()).toHaveFocus();
+    expect(input()).toHaveValue("mila");
+  });
+
+  it("Enter en el buscador agrega el primero de la lista", async () => {
+    const user = userEvent.setup();
     const onPick = vi.fn();
     render(<Harness onPick={onPick} />);
-    fireEvent.keyDown(input(), { key: "ArrowDown" });
-    fireEvent.keyDown(input(), { key: "Enter" });
-    expect(onPick).toHaveBeenCalledWith(NAPOLITANA);
+
+    input().focus();
+    await user.keyboard("{Enter}");
+    expect(onPick).toHaveBeenCalledWith(MILANESA);
   });
 
-  it("al cambiar de categoría la selección vuelve al primero", () => {
-    const { rerender } = render(<Harness browse={[MILANESA, NAPOLITANA]} />);
-    fireEvent.keyDown(input(), { key: "ArrowDown" });
-    expect(selected()).toBe("Napolitana");
-    rerender(<Harness browse={[EMPANADA, MILANESA]} />);
-    expect(selected()).toBe("Empanada");
-  });
-
-  it("el filtro de la carta online también filtra sin búsqueda", () => {
+  it("el filtro de la carta online también filtra sin búsqueda", async () => {
+    const user = userEvent.setup();
     render(<Harness />);
     expect(rows()).toContain("Empanada");
-    fireEvent.click(screen.getByRole("button", { name: "En la carta online" }));
+
+    await user.click(screen.getByRole("button", { name: "En la carta online" }));
     expect(rows()).toEqual(["Milanesa", "Napolitana"]);
-    fireEvent.click(screen.getByRole("button", { name: "Solo para el local" }));
+
+    await user.click(screen.getByRole("button", { name: "Solo para el local" }));
     expect(rows()).toEqual(["Empanada"]);
   });
 
-  it("escribiendo, busca sobre el catálogo entero y no sobre la categoría", () => {
+  it("escribiendo, busca sobre el catálogo entero y no sobre la categoría", async () => {
+    const user = userEvent.setup();
     render(<Harness browse={[MILANESA]} />);
-    fireEvent.change(input(), { target: { value: "empan" } });
+
+    await user.type(input(), "empan");
     expect(rows()).toEqual(["Empanada"]);
   });
 });

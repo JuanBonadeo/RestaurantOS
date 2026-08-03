@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
 
 import type { CatalogProduct } from "@/lib/mozo/catalog-query";
-import { moveSelection, resetSelection } from "@/lib/mozo/product-search";
 import { useStickyFilter } from "@/lib/ui/use-sticky-filter";
 
 export const CARTA_ALL = "all";
@@ -56,6 +55,7 @@ export function useProductSearch({
   browse,
   storageKey,
   onPick,
+  onEnterResults,
 }: {
   /** Candidatos: lo que ya pasó el filtro duro del server (`is_active` +
    *  `is_available` en `getCatalogForMozo`). El de la carta online es aparte. */
@@ -70,9 +70,16 @@ export function useProductSearch({
    *  distintas. */
   storageKey: string;
   onPick: (product: CatalogProduct) => void;
+  /**
+   * `↓` en el buscador baja el **foco** a la lista de resultados (spec 075).
+   * Antes movía un resaltado virtual y el foco no se iba nunca del `<input>`,
+   * que es lo que dejaba al carrito a seis Tabs de distancia.
+   *
+   * Sin este callback (superficie táctil) `↓` no hace nada.
+   */
+  onEnterResults?: () => void;
 }) {
   const [search, setSearch] = useState("");
-  const [selectedIndex, setSelectedIndex] = useState(0);
 
   const [cartaFilter, setCartaFilter] = useStickyFilter<string>(
     storageKey,
@@ -114,21 +121,15 @@ export function useProductSearch({
     });
   }, [products, browse, search, cartaFilter, isSearching]);
 
-  // Vuelve al primero cuando cambia la lista visible: otra búsqueda, otra
-  // categoría o otro filtro.
-  useEffect(() => {
-    setSelectedIndex(resetSelection(results.length));
-  }, [results]);
-
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowDown") {
+      if (!onEnterResults) return;
       e.preventDefault();
-      setSelectedIndex((i) => moveSelection(i, 1, results.length));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setSelectedIndex((i) => moveSelection(i, -1, results.length));
+      onEnterResults();
     } else if (e.key === "Enter") {
-      const pick = results[selectedIndex];
+      // Enter desde el buscador agrega el primero — el caso de siempre: tipeás
+      // tres letras y el que buscabas ya está arriba. Para cualquier otro, ↓.
+      const pick = results[0];
       if (pick) {
         e.preventDefault();
         onPick(pick);
@@ -141,8 +142,8 @@ export function useProductSearch({
     setSearch,
     isSearching,
     results,
-    selectedIndex,
-    selectedProductId: results[selectedIndex]?.id,
+    /** El que abre Enter desde el buscador; la lista lo marca. */
+    enterTargetId: results[0]?.id,
     handleKeyDown,
     cartaFilter,
     setCartaFilter,

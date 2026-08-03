@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -49,6 +56,9 @@ import {
 import type { ComandaConItems } from "@/lib/comandas/queries";
 import type { ComandaStatus } from "@/lib/comandas/types";
 import { useOptimisticAction } from "@/lib/ui/use-optimistic-action";
+import { useCartZone } from "@/lib/mozo/use-cart-zone";
+import { isPrintableKey } from "@/lib/ui/roving";
+import { useRovingList } from "@/lib/ui/use-roving-list";
 import { formatCurrency } from "@/lib/currency";
 import type {
   CatalogCategory,
@@ -486,12 +496,15 @@ export function MozoPedirClient({
     browse: browseProducts,
     storageKey: `mesa_web_${slug}`,
     onPick: (p) => setOpenProduct(p),
+    // ↓ en el buscador baja el foco al catálogo (spec 075). Sólo en el sidebar:
+    // en la tablet no hay flechas.
+    onEnterResults: embedded ? () => catalogo.focusFirst() : undefined,
   });
   const {
     setSearch,
     isSearching,
     results: searchResults,
-    selectedProductId,
+    enterTargetId,
   } = searchApi;
 
   // Foco al buscador al montar, SOLO en el sidebar embebido: en la tablet del
@@ -503,10 +516,80 @@ export function MozoPedirClient({
   // Tras agregar un ítem o cerrar el modal, devolvemos el foco al buscador para
   // encadenar cargas sin mouse (FR-013), en el próximo tick (modal ya
   // desmontado). No-op fuera del modo embebido.
-  const focusSearch = () => {
+  const focusSearch = useCallback(() => {
     if (!embedded) return;
-    setTimeout(() => searchRef.current?.focus(), 0);
-  };
+    setTimeout(() => {
+      const input = searchRef.current;
+      if (!input) return;
+      input.focus();
+      // Cursor al final: volver del catálogo con ↑ tiene que dejarte seguir
+      // tipeando donde ibas, no seleccionar lo escrito (FR-011).
+      const end = input.value.length;
+      input.setSelectionRange(end, end);
+    }, 0);
+  }, [embedded]);
+
+  // ── Zonas del panel (spec 075) ────────────────────────────────────────────
+  //
+  // buscador → catálogo/resultados → carrito → enviar. ↑/↓ pasan de una a otra
+  // en los bordes, así el panel entero se recorre con una sola tecla.
+  //
+  // Lo que se ve sin búsqueda se filtra por el mismo criterio que `results`
+  // (spec 068: el filtro de la carta online): la zona navegable tiene que ser
+  // exactamente lo que está en pantalla, o Enter abriría otra cosa.
+  const visibleIds = useMemo(
+    () => new Set(searchResults.map((p) => p.id)),
+    [searchResults],
+  );
+  const visibleSections = useMemo(
+    () =>
+      tabSections
+        .map((s) => ({
+          ...s,
+          products: s.products.filter((p) => visibleIds.has(p.id)),
+        }))
+        .filter((s) => s.products.length > 0),
+    [tabSections, visibleIds],
+  );
+
+  // Los menús del día encabezan el catálogo del tab «Más pedidos», así que son
+  // el primer tramo de la zona.
+  const menusVisibles = useMemo(
+    () =>
+      !isSearching && activeTab === TOP_TAB_ID && dailyMenus.length > 0
+        ? dailyMenus
+        : [],
+    [isSearching, activeTab, dailyMenus],
+  );
+  const catalogoIndex = useMemo(() => {
+    const index = new Map<string, number>();
+    for (const m of menusVisibles) index.set(`menu:${m.id}`, index.size);
+    for (const p of searchResults) index.set(`prod:${p.id}`, index.size);
+    return index;
+  }, [menusVisibles, searchResults]);
+
+  const catalogo = useRovingList<HTMLButtonElement>({
+    length: catalogoIndex.size,
+    onExitUp: focusSearch,
+    onExitDown: () => carrito.focusFirst(),
+  });
+  const { itemProps: catalogoItemProps } = catalogo;
+  const catalogoProps = useCallback(
+    (key: string) => {
+      const i = catalogoIndex.get(key);
+      return i === undefined ? {} : catalogoItemProps(i);
+    },
+    [catalogoIndex, catalogoItemProps],
+  );
+
+  /** Escribir una letra desde el catálogo o el carrito vuelve al buscador. */
+  const escribirEnBuscador = useCallback(
+    (char: string) => {
+      setSearch((s) => s + char);
+      focusSearch();
+    },
+    [setSearch, focusSearch],
+  );
 
   // ── Cache del borrador de pedido por mesa (spec 055 fast-follow, #81) ──
   // Si el encargado sale de la carga (p. ej. a editar el precio de una
@@ -599,6 +682,34 @@ export function MozoPedirClient({
   // ── Precio por ítem (spec 069) ──
   const userCanEditPrice = canOverrideItemPrice(role);
   const [priceTargetKey, setPriceTargetKey] = useState<string | null>(null);
+
+  // ── El carrito, operable con el teclado (spec 075, FR-012) ────────────────
+  // Parado en una línea: ←/→ cantidad, un dígito la fija, Supr la quita, Enter
+  // abre el editor de precio. Antes esto era mouse obligado en medio de la
+  // carga.
+  const carrito = useCartZone({
+    length: cart.length,
+    onExitUp: () => catalogo.focusLast(),
+    onQuantityDelta: (i, delta) => {
+      const line = cart[i];
+      if (line) changeQuantity(line._key, delta);
+    },
+    onQuantitySet: (i, quantity) => {
+      const line = cart[i];
+      if (line) changeQuantity(line._key, quantity - line.quantity);
+    },
+    onRemove: (i) => {
+      const line = cart[i];
+      if (line) removeFromCart(line._key);
+    },
+    onActivate: (i) => {
+      const line = cart[i];
+      if (line && userCanEditPrice && !isDailyMenuCart(line)) {
+        setPriceTargetKey(line._key);
+      }
+    },
+    onType: escribirEnBuscador,
+  });
   const priceTarget = cart.find(
     (c): c is CartProductItem => c._key === priceTargetKey && !isDailyMenuCart(c),
   );
@@ -980,25 +1091,37 @@ export function MozoPedirClient({
           )}
         </div>
 
-        {/* Resultados / catálogo (scroll) */}
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+        {/* Resultados / catálogo (scroll) — zona de teclado: ↓ desde el
+            buscador entra acá, ↓ pasado el último ítem sigue al carrito. */}
+        <div
+          onKeyDown={(e) => {
+            if (catalogo.handleKeyDown(e)) return;
+            if (isPrintableKey(e)) {
+              e.preventDefault();
+              escribirEnBuscador(e.key);
+            }
+          }}
+          className="min-h-0 flex-1 overflow-y-auto px-3 py-3"
+        >
           {isSearching ? (
             <SearchResults
               results={searchResults}
               onPick={setOpenProduct}
-              selectedProductId={selectedProductId}
+              enterTargetId={enterTargetId}
+              itemProps={catalogoProps}
             />
           ) : tabs.length === 0 ? (
             <EmptyCatalog />
           ) : (
             <TabView
-              tabSections={tabSections}
+              tabSections={visibleSections}
               activeTabLabel={activeTabLabel}
               isTopTab={activeTab === TOP_TAB_ID}
-              dailyMenus={dailyMenus}
+              dailyMenus={menusVisibles}
               onPick={setOpenProduct}
               onPickDailyMenu={setOpenDailyMenu}
-              selectedProductId={selectedProductId}
+              enterTargetId={enterTargetId}
+              itemProps={catalogoProps}
             />
           )}
         </div>
@@ -1021,11 +1144,16 @@ export function MozoPedirClient({
               Todavía no cargaste nada. Buscá arriba y agregá con Enter.
             </p>
           ) : (
-            <ul className="max-h-44 space-y-1 overflow-y-auto px-3 py-2">
-              {cart.map((c) => (
+            <ul
+              onKeyDown={carrito.handleKeyDown}
+              className="max-h-44 space-y-1 overflow-y-auto px-3 py-2"
+            >
+              {cart.map((c, i) => (
                 <li
                   key={c._key}
-                  className="flex items-center gap-2 rounded-xl bg-zinc-50 px-2.5 py-1.5 ring-1 ring-zinc-100"
+                  {...carrito.itemProps(i)}
+                  aria-label={`${c.product_name}, cantidad ${c.quantity}. ← y → cambian la cantidad, Supr la quita.`}
+                  className="flex items-center gap-2 rounded-xl bg-zinc-50 px-2.5 py-1.5 outline-none ring-1 ring-zinc-100 focus-visible:ring-2 focus-visible:ring-emerald-500"
                 >
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-zinc-900">
@@ -1383,7 +1511,7 @@ function CatalogoStep({
         <SearchResults
           results={searchResults}
           onPick={onPick}
-          selectedProductId={searchApi.selectedProductId}
+          enterTargetId={searchApi.enterTargetId}
         />
       ) : tabsCount === 0 ? (
         <EmptyCatalog />
@@ -1395,22 +1523,29 @@ function CatalogoStep({
           dailyMenus={dailyMenus}
           onPick={onPick}
           onPickDailyMenu={onPickDailyMenu}
-          selectedProductId={searchApi.selectedProductId}
+          enterTargetId={searchApi.enterTargetId}
         />
       )}
     </div>
   );
 }
 
+/** Props de teclado del catálogo, por clave (`menu:<id>` / `prod:<id>`). */
+type CatalogoItemProps = (
+  key: string,
+) => Partial<React.ComponentProps<"button">>;
+
 function SearchResults({
   results,
   onPick,
-  selectedProductId,
+  enterTargetId,
+  itemProps,
 }: {
   results: CatalogProduct[];
   onPick: (p: CatalogProduct) => void;
-  /** Resalta el resultado navegado por teclado (↓/↑). Spec 055. */
-  selectedProductId?: string;
+  /** El que abre Enter desde el buscador (el primero). Spec 055/075. */
+  enterTargetId?: string;
+  itemProps?: CatalogoItemProps;
 }) {
   if (results.length === 0) {
     return (
@@ -1425,7 +1560,8 @@ function SearchResults({
     <ProductResultsList
       products={results}
       onPick={onPick}
-      selectedProductId={selectedProductId}
+      enterTargetId={enterTargetId}
+      itemProps={(id) => itemProps?.(`prod:${id}`) ?? {}}
     />
   );
 }
@@ -1437,7 +1573,8 @@ function TabView({
   dailyMenus,
   onPick,
   onPickDailyMenu,
-  selectedProductId,
+  enterTargetId,
+  itemProps,
 }: {
   tabSections: { category: CatalogCategory | null; products: CatalogProduct[] }[];
   activeTabLabel: string;
@@ -1445,10 +1582,13 @@ function TabView({
   dailyMenus: DailyMenuForMozo[];
   onPick: (p: CatalogProduct) => void;
   onPickDailyMenu: (m: DailyMenuForMozo) => void;
-  /** Producto navegado con ↓/↑ desde el buscador, sin haber tipeado nada
-   *  (spec 073). El índice corre sobre las secciones aplanadas, así que la
-   *  fila marcada puede caer en cualquiera de ellas. */
-  selectedProductId?: string;
+  /** El que abre Enter desde el buscador (spec 073/075): el primero de lo que
+   *  está a la vista, caiga en la sección que caiga. */
+  enterTargetId?: string;
+  /** Foco de teclado, por clave (`menu:<id>` / `prod:<id>`). La zona arranca en
+   *  los menús del día y sigue por las secciones de categoría: un solo ↓ las
+   *  recorre todas. */
+  itemProps?: CatalogoItemProps;
 }) {
   const showDailyMenus = isTopTab && dailyMenus.length > 0;
   const isEmpty = tabSections.length === 0 && !showDailyMenus;
@@ -1479,6 +1619,7 @@ function TabView({
                 key={m.id}
                 menu={m}
                 onClick={() => onPickDailyMenu(m)}
+                itemProps={itemProps?.(`menu:${m.id}`)}
               />
             ))}
           </div>
@@ -1513,7 +1654,8 @@ function TabView({
           <ProductResultsList
             products={section.products}
             onPick={onPick}
-            selectedProductId={selectedProductId}
+            enterTargetId={enterTargetId}
+            itemProps={(id) => itemProps?.(`prod:${id}`) ?? {}}
           />
         </div>
       ))}
@@ -1578,14 +1720,18 @@ function TabNav({
 function DailyMenuCard({
   menu,
   onClick,
+  itemProps,
 }: {
   menu: DailyMenuForMozo;
   onClick: () => void;
+  /** Foco de teclado: los menús del día encabezan la zona del catálogo. */
+  itemProps?: Partial<React.ComponentProps<"button">>;
 }) {
   return (
     <button
       onClick={onClick}
-      className="flex w-full gap-3 overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-50 via-white to-emerald-50 p-3 text-left shadow-sm ring-1 ring-emerald-200 transition active:scale-[0.99]"
+      {...itemProps}
+      className="flex w-full gap-3 overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-50 via-white to-emerald-50 p-3 text-left shadow-sm outline-none ring-1 ring-emerald-200 transition active:scale-[0.99] focus-visible:ring-2 focus-visible:ring-emerald-500"
     >
       {menu.image_url ? (
         // eslint-disable-next-line @next/next/no-img-element

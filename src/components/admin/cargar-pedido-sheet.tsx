@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import {
   ArrowLeft,
   Bike,
@@ -28,6 +35,9 @@ import { ProductModal, type AddToCartItem } from "@/components/mozo/product-moda
 import { CustomerFields } from "@/components/shared/customer-fields";
 import { PriceOverrideModal } from "@/components/shared/price-override-modal";
 import { ProductResultsList } from "@/components/mozo/product-results-list";
+import { useCartZone } from "@/lib/mozo/use-cart-zone";
+import { isPrintableKey } from "@/lib/ui/roving";
+import { useRovingList } from "@/lib/ui/use-roving-list";
 import {
   ProductSearchInput,
   useProductSearch,
@@ -144,12 +154,10 @@ export function CargarPedidoSheet({
     browse: browseProducts,
     storageKey: `cargar_pedido_web_${slug}`,
     onPick: (p) => setOpenProduct(p),
+    // ↓ baja el foco al catálogo (spec 075): mismas zonas que la carga de mesa.
+    onEnterResults: () => catalogo.focusFirst(),
   });
-  const {
-    isSearching,
-    results: catalogProducts,
-    selectedProductId,
-  } = searchApi;
+  const { isSearching, results: catalogProducts, enterTargetId } = searchApi;
 
   // Autofocus al buscador al abrir o al volver a la vista de carga.
   useEffect(() => {
@@ -159,9 +167,53 @@ export function CargarPedidoSheet({
     }
   }, [open, view]);
 
-  function focusSearch() {
-    setTimeout(() => searchRef.current?.focus(), 0);
-  }
+  const focusSearch = useCallback(() => {
+    setTimeout(() => {
+      const input = searchRef.current;
+      if (!input) return;
+      input.focus();
+      // Cursor al final: volver del catálogo con ↑ deja seguir tipeando.
+      const end = input.value.length;
+      input.setSelectionRange(end, end);
+    }, 0);
+  }, []);
+
+  /** Escribir desde el catálogo o el carrito vuelve al buscador (FR-014). */
+  const escribirEnBuscador = useCallback(
+    (char: string) => {
+      searchApi.setSearch((s) => s + char);
+      focusSearch();
+    },
+    [searchApi, focusSearch],
+  );
+
+  // ── Zonas (spec 075): buscador → catálogo → carrito ──
+  const catalogo = useRovingList<HTMLButtonElement>({
+    length: catalogProducts.length,
+    onExitUp: focusSearch,
+    onExitDown: () => carrito.focusFirst(),
+  });
+  const carrito = useCartZone({
+    length: cart.length,
+    onExitUp: () => catalogo.focusLast(),
+    onQuantityDelta: (i, delta) => {
+      const line = cart[i];
+      if (line) changeQty(line._key, delta);
+    },
+    onQuantitySet: (i, quantity) => {
+      const line = cart[i];
+      if (line) changeQty(line._key, quantity - line.quantity);
+    },
+    onRemove: (i) => {
+      const line = cart[i];
+      if (line) removeFromCart(line._key);
+    },
+    onActivate: (i) => {
+      const line = cart[i];
+      if (line) setPriceTargetKey(line._key);
+    },
+    onType: escribirEnBuscador,
+  });
 
   function reset() {
     setView("carga");
@@ -409,7 +461,16 @@ export function CargarPedidoSheet({
             </div>
 
             {/* ─── Resultados (scroll) ─── */}
-            <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+            <div
+              onKeyDown={(e) => {
+                if (catalogo.handleKeyDown(e)) return;
+                if (isPrintableKey(e)) {
+                  e.preventDefault();
+                  escribirEnBuscador(e.key);
+                }
+              }}
+              className="min-h-0 flex-1 overflow-y-auto px-3 py-3"
+            >
               {loadingCatalog ? (
                 <div className="flex h-40 items-center justify-center text-zinc-400">
                   <Loader2 className="h-6 w-6 animate-spin" />
@@ -431,7 +492,11 @@ export function CargarPedidoSheet({
                 <ProductResultsList
                   products={catalogProducts}
                   onPick={setOpenProduct}
-                  selectedProductId={selectedProductId}
+                  enterTargetId={enterTargetId}
+                  itemProps={(id) => {
+                    const i = catalogProducts.findIndex((p) => p.id === id);
+                    return i < 0 ? {} : catalogo.itemProps(i);
+                  }}
                 />
               )}
             </div>
@@ -453,11 +518,16 @@ export function CargarPedidoSheet({
                   Todavía no cargaste nada. Buscá arriba y agregá con Enter.
                 </p>
               ) : (
-                <ul className="max-h-36 space-y-1 overflow-y-auto px-3 py-2">
-                  {cart.map((c) => (
+                <ul
+                  onKeyDown={carrito.handleKeyDown}
+                  className="max-h-36 space-y-1 overflow-y-auto px-3 py-2"
+                >
+                  {cart.map((c, i) => (
                     <li
                       key={c._key}
-                      className="flex items-center gap-2 rounded-xl bg-zinc-50 px-2.5 py-1.5 ring-1 ring-zinc-100"
+                      {...carrito.itemProps(i)}
+                      aria-label={`${c.product_name}, cantidad ${c.quantity}. ← y → cambian la cantidad, Supr la quita.`}
+                      className="flex items-center gap-2 rounded-xl bg-zinc-50 px-2.5 py-1.5 outline-none ring-1 ring-zinc-100 focus-visible:ring-2 focus-visible:ring-emerald-500"
                     >
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-semibold text-zinc-900">

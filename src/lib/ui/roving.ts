@@ -47,42 +47,6 @@ export function nextIndex(
 }
 
 /**
- * Lo mismo sobre una **grilla** de `columns` columnas (el catálogo por
- * categoría): ↓/↑ mueven de fila, ←/→ de a uno.
- *
- * ←/→ se mueven en **orden de lectura**: al final de una fila siguen en la
- * primera celda de la siguiente. Así el catálogo entero se recorre con una sola
- * flecha, que es lo que hace falta cuando no querés pensar en la grilla.
- *
- * Devuelve `null` si la tecla no es una flecha (el caller la deja pasar).
- *
- * Nota: la spec 066 había descartado usar ←/→ acá porque el foco vivía en el
- * `<input>` de búsqueda y se le robaba el cursor al usuario. Con el modelo de
- * zonas de la spec 075 el foco está en la celda, no en el texto: la restricción
- * ya no aplica.
- */
-export function gridNextIndex(
-  index: number,
-  key: string,
-  length: number,
-  columns: number,
-): RovingMove | null {
-  const cols = columns > 0 ? Math.floor(columns) : 1;
-  switch (key) {
-    case "ArrowDown":
-      return nextIndex(index, cols, length);
-    case "ArrowUp":
-      return nextIndex(index, -cols, length);
-    case "ArrowRight":
-      return nextIndex(index, 1, length);
-    case "ArrowLeft":
-      return nextIndex(index, -1, length);
-    default:
-      return null;
-  }
-}
-
-/**
  * `"1"`…`"9"` → índice 0-8 si existe en la lista, si no `null`.
  *
  * Es el atajo de "elegir la opción N" que ya usaban el asistente del menú del

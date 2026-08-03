@@ -1,11 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import {
-  gridNextIndex,
-  indexFromDigit,
-  isPrintableKey,
-  nextIndex,
-} from "./roving";
+import { indexFromDigit, isPrintableKey, nextIndex } from "./roving";
 
 describe("nextIndex", () => {
   it("baja una posición dentro de la lista", () => {
@@ -45,100 +40,6 @@ describe("nextIndex", () => {
 
   it("delta 0: se queda donde está", () => {
     expect(nextIndex(2, 0, 5)).toEqual({ kind: "index", index: 2 });
-  });
-});
-
-describe("gridNextIndex", () => {
-  // Catálogo de 5 productos en 2 columnas:
-  //   0 1
-  //   2 3
-  //   4
-  const LENGTH = 5;
-  const COLS = 2;
-
-  it("↓ baja una fila (no se va al costado)", () => {
-    expect(gridNextIndex(0, "ArrowDown", LENGTH, COLS)).toEqual({
-      kind: "index",
-      index: 2,
-    });
-  });
-
-  it("↑ sube una fila", () => {
-    expect(gridNextIndex(3, "ArrowUp", LENGTH, COLS)).toEqual({
-      kind: "index",
-      index: 1,
-    });
-  });
-
-  it("↑ en la primera fila sale por arriba", () => {
-    expect(gridNextIndex(1, "ArrowUp", LENGTH, COLS)).toEqual({
-      kind: "exit",
-      edge: "up",
-    });
-  });
-
-  it("↓ sin fila debajo sale por abajo (última fila incompleta)", () => {
-    // Desde el 3 (fila 1, col 1) no hay col 1 en la fila 2: sólo está el 4.
-    expect(gridNextIndex(3, "ArrowDown", LENGTH, COLS)).toEqual({
-      kind: "exit",
-      edge: "down",
-    });
-  });
-
-  it("→ y ← se mueven en orden de lectura, cruzando de fila", () => {
-    expect(gridNextIndex(1, "ArrowRight", LENGTH, COLS)).toEqual({
-      kind: "index",
-      index: 2,
-    });
-    expect(gridNextIndex(2, "ArrowLeft", LENGTH, COLS)).toEqual({
-      kind: "index",
-      index: 1,
-    });
-  });
-
-  it("← en el primero sale por arriba y → en el último por abajo", () => {
-    expect(gridNextIndex(0, "ArrowLeft", LENGTH, COLS)).toEqual({
-      kind: "exit",
-      edge: "up",
-    });
-    expect(gridNextIndex(4, "ArrowRight", LENGTH, COLS)).toEqual({
-      kind: "exit",
-      edge: "down",
-    });
-  });
-
-  it("una sola columna: se comporta como lista", () => {
-    expect(gridNextIndex(1, "ArrowDown", 3, 1)).toEqual({
-      kind: "index",
-      index: 2,
-    });
-    expect(gridNextIndex(2, "ArrowDown", 3, 1)).toEqual({
-      kind: "exit",
-      edge: "down",
-    });
-  });
-
-  it("columnas inválidas: no rompe, trata la grilla como lista", () => {
-    expect(gridNextIndex(0, "ArrowDown", 3, 0)).toEqual({
-      kind: "index",
-      index: 1,
-    });
-  });
-
-  it("grilla vacía: transparente en las cuatro direcciones", () => {
-    expect(gridNextIndex(-1, "ArrowDown", 0, COLS)).toEqual({
-      kind: "exit",
-      edge: "down",
-    });
-    expect(gridNextIndex(-1, "ArrowUp", 0, COLS)).toEqual({
-      kind: "exit",
-      edge: "up",
-    });
-  });
-
-  it("tecla que no es flecha: null (el caller la deja pasar)", () => {
-    expect(gridNextIndex(0, "Enter", LENGTH, COLS)).toBeNull();
-    expect(gridNextIndex(0, "a", LENGTH, COLS)).toBeNull();
   });
 });
 

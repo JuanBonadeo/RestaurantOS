@@ -14,6 +14,7 @@ import {
 } from "@/lib/mozo/party-size-keys";
 import { CustomerFields } from "@/components/shared/customer-fields";
 import { sentarWalkIn } from "@/lib/mozo/walk-in";
+import { useArrowFocus } from "@/lib/ui/use-arrow-focus";
 import { useEscapeToClose } from "@/lib/ui/use-escape-to-close";
 
 const FormSchema = z.object({
@@ -104,11 +105,23 @@ function WalkInForm({
     onSuccess();
   };
 
+  // ↑/↓ recorren los controles del panel (spec 075, FR-016): Personas, el
+  // cliente, las notas y «Abrir mesa», sin tener que cambiar a Tab.
+  const formRef = useRef<HTMLFormElement>(null);
+  const handleArrows = useArrowFocus(formRef);
+
   // `+` / `−` / dígitos mueven la cantidad de personas. Escribiendo en Nombre,
   // Teléfono o Notas no aplica: ahí `-` es un guion y `4` es un cuatro. FR-004.
   const handleKeyDown = (e: React.KeyboardEvent<HTMLFormElement>) => {
     const tag = (e.target as HTMLElement).tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA") return;
+    if (tag === "INPUT" || tag === "TEXTAREA") {
+      // En un `<input>` de una línea ↑/↓ no hacen nada útil: se usan para
+      // moverse de campo. En un `<textarea>` sí mueven el cursor y no se tocan
+      // (lo decide `useArrowFocus`).
+      handleArrows(e);
+      return;
+    }
+    if (handleArrows(e)) return;
     const next = partySizeFromKey(e.key, partySize);
     if (next === null) return;
     e.preventDefault();
@@ -119,6 +132,7 @@ function WalkInForm({
 
   return (
     <form
+      ref={formRef}
       className={
         isPanel
           ? "flex min-h-0 flex-1 flex-col"
