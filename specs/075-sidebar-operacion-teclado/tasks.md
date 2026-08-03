@@ -41,7 +41,7 @@ Tres fases que pueden entrar por separado: **P1** es lo que hoy tiene cero tecla
 
 ## Cierre
 
-- [ ] T24 · `pnpm typecheck` + `pnpm test` + `pnpm build` en verde. (⚠️ los `*.integration.test.ts` fallan con `fetch failed` sin el stack local levantado — ruido esperado, ajeno a esta spec.)
-- [ ] T25 · **Verify en vivo con el rol real** (encargado, `/admin/operacion → Mesas`, nunca `service_role`): el recorrido completo del criterio de aceptación 1, sin tocar el mouse. Checklist de qa-brain.
+- [x] T24 · `pnpm typecheck` + `pnpm test` + `pnpm build` en verde. (⚠️ los `*.integration.test.ts` fallan con `fetch failed` sin el stack local levantado — ruido esperado, ajeno a esta spec.)
+- [ ] T25 · **Verify en vivo con el rol real** (encargado, `/admin/operacion → Mesas`, nunca `service_role`): el recorrido completo del criterio de aceptación 1, sin tocar el mouse. Checklist de qa-brain. ⚠️ **Bloqueado para el agente**: el panel está detrás del login y no hay sesión; lo hace Juan.
 - [ ] T26 · Regresión táctil del mozo full-screen (FR-023).
 - [ ] T27 · Cerrar el loop: tildar estas tasks, actualizar la feature page del wiki, comentar + cerrar la issue #112, bumpear el puntero del submódulo en el brain y loggear en `wiki/log.md`.

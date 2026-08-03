@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-03
 
-**Status**: 🚧 En implementación. Issue [#112](https://github.com/gachetponzellini/RestaurantOS-app/issues/112). Milestone: Post-demo · Growth & hardening.
+**Status**: 🚧 Implementada (2026-08-03) en tres fases. `pnpm typecheck` + `pnpm test` (1142 unit, 60 nuevos) + `pnpm build` en verde. **Pendiente:** verify en vivo con el rol real (encargado) — T25/T26: el panel está detrás del login y no se puede probar sin la sesión de Juan. Issue [#112](https://github.com/gachetponzellini/RestaurantOS-app/issues/112). Milestone: Post-demo · Growth & hardening.
 
 **Input**: Pedido de Juan 2026-08-03 — *"que el sidebar de la parte operacional tenga la mejor ux/ui con respecto a la navegabilidad con las teclas, tiene que ser todo manejable con las flechitas, y bien intuitivo"*.
 
