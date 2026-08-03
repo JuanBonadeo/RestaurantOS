@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { useRouter } from "next/navigation";
 import { CalendarPlus, Loader2, MapPin, Minus, Plus, X } from "lucide-react";
 import { toast } from "sonner";
@@ -23,6 +29,9 @@ import {
 } from "@/lib/reservations/booking-actions";
 import { arrivalSlots } from "@/lib/reservations/flexible-availability";
 import { CustomerFields } from "@/components/shared/customer-fields";
+import { partySizeFromKey } from "@/lib/mozo/party-size-keys";
+import { useArrowFocus } from "@/lib/ui/use-arrow-focus";
+import { useRovingList } from "@/lib/ui/use-roving-list";
 import type { FloorTable, ReservationMode, ReservationService } from "@/lib/reservations/types";
 
 type Slot = { slot: string; starts_at: string; ends_at: string };
@@ -275,6 +284,78 @@ export function ReservaForm({
     });
   };
 
+  // ── Teclado (spec 075) ────────────────────────────────────────────────────
+  //
+  // Cargar una reserva es el flujo con más campos del panel y era 100% mouse:
+  // ni el stepper de Personas —que en el walk-in ya se teclea— ni la grilla de
+  // horarios tenían una sola tecla.
+  //
+  // ↑/↓ recorren los controles del formulario; la grilla de horarios y los
+  // chips de servicio son **zonas anidadas** con su propio índice, así que
+  // aportan una sola parada al recorrido y adentro se navegan solas.
+  const formRef = useRef<HTMLFormElement>(null);
+  const { handleKeyDown: handleFormArrows, move: moverEnForm } =
+    useArrowFocus(formRef);
+
+  const serviciosZona = useRovingList<HTMLButtonElement>({
+    length: serviceNames.length,
+    onExitUp: () => moverEnForm(-1),
+    onExitDown: () => moverEnForm(1),
+  });
+
+  const horariosVisibles = useMemo(
+    () => (mode === "flexible" ? shownArrivalOptions : slots.map((s) => s.slot)),
+    [mode, shownArrivalOptions, slots],
+  );
+
+  // La grilla de horarios es `grid-cols-4 sm:grid-cols-5`: la cantidad real de
+  // columnas depende del ancho (no es lo mismo el sidebar de 480px que el sheet
+  // a pantalla completa), así que se mide en vez de hardcodearse — si no, ↓ se
+  // movería de a 4 en una grilla de 5 y saltearía horarios.
+  const horariosRef = useRef<HTMLDivElement>(null);
+  const [horarioCols, setHorarioCols] = useState(4);
+  useEffect(() => {
+    const el = horariosRef.current;
+    if (!el) return;
+    const medir = () => {
+      // Sin layout resuelto (jsdom, o el panel todavía oculto) esto es `none`:
+      // ahí conviene quedarse con el default antes que leer "1 columna" y
+      // navegar la grilla como si fuera una lista.
+      const tracks = getComputedStyle(el).gridTemplateColumns;
+      if (!tracks || tracks === "none") return;
+      const cols = tracks.split(" ").filter(Boolean).length;
+      if (cols > 0) setHorarioCols(cols);
+    };
+    medir();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(medir);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [horariosVisibles.length]);
+
+  const horariosZona = useRovingList<HTMLButtonElement>({
+    length: horariosVisibles.length,
+    columns: horarioCols,
+    onExitUp: () => moverEnForm(-1),
+    onExitDown: () => moverEnForm(1),
+  });
+
+  /**
+   * Teclas del formulario: primero las flechas (con las zonas anidadas ya
+   * servidas), después los atajos de Personas — los mismos que abrir mesa
+   * (spec 066): `1`–`9` fijan, `+`/`−` mueven de a uno. Escribiendo en un campo
+   * no aplican: ahí un `4` es un cuatro.
+   */
+  const handleFormKeyDown = (e: React.KeyboardEvent<HTMLFormElement>) => {
+    if (handleFormArrows(e)) return;
+    const tag = (e.target as HTMLElement).tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    const next = partySizeFromKey(e.key, partySize);
+    if (next === null) return;
+    e.preventDefault();
+    setPartySize(next);
+  };
+
   const freeTablesEstricto = tables.filter(
     (t) => t.status === "active" && (t.operational_status ?? "libre") === "libre",
   );
@@ -360,6 +441,8 @@ export function ReservaForm({
 
   return (
     <form
+      ref={formRef}
+      onKeyDown={handleFormKeyDown}
       onSubmit={(e) => {
         e.preventDefault();
         handleSubmit();
@@ -386,11 +469,17 @@ export function ReservaForm({
         />
 
         <div>
-          <label className={LABEL_CLS}>Personas</label>
+          <label className={LABEL_CLS}>
+            Personas
+            <span className="ml-1.5 font-semibold normal-case tracking-normal text-zinc-400">
+              · teclas 1-9, + y −
+            </span>
+          </label>
           <div className="mt-2 flex items-center justify-between rounded-2xl bg-zinc-50 p-2 ring-1 ring-zinc-200">
             <button
               type="button"
-              className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-zinc-700 ring-1 ring-zinc-200 transition active:scale-95 disabled:opacity-30"
+              aria-label="Una persona menos"
+              className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-zinc-700 outline-none ring-1 ring-zinc-200 transition active:scale-95 focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-30"
               disabled={partySize <= 1}
               onClick={() => setPartySize((v) => Math.max(1, v - 1))}
             >
@@ -401,7 +490,8 @@ export function ReservaForm({
             </span>
             <button
               type="button"
-              className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-zinc-700 ring-1 ring-zinc-200 transition active:scale-95 disabled:opacity-30"
+              aria-label="Una persona más"
+              className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-zinc-700 outline-none ring-1 ring-zinc-200 transition active:scale-95 focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-30"
               disabled={partySize >= 20}
               onClick={() => setPartySize((v) => Math.min(20, v + 1))}
             >
@@ -435,8 +525,11 @@ export function ReservaForm({
                   No hay servicios configurados para esta fecha.
                 </p>
               ) : (
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {serviceNames.map((s) => (
+                <div
+                  onKeyDown={serviciosZona.handleKeyDown}
+                  className="mt-2 flex flex-wrap gap-1.5"
+                >
+                  {serviceNames.map((s, i) => (
                     <button
                       key={s}
                       type="button"
@@ -444,7 +537,8 @@ export function ReservaForm({
                         setService(s);
                         setArrivalTime("");
                       }}
-                      className={`rounded-xl px-3 py-2 text-sm font-semibold transition active:scale-95 ${
+                      {...serviciosZona.itemProps(i)}
+                      className={`rounded-xl px-3 py-2 text-sm font-semibold outline-none transition active:scale-95 focus-visible:ring-2 focus-visible:ring-blue-900/30 ${
                         service === s
                           ? "bg-blue-600 text-white shadow-sm"
                           : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
@@ -466,13 +560,18 @@ export function ReservaForm({
                   No quedan horarios disponibles para este servicio.
                 </p>
               ) : (
-                <div className="mt-2 grid grid-cols-4 gap-1.5 sm:grid-cols-5">
-                  {shownArrivalOptions.map((t) => (
+                <div
+                  ref={horariosRef}
+                  onKeyDown={horariosZona.handleKeyDown}
+                  className="mt-2 grid grid-cols-4 gap-1.5 sm:grid-cols-5"
+                >
+                  {shownArrivalOptions.map((t, i) => (
                     <button
                       key={t}
                       type="button"
                       onClick={() => setArrivalTime(t)}
-                      className={`rounded-xl px-2 py-2.5 text-sm font-semibold transition active:scale-95 ${
+                      {...horariosZona.itemProps(i)}
+                      className={`rounded-xl px-2 py-2.5 text-sm font-semibold outline-none transition active:scale-95 focus-visible:ring-2 focus-visible:ring-blue-900/30 ${
                         arrivalTime === t
                           ? "bg-blue-600 text-white shadow-sm"
                           : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
@@ -511,13 +610,18 @@ export function ReservaForm({
                   Sin horarios disponibles para esta fecha.
                 </p>
               ) : (
-                <div className="mt-2 grid grid-cols-4 gap-1.5 sm:grid-cols-5">
-                  {slots.map((s) => (
+                <div
+                  ref={horariosRef}
+                  onKeyDown={horariosZona.handleKeyDown}
+                  className="mt-2 grid grid-cols-4 gap-1.5 sm:grid-cols-5"
+                >
+                  {slots.map((s, i) => (
                     <button
                       key={s.slot}
                       type="button"
                       onClick={() => setSelectedSlot(s.slot)}
-                      className={`rounded-xl px-2 py-2.5 text-sm font-semibold transition active:scale-95 ${
+                      {...horariosZona.itemProps(i)}
+                      className={`rounded-xl px-2 py-2.5 text-sm font-semibold outline-none transition active:scale-95 focus-visible:ring-2 focus-visible:ring-blue-900/30 ${
                         selectedSlot === s.slot
                           ? "bg-blue-600 text-white shadow-sm"
                           : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"

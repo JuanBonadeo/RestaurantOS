@@ -176,6 +176,14 @@ export function ProductModal({
           // Spec 055 fast-follow: acelera cargar varias unidades (ej. agua).
           const target = e.target as HTMLElement;
           const typing = target.tagName === "TEXTAREA" || target.tagName === "INPUT";
+          // `/` marca el ítem como entrada (spec 050 · atajo agregado en la 075).
+          // Es la tecla que la mano ya tiene abajo a la derecha, y en Observaciones
+          // no aplica: ahí una barra es una barra.
+          if (!typing && e.key === "/") {
+            e.preventDefault();
+            setAsEntrada((v) => !v);
+            return;
+          }
           if (!typing && (e.key === "+" || e.key === "=")) {
             e.preventDefault();
             setQuantity((q) => Math.min(99, q + 1));
@@ -331,7 +339,16 @@ export function ProductModal({
               {asEntrada && <Check className="h-3 w-3" strokeWidth={3} />}
             </span>
             <UtensilsCrossed className="h-4 w-4 shrink-0" />
-            <span>Como entrada</span>
+            <span className="flex-1">Como entrada</span>
+            <kbd
+              className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                asEntrada
+                  ? "bg-emerald-600/15 text-emerald-800"
+                  : "bg-white text-zinc-500 ring-1 ring-zinc-200"
+              }`}
+            >
+              /
+            </kbd>
           </button>
           <textarea
             value={notes}

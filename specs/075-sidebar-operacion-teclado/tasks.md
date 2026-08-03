@@ -39,9 +39,16 @@ Tres fases que pueden entrar por separado: **P1** es lo que hoy tiene cero tecla
 - [x] T22 · `src/components/admin/local/atajos-help.tsx` **(nuevo)** — panel `?` con los atajos del modo activo, `absolute` dentro del `<aside>`, cierra con `Esc`, más un botón `⌨` en el header (FR-022).
 - [x] T23 · Chips `kbd` inline en acción primaria del detalle, botón de volver y estado vacío del carrito (FR-021).
 
+## Fast-follow · reservas y «como entrada» (pedido de Juan, 2026-08-03)
+
+- [x] T28 · `new-reservation-modal.tsx` · `ReservaForm` — el flujo de **cargar una reserva** por teclado (FR-025): ↑/↓ entre controles, `1`–`9`/`+`/`−` en Personas (reusa `partySizeFromKey` del walk-in), chips de servicio y grilla de horarios como zonas anidadas. Lo heredan las tres superficies que montan el form (panel del salón, sheet de la tab Reservas y `/admin/reservas`). Tests en `new-reservation-modal.test.tsx`.
+- [x] T29 · `use-arrow-focus.ts` — tres arreglos para que componga con zonas anidadas: el selector ignora `[tabindex="-1"]` (si no, una grilla roving aportaba 20 paradas en vez de una), no secuestra ↑/↓ en `input[type=date|time|number]` (ahí ya mueven el valor) y sale si una zona anidada ya consumió la tecla. Expone `move()` para que la zona anidada diga «me pasé del borde, seguí vos».
+- [x] T30 · `reservations-panel.tsx` — la parada de teclado pasa a ser **la fila** (FR-026). Los botones ± de Personas ganaron `aria-label` (no tenían nombre accesible).
+- [x] T31 · `product-modal.tsx` — `/` marca «Como entrada» (FR-027) + chip visible. Tests en `product-modal.test.tsx`.
+
 ## Cierre
 
-- [x] T24 · `pnpm typecheck` + `pnpm test` + `pnpm build` en verde. (⚠️ los `*.integration.test.ts` fallan con `fetch failed` sin el stack local levantado — ruido esperado, ajeno a esta spec.)
+- [x] T24 · `pnpm typecheck` + `pnpm test` (1154 unit) + `pnpm build` en verde. (⚠️ los `*.integration.test.ts` fallan con `fetch failed` sin el stack local levantado — ruido esperado, ajeno a esta spec.)
 - [ ] T25 · **Verify en vivo con el rol real** (encargado, `/admin/operacion → Mesas`, nunca `service_role`): el recorrido completo del criterio de aceptación 1, sin tocar el mouse. Checklist de qa-brain. ⚠️ **Bloqueado para el agente**: el panel está detrás del login y no hay sesión; lo hace Juan.
 - [ ] T26 · Regresión táctil del mozo full-screen (FR-023).
 - [ ] T27 · Cerrar el loop: tildar estas tasks, actualizar la feature page del wiki, comentar + cerrar la issue #112, bumpear el puntero del submódulo en el brain y loggear en `wiki/log.md`.

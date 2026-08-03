@@ -117,7 +117,9 @@ describe("SalonDesktop · teclado del panel lateral (spec 075)", () => {
     renderPanel();
 
     // La reserva es el tramo de arriba de la zona; abajo siguen las mesas.
-    pararseEn(screen.getByRole("button", { name: /Sentar/ }));
+    // La parada de teclado de una reserva es su menú de acciones, no «Sentar»:
+    // pasar por encima con ↓ no puede sentar gente de un Enter (spec 075).
+    pararseEn(screen.getByRole("group", { name: /Reserva de P\u00e9rez/ }));
     await user.keyboard("{ArrowDown}");
 
     // Primera mesa de la lista: ocupada antes que libres.
@@ -198,5 +200,15 @@ describe("SalonDesktop · teclado del panel lateral (spec 075)", () => {
     expect(
       screen.getByRole("button", { name: /Cargar pedido|Cobrar|Sentar/ }),
     ).toHaveFocus();
+  });
+
+  it("pasar por una reserva no deja el foco sobre «Sentar»", async () => {
+    renderPanel();
+
+    // La parada de ↓ es la fila, no el botón que sienta.
+    expect(
+      screen.getByRole("group", { name: /Reserva de Pérez/ }),
+    ).toHaveAttribute("tabindex", "0");
+    expect(screen.getByRole("button", { name: /Sentar/ })).not.toHaveFocus();
   });
 });

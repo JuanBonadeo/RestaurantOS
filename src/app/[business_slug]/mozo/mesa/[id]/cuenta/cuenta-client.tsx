@@ -185,7 +185,7 @@ export function CuentaClient({
   // descuento, Cobrar— sin cambiar a Tab (spec 075, FR-017). Sólo en el panel
   // del salón: la versión full-screen del mozo es táctil.
   const panelRef = useRef<HTMLDivElement>(null);
-  const handleArrows = useArrowFocus(panelRef);
+  const { handleKeyDown: handleArrows } = useArrowFocus(panelRef);
 
   return (
     <div

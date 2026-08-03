@@ -147,6 +147,17 @@ Consecuencias que se aprovechan:
 
 - **FR-022**: `?` DEBE abrir un panel con los atajos **del modo activo**, dentro del `<aside>` (no un overlay de viewport), que cierra con `Esc`. Un botón chiquito en el header del panel ofrece el mismo acceso con el mouse.
 
+
+### Reservas (fast-follow, pedido de Juan 2026-08-03)
+
+- **FR-025**: Cargar una **reserva nueva** DEBE ser operable con el teclado: `↑`/`↓` entre los controles del formulario, `1`–`9`/`+`/`−` para la cantidad de personas (**el mismo atajo que abrir una mesa**, spec 066 FR-004), los chips de servicio con flechas y la **grilla de horarios en dos dimensiones** (`↓` baja una fila, `←`/`→` de a uno).
+
+  La cantidad de columnas de la grilla se **mide** (`grid-cols-4 sm:grid-cols-5`): no es la misma en el panel de 480px que en el sheet a pantalla completa, y hardcodearla haría que `↓` saltee horarios.
+
+- **FR-026**: La parada de teclado de una fila de reserva DEBE ser **la fila**, no su botón «Sentar» ni su menú `⋯`. Sentar es una acción de negocio y la lista es un solo camino de `↓` hacia las mesas: con el foco en «Sentar», un Enter de más sienta gente. Con el foco en el `⋯`, la flecha abre el menú y se pierde la navegación. Parado en la fila, `Enter` abre las acciones —con «Sentar» primero, así sentar sigue siendo Enter-Enter— y reasignar / no vino / cancelar dejan de necesitar mouse.
+
+- **FR-027**: En el modal de alta de ítem, `/` DEBE marcar y desmarcar «Como entrada» (spec [050](../050-item-como-entrada/)), salvo escribiendo en Observaciones. El chip con la tecla va en el propio control.
+
 ### Sin regresión
 
 - **FR-023**: La carga por tap del mozo full-screen (tablet táctil) NO DEBE cambiar: los atajos conviven sin estorbar y el autofocus del buscador sigue siendo exclusivo del modo `embedded` (spec 055, FR-002).

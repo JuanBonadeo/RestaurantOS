@@ -108,7 +108,7 @@ function WalkInForm({
   // ↑/↓ recorren los controles del panel (spec 075, FR-016): Personas, el
   // cliente, las notas y «Abrir mesa», sin tener que cambiar a Tab.
   const formRef = useRef<HTMLFormElement>(null);
-  const handleArrows = useArrowFocus(formRef);
+  const { handleKeyDown: handleArrows } = useArrowFocus(formRef);
 
   // `+` / `−` / dígitos mueven la cantidad de personas. Escribiendo en Nombre,
   // Teléfono o Notas no aplica: ahí `-` es un guion y `4` es un cuatro. FR-004.

@@ -972,7 +972,7 @@ export function SalonDesktop({
     return index;
   }, [demoras, reservasConfirmadas, mesaGroups]);
 
-  const lista = useRovingList<HTMLButtonElement>({ length: listaRowIndex.size });
+  const lista = useRovingList<HTMLElement>({ length: listaRowIndex.size });
   const { itemProps: listaItemProps, focusIndex: listaFocusIndex } = lista;
   /** Props de teclado de una fila de la lista, por su clave estable. */
   const listaRowProps = useCallback(
@@ -1066,19 +1066,21 @@ export function SalonDesktop({
   // ── Panel de atajos (`?`) ──
   const [atajosOpen, setAtajosOpen] = useState(false);
   /** Qué modo está mostrando el panel: se listan sus atajos, no todos. */
-  const modoPanel: ModoPanel = cobroTable
-    ? "cobro"
-    : cuentaTable
-      ? "cuenta"
-      : pedirTable
-        ? "pedir"
-        : walkInTableId
-          ? "walkin"
-          : ventaRapidaOpen
-            ? "venta"
-            : selectedId
-              ? "detalle"
-              : "lista";
+  const modoPanel: ModoPanel = showNewReservation
+    ? "reserva"
+    : cobroTable
+      ? "cobro"
+      : cuentaTable
+        ? "cuenta"
+        : pedirTable
+          ? "pedir"
+          : walkInTableId
+            ? "walkin"
+            : ventaRapidaOpen
+              ? "venta"
+              : selectedId
+                ? "detalle"
+                : "lista";
 
   const handleAsideKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -1815,9 +1817,12 @@ function MozosLegend({
  * índice de teclado lo lleva el padre y cada fila lo pide por clave en vez de
  * por posición: cuando una sección aparece o desaparece, ninguna cuenta.
  */
-export type SalonRowProps = (
-  key: string,
-) => Partial<React.ComponentProps<"button">>;
+export type SalonRowProps = (key: string) => {
+  ref?: (el: HTMLElement | null) => void;
+  tabIndex?: number;
+  "aria-current"?: "true";
+  onFocus?: () => void;
+};
 
 function DemorasPanel({
   demoras,
@@ -2366,7 +2371,7 @@ function TableDetail({
   // FR-008). El menú ⋯ se abre con Enter y trae sus propias flechas: no hace
   // falta aplanarlo acá.
   const detalleRef = useRef<HTMLDivElement>(null);
-  const handleDetalleKeyDown = useArrowFocus(detalleRef);
+  const { handleKeyDown: handleDetalleKeyDown } = useArrowFocus(detalleRef);
 
   const canWalkIn = status === "libre";
   const canTransfer =

@@ -21,6 +21,7 @@ export type ModoPanel =
   | "pedir"
   | "walkin"
   | "venta"
+  | "reserva"
   | "cuenta"
   | "cobro";
 
@@ -35,7 +36,7 @@ const COMUNES: Atajo[] = [
 
 const POR_MODO: Record<ModoPanel, Atajo[]> = {
   lista: [
-    { teclas: ["Enter"], que: "Abrir la mesa o sentar la reserva marcada" },
+    { teclas: ["Enter"], que: "Abrir la mesa, o las acciones de la reserva" },
   ],
   detalle: [
     { teclas: ["Enter"], que: "La acción grande de la mesa" },
@@ -43,6 +44,7 @@ const POR_MODO: Record<ModoPanel, Atajo[]> = {
   ],
   pedir: [
     { teclas: ["A-Z"], que: "Escribir busca, desde donde estés" },
+    { teclas: ["/"], que: "Marcar el ítem «como entrada» (en su modal)" },
     {
       teclas: ["↓"],
       que: "Del buscador al catálogo, y del catálogo al pedido",
@@ -62,6 +64,12 @@ const POR_MODO: Record<ModoPanel, Atajo[]> = {
     { teclas: ["←", "→"], que: "Cantidad de la línea" },
     { teclas: ["Supr"], que: "Quitar la línea" },
   ],
+  reserva: [
+    { teclas: ["1-9"], que: "Cuánta gente viene" },
+    { teclas: ["+", "−"], que: "Una persona más o menos" },
+    { teclas: ["←", "→"], que: "Moverse entre horarios de la misma fila" },
+    { teclas: ["Enter"], que: "Elegir el servicio o el horario marcado" },
+  ],
   cuenta: [{ teclas: ["Enter"], que: "Pasar a cobrar" }],
   cobro: [
     { teclas: ["1-9"], que: "Elegir el método de pago por su número" },
@@ -76,6 +84,7 @@ const TITULO: Record<ModoPanel, string> = {
   pedir: "Cargar pedido",
   walkin: "Abrir mesa",
   venta: "Venta rápida",
+  reserva: "Nueva reserva",
   cuenta: "Cuenta",
   cobro: "Cobro",
 };

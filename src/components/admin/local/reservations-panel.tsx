@@ -1,6 +1,6 @@
 "use client";
 
-import { useTransition } from "react";
+import { useRef, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   CalendarPlus,
@@ -60,6 +60,9 @@ export function ReservationsPanel({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const confirmed = reservations.filter((r) => r.status === "confirmed");
+  // Un ref por fila para poder abrir su menú desde el teclado sin controlar el
+  // `open` del DropdownMenu a mano.
+  const triggerRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
   if (confirmed.length === 0 && !onNewReservation) return null;
 
@@ -146,9 +149,26 @@ export function ReservationsPanel({
             const canPickOnPlan = !!onAsignarMesa;
             const picking = pickingForId === r.id;
             return (
+              /* La fila entera es la parada de teclado (spec 075).
+                 No el botón «Sentar»: la lista del panel es un solo camino de ↓
+                 y para llegar a las mesas se pasa por encima de cada reserva —
+                 con el foco ahí, un Enter de más sentaba gente. Tampoco el ⋯:
+                 un menú se abre con ↓, así que se comía la navegación.
+                 Parado en la fila, Enter abre sus acciones (con «Sentar»
+                 primero, así sentar sigue siendo Enter-Enter) y de paso
+                 reasignar / no vino / cancelar dejan de necesitar mouse. */
               <div
                 key={r.id}
-                className="flex items-center gap-2 rounded-xl bg-zinc-50 px-3 py-1.5 ring-1 ring-zinc-200/60"
+                {...rowProps(`reserva:${r.id}`)}
+                role="group"
+                aria-label={`Reserva de ${r.customer_name}, ${formatTime(r.starts_at)}, ${r.party_size} personas`}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter" && e.key !== " ") return;
+                  if (e.target !== e.currentTarget) return;
+                  e.preventDefault();
+                  triggerRefs.current[r.id]?.click();
+                }}
+                className="flex items-center gap-2 rounded-xl bg-zinc-50 px-3 py-1.5 outline-none ring-1 ring-zinc-200/60 focus-visible:ring-2 focus-visible:ring-blue-500"
               >
                 {/* Info en una sola línea */}
                 <div className="flex min-w-0 flex-1 items-baseline gap-1.5">
@@ -171,7 +191,6 @@ export function ReservationsPanel({
                     r.table_id ? handleSentar(r.id) : onAsignarMesa?.(r, "seat")
                   }
                   disabled={pending || (!r.table_id && !canPickOnPlan)}
-                  {...rowProps(`reserva:${r.id}`)}
                   className={`flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm outline-none transition active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-emerald-900/30 disabled:opacity-60 ${
                     picking
                       ? "bg-emerald-700 ring-2 ring-emerald-300"
@@ -186,16 +205,37 @@ export function ReservationsPanel({
                   {picking ? "Elegí en el plano…" : "Sentar"}
                 </button>
 
-                {/* Resto de acciones */}
+                {/* Resto de acciones.
+                    El teclado para **acá**, no en «Sentar» (spec 075): la lista
+                    del panel es un solo camino de ↓ y para llegar a las mesas se
+                    pasa por encima de cada reserva — con el foco en «Sentar», un
+                    Enter de más sentaba gente. Un menú es inerte hasta que lo
+                    abrís, y adentro «Sentar» es lo primero, así que sentar sigue
+                    siendo Enter-Enter. De paso, reasignar / no vino / cancelar
+                    dejan de ser inalcanzables sin mouse. */}
                 <DropdownMenu>
                   <DropdownMenuTrigger
+                    ref={(el) => {
+                      triggerRefs.current[r.id] = el;
+                    }}
                     aria-label="Más acciones"
                     disabled={pending}
-                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-zinc-200 hover:text-zinc-700 disabled:opacity-60"
+                    tabIndex={-1}
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-zinc-500 outline-none transition hover:bg-zinc-200 hover:text-zinc-700 focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-60"
                   >
                     <MoreVertical className="h-4 w-4" />
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-44">
+                    <DropdownMenuItem
+                      disabled={pending || (!r.table_id && !canPickOnPlan)}
+                      onClick={() =>
+                        r.table_id ? handleSentar(r.id) : onAsignarMesa?.(r, "seat")
+                      }
+                    >
+                      <UserCheck className="h-4 w-4" />
+                      Sentar
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
                     {canPickOnPlan ? (
                       <>
                         <DropdownMenuItem onClick={() => onAsignarMesa?.(r, "assign")}>
