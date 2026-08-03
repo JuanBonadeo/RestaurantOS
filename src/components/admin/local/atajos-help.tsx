@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { Keyboard, X } from "lucide-react";
 
 /**
@@ -97,10 +98,32 @@ export function AtajosHelp({
   onClose: () => void;
 }) {
   const atajos = [...POR_MODO[modo], ...COMUNES];
+  const cerrarRef = useRef<HTMLButtonElement>(null);
+  // Al cerrarse, el foco tiene que volver a donde estaba: si no, queda en el
+  // `<body>` y el teclado del panel entero deja de responder — justo el panel
+  // que esta ayuda vino a explicar.
+  const origenRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const activo = document.activeElement;
+    origenRef.current = activo instanceof HTMLElement ? activo : null;
+    cerrarRef.current?.focus({ preventScroll: true });
+    return () => {
+      const origen = origenRef.current;
+      if (origen?.isConnected) origen.focus({ preventScroll: true });
+    };
+  }, []);
+
   return (
     <div
       className="absolute inset-0 z-50 flex items-end bg-black/40 backdrop-blur-sm"
       onClick={onClose}
+      onKeyDown={(e) => {
+        // Focus-trap: sin esto se puede tabular al panel de atrás y operarlo
+        // sin verlo (mismo patrón que `ProductModal` y el asistente del menú).
+        if (e.key !== "Tab") return;
+        e.preventDefault();
+        cerrarRef.current?.focus({ preventScroll: true });
+      }}
     >
       <div
         role="dialog"
@@ -120,11 +143,11 @@ export function AtajosHelp({
             </h3>
           </div>
           <button
+            ref={cerrarRef}
             type="button"
             onClick={onClose}
             aria-label="Cerrar atajos"
-            className="rounded-full p-1.5 text-zinc-500 transition hover:bg-zinc-100"
-            autoFocus
+            className="rounded-full p-1.5 text-zinc-500 outline-none transition hover:bg-zinc-100 focus-visible:ring-2 focus-visible:ring-zinc-900/20"
           >
             <X className="size-4" />
           </button>

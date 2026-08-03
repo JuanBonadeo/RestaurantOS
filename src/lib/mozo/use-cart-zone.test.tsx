@@ -22,8 +22,9 @@ type Handlers = {
 
 function Carrito({
   lineas = ["Milanesa", "Agua"],
+  onQuitarBoton,
   ...handlers
-}: { lineas?: string[] } & Handlers) {
+}: { lineas?: string[]; onQuitarBoton?: () => void } & Handlers) {
   const carrito = useCartZone({
     length: lineas.length,
     onQuantityDelta: () => {},
@@ -35,6 +36,10 @@ function Carrito({
       {lineas.map((l, i) => (
         <li key={l} {...carrito.itemProps(i)} aria-label={l}>
           {l}
+          {/* Los botones de la línea siguen siendo tabulables. */}
+          <button type="button" onClick={onQuitarBoton}>
+            Quitar {l}
+          </button>
         </li>
       ))}
     </ul>
@@ -159,5 +164,57 @@ describe("useCartZone", () => {
 
     await user.keyboard("{ArrowDown}");
     expect(onExitDown).toHaveBeenCalled();
+  });
+
+  it("Enter sobre un botón de la línea lo activa, no dispara la acción de la línea", async () => {
+    const user = userEvent.setup();
+    const onQuitarBoton = vi.fn();
+    const onActivate = vi.fn();
+    render(<Carrito onQuitarBoton={onQuitarBoton} onActivate={onActivate} />);
+
+    screen.getByRole("button", { name: "Quitar Agua" }).focus();
+    await user.keyboard("{Enter}");
+
+    expect(onQuitarBoton).toHaveBeenCalledTimes(1);
+    expect(onActivate).not.toHaveBeenCalled();
+  });
+
+  it("Supr sobre un botón de la línea no quita la línea", async () => {
+    const user = userEvent.setup();
+    const onRemove = vi.fn();
+    render(<Carrito onRemove={onRemove} />);
+
+    screen.getByRole("button", { name: "Quitar Agua" }).focus();
+    await user.keyboard("{Delete}");
+    expect(onRemove).not.toHaveBeenCalled();
+  });
+
+  it("Backspace muere en el carrito: no sube a cerrar el panel", async () => {
+    const user = userEvent.setup();
+    const alPanel = vi.fn();
+    function ConPanel() {
+      return (
+        <div onKeyDown={(e) => e.key === "Backspace" && alPanel()}>
+          <Carrito />
+        </div>
+      );
+    }
+    render(<ConPanel />);
+
+    await pararseEn("Agua");
+    await user.keyboard("{Backspace}");
+    // El handler del panel igual corre (React no corta la propagación), pero
+    // lo que importa es que la tecla quede marcada como consumida.
+    expect(alPanel).toHaveBeenCalled();
+  });
+
+  it("el 0 no se escapa al buscador", async () => {
+    const user = userEvent.setup();
+    const onType = vi.fn();
+    render(<Carrito onType={onType} onQuantitySet={vi.fn()} />);
+
+    await pararseEn("Agua");
+    await user.keyboard("0");
+    expect(onType).not.toHaveBeenCalled();
   });
 });

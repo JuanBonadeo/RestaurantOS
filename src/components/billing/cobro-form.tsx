@@ -198,10 +198,19 @@ export function CobroForm<T = unknown>({
     return () => clearTimeout(t);
   }, [method]);
 
-  /** Volver al selector dejando el foco en el método que estaba elegido. */
+  /**
+   * Volver al selector dejando el foco en el método que estaba elegido.
+   *
+   * Resetea `hasSetAmount` **acá dentro** y no en el botón «Cambiar»: si no, el
+   * camino por Esc —el que la spec 075 promociona— se arrastra el monto tipeado
+   * para el método anterior. Efectivo $15.000 sobre una cuenta de $10.000, Esc,
+   * tarjeta con +10%: el paso 2 abría en $15.000 en vez de $11.000, sin guarda
+   * de efectivo ni cartel de vuelto, y ⌘Enter cobraba eso.
+   */
   const volverAlSelector = () => {
     const i = methods.findIndex((m) => m.value === method);
     setMethod(null);
+    setHasSetAmount(false);
     setTimeout(() => metodoZona.focusIndex(i < 0 ? 0 : i), 0);
   };
 
@@ -349,7 +358,7 @@ export function CobroForm<T = unknown>({
           onClick={() => {
             setMpInitPoint(null);
             setMpPaymentId(null);
-            setMethod(null);
+            volverAlSelector();
           }}
           className="text-xs font-semibold text-zinc-500 underline"
         >
@@ -473,7 +482,6 @@ export function CobroForm<T = unknown>({
           type="button"
           onClick={() => {
             volverAlSelector();
-            setHasSetAmount(false);
             onCancel?.();
           }}
           className="text-xs font-semibold text-zinc-500 underline"

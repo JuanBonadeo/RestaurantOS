@@ -43,11 +43,23 @@ export function useRovingList<T extends HTMLElement = HTMLElement>({
   // Foco pedido para un elemento que todavía no montó (la zona acaba de
   // aparecer): lo resuelve el efecto de abajo en cuanto existe.
   const [pendingFocus, setPendingFocus] = useState<number | null>(null);
+  // ¿El usuario está operando ESTA zona con el teclado? Decide si hay que
+  // recuperar el foco cuando el ítem enfocado se desmonta.
+  const teniaFoco = useRef(false);
+  const indexRef = useRef(0);
+  indexRef.current = index;
 
-  // La lista se achicó (se filtró, se quitó un ítem): el índice no puede quedar
-  // apuntando al vacío.
+  // La lista cambió: se filtró, se quitó un ítem, entró uno nuevo por realtime.
   useEffect(() => {
     setIndex((i) => Math.max(0, clampIndex(i, length)));
+    // Si el ítem que tenía el foco se fue con el cambio —Supr sobre una línea
+    // del carrito es el caso típico— el navegador manda el foco al `<body>`, y
+    // ahí el teclado de la zona **muere**: los handlers viven en el contenedor
+    // y al body no le llega nada. Se recupera en la posición equivalente.
+    if (!teniaFoco.current || length === 0) return;
+    if (typeof document === "undefined") return;
+    if (document.activeElement !== document.body) return;
+    setPendingFocus(Math.max(0, clampIndex(indexRef.current, length)));
   }, [length]);
 
   const focusAt = useCallback((i: number) => {
@@ -110,13 +122,23 @@ export function useRovingList<T extends HTMLElement = HTMLElement>({
         return true;
       }
 
+      // De dónde sale el movimiento: del **foco real**, no del estado. El
+      // índice es posicional y sólo se sincroniza por `onFocus`; si la lista
+      // cambió sola debajo (una demora que se resuelve, una reserva que entra
+      // por realtime) el estado apunta a otra fila y la primera flecha se
+      // planta o saltea una.
+      const enFoco = itemsRef.current.indexOf(
+        document.activeElement as unknown as T,
+      );
+      const desde = enFoco >= 0 ? enFoco : index;
+
       const move =
         columns > 1
-          ? gridNextIndex(index, e.key, length, columns)
+          ? gridNextIndex(desde, e.key, length, columns)
           : e.key === "ArrowDown"
-            ? nextIndex(index, 1, length)
+            ? nextIndex(desde, 1, length)
             : e.key === "ArrowUp"
-              ? nextIndex(index, -1, length)
+              ? nextIndex(desde, -1, length)
               : null;
       if (!move) return false;
 
@@ -139,7 +161,18 @@ export function useRovingList<T extends HTMLElement = HTMLElement>({
       },
       tabIndex: i === index ? 0 : -1,
       "aria-current": i === index ? ("true" as const) : undefined,
-      onFocus: () => setIndex(i),
+      onFocus: () => {
+        teniaFoco.current = true;
+        setIndex(i);
+      },
+      onBlur: (e: React.FocusEvent) => {
+        // El foco se fue a otra zona (no a otro ítem de ésta ni al `<body>` por
+        // un desmontaje): dejamos de ser responsables de recuperarlo.
+        const hacia = e.relatedTarget as Node | null;
+        if (!hacia) return;
+        if (itemsRef.current.some((el) => el === hacia)) return;
+        teniaFoco.current = false;
+      },
     }),
     [index],
   );

@@ -54,6 +54,28 @@ export function useCartZone({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      // Lo que nace en un control de la línea es suyo. Sin esto, Enter o
+      // Espacio sobre «Quitar» no lo activaban —el `preventDefault` de acá
+      // cancelaba la activación nativa del `<button>`— y encima disparaban
+      // `onActivate`: apretar Enter en «Quitar» abría el editor de precio.
+      const target = e.target as HTMLElement;
+      if (
+        target !== e.currentTarget &&
+        target.closest("button, a, input, select, textarea")
+      ) {
+        return;
+      }
+
+      // Backspace muere acá. No borra la línea (ver el docstring), pero sobre
+      // todo no puede seguir viaje: en el panel de la operación esa tecla sube
+      // un nivel de modo, y desde el carrito de venta rápida eso desmonta el
+      // panel y se lleva puesta la venta cargada. Un instinto de "borrar" no
+      // puede tirar ocho ítems.
+      if (e.key === "Backspace" && length > 0) {
+        e.preventDefault();
+        return;
+      }
+
       if (navKeyDown(e)) return;
       if (index < 0 || index >= length) return;
 
@@ -85,6 +107,13 @@ export function useCartZone({
       if (cantidad !== null) {
         e.preventDefault();
         onQuantitySet?.(index, cantidad + 1);
+        return;
+      }
+      // El `0` no es un atajo de cantidad (se numera desde 1) pero tampoco se
+      // escapa al buscador: quien teclea `1` `0` queriendo diez no puede
+      // terminar con la línea en 1 y un `0` metido en la búsqueda.
+      if (e.key === "0") {
+        e.preventDefault();
         return;
       }
 

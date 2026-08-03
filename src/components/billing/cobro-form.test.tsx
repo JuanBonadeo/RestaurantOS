@@ -325,4 +325,25 @@ describe("<CobroForm /> — elegir método con el teclado", () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit.mock.calls[0][0]).toMatchObject({ method: "cash" });
   });
+
+  it("Esc para cambiar de método no arrastra el monto tipeado", async () => {
+    const user = userEvent.setup();
+    setup({ methodConfigs: [config("card_manual", 10)] });
+
+    // Efectivo, y el cliente paga con un billete más grande.
+    metodos()[0].focus();
+    await user.keyboard("1");
+    const monto = screen.getByLabelText(/monto/i) as HTMLInputElement;
+    fireEvent.change(monto, { target: { value: "150" } });
+    expect(monto).toHaveValue(150);
+
+    // Se arrepiente: Esc y tarjeta (+10% sobre $10.000 = $11.000).
+    await user.keyboard("{Escape}");
+    metodos()[1].focus();
+    await user.keyboard("2");
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/monto/i)).toHaveValue(110);
+    });
+  });
 });

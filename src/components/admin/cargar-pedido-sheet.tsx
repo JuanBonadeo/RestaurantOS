@@ -155,7 +155,8 @@ export function CargarPedidoSheet({
     storageKey: `cargar_pedido_web_${slug}`,
     onPick: (p) => setOpenProduct(p),
     // ↓ baja el foco al catálogo (spec 075): mismas zonas que la carga de mesa.
-    onEnterResults: () => catalogo.focusFirst(),
+    onEnterResults: () =>
+      catalogProducts.length > 0 ? catalogo.focusFirst() : carrito.focusFirst(),
   });
   const { isSearching, results: catalogProducts, enterTargetId } = searchApi;
 
@@ -195,7 +196,8 @@ export function CargarPedidoSheet({
   });
   const carrito = useCartZone({
     length: cart.length,
-    onExitUp: () => catalogo.focusLast(),
+    onExitUp: () =>
+      catalogProducts.length > 0 ? catalogo.focusLast() : focusSearch(),
     onQuantityDelta: (i, delta) => {
       const line = cart[i];
       if (line) changeQty(line._key, delta);

@@ -1037,6 +1037,7 @@ export function SalonDesktop({
     }
     if (ventaRapidaOpen) {
       setVentaRapidaOpen(false);
+      listaFocusIndex(0);
       return true;
     }
     if (selectedId) {
@@ -1060,6 +1061,7 @@ export function SalonDesktop({
     closePedir,
     walkInTableId,
     ventaRapidaOpen,
+    listaFocusIndex,
     selectedId,
   ]);
 
@@ -1082,8 +1084,27 @@ export function SalonDesktop({
                 ? "detalle"
                 : "lista";
 
+  // Cambiar de modo desmonta un panel y monta otro. Si el que entra no enfoca
+  // nada suyo (la cuenta y el cobro tardan en traer sus datos), el foco queda
+  // en el `<body>` y ni las flechas ni Esc llegan al panel. El `<aside>` es
+  // focusable de último recurso: se queda con el foco hasta que el panel nuevo
+  // lo reclame, y así Esc siempre funciona.
+  const asideRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (document.activeElement !== document.body) return;
+      asideRef.current?.focus({ preventScroll: true });
+    }, 0);
+    return () => clearTimeout(t);
+  }, [modoPanel]);
+
   const handleAsideKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      // Una zona de adentro ya la consumió. Sin esto, el Backspace que el
+      // carrito frena igual subía y cerraba el panel —llevándose la venta
+      // rápida cargada—, y el `?` se escribía en el buscador **además** de
+      // abrir la ayuda.
+      if (e.defaultPrevented) return;
       const el = e.target as HTMLElement;
       const escribiendo =
         el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable;
@@ -1296,8 +1317,10 @@ export function SalonDesktop({
             el encargado pinta no queremos que un tap accidental abra el
             detalle. Cobro y pedir son terminales por mesa (excluyentes). */}
         <aside
+          ref={asideRef}
+          tabIndex={-1}
           onKeyDown={handleAsideKeyDown}
-          className="bg-card ring-border/60 relative flex min-h-0 flex-col overflow-hidden rounded-2xl ring-1"
+          className="bg-card ring-border/60 relative flex min-h-0 flex-col overflow-hidden rounded-2xl outline-none ring-1"
         >
           {atajosOpen && (
             <AtajosHelp modo={modoPanel} onClose={() => setAtajosOpen(false)} />
@@ -1450,7 +1473,10 @@ export function SalonDesktop({
           ) : ventaRapidaOpen ? (
             <VentaRapidaPanel
               slug={slug}
-              onClose={() => setVentaRapidaOpen(false)}
+              onClose={() => {
+                setVentaRapidaOpen(false);
+                listaFocusIndex(0);
+              }}
             />
           ) : selected ? (
             <TableDetail
@@ -1467,7 +1493,12 @@ export function SalonDesktop({
               pending={pending}
               onCargarPedido={() => openPedir(selected)}
               onPedirCuenta={() => openCuenta(selected)}
-              onClose={() => setSelectedId(null)}
+              onClose={() => {
+                // Mismo camino que Esc: el botón y la tecla no pueden divergir
+                // (con la X el foco se perdía y el panel dejaba de responder).
+                setVolverAFila(`mesa:${selected.id}`);
+                setSelectedId(null);
+              }}
               onWalkIn={() => {
                 // Bloqueo blando (spec 059): si la mesa tiene una reserva, no
                 // se impide el walk-in, pero se avisa antes (el encargado

@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+
+import { useState } from "react";
 
 import { useRovingList } from "./use-roving-list";
 
@@ -164,5 +166,48 @@ describe("useRovingList", () => {
     await user.click(screen.getByRole("button", { name: "X" }));
     await user.keyboard("a");
     expect(onKeyDown).toHaveBeenCalledWith("a");
+  });
+
+  it("si el ítem enfocado se desmonta, la zona recupera el foco", async () => {
+    const user = userEvent.setup();
+
+    function ListaQueSeAchica() {
+      const [items, setItems] = useState(["A", "B", "C"]);
+      const zona = useRovingList<HTMLButtonElement>({ length: items.length });
+      return (
+        <ul
+          onKeyDown={(e) => {
+            if (zona.handleKeyDown(e)) return;
+            if (e.key !== "Delete") return;
+            e.preventDefault();
+            setItems((prev) => prev.filter((_, i) => i !== zona.index));
+          }}
+        >
+          {items.map((l, i) => (
+            <li key={l}>
+              <button type="button" {...zona.itemProps(i)}>
+                {l}
+              </button>
+            </li>
+          ))}
+        </ul>
+      );
+    }
+    render(<ListaQueSeAchica />);
+
+    // Parado en B, lo saco: el nodo enfocado se destruye y el navegador manda
+    // el foco al <body>. Ahí el teclado de la zona moriría — los handlers viven
+    // en el <ul> y al body no le llega nada.
+    await user.click(screen.getByRole("button", { name: "B" }));
+    await user.keyboard("{Delete}");
+
+    expect(screen.queryByRole("button", { name: "B" })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(document.activeElement).not.toBe(document.body);
+    });
+    // Y las flechas siguen funcionando desde donde quedó.
+    expect(screen.getByRole("button", { name: "C" })).toHaveFocus();
+    await user.keyboard("{ArrowUp}");
+    expect(screen.getByRole("button", { name: "A" })).toHaveFocus();
   });
 });

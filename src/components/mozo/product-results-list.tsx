@@ -53,8 +53,12 @@ export function ProductResultsList({
             <button
               onClick={() => onPick(p)}
               {...itemProps?.(p.id)}
-              className={`flex w-full items-center gap-2.5 rounded-xl bg-white px-3 py-2.5 text-left outline-none transition active:scale-[0.99] active:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-emerald-500 ${
-                isEnterTarget ? "ring-2 ring-emerald-500" : "ring-1 ring-zinc-200"
+              // El anillo del foco y el de «esto abre Enter» tienen que
+              // distinguirse: con los dos iguales no se sabía dónde estabas
+              // parado. Foco = anillo grueso con offset; target de Enter =
+              // anillo fino.
+              className={`flex w-full items-center gap-2.5 rounded-xl bg-white px-3 py-2.5 text-left outline-none transition active:scale-[0.99] active:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 ${
+                isEnterTarget ? "ring-1 ring-emerald-400" : "ring-1 ring-zinc-200"
               }`}
             >
               <span className="min-w-0 flex-1 truncate text-sm font-semibold text-zinc-900">

@@ -498,7 +498,10 @@ export function MozoPedirClient({
     onPick: (p) => setOpenProduct(p),
     // ↓ en el buscador baja el foco al catálogo (spec 075). Sólo en el sidebar:
     // en la tablet no hay flechas.
-    onEnterResults: embedded ? () => catalogo.focusFirst() : undefined,
+    // Con el catálogo vacío (una búsqueda sin resultados) la zona no puede
+    // tragarse la flecha: se sigue derecho al carrito.
+    onEnterResults: () =>
+      catalogoIndex.size > 0 ? catalogo.focusFirst() : carrito.focusFirst(),
   });
   const {
     setSearch,
@@ -568,6 +571,7 @@ export function MozoPedirClient({
     return index;
   }, [menusVisibles, searchResults]);
 
+  const enviarRef = useRef<HTMLButtonElement>(null);
   const catalogo = useRovingList<HTMLButtonElement>({
     length: catalogoIndex.size,
     onExitUp: focusSearch,
@@ -689,7 +693,12 @@ export function MozoPedirClient({
   // carga.
   const carrito = useCartZone({
     length: cart.length,
-    onExitUp: () => catalogo.focusLast(),
+    // Con el catálogo vacío, ↑ vuelve derecho al buscador.
+    onExitUp: () =>
+      catalogoIndex.size > 0 ? catalogo.focusLast() : focusSearch(),
+    // ↓ en la última línea llega a Enviar: la cadena termina en la acción
+    // primaria y no en una tecla muerta (FR-010).
+    onExitDown: () => enviarRef.current?.focus({ preventScroll: true }),
     onQuantityDelta: (i, delta) => {
       const line = cart[i];
       if (line) changeQuantity(line._key, delta);
@@ -1237,6 +1246,7 @@ export function MozoPedirClient({
               </p>
             </div>
             <button
+              ref={enviarRef}
               onClick={handleSend}
               disabled={pending || cart.length === 0}
               className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm active:scale-[0.98] disabled:opacity-50"
@@ -1401,6 +1411,10 @@ export function MozoPedirClient({
       <main className={mainClass}>
         {step === "catalogo" ? (
           <CatalogoStep
+            itemProps={catalogoProps}
+            onCatalogoKeyDown={(e) => {
+              catalogo.handleKeyDown(e);
+            }}
             searchApi={searchApi}
             isSearching={isSearching}
             searchResults={searchResults}
@@ -1482,6 +1496,8 @@ export function MozoPedirClient({
 // ─────────────────────────────────────────────────────────────────────────
 
 function CatalogoStep({
+  itemProps,
+  onCatalogoKeyDown,
   searchApi,
   isSearching,
   searchResults,
@@ -1493,6 +1509,11 @@ function CatalogoStep({
   onPickDailyMenu,
   tabsCount,
 }: {
+  /** Foco de teclado del catálogo. En la tablet nadie usa flechas, pero el
+   *  mismo componente lo monta el admin en desktop: dejarlo sin zona era la
+   *  regresión de que ↓ dejara de hacer nada. */
+  itemProps?: CatalogoItemProps;
+  onCatalogoKeyDown?: (e: React.KeyboardEvent) => void;
   searchApi: ProductSearchApi;
   isSearching: boolean;
   searchResults: CatalogProduct[];
@@ -1505,7 +1526,7 @@ function CatalogoStep({
   tabsCount: number;
 }) {
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" onKeyDown={onCatalogoKeyDown}>
       <ProductSearchInput api={searchApi} />
 
       {isSearching ? (
@@ -1513,6 +1534,7 @@ function CatalogoStep({
           results={searchResults}
           onPick={onPick}
           enterTargetId={searchApi.enterTargetId}
+          itemProps={itemProps}
         />
       ) : tabsCount === 0 ? (
         <EmptyCatalog />
@@ -1525,6 +1547,7 @@ function CatalogoStep({
           onPick={onPick}
           onPickDailyMenu={onPickDailyMenu}
           enterTargetId={searchApi.enterTargetId}
+          itemProps={itemProps}
         />
       )}
     </div>

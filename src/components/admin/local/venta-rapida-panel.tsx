@@ -156,7 +156,8 @@ export function VentaRapidaPanel({
     storageKey: `venta_rapida_web_${slug}`,
     onPick: (p) => setOpenProduct(p),
     // ↓ baja el foco al catálogo (spec 075): mismas zonas que la carga de mesa.
-    onEnterResults: () => catalogo.focusFirst(),
+    onEnterResults: () =>
+      visibleProducts.length > 0 ? catalogo.focusFirst() : carrito.focusFirst(),
   });
   const { isSearching, results: visibleProducts, enterTargetId } = searchApi;
 
@@ -194,6 +195,7 @@ export function VentaRapidaPanel({
   );
 
   // ── Zonas del panel (spec 075): buscador → catálogo → carrito → cobrar ──
+  const cobrarRef = useRef<HTMLButtonElement>(null);
   const catalogo = useRovingList<HTMLButtonElement>({
     length: visibleProducts.length,
     onExitUp: focusSearch,
@@ -233,7 +235,10 @@ export function VentaRapidaPanel({
   // fija, Supr quita.
   const carrito = useCartZone({
     length: cart.length,
-    onExitUp: () => catalogo.focusLast(),
+    onExitUp: () =>
+      visibleProducts.length > 0 ? catalogo.focusLast() : focusSearch(),
+    // La cadena termina en la acción primaria, no en una tecla muerta.
+    onExitDown: () => cobrarRef.current?.focus({ preventScroll: true }),
     onQuantityDelta: (i, delta) => {
       const line = cart[i];
       if (line) changeQty(line._key, delta);
@@ -577,6 +582,7 @@ export function VentaRapidaPanel({
           </div>
           <button
             onClick={cobrar}
+            ref={cobrarRef}
             disabled={!canCobrar}
             className="flex h-11 items-center gap-2 rounded-2xl bg-emerald-600 px-5 text-sm font-semibold text-white transition active:scale-[0.98] disabled:opacity-40"
           >

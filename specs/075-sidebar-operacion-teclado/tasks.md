@@ -46,6 +46,23 @@ Tres fases que pueden entrar por separado: **P1** es lo que hoy tiene cero tecla
 - [x] T30 · `reservations-panel.tsx` — la parada de teclado pasa a ser **la fila** (FR-026). Los botones ± de Personas ganaron `aria-label` (no tenían nombre accesible).
 - [x] T31 · `product-modal.tsx` — `/` marca «Como entrada» (FR-027) + chip visible. Tests en `product-modal.test.tsx`.
 
+## Hallazgos de la revisión adversarial (2026-08-03)
+
+Once agentes revisaron el diff por zonas y refutaron sus propios hallazgos; sobrevivieron 20 (varios eran el mismo bug visto desde zonas distintas). Los de gravedad alta y media, arreglados:
+
+- [x] T32 · **El foco quedaba huérfano en el `<body>` y ahí el teclado muere** — los handlers viven en los contenedores, así que al `<body>` no le llega nada. Pasaba al quitar una línea con Supr, al cerrar el panel de atajos, al cerrar el detalle con la X (Esc sí lo restauraba: dos caminos divergentes), al salir de venta rápida y al abrir cuenta/cobro. Arreglado en tres niveles: `use-roving-list` recupera el foco cuando el ítem enfocado se desmonta, `atajos-help` atrapa y devuelve el foco, y el `<aside>` es focusable de último recurso (`tabIndex={-1}` + efecto por modo) para que Esc funcione siempre. Test de regresión verificado por mutación.
+- [x] T33 · **`useCartZone` se comía las teclas de los botones de la línea** — Enter sobre «Quitar» no lo activaba (el `preventDefault` cancelaba la activación nativa) y encima abría el editor de precio. Ahora lo que nace en un control interactivo es suyo.
+- [x] T34 · **Backspace desde el carrito de venta rápida cerraba el panel y se llevaba la venta cargada.** Muere en el carrito, y el `<aside>` ignora lo que una zona ya consumió (`e.defaultPrevented`).
+- [x] T35 · **(plata) `Esc` para cambiar de método arrastraba el monto tipeado.** Efectivo $15.000 sobre una cuenta de $10.000 → Esc → tarjeta +10%: abría en $15.000 en vez de $11.000 y `⌘Enter` cobraba eso. `setHasSetAmount(false)` se mudó adentro de `volverAlSelector` para que los tres caminos (Esc, «Cambiar», cancelar MP) converjan. Test de regresión.
+- [x] T36 · **El índice de la zona se desfasaba cuando la lista cambiaba sola** (una demora que se resuelve, una reserva por realtime): la primera flecha se plantaba o salteaba una fila. Ahora el movimiento sale del **foco real**, no del estado.
+- [x] T37 · **`?` desde el catálogo o el carrito se escribía en el buscador** y vaciaba la lista además de abrir la ayuda. Lo cubre el mismo `e.defaultPrevented` del `<aside>`.
+- [x] T38 · **`↓` en la última línea del carrito era tecla muerta**: la cadena no llegaba a Enviar / Cobrar. Y con el catálogo vacío se cortaba en los dos sentidos.
+- [x] T39 · **El `0` de una cantidad de dos dígitos se escapaba al buscador** dejando la línea en 1.
+- [x] T40 · **Regresión: el mozo full-screen había perdido las flechas del buscador.** El `CatalogoStep` no tenía zona; ahora es el mismo camino que el sidebar.
+- [x] T41 · **El anillo del foco era idéntico al de «esto abre Enter»**: no se veía dónde estabas parado.
+
+Queda sin atender (media/baja, anotado): la espera de Mercado Pago sigue sin teclado (T42), y cargar varios ítems de una misma categoría devuelve al buscador cada vez en vez de dejarte donde estabas (T43).
+
 ## Cierre
 
 - [x] T24 · `pnpm typecheck` + `pnpm test` (1154 unit) + `pnpm build` en verde. (⚠️ los `*.integration.test.ts` fallan con `fetch failed` sin el stack local levantado — ruido esperado, ajeno a esta spec.)
