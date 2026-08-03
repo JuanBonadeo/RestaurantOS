@@ -100,7 +100,7 @@ Como **encargado**, veo un cobro de $15.000 que en realidad fue de $1.500. Toco 
 5. **Dado** un pago con propina mal cargada, **Cuando** corrijo sólo `tip_cents`, **Entonces** el monto no cambia, la rendición del mozo se mueve y el total de ventas queda igual.
 6. **Dado** un monto corregido a $0, **Cuando** confirmo, **Entonces** se rechaza: un cobro de $0 es una anulación y se hace con «Anular cobro».
 7. **Dado** un pago con `adjustment_cents > 0` (recargo por método), **Cuando** corrijo el monto, **Entonces** la UI avisa que el recargo registrado **no se recalcula** y queda tal cual (D6).
-8. **Dado** un pago con **factura emitida** contra su orden, **Cuando** intento corregir el monto, **Entonces** se rechaza: el comprobante fijó el importe (anular factura → anular cobro). Método y mozo **sí** se pueden corregir con factura emitida.
+8. **Dado** un pago con **factura emitida** contra su orden, **Cuando** corrijo el monto, **Entonces** se acepta: el comprobante se emite sobre la **cuenta** (`total_cents` sin propina), no sobre el pago, así que corregir cuánta plata entró no cambia un peso de lo declarado a ARCA. La línea **muestra el comprobante** y explica que, si lo que está mal es el importe facturado, eso se arregla anulándolo (nota de crédito) y re-facturando (D10).
 
 ---
 
@@ -171,7 +171,7 @@ Como **admin**, quiero ver las correcciones del turno sin tener que ir a buscarl
 - **FR-010**: Tras corregir el monto, `orders.total_paid_cents` y `order_splits.paid_amount_cents` DEBEN recalcularse desde los pagos `paid` de la orden — no incrementalmente.
 - **FR-011**: Si tras el recálculo la orden queda **cubierta** y estaba `open`, DEBE cerrarse por el camino existente (`closeOrderIfFullyPaid`, con su transición de mesa).
 - **FR-012**: Si tras el recálculo una orden **cerrada** quedaría sin cubrir, la corrección DEBE rechazarse con un mensaje que ofrezca «Anular cobro» (D5). Una orden cerrada nunca se reabre desde acá.
-- **FR-013**: Si la orden tiene una **factura emitida** (`invoices` con CAE contra esa orden o ese pago), el **monto** y la **propina** NO se corrigen. Método, mozo y caja sí.
+- **FR-013**: Una **factura emitida NO bloquea** ninguna corrección del cobro. La línea DEBE mostrar el comprobante autorizado de su cuenta (tipo + número), aclarar que corregir el cobro no lo modifica, y —para quien tenga acceso a Facturación— enlazar a él para anularlo y re-facturarlo (D10).
 - **FR-014**: `adjustment_percent` / `adjustment_cents` NO se recalculan al corregir el monto; la UI DEBE avisarlo cuando el pago tiene un ajuste distinto de cero.
 
 ### Mozo atribuido
@@ -190,7 +190,7 @@ Como **admin**, quiero ver las correcciones del turno sin tener que ir a buscarl
 - **FR-020**: DEBE existir una vista «Movimientos» accesible para **admin y encargado**, enlazada desde el board de caja, con: rango de fechas (default hoy, timezone AR explícita), filtro por caja (default todas), por tipo (cobro / sangría / ingreso), por método y por mozo, y búsqueda por mesa/cliente/#orden.
 - **FR-021**: La lista DEBE incluir los cobros **anulados** y las líneas **corregidas**, visualmente distinguidos, y los anulados NO DEBEN sumar en los totales.
 - **FR-022**: Cada línea DEBE poder abrirse a un detalle con su historial de correcciones y, si el rol y las guardas lo permiten, el botón «Corregir».
-- **FR-023**: Cuando una línea no es corregible, el detalle DEBE decir **por qué** (arqueo cerrado, pago de MP, factura emitida, mozo que ya rindió) en lugar de esconder el botón sin explicación.
+- **FR-023**: Cuando una línea no es corregible, el detalle DEBE decir **por qué** (arqueo cerrado, pago de MP, línea anulada) en lugar de esconder el formulario sin explicación. Lo mismo con los límites parciales (mozo que ya rindió).
 - **FR-024**: El panel «Movimientos del período» del board sigue existiendo tal cual (hot path del turno) y suma el enlace al libro + la línea accionable.
 - **FR-025**: La confirmación de una corrección DEBE ser **explícita y no optimista** (frontera de plata, spec 021), con el botón bloqueado mientras está en vuelo.
 
@@ -222,6 +222,8 @@ Como **admin**, quiero ver las correcciones del turno sin tener que ir a buscarl
 
 **D8 — El libro vive en Operación, no en Reportes.** `reportes` es `none` para el encargado ([`sections.ts`](../../src/lib/permissions/sections.ts)) y el encargado es el que corrige. El libro cuelga de Operación (que ya tiene `full` para encargado), no de la sección Cajas (que es config admin-only).
 
+**D10 — La factura no es una frontera de la caja; la re-emisión ya existe.** La primera versión bloqueaba corregir el monto de un cobro cuya cuenta estaba facturada. Estaba de más: `emitInvoice` factura `order.total_cents − tip_cents`, o sea la **cuenta**, no el pago — mover cuánta plata entró a la caja no cambia el comprobante. Y para el caso en que sí está mal el importe facturado, el producto ya sabe hacerlo: `anularFactura` emite la **nota de crédito** referenciando la original y `emitInvoice` permite re-facturar cuando la anterior quedó `cancelled` (el botón «Re-facturar» del detalle de comprobante, spec 09 + 053). Lo que faltaba era el puente: la línea del libro ahora muestra el comprobante y linkea a él. Pedido de Juan (2026-08-03): *"tendría que haber una manera de re-emitir un comprobante, anulando el anterior y haciendo uno nuevo"* — existe, y ahora se llega.
+
 **D9 — La propina se corrige junto con el monto.** No es scope creep: `amount_cents` **incluye** la propina, así que permitir bajar el monto sin tocar `tip_cents` habilita el estado imposible `tip > amount`, que rompe `calcularRendicionMozo` en silencio.
 
 ## Success Criteria *(mandatory)*
@@ -239,7 +241,7 @@ Como **admin**, quiero ver las correcciones del turno sin tener que ir a buscarl
 - Corregir pagos de **Mercado Pago** (D3).
 - Corregir movimientos de **arqueos ya cerrados** — se resuelve anulando y registrando de nuevo en el período vigente.
 - **Reabrir** una orden cerrada desde la caja (D5).
-- Re-emitir o corregir **facturas ARCA** a partir de una corrección.
+- Re-emitir **automáticamente** una factura ARCA como efecto de corregir un cobro. La re-emisión es un acto fiscal deliberado y vive en Facturación (anular → nota de crédito → re-facturar); desde el libro sólo se llega a ella (D10).
 - Editar un **corte de caja** ya firmado o una **rendición** ya cerrada.
 - Cambiar el motor de `registrarPago` / `registrar_pago_tx` / `anularCobro`.
 - Cambiar cómo el server **deriva** el mozo atribuido al cobrar (`deriveAttributedMozo`): esta spec corrige el resultado, no la heurística.
@@ -255,7 +257,7 @@ Como **admin**, quiero ver las correcciones del turno sin tener que ir a buscarl
 - `src/lib/caja/queries.ts` — `getLibroDeMovimientos(range, filtros)` + `getCorreccionesDeLinea`.
 - `src/app/[business_slug]/admin/(authed)/operacion/movimientos/page.tsx` **(nueva)** + su client.
 - `src/components/admin/local/caja-admin-board.tsx` — línea accionable + enlace al libro.
-- `src/components/admin/local/corregir-cobro-modal.tsx` **(nuevo)**.
+- El formulario de corrección vive **dentro del panel lateral** de la línea, no en un modal encima (decisión de Juan, 2026-08-03: "queda más prolijo"). El panel también muestra el comprobante de la cuenta y linkea a Facturación (D10).
 - `src/lib/caja/expected-cash.ts` — ignorar movimientos anulados (P2).
 - `src/lib/reports/shift-summary-loader.ts` + plantilla del mail — correcciones del turno (P2).
 

@@ -95,6 +95,9 @@ export default async function MovimientosPage({
         puedeCorregir={
           ctx.isPlatformAdmin || (ctx.role !== null && canCorregirCobro(ctx.role))
         }
+        // Facturación es admin-only (matriz de secciones): al encargado se le
+        // muestra el comprobante, pero el link no lo llevaría a ningún lado.
+        esAdmin={ctx.isPlatformAdmin || ctx.role === "admin"}
       />
     </PageShell>
   );

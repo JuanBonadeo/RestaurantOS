@@ -234,8 +234,6 @@ export type ContextoCorreccion = {
   ultimoCorteOrigen: string | null;
   /** Último corte de la caja destino, sólo si el patch la cambia. */
   ultimoCorteDestino?: string | null;
-  /** ¿La cuenta del cobro tiene comprobante autorizado? */
-  facturaAutorizada: boolean;
   /**
    * Mozos (origen y/o destino) que ya rindieron después de este cobro. El
    * nombre entra en el mensaje: "ya entró en la rendición de X" explica, "no
@@ -250,9 +248,16 @@ function esPosterior(fecha: string, corte: string | null): boolean {
 }
 
 /**
- * Guardas de contexto (FR-004 a FR-007, FR-013, FR-016). Corren antes de tocar
- * la base: la RPC repite las invariantes duras, pero estos mensajes son los
- * que el encargado necesita leer para saber qué hacer en su lugar.
+ * Guardas de contexto (FR-004 a FR-007, FR-016). Corren antes de tocar la base:
+ * la RPC repite las invariantes duras, pero estos mensajes son los que el
+ * encargado necesita leer para saber qué hacer en su lugar.
+ *
+ * Ojo con lo que NO está acá: tener **factura emitida** no bloquea corregir el
+ * monto. El comprobante se emite sobre la CUENTA (`order.total_cents` sin
+ * propina), no sobre el pago — corregir cuánta plata entró a la caja no cambia
+ * un peso de lo declarado a ARCA. Si lo que está mal es el importe facturado,
+ * eso se arregla en Facturación: anular (emite la nota de crédito) y
+ * re-facturar.
  */
 export function evaluarGuardas(
   ctx: ContextoCorreccion,
@@ -289,16 +294,6 @@ export function evaluarGuardas(
       ok: false,
       error:
         "La caja destino ya cerró un arqueo posterior a ese cobro. Registralo en el período vigente.",
-    };
-  }
-
-  const cambiaMonto =
-    patch.amount_cents !== undefined || patch.tip_cents !== undefined;
-  if (cambiaMonto && ctx.facturaAutorizada) {
-    return {
-      ok: false,
-      error:
-        "Esa cuenta ya tiene factura emitida: el comprobante fijó el importe. Anulá la factura y el cobro para rehacerlo. El método y el mozo sí se pueden corregir.",
     };
   }
 

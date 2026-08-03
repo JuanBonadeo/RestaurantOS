@@ -751,7 +751,7 @@ export async function getLibroDeMovimientos(
     orderIds.length > 0
       ? service
           .from("invoices")
-          .select("order_id")
+          .select("id, order_id, tipo_comprobante, punto_venta, numero")
           .eq("business_id", businessId)
           .eq("status", "authorized")
           .in("order_id", orderIds)
@@ -771,8 +771,27 @@ export async function getLibroDeMovimientos(
   const corregidos = new Set(
     ((auditRes.data ?? []) as Array<{ entity_id: string }>).map((r) => r.entity_id),
   );
-  const facturadas = new Set(
-    ((facturasRes.data ?? []) as Array<{ order_id: string }>).map((r) => r.order_id),
+  // El comprobante NO limita la corrección del cobro (se emite sobre la cuenta,
+  // no sobre el pago): viaja para poder saltar a él desde la línea cuando lo
+  // que hay que rehacer es la factura.
+  const facturaPorOrden = new Map(
+    (
+      (facturasRes.data ?? []) as Array<{
+        id: string;
+        order_id: string;
+        tipo_comprobante: string;
+        punto_venta: number;
+        numero: number | null;
+      }>
+    ).map((r) => [
+      r.order_id,
+      {
+        id: r.id,
+        tipo_comprobante: r.tipo_comprobante,
+        punto_venta: r.punto_venta,
+        numero: r.numero,
+      },
+    ]),
   );
   const rendiciones = (rendicionesRes.data ?? []) as Array<{
     mozo_id: string;
@@ -798,11 +817,6 @@ export async function getLibroDeMovimientos(
 
     const advertencias: string[] = [];
     if (!bloqueo) {
-      if (facturadas.has(p.order_id)) {
-        advertencias.push(
-          "La cuenta ya tiene factura emitida: se pueden corregir el método y el mozo, no el monto.",
-        );
-      }
       const yaRindio = rendiciones.some(
         (r) =>
           r.mozo_id === p.attributed_mozo_id &&
@@ -844,6 +858,7 @@ export async function getLibroDeMovimientos(
       corregido: corregidos.has(p.id),
       bloqueo,
       advertencias,
+      factura: facturaPorOrden.get(p.order_id) ?? null,
     });
   }
 
@@ -875,6 +890,7 @@ export async function getLibroDeMovimientos(
       corregido: corregidos.has(m.id),
       bloqueo,
       advertencias: [],
+      factura: null,
     });
   }
 

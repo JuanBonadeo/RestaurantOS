@@ -68,8 +68,19 @@ export type LibroEntry = {
   corregido: boolean;
   /** Por qué NO se puede corregir, en castellano. `null` = se puede. */
   bloqueo: string | null;
-  /** Corregible, pero con límites (factura emitida, mozo que ya rindió). */
+  /** Corregible, pero con límites (mozo que ya rindió). */
   advertencias: string[];
+  /**
+   * Comprobante autorizado de la cuenta, si hay. NO limita la corrección del
+   * cobro (la factura se emite sobre la cuenta, no sobre el pago): está para
+   * poder saltar a él cuando lo que hay que arreglar es el comprobante.
+   */
+  factura: {
+    id: string;
+    tipo_comprobante: string;
+    punto_venta: number;
+    numero: number | null;
+  } | null;
 };
 
 export type LibroTotales = {

@@ -150,22 +150,6 @@ async function tieneRendicionPosterior(
   return ((data ?? []) as unknown[]).length > 0;
 }
 
-/** ¿Hay comprobante fiscal emitido contra esta orden? */
-async function tieneFacturaAutorizada(
-  service: GenericClient,
-  businessId: string,
-  orderId: string,
-): Promise<boolean> {
-  const { data } = await service
-    .from("invoices")
-    .select("id")
-    .eq("business_id", businessId)
-    .eq("order_id", orderId)
-    .eq("status", "authorized")
-    .limit(1);
-  return ((data ?? []) as unknown[]).length > 0;
-}
-
 /**
  * Corrige una línea de cobro ya registrada (spec 070).
  *
@@ -219,22 +203,16 @@ export async function corregirCobro(
   // Los hechos se buscan acá; la decisión la toma `evaluarGuardas` (puro).
   const cambiaCaja =
     patch.caja_id !== undefined && patch.caja_id !== pago.caja_id;
-  const cambiaMonto =
-    patch.amount_cents !== undefined || patch.tip_cents !== undefined;
   const cambiaMozo =
     patch.attributed_mozo_id !== undefined &&
     patch.attributed_mozo_id !== pago.attributed_mozo_id;
 
-  const [ultimoCorteOrigen, ultimoCorteDestino, facturaAutorizada] =
-    await Promise.all([
-      ultimoCorteDe(service, pago.caja_id, business.id),
-      cambiaCaja
-        ? ultimoCorteDe(service, patch.caja_id as string, business.id)
-        : Promise.resolve(null),
-      cambiaMonto
-        ? tieneFacturaAutorizada(service, business.id, pago.order_id)
-        : Promise.resolve(false),
-    ]);
+  const [ultimoCorteOrigen, ultimoCorteDestino] = await Promise.all([
+    ultimoCorteDe(service, pago.caja_id, business.id),
+    cambiaCaja
+      ? ultimoCorteDe(service, patch.caja_id as string, business.id)
+      : Promise.resolve(null),
+  ]);
 
   const rendicionesPosteriores: Array<{ mozoId: string; nombre: string }> = [];
   if (cambiaMozo) {
@@ -260,7 +238,6 @@ export async function corregirCobro(
       businessId: business.id,
       ultimoCorteOrigen,
       ultimoCorteDestino,
-      facturaAutorizada,
       rendicionesPosteriores,
     },
     patch,

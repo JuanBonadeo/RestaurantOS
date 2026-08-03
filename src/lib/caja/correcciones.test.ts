@@ -142,7 +142,6 @@ const CTX: ContextoCorreccion = {
   businessId: "biz-1",
   ultimoCorteOrigen: "2026-07-30T14:00:00.000Z",
   ultimoCorteDestino: null,
-  facturaAutorizada: false,
   rendicionesPosteriores: [],
 };
 
@@ -199,16 +198,12 @@ describe("caja / evaluarGuardas", () => {
     expect(r.ok === false && r.error).toContain("caja destino");
   });
 
-  it("con factura emitida rechaza el monto pero deja corregir método y mozo", () => {
-    const conFactura = { ...CTX, facturaAutorizada: true };
-    expect(evaluarGuardas(conFactura, { amount_cents: 500 }).ok).toBe(false);
-    expect(evaluarGuardas(conFactura, { tip_cents: 100 }).ok).toBe(false);
-    expect(evaluarGuardas(conFactura, { method: "card_manual" })).toEqual({
-      ok: true,
-    });
-    expect(evaluarGuardas(conFactura, { attributed_mozo_id: "mozo-2" })).toEqual(
-      { ok: true },
-    );
+  // La factura se emite sobre la CUENTA, no sobre el pago: corregir cuánta
+  // plata entró a la caja no cambia un peso de lo declarado a ARCA. Si lo que
+  // está mal es el importe facturado, se anula y se re-factura en Facturación.
+  it("una cuenta facturada no bloquea la corrección del cobro", () => {
+    expect(evaluarGuardas(CTX, { amount_cents: 500 })).toEqual({ ok: true });
+    expect(evaluarGuardas(CTX, { tip_cents: 100 })).toEqual({ ok: true });
   });
 
   it("rechaza reatribuir un cobro que ya entró en una rendición, con nombre", () => {

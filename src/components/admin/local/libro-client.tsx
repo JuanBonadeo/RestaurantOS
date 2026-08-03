@@ -3,34 +3,49 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
+  AlertTriangle,
   ArrowDownToLine,
   ArrowUpFromLine,
   Banknote,
   CreditCard,
   History,
   Link2,
+  FileText,
   Lock,
   MoreHorizontal,
-  Pencil,
   QrCode,
   Wallet,
 } from "lucide-react";
+import { toast } from "sonner";
 
-import { CorregirCobroModal } from "@/components/admin/local/corregir-cobro-modal";
+import Link from "next/link";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Sheet,
   SheetContent,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { Textarea } from "@/components/ui/textarea";
 import {
+  corregirCobro,
+  corregirMovimiento,
   verCorrecciones,
   type CorreccionLogConNombres,
 } from "@/lib/caja/correccion-actions";
 import type { LibroEntry, LibroTotales, PaymentMethod } from "@/lib/caja/types";
+import { formatInvoiceNumber, tipoLabel } from "@/lib/afip/format";
+import type { TipoComprobante } from "@/lib/afip/types";
 import { formatCurrency } from "@/lib/currency";
 import { cn } from "@/lib/utils";
 
@@ -42,6 +57,23 @@ const METHOD_LABEL: Record<PaymentMethod, string> = {
   transfer: "Transferencia",
   other: "Otro",
 };
+
+const METODOS: { value: PaymentMethod; label: string }[] = [
+  { value: "cash", label: "Efectivo" },
+  { value: "card_manual", label: "Tarjeta" },
+  { value: "transfer", label: "Transferencia" },
+  { value: "other", label: "Otro" },
+];
+
+const SIN_MOZO = "__sin_mozo__";
+
+function centsToInput(cents: number): string {
+  return (cents / 100).toFixed(2);
+}
+
+function inputToCents(value: string): number {
+  return Math.round(Number(value) * 100);
+}
 
 const CAMPO_LABEL: Record<string, string> = {
   method: "Método",
@@ -126,6 +158,7 @@ type Props = {
   truncado: boolean;
   filtros: FiltrosUI;
   puedeCorregir: boolean;
+  esAdmin: boolean;
 };
 
 export function LibroClient({
@@ -137,11 +170,11 @@ export function LibroClient({
   truncado,
   filtros,
   puedeCorregir,
+  esAdmin,
 }: Props) {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [detalle, setDetalle] = useState<LibroEntry | null>(null);
-  const [corrigiendo, setCorrigiendo] = useState<LibroEntry | null>(null);
 
   function aplicar(patch: Partial<FiltrosUI>) {
     const next = { ...filtros, ...patch };
@@ -392,28 +425,16 @@ export function LibroClient({
       <DetalleSheet
         entry={detalle}
         slug={slug}
+        cajas={cajas}
+        mozos={mozos}
         puedeCorregir={puedeCorregir}
+        esAdmin={esAdmin}
         onClose={() => setDetalle(null)}
-        onCorregir={(e) => {
+        onDone={() => {
           setDetalle(null);
-          setCorrigiendo(e);
+          router.refresh();
         }}
       />
-
-      {corrigiendo && (
-        <CorregirCobroModal
-          open
-          onOpenChange={(o) => !o && setCorrigiendo(null)}
-          slug={slug}
-          entry={corrigiendo}
-          cajas={cajas}
-          mozos={mozos}
-          onDone={() => {
-            setCorrigiendo(null);
-            router.refresh();
-          }}
-        />
-      )}
     </div>
   );
 }
@@ -440,21 +461,56 @@ function Totalizador({
   );
 }
 
+/**
+ * El panel de la línea: detalle **y** corrección en el mismo lugar. Antes la
+ * corrección abría un modal encima del panel — dos capas para editar cuatro
+ * campos. Acá se edita donde se mira, con la misma estética del detalle.
+ */
 function DetalleSheet({
   entry,
   slug,
+  cajas,
+  mozos,
   puedeCorregir,
+  esAdmin,
   onClose,
-  onCorregir,
+  onDone,
 }: {
   entry: LibroEntry | null;
   slug: string;
+  cajas: { id: string; name: string }[];
+  mozos: { id: string; name: string }[];
   puedeCorregir: boolean;
+  esAdmin: boolean;
   onClose: () => void;
-  onCorregir: (entry: LibroEntry) => void;
+  onDone: () => void;
 }) {
   const [logs, setLogs] = useState<CorreccionLogConNombres[]>([]);
   const [cargando, setCargando] = useState(false);
+
+  const [method, setMethod] = useState<PaymentMethod | null>(null);
+  const [amount, setAmount] = useState("");
+  const [tip, setTip] = useState("");
+  const [mozoId, setMozoId] = useState(SIN_MOZO);
+  const [cajaId, setCajaId] = useState("");
+  const [notes, setNotes] = useState("");
+  const [motivo, setMotivo] = useState("");
+  const [anular, setAnular] = useState(false);
+  const [pending, startTransition] = useTransition();
+
+  // Cada línea abre con sus valores actuales cargados: el formulario ES el
+  // detalle, así que arranca mostrando lo que hay.
+  useEffect(() => {
+    if (!entry) return;
+    setMethod(entry.method);
+    setAmount(centsToInput(entry.amount_cents));
+    setTip(centsToInput(entry.tip_cents));
+    setMozoId(entry.attributed_mozo_id ?? SIN_MOZO);
+    setCajaId(entry.caja_id);
+    setNotes("");
+    setMotivo("");
+    setAnular(false);
+  }, [entry]);
 
   useEffect(() => {
     if (!entry || !entry.corregido) {
@@ -479,20 +535,88 @@ function DetalleSheet({
 
   if (!entry) return null;
 
+  const esCobro = entry.tipo === "cobro";
+  const editable = puedeCorregir && !entry.bloqueo;
+  const nuevoMonto = inputToCents(amount);
+  const nuevaPropina = inputToCents(tip);
+  const mozoBloqueado = entry.advertencias.some((a) => a.includes("rindió"));
+
+  const cambios: string[] = [];
+  if (esCobro) {
+    if (method !== entry.method) cambios.push("método");
+    if (nuevoMonto !== entry.amount_cents) cambios.push("monto");
+    if (nuevaPropina !== entry.tip_cents) cambios.push("propina");
+    if ((mozoId === SIN_MOZO ? null : mozoId) !== entry.attributed_mozo_id) {
+      cambios.push("mozo");
+    }
+    if (cajaId !== entry.caja_id) cambios.push("caja");
+    if (notes.trim() !== "") cambios.push("nota");
+  } else if (anular) {
+    cambios.push("anulación");
+  } else if (nuevoMonto !== entry.amount_cents) {
+    cambios.push("monto");
+  }
+
+  const montoValido =
+    nuevoMonto > 0 && nuevaPropina >= 0 && nuevaPropina <= nuevoMonto;
+  const puedeConfirmar =
+    !pending && motivo.trim() !== "" && cambios.length > 0 && montoValido;
+
+  function confirmar() {
+    if (!entry) return;
+    const linea = entry;
+    startTransition(async () => {
+      const r = esCobro
+        ? await corregirCobro({
+            paymentId: linea.id,
+            slug,
+            motivo: motivo.trim(),
+            ...(method !== linea.method && method ? { method } : {}),
+            ...(nuevoMonto !== linea.amount_cents
+              ? { amount_cents: nuevoMonto }
+              : {}),
+            ...(nuevaPropina !== linea.tip_cents
+              ? { tip_cents: nuevaPropina }
+              : {}),
+            ...((mozoId === SIN_MOZO ? null : mozoId) !== linea.attributed_mozo_id
+              ? { attributed_mozo_id: mozoId === SIN_MOZO ? null : mozoId }
+              : {}),
+            ...(cajaId !== linea.caja_id ? { caja_id: cajaId } : {}),
+            ...(notes.trim() !== "" ? { notes: notes.trim() } : {}),
+          })
+        : await corregirMovimiento({
+            movimientoId: linea.id,
+            slug,
+            motivo: motivo.trim(),
+            ...(anular ? { anular: true } : { amount_cents: nuevoMonto }),
+          });
+
+      if (!r.ok) {
+        toast.error(r.error);
+        return;
+      }
+      toast.success(anular ? "Movimiento anulado" : "Línea corregida");
+      onDone();
+    });
+  }
+
   return (
-    <Sheet open onOpenChange={(o) => !o && onClose()}>
-      <SheetContent side="right" className="w-full sm:max-w-md">
+    <Sheet open onOpenChange={(o) => (pending ? null : !o && onClose())}>
+      <SheetContent
+        side="right"
+        className="w-full overflow-y-auto sm:max-w-md"
+      >
         <SheetHeader>
           <SheetTitle className="text-lg">{entry.descripcion}</SheetTitle>
         </SheetHeader>
 
-        <div className="space-y-4 px-4 pb-6">
+        <div className="space-y-4 px-4 pb-8">
           <div className="rounded-xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70">
             <p className="text-3xl font-bold tabular-nums text-zinc-900">
               {formatCurrency(entry.amount_cents)}
             </p>
             <p className="mt-1 text-sm text-zinc-600">
-              {entry.tipo === "cobro" && entry.method
+              {esCobro && entry.method
                 ? METHOD_LABEL[entry.method]
                 : entry.tipo === "sangria"
                   ? "Sangría"
@@ -514,15 +638,47 @@ function DetalleSheet({
             )}
           </div>
 
+          {/* El comprobante no limita nada de acá: se emite sobre la CUENTA
+              (total sin propina), no sobre el pago. Está para poder ir a
+              arreglarlo cuando lo que está mal es la factura. */}
+          {entry.factura && (
+            <div className="rounded-xl bg-white p-3 text-sm ring-1 ring-zinc-200/70">
+              <p className="flex items-center gap-2 font-semibold text-zinc-800">
+                <FileText className="size-4 text-zinc-400" />
+                {tipoLabel(entry.factura.tipo_comprobante as TipoComprobante)}{" "}
+                {formatInvoiceNumber(
+                  entry.factura.punto_venta,
+                  entry.factura.numero,
+                )}
+              </p>
+              <p className="mt-1 text-zinc-600">
+                Corregir el cobro <strong>no toca el comprobante</strong>: la
+                factura se emite sobre la cuenta, no sobre la plata que entró. Si
+                lo que está mal es el importe facturado, hay que anularla —se
+                emite la nota de crédito— y volver a facturar.
+              </p>
+              {esAdmin && entry.factura.numero != null && (
+                <Link
+                  href={`/${slug}/admin/facturacion?range=all&q=${entry.factura.numero}`}
+                  className="mt-2 inline-flex text-sm font-semibold text-zinc-700 underline underline-offset-2 hover:text-zinc-900"
+                >
+                  Ir al comprobante
+                </Link>
+              )}
+            </div>
+          )}
+
           {entry.anulado && (
             <div className="rounded-xl bg-zinc-100 p-3 text-sm text-zinc-700">
               <p className="font-semibold">Anulado</p>
-              {entry.anulado_reason && <p className="mt-0.5">{entry.anulado_reason}</p>}
+              {entry.anulado_reason && (
+                <p className="mt-0.5">{entry.anulado_reason}</p>
+              )}
             </div>
           )}
 
           {/* Por qué no se puede corregir: decirlo es parte del trabajo — un
-              botón escondido no explica nada. */}
+              formulario escondido no explica nada. */}
           {entry.bloqueo && (
             <p className="flex items-start gap-2 rounded-xl bg-zinc-50 p-3 text-sm text-zinc-600 ring-1 ring-zinc-200">
               <Lock className="mt-0.5 size-3.5 shrink-0" />
@@ -534,15 +690,225 @@ function DetalleSheet({
               </span>
             </p>
           )}
-          {!entry.bloqueo &&
+
+          {editable &&
             entry.advertencias.map((a) => (
               <p
                 key={a}
-                className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200"
+                className="flex items-start gap-2 rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200"
               >
-                {a}
+                <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                <span>{a}</span>
               </p>
             ))}
+
+          {editable && (
+            <div className="space-y-4 rounded-xl bg-white p-4 ring-1 ring-zinc-200/70">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                Corregir
+              </p>
+
+              {esCobro && (
+                <div className="grid gap-1.5">
+                  <Label className="text-sm">Método</Label>
+                  <Select
+                    value={method ?? undefined}
+                    onValueChange={(v) => setMethod(v as PaymentMethod)}
+                  >
+                    <SelectTrigger className="h-11 w-full text-base">
+                      {/* `SelectValue` sin render function imprime el VALOR,
+                          que acá es un id. */}
+                      <SelectValue placeholder="Elegí un método">
+                        {(value) =>
+                          METODOS.find((m) => m.value === value)?.label ??
+                          "Elegí un método"
+                        }
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {METODOS.map((m) => (
+                        <SelectItem key={m.value} value={m.value}>
+                          {m.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              {!esCobro && (
+                <label className="flex items-center gap-3 rounded-xl bg-zinc-50 p-3 text-sm ring-1 ring-zinc-200">
+                  <input
+                    type="checkbox"
+                    checked={anular}
+                    onChange={(e) => setAnular(e.target.checked)}
+                    className="size-5"
+                  />
+                  <span>
+                    Anular el movimiento — deja de contar para el arqueo, pero
+                    sigue visible acá.
+                  </span>
+                </label>
+              )}
+
+              <div className={cn("grid gap-3", esCobro && "grid-cols-2")}>
+                <div className="grid gap-1.5">
+                  <Label className="text-sm">Monto</Label>
+                  <div className="relative">
+                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-lg font-semibold text-zinc-400">
+                      $
+                    </span>
+                    <Input
+                      type="number"
+                      inputMode="decimal"
+                      value={amount}
+                      disabled={anular}
+                      onChange={(e) => setAmount(e.target.value)}
+                      className="h-12 pl-8 text-lg font-semibold tabular-nums"
+                    />
+                  </div>
+                </div>
+                {esCobro && (
+                  <div className="grid gap-1.5">
+                    <Label className="text-sm">De propina</Label>
+                    <div className="relative">
+                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-lg font-semibold text-zinc-400">
+                        $
+                      </span>
+                      <Input
+                        type="number"
+                        inputMode="decimal"
+                        value={tip}
+                        onChange={(e) => setTip(e.target.value)}
+                        className="h-12 pl-8 text-lg font-semibold tabular-nums"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {esCobro && (
+                <p className="-mt-1 text-sm text-zinc-500">
+                  La propina viaja dentro del monto:{" "}
+                  {formatCurrency(entry.amount_cents)} incluye{" "}
+                  {formatCurrency(entry.tip_cents)} de propina.
+                </p>
+              )}
+
+              {esCobro && (
+                <>
+                  <div className="grid gap-1.5">
+                    <Label className="text-sm">Mozo atribuido</Label>
+                    <Select
+                      value={mozoId}
+                      onValueChange={(v) => setMozoId(v ?? SIN_MOZO)}
+                      disabled={mozoBloqueado}
+                    >
+                      <SelectTrigger className="h-11 w-full text-base">
+                        <SelectValue placeholder="Sin mozo">
+                          {(value) =>
+                            !value || value === SIN_MOZO
+                              ? "Sin mozo"
+                              : (mozos.find((m) => m.id === value)?.name ??
+                                "Sin mozo")
+                          }
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={SIN_MOZO}>Sin mozo</SelectItem>
+                        {mozos.map((m) => (
+                          <SelectItem key={m.id} value={m.id}>
+                            {m.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {cajas.length > 1 && (
+                    <div className="grid gap-1.5">
+                      <Label className="text-sm">Caja</Label>
+                      <Select
+                        value={cajaId}
+                        onValueChange={(v) => setCajaId(v ?? cajaId)}
+                      >
+                        <SelectTrigger className="h-11 w-full text-base">
+                          <SelectValue>
+                            {(value) =>
+                              cajas.find((c) => c.id === value)?.name ?? "Caja"
+                            }
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {cajas.map((c) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              {c.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  {(method === "transfer" || method === "other") && (
+                    <div className="grid gap-1.5">
+                      <Label className="text-sm">
+                        {method === "transfer" ? "Alias / referencia" : "Nota"}
+                        <span className="ml-1 text-rose-600">*</span>
+                      </Label>
+                      <Input
+                        className="h-11 text-base"
+                        value={notes}
+                        onChange={(e) => setNotes(e.target.value)}
+                        placeholder={
+                          method === "transfer" ? "alias.mp" : "Detalle"
+                        }
+                      />
+                    </div>
+                  )}
+                </>
+              )}
+
+              <div className="grid gap-1.5">
+                <Label className="text-sm">
+                  Motivo<span className="ml-1 text-rose-600">*</span>
+                </Label>
+                <Textarea
+                  className="text-base"
+                  value={motivo}
+                  onChange={(e) => setMotivo(e.target.value)}
+                  rows={3}
+                  placeholder="Ej: lo pagó con débito, no en efectivo"
+                />
+              </div>
+
+              {esCobro && nuevoMonto !== entry.amount_cents && (
+                <p className="text-sm text-zinc-600">
+                  El recargo o descuento por método registrado en el cobro{" "}
+                  <strong>no se recalcula</strong>: se corrige cuánto entró, no
+                  cómo se compuso el precio.
+                </p>
+              )}
+              {!montoValido && (
+                <p className="text-sm font-medium text-rose-600">
+                  El monto tiene que ser mayor a cero y la propina no puede
+                  superarlo.
+                </p>
+              )}
+
+              <Button
+                className="h-12 w-full text-base"
+                disabled={!puedeConfirmar}
+                onClick={confirmar}
+              >
+                {pending
+                  ? "Guardando…"
+                  : cambios.length > 0
+                    ? `Corregir ${cambios.join(" + ")}`
+                    : "Corregir"}
+              </Button>
+            </div>
+          )}
 
           {entry.corregido && (
             <div>
@@ -565,19 +931,14 @@ function DetalleSheet({
                       </p>
                       <p className="mt-0.5 text-zinc-600">{l.reason}</p>
                       <p className="mt-0.5 text-xs text-zinc-400">
-                        {l.by_name ?? "—"} · {fecha(l.created_at)} {hora(l.created_at)}
+                        {l.by_name ?? "—"} · {fecha(l.created_at)}{" "}
+                        {hora(l.created_at)}
                       </p>
                     </li>
                   ))}
                 </ul>
               )}
             </div>
-          )}
-
-          {puedeCorregir && !entry.bloqueo && (
-            <Button className="h-12 w-full text-base" onClick={() => onCorregir(entry)}>
-              <Pencil className="size-4" /> Corregir
-            </Button>
           )}
         </div>
       </SheetContent>
