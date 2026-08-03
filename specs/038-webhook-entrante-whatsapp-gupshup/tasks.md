@@ -1,5 +1,8 @@
 # Tasks: Webhook entrante de WhatsApp (Gupshup) + bot en vivo
 
+> **Nota (2026-08-03):** tildado retroactivamente. Estas tasks se implementaron y shippearon pero el archivo nunca se actualizó; el estado se reconstruyó desde el código y la issue cerrada. Lo que sigue sin tildar es lo que realmente falta (verify en vivo con rol real).
+
+
 **Input**: `/specs/038-webhook-entrante-whatsapp-gupshup/` (spec.md + plan.md)
 
 **Tests**: incluidos — TDD por constitución (principio II) para parser/auth/idempotencia.
@@ -15,13 +18,13 @@
 
 ## Phase 1: Setup
 
-- [ ] T001 Confirmar feature activa `038-...` + GitHub Issue del milestone. Verificar que 037 está mergeado (dependencia).
+- [x] T001 Confirmar feature activa `038-...` + GitHub Issue del milestone. Verificar que 037 está mergeado (dependencia).
 
 ## Phase 2: Foundational (bloquea todas las stories)
 
-- [ ] T002 Migración `supabase/migrations/0006_whatsapp_inbound.sql`: `whatsapp_credentials add column webhook_token text`; `create table whatsapp_inbound_events (...)` con `unique(business_id, provider_event_id)` + RLS service-role-only. (Squashable con `0005` si van juntas.)
-- [ ] T003 Aplicar `0006` al cloud vía MCP + `get_advisors` sin alertas nuevas + `pnpm db:types`.
-- [ ] T004 [P] Extender el port con la cara inbound en `src/lib/notifications/whatsapp-provider.ts` (`WhatsappInboundAdapter { verify, parse }`).
+- [x] T002 Migración `supabase/migrations/0006_whatsapp_inbound.sql`: `whatsapp_credentials add column webhook_token text`; `create table whatsapp_inbound_events (...)` con `unique(business_id, provider_event_id)` + RLS service-role-only. (Squashable con `0005` si van juntas.)
+- [x] T003 Aplicar `0006` al cloud vía MCP + `get_advisors` sin alertas nuevas + `pnpm db:types`.
+- [x] T004 [P] Extender el port con la cara inbound en `src/lib/notifications/whatsapp-provider.ts` (`WhatsappInboundAdapter { verify, parse }`).
 
 **Checkpoint**: datos + port inbound listos.
 
@@ -35,14 +38,14 @@
 
 ### Tests (rojo primero)
 
-- [ ] T005 [P] [US1] `whatsapp-gupshup.test.ts`: `parseGupshupInbound` extrae de `type:"message"` el `phone`, `text`, `providerEventId`, `name`; distingue `message-event`/`user-event`; media → marca "no texto".
+- [x] T005 [P] [US1] `whatsapp-gupshup.test.ts`: `parseGupshupInbound` extrae de `type:"message"` el `phone`, `text`, `providerEventId`, `name`; distingue `message-event`/`user-event`; media → marca "no texto".
 
 ### Implementación
 
-- [ ] T006 [US1] `src/lib/notifications/whatsapp-gupshup.ts`: `parseGupshupInbound(body)` → forma neutra `{ type, phone, name, text, providerEventId }`. Verde para T005.
-- [ ] T007 [US1] Ruta `src/app/api/chatbot/whatsapp/[businessId]/route.ts` (`runtime="nodejs"`): parseo del envelope; si `type!=="message"` o media → ack `200`. Resuelve negocio por path.
-- [ ] T008 [US1] Wiring: `after()` → `runChatbot({ businessId, businessSlug, businessName, channel:"whatsapp", contactIdentifier: normalizePhone(phone), contactDisplayName: name, userMessage: text })` → respuesta por `sendWhatsapp({ businessId, to: phone, text: assistantMessage })`. Manejar `ChatbotRateLimitedError` (ack, no responder) y `ChatbotNotConfiguredError` (log).
-- [ ] T009 [US1] Test de integración de la ruta (agente mockeado): un `message` dispara `runChatbot` con canal/teléfono correctos y ackea `200`; media/`message-event` → ack sin invocar agente.
+- [x] T006 [US1] `src/lib/notifications/whatsapp-gupshup.ts`: `parseGupshupInbound(body)` → forma neutra `{ type, phone, name, text, providerEventId }`. Verde para T005.
+- [x] T007 [US1] Ruta `src/app/api/chatbot/whatsapp/[businessId]/route.ts` (`runtime="nodejs"`): parseo del envelope; si `type!=="message"` o media → ack `200`. Resuelve negocio por path.
+- [x] T008 [US1] Wiring: `after()` → `runChatbot({ businessId, businessSlug, businessName, channel:"whatsapp", contactIdentifier: normalizePhone(phone), contactDisplayName: name, userMessage: text })` → respuesta por `sendWhatsapp({ businessId, to: phone, text: assistantMessage })`. Manejar `ChatbotRateLimitedError` (ack, no responder) y `ChatbotNotConfiguredError` (log).
+- [x] T009 [US1] Test de integración de la ruta (agente mockeado): un `message` dispara `runChatbot` con canal/teléfono correctos y ackea `200`; media/`message-event` → ack sin invocar agente.
 
 **Checkpoint**: US1 funcional — el bot atiende por WhatsApp.
 
@@ -56,13 +59,13 @@
 
 ### Tests (rojo primero)
 
-- [ ] T010 [P] [US2] `whatsapp-gupshup.test.ts`: `verifyGupshupToken` timing-safe (token correcto → true; ausente/incorrecto → false).
+- [x] T010 [P] [US2] `whatsapp-gupshup.test.ts`: `verifyGupshupToken` timing-safe (token correcto → true; ausente/incorrecto → false).
 
 ### Implementación
 
-- [ ] T011 [US2] En la ruta: cargar `webhook_token` del negocio (service client) y verificar (header o `?token=`) **antes** de procesar; inválido → `401` fail-closed. Cross-check `body.app === app_name`; mismatch → `200` + log + descartar.
-- [ ] T012 [US2] Idempotencia: `INSERT` en `whatsapp_inbound_events` (unique) antes de invocar el agente; violación 23505 → ack `200` sin reprocesar.
-- [ ] T013 [US2] Tests de ruta: token inválido → 401; duplicado (mismo `payload.id`) → un solo `runChatbot`; `app` que no matchea → descartado.
+- [x] T011 [US2] En la ruta: cargar `webhook_token` del negocio (service client) y verificar (header o `?token=`) **antes** de procesar; inválido → `401` fail-closed. Cross-check `body.app === app_name`; mismatch → `200` + log + descartar.
+- [x] T012 [US2] Idempotencia: `INSERT` en `whatsapp_inbound_events` (unique) antes de invocar el agente; violación 23505 → ack `200` sin reprocesar.
+- [x] T013 [US2] Tests de ruta: token inválido → 401; duplicado (mismo `payload.id`) → un solo `runChatbot`; `app` que no matchea → descartado.
 
 **Checkpoint**: seguridad e idempotencia probadas; US1 sigue verde.
 
@@ -74,8 +77,8 @@
 
 **Independent Test**: `agent_enabled=false` → mensaje guardado, bot no responde.
 
-- [ ] T014 [US3] En la ruta, antes del turno: si existe `chatbot_conversations.agent_enabled` y está `false` → persistir el entrante y **no** invocar el LLM; si la columna no existe aún → atender (default prendido).
-- [ ] T015 [US3] Test: con agente apagado, `runChatbot` no se llama y el mensaje queda persistido.
+- [x] T014 [US3] En la ruta, antes del turno: si existe `chatbot_conversations.agent_enabled` y está `false` → persistir el entrante y **no** invocar el LLM; si la columna no existe aún → atender (default prendido).
+- [x] T015 [US3] Test: con agente apagado, `runChatbot` no se llama y el mensaje queda persistido.
 
 **Checkpoint**: las 3 stories funcionales.
 
@@ -83,9 +86,9 @@
 
 ## Phase 6: Verify & cierre
 
-- [ ] T016 `pnpm typecheck` + `pnpm test` en verde; lint sin warnings.
-- [ ] T017 Revisión fresca: ningún secreto en código/tests/logs; el `webhook_token` nunca se expone; `get_advisors` sin alertas nuevas.
-- [ ] T018 Documentar el contrato de la callback URL (para setear en Gupshup en operación) + actualizar feature page/wiki + marcar la spec + loggear; comentar + cerrar la Issue. Nota: desbloquea la bandeja de conversaciones y corrige el supuesto Meta del hardening previo.
+- [x] T016 `pnpm typecheck` + `pnpm test` en verde; lint sin warnings.
+- [x] T017 Revisión fresca: ningún secreto en código/tests/logs; el `webhook_token` nunca se expone; `get_advisors` sin alertas nuevas.
+- [x] T018 Documentar el contrato de la callback URL (para setear en Gupshup en operación) + actualizar feature page/wiki + marcar la spec + loggear; comentar + cerrar la Issue. Nota: desbloquea la bandeja de conversaciones y corrige el supuesto Meta del hardening previo.
 
 ---
 

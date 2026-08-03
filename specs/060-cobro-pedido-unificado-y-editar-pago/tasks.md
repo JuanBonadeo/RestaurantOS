@@ -1,5 +1,7 @@
 # Tasks: 060 — Cobro unificado del pedido sin mesa + corregir un pago
 
+**Status**: ⛔ **SUPERSEDED (2026-08-03)** — no se implementa como está escrita. La **mitad A** (cobro unificado del pedido sin mesa) la absorbió la [spec 062](../062-motor-de-cobro-unificado/) (issue #96); la **mitad B** (corregir un pago) la resolvió la [spec 070](../070-caja-correccion-de-lineas-y-libro/) (issue #106), que la mejora: acá el monto quedaba afuera (P2) y no se contemplaba reatribuir el mozo. Las tasks de abajo quedan sin tildar a propósito: se implementó otra cosa, no ésta. Issue [#91](https://github.com/gachetponzellini/RestaurantOS-app/issues/91) cerrada como no planificada.
+
 Leyenda: `[ ]` pendiente · `[x]` hecho. Dos mitades independientes: **B** (corregir pago) se puede mergear sin **A** (cobro unificado) y viceversa.
 
 ## B · Datos

@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-28
 
-**Status**: 📝 Spec — pendiente de aprobación. Issue [#91](https://github.com/gachetponzellini/RestaurantOS-app/issues/91). Milestone: Post-demo · Growth & hardening.
+**Status**: ⛔ **SUPERSEDED (2026-08-03)** — no se implementa como está escrita. La **mitad A** (cobro unificado del pedido sin mesa) la absorbió la [spec 062](../062-motor-de-cobro-unificado/) (issue #96); la **mitad B** (corregir un pago) la resolvió la [spec 070](../070-caja-correccion-de-lineas-y-libro/) (issue #106), que la mejora: acá el monto quedaba afuera (P2) y no se contemplaba reatribuir el mozo. Las tasks de abajo quedan sin tildar a propósito: se implementó otra cosa, no ésta. Issue [#91](https://github.com/gachetponzellini/RestaurantOS-app/issues/91) cerrada como no planificada.
 
 > ⚠️ **La mitad A (cobro unificado) quedó reemplazada por [spec 062](../062-motor-de-cobro-unificado/)** (2026-07-28, [#96](https://github.com/gachetponzellini/RestaurantOS-app/issues/96)). Acá se proponía reusar `CobrarDesktopClient` para el pedido sin mesa; Juan pidió ir más lejos — **un solo motor de cobro para las cuatro UIs**, parametrizado por lo que hay que cobrar. Todo lo de la mitad A (FR-001 a FR-006, US1) se cumple allá y **no se implementa desde acá**.
 >
