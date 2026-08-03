@@ -68,6 +68,12 @@ import {
 import { anularMesa, assignMozoToTable } from "@/lib/mozo/actions";
 import { tieneConsumo } from "@/lib/mozo/consumo";
 import {
+  groupTablesForSidebar,
+  type SalonTableGroup,
+} from "@/lib/mozo/salon-table-order";
+import { useArrowFocus } from "@/lib/ui/use-arrow-focus";
+import { useRovingList } from "@/lib/ui/use-roving-list";
+import {
   loadPedirCatalog,
   loadTableComandas,
   type PedirCatalogBundle,
@@ -935,6 +941,142 @@ export function SalonDesktop({
     router.refresh();
   }, [onDistribuirClose, router]);
 
+  // ── Teclado del panel lateral (spec 075) ──────────────────────────────────
+  //
+  // La lista de entrada del panel (demoras + reservas + mesas) se recorre con
+  // ↑/↓ como **un solo camino** de arriba a abajo: las tres secciones son una
+  // sola zona con foco real, así el encargado elige mesa sin ir al mouse.
+  //
+  // El orden de las mesas sale de `groupTablesForSidebar` y se comparte con
+  // quien las pinta: desde que la lista se navega con flechas, el orden visual
+  // y el del teclado tienen que ser el mismo o Enter abre otra mesa.
+  const mesaGroups = useMemo(
+    () => groupTablesForSidebar(activeTables, reservationByTable, now),
+    [activeTables, reservationByTable, now],
+  );
+  const reservasConfirmadas = useMemo(
+    () => reservations.filter((r) => r.status === "confirmed"),
+    [reservations],
+  );
+  const listaRowIndex = useMemo(() => {
+    const index = new Map<string, number>();
+    const push = (key: string) => index.set(key, index.size);
+    for (const d of demoras) push(`demora:${d.tableId}`);
+    for (const r of reservasConfirmadas) push(`reserva:${r.id}`);
+    for (const g of mesaGroups) for (const t of g.tables) push(`mesa:${t.id}`);
+    return index;
+  }, [demoras, reservasConfirmadas, mesaGroups]);
+
+  const lista = useRovingList<HTMLButtonElement>({ length: listaRowIndex.size });
+  const { itemProps: listaItemProps, focusIndex: listaFocusIndex } = lista;
+  /** Props de teclado de una fila de la lista, por su clave estable. */
+  const listaRowProps = useCallback(
+    (key: string) => {
+      const i = listaRowIndex.get(key);
+      return i === undefined ? {} : listaItemProps(i);
+    },
+    [listaRowIndex, listaItemProps],
+  );
+
+  // Volver de un modo a la lista deja el foco en la fila de donde se salió, no
+  // al principio (FR-003/009). Se recuerda **la clave de la fila** y no el
+  // elemento: al abrir un modo la lista entera se desmonta, así que para cuando
+  // hay que devolver el foco el botón original ya no existe — lo que sobrevive
+  // es la mesa.
+  const [volverAFila, setVolverAFila] = useState<string | null>(null);
+  useEffect(() => {
+    if (!volverAFila) return;
+    const i = listaRowIndex.get(volverAFila);
+    if (i !== undefined) listaFocusIndex(i);
+    setVolverAFila(null);
+  }, [volverAFila, listaRowIndex, listaFocusIndex]);
+
+  const seleccionarMesa = useCallback((id: string) => {
+    setVentaRapidaOpen(false);
+    setSelectedId(id);
+  }, []);
+
+  /**
+   * Esc / Backspace suben **un** nivel de la cadena de modos, en el mismo orden
+   * de prioridad con el que el panel decide qué mostrar.
+   */
+  const cerrarModoActual = useCallback(() => {
+    if (asignarReservaFor || pickingForNueva) {
+      setAsignarReservaFor(null);
+      setPickingForNueva(false);
+      return true;
+    }
+    if (showNewReservation) {
+      closeNuevaReserva();
+      return true;
+    }
+    if (distribuirOpen) {
+      closeDistribuir();
+      return true;
+    }
+    if (cobroTable) {
+      closeCobro();
+      return true;
+    }
+    if (cuentaTable) {
+      closeCuenta();
+      return true;
+    }
+    if (pedirTable) {
+      closePedir();
+      return true;
+    }
+    if (walkInTableId) {
+      setWalkInTableId(null);
+      return true;
+    }
+    if (ventaRapidaOpen) {
+      setVentaRapidaOpen(false);
+      return true;
+    }
+    if (selectedId) {
+      setVolverAFila(`mesa:${selectedId}`);
+      setSelectedId(null);
+      return true;
+    }
+    return false;
+  }, [
+    asignarReservaFor,
+    pickingForNueva,
+    showNewReservation,
+    closeNuevaReserva,
+    distribuirOpen,
+    closeDistribuir,
+    cobroTable,
+    closeCobro,
+    cuentaTable,
+    closeCuenta,
+    pedirTable,
+    closePedir,
+    walkInTableId,
+    ventaRapidaOpen,
+    selectedId,
+  ]);
+
+  const handleAsideKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key !== "Escape" && e.key !== "Backspace") return;
+      // Con un modal abierto adentro del panel (alta de producto, asistente del
+      // menú) el Esc es suyo: lo cierra él y el panel no se mueve.
+      if ((e.target as HTMLElement).closest?.("[role='dialog']")) return;
+      if (e.key === "Backspace") {
+        const el = e.target as HTMLElement;
+        const escribiendo =
+          el.tagName === "INPUT" ||
+          el.tagName === "TEXTAREA" ||
+          el.isContentEditable;
+        if (escribiendo) return;
+      }
+      if (cerrarModoActual()) e.preventDefault();
+    },
+    [cerrarModoActual],
+  );
+
   // Extras para el FloorPlanViewer.
   const extras = useMemo(() => {
     const out: Record<string, TableExtra> = {};
@@ -1120,7 +1262,10 @@ export function SalonDesktop({
             cobro > pedir > detalle de mesa > lista. Paint gana porque mientras
             el encargado pinta no queremos que un tap accidental abra el
             detalle. Cobro y pedir son terminales por mesa (excluyentes). */}
-        <aside className="bg-card ring-border/60 flex min-h-0 flex-col overflow-hidden rounded-2xl ring-1">
+        <aside
+          onKeyDown={handleAsideKeyDown}
+          className="bg-card ring-border/60 flex min-h-0 flex-col overflow-hidden rounded-2xl ring-1"
+        >
           {showNewReservation ? (
             <NuevaReservaPanel
               slug={slug}
@@ -1311,15 +1456,24 @@ export function SalonDesktop({
               onAnular={() => pedirAnular(selected.id, selected.label)}
             />
           ) : (
-            <>
+            /* Lista de entrada del panel: demoras + reservas + mesas son UNA
+               sola zona de teclado (spec 075, FR-006) — ↑/↓ la recorren entera
+               de arriba a abajo y Enter abre. El `onKeyDown` va acá, en el
+               contenedor de las tres secciones. */
+            <div
+              onKeyDown={lista.handleKeyDown}
+              className="flex min-h-0 flex-1 flex-col"
+            >
               <DemorasPanel
                 demoras={demoras}
-                onSelect={(id) => setSelectedId(id)}
+                onSelect={seleccionarMesa}
+                rowProps={listaRowProps}
               />
               <ReservationsPanel
                 reservations={reservations}
                 slug={slug}
                 tableLabelById={tableLabelById}
+                rowProps={listaRowProps}
                 pickingForId={asignarReservaFor?.reservation.id ?? null}
                 onAsignarMesa={(r, intent) => {
                   setSelectedId(null);
@@ -1336,12 +1490,14 @@ export function SalonDesktop({
                 }}
               />
               <ActiveTablesList
-                tables={activeTables}
+                groups={mesaGroups}
+                total={activeTables.length}
                 orderByTable={orderByTable}
                 reservationByTable={reservationByTable}
                 mozoNameById={mozoNameById}
                 now={now}
-                onSelect={(id) => setSelectedId(id)}
+                onSelect={seleccionarMesa}
+                rowProps={listaRowProps}
                 canDistribuir={canAssignMozo(role) && !!onDistribuirOpen}
                 onDistribuir={() => onDistribuirOpen?.()}
                 canVentaRapida={canCargarPedido(role)}
@@ -1355,7 +1511,7 @@ export function SalonDesktop({
                     : null
                 }
               />
-            </>
+            </div>
           )}
         </aside>
       </div>
@@ -1616,9 +1772,22 @@ function MozosLegend({
 
 // ─── Lista de demoras (cocina pasada de su tiempo esperado) ─────────────────
 
+/**
+ * Props de teclado de una fila de la lista lateral, por su clave estable
+ * (`demora:<id>`, `reserva:<id>`, `mesa:<id>`) — spec 075.
+ *
+ * Las tres secciones del panel son **una sola** zona navegable, así que el
+ * índice de teclado lo lleva el padre y cada fila lo pide por clave en vez de
+ * por posición: cuando una sección aparece o desaparece, ninguna cuenta.
+ */
+export type SalonRowProps = (
+  key: string,
+) => Partial<React.ComponentProps<"button">>;
+
 function DemorasPanel({
   demoras,
   onSelect,
+  rowProps,
 }: {
   demoras: {
     tableId: string;
@@ -1628,6 +1797,8 @@ function DemorasPanel({
     level: number;
   }[];
   onSelect: (id: string) => void;
+  /** Props de teclado de la fila (spec 075): el panel entero es una zona. */
+  rowProps: SalonRowProps;
 }) {
   // Sin demoras → no ocupa lugar (en hora normal el panel no se ensucia).
   if (demoras.length === 0) return null;
@@ -1645,7 +1816,8 @@ function DemorasPanel({
             <button
               type="button"
               onClick={() => onSelect(d.tableId)}
-              className="flex w-full items-center gap-2.5 px-4 py-1.5 text-left transition hover:bg-zinc-50"
+              {...rowProps(`demora:${d.tableId}`)}
+              className="flex w-full items-center gap-2.5 px-4 py-1.5 text-left outline-none transition hover:bg-zinc-50 focus-visible:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-zinc-900/20"
             >
               <span
                 aria-hidden
@@ -1672,24 +1844,30 @@ function DemorasPanel({
 // ─── Lista lateral cuando no hay mesa seleccionada ──────────────────────────
 
 function ActiveTablesList({
-  tables,
+  groups,
+  total,
   orderByTable,
   reservationByTable,
   mozoNameById,
   now,
   onSelect,
+  rowProps,
   canDistribuir,
   onDistribuir,
   canVentaRapida,
   onVentaRapida,
   editPlanHref,
 }: {
-  tables: FloorTable[];
+  /** Mesas ya agrupadas y ordenadas por `groupTablesForSidebar`. El orden lo
+   *  arma el padre porque desde la spec 075 es también el orden del teclado. */
+  groups: SalonTableGroup[];
+  total: number;
   orderByTable: Record<string, SalonOrderRef>;
   reservationByTable: Record<string, SalonReservationRef>;
   mozoNameById: Map<string, string>;
   now: number | null;
   onSelect: (id: string) => void;
+  rowProps: SalonRowProps;
   /** Mostrar el CTA "Distribuir mozos" en el header de la lista. Solo
    *  encargado / admin lo ven (el flag es del parent). */
   canDistribuir: boolean;
@@ -1700,53 +1878,15 @@ function ActiveTablesList({
   /** Link al editor del plano del salón activo. Si null, no se muestra. */
   editPlanHref: string | null;
 }) {
-  // Agrupamos por estado para que el encargado vea: primero urgentes
-  // (pidio_cuenta), después ocupadas, después libres con reserva próxima
-  // y por último libres simples. Dentro de cada grupo, por label.
-  const groups = useMemo(() => {
-    const sorted = tables.slice().sort((a, b) => a.label.localeCompare(b.label));
-    return {
-      pidio_cuenta: sorted.filter(
-        (t) => (t.operational_status ?? "libre") === "pidio_cuenta",
-      ),
-      ocupada: sorted.filter(
-        (t) => (t.operational_status ?? "libre") === "ocupada",
-      ),
-      libre: sorted.filter(
-        (t) => (t.operational_status ?? "libre") === "libre",
-      ),
-    };
-  }, [tables]);
-
-  // Libres con reserva próxima (próximas 2h) van al tope del grupo libre.
-  // En SSR/primer render (now == null) ordenamos solo por label, para que el
-  // orden del server y del cliente coincidan (sin hydration mismatch).
-  const dosHoras = 2 * 60 * 60 * 1000;
-  const libresOrdenadas = groups.libre.slice().sort((a, b) => {
-    const ra = reservationByTable[a.id];
-    const rb = reservationByTable[b.id];
-    const aProxima =
-      now != null && ra && new Date(ra.starts_at).getTime() - now < dosHoras;
-    const bProxima =
-      now != null && rb && new Date(rb.starts_at).getTime() - now < dosHoras;
-    if (aProxima && !bProxima) return -1;
-    if (!aProxima && bProxima) return 1;
-    return a.label.localeCompare(b.label);
-  });
-
-  const renderGroup = (
-    title: string,
-    items: typeof tables,
-    tone: OperationalStatus,
-  ) => {
-    if (items.length === 0) return null;
+  const renderGroup = (group: SalonTableGroup) => {
+    if (group.tables.length === 0) return null;
     return (
-      <section className="space-y-1.5">
+      <section key={group.tone} className="space-y-1.5">
         <h4 className="px-4 pt-3 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
-          {title} · {items.length}
+          {group.title} · {group.tables.length}
         </h4>
         <ul>
-          {items.map((t) => (
+          {group.tables.map((t) => (
             <ActiveTableRow
               key={t.id}
               table={t}
@@ -1755,8 +1895,9 @@ function ActiveTablesList({
               mozoName={t.mozo_id ? mozoNameById.get(t.mozo_id) : null}
               minutes={minutesSince(t.opened_at, now)}
               now={now}
-              tone={tone}
+              tone={group.tone}
               onSelect={onSelect}
+              rowProps={rowProps}
             />
           ))}
         </ul>
@@ -1764,7 +1905,9 @@ function ActiveTablesList({
     );
   };
 
-  const totalActivas = groups.pidio_cuenta.length + groups.ocupada.length;
+  const totalActivas = groups
+    .filter((g) => g.tone !== "libre")
+    .reduce((a, g) => a + g.tables.length, 0);
 
   return (
     <>
@@ -1777,7 +1920,7 @@ function ActiveTablesList({
             Mesas
           </h3>
           <p className="text-muted-foreground shrink-0 text-[11px]">
-            {totalActivas} {totalActivas === 1 ? "activa" : "activas"} · {tables.length} totales
+            {totalActivas} {totalActivas === 1 ? "activa" : "activas"} · {total} totales
           </p>
         </div>
         {canVentaRapida || canDistribuir || editPlanHref ? (
@@ -1822,16 +1965,12 @@ function ActiveTablesList({
         )}
       </header>
       <div className="flex-1 overflow-y-auto pb-3">
-        {tables.length === 0 ? (
+        {total === 0 ? (
           <p className="text-muted-foreground p-6 text-center text-sm">
             Sin mesas en el plano
           </p>
         ) : (
-          <>
-            {renderGroup("Pidió la cuenta", groups.pidio_cuenta, "pidio_cuenta")}
-            {renderGroup("Ocupadas", groups.ocupada, "ocupada")}
-            {renderGroup("Libres", libresOrdenadas, "libre")}
-          </>
+          groups.map(renderGroup)
         )}
       </div>
     </>
@@ -1849,6 +1988,7 @@ function ActiveTableRow({
   now,
   tone,
   onSelect,
+  rowProps,
 }: {
   table: FloorTable;
   order: SalonOrderRef | undefined;
@@ -1858,6 +1998,7 @@ function ActiveTableRow({
   now: number | null;
   tone: OperationalStatus;
   onSelect: (id: string) => void;
+  rowProps: SalonRowProps;
 }) {
   // Color del border-left según estado.
   const borderClass: Record<OperationalStatus, string> = {
@@ -1888,8 +2029,10 @@ function ActiveTableRow({
       <button
         type="button"
         onClick={() => onSelect(table.id)}
+        {...rowProps(`mesa:${table.id}`)}
         className={cn(
-          "block w-full border-l-[3px] px-4 py-3 text-left transition hover:bg-zinc-50",
+          "block w-full border-l-[3px] px-4 py-3 text-left outline-none transition hover:bg-zinc-50",
+          "focus-visible:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-zinc-900/20",
           borderClass[tone],
         )}
       >
@@ -2176,6 +2319,12 @@ function TableDetail({
     return () => clearTimeout(t);
   }, [table.id]);
 
+  // ↑/↓ recorren los controles del detalle — primaria, ⋯ y cerrar (spec 075,
+  // FR-008). El menú ⋯ se abre con Enter y trae sus propias flechas: no hace
+  // falta aplanarlo acá.
+  const detalleRef = useRef<HTMLDivElement>(null);
+  const handleDetalleKeyDown = useArrowFocus(detalleRef);
+
   const canWalkIn = status === "libre";
   const canTransfer =
     status !== "libre" &&
@@ -2211,7 +2360,11 @@ function TableDetail({
   const partySize = reservation?.party_size ?? null;
 
   return (
-    <>
+    <div
+      ref={detalleRef}
+      onKeyDown={handleDetalleKeyDown}
+      className="flex min-h-0 flex-1 flex-col"
+    >
       {/* Header limpio: Mesa N · estado · tiempo · avatar mozo · close. */}
       <header className="border-border/60 flex items-center gap-3 border-b px-4 py-3">
         <div className="min-w-0 flex-1">
@@ -2424,6 +2577,6 @@ function TableDetail({
           );
         })()}
       </div>
-    </>
+    </div>
   );
 }

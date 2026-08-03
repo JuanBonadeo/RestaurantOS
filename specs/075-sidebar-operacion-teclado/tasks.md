@@ -6,18 +6,18 @@ Tres fases que pueden entrar por separado: **P1** es lo que hoy tiene cero tecla
 
 ## Primitivas (TDD — primero el test)
 
-- [ ] T1 · `src/lib/ui/roving.ts` **(nuevo)** + `roving.test.ts` — FR-001. `nextIndex(index, delta, length)` devuelve `{kind:"index"}` o `{kind:"exit", edge:"up"|"down"}` (el borde **no** clampea: avisa para el handoff); `gridNextIndex(index, key, length, columns)` para la grilla 2-D; `indexFromDigit(key, length)`. Se apoya en `clampIndex` de [`product-search.ts`](../../src/lib/mozo/product-search.ts). Casos: lista vacía, un solo elemento, salida por arriba y por abajo, última fila incompleta de la grilla, dígito fuera de rango.
-- [ ] T2 · Mover `optionIndexFromKey` de `daily-menu-steps.ts` a `roving.ts` como `indexFromDigit` y reimportar en `daily-menu-wizard.tsx`. Los tests existentes de `daily-menu-steps.test.ts` que lo cubren se mudan con él.
-- [ ] T3 · `src/lib/ui/use-roving-list.ts` **(nuevo)** — FR-002/005. Foco real, `tabIndex` roving (0 en el activo, -1 en el resto), `scrollIntoView({block:"nearest"})`, `aria-current`, callbacks `onExitUp`/`onExitDown`. Patrón del efecto de foco de [`daily-menu-wizard.tsx:101`](../../src/components/mozo/daily-menu-wizard.tsx).
-- [ ] T4 · `src/lib/ui/use-return-focus.ts` **(nuevo)** — FR-003. Guarda `document.activeElement` al abrir y lo restaura al cerrar.
+- [x] T1 · `src/lib/ui/roving.ts` **(nuevo)** + `roving.test.ts` — FR-001. `nextIndex(index, delta, length)` devuelve `{kind:"index"}` o `{kind:"exit", edge:"up"|"down"}` (el borde **no** clampea: avisa para el handoff); `gridNextIndex(index, key, length, columns)` para la grilla 2-D; `indexFromDigit(key, length)`. Se apoya en `clampIndex` de [`product-search.ts`](../../src/lib/mozo/product-search.ts). Casos: lista vacía, un solo elemento, salida por arriba y por abajo, última fila incompleta de la grilla, dígito fuera de rango.
+- [x] T2 · Mover `optionIndexFromKey` de `daily-menu-steps.ts` a `roving.ts` como `indexFromDigit` y reimportar en `daily-menu-wizard.tsx`. Los tests existentes de `daily-menu-steps.test.ts` que lo cubren se mudan con él.
+- [x] T3 · `src/lib/ui/use-roving-list.ts` **(nuevo)** — FR-002/005. Foco real, `tabIndex` roving (0 en el activo, -1 en el resto), `scrollIntoView({block:"nearest"})`, `aria-current`, callbacks `onExitUp`/`onExitDown`. Patrón del efecto de foco de [`daily-menu-wizard.tsx:101`](../../src/components/mozo/daily-menu-wizard.tsx).
+- [x] T4 · Volver a la fila de origen (FR-003). **No** por elemento: abrir un modo desmonta la lista entera, así que el `document.activeElement` guardado ya no está en el DOM cuando hay que devolver el foco. Se recuerda la **clave de la fila** (`mesa:<id>`) y se re-enfoca con `focusIndex` cuando la lista vuelve. (Se descartó `use-return-focus.ts` por eso.)
 
 ## P1 · Lista + detalle + contrato de Esc/foco
 
-- [ ] T5 · `salon-desktop.tsx` — `DemorasPanel` y `ActiveTablesList`/`ActiveTableRow` como zonas encadenadas (FR-006/007). Fila activa con ring + `aria-current`; sin `focus()` automático al entrar al panel.
-- [ ] T6 · `reservations-panel.tsx` — misma zona, encadenada entre Demoras y Mesas (FR-006).
-- [ ] T7 · `salon-desktop.tsx` · `TableDetail` — zona sobre primaria + ítems del `MesaOptionsMenu` + Anular (FR-008). Reemplaza el autofocus puntual de la spec 066 sin perder su efecto (la primaria sigue siendo lo primero enfocado).
-- [ ] T8 · `salon-desktop.tsx` — cadena de modos con `Esc`/`Backspace` (FR-004) + `useReturnFocus` en cada apertura (FR-003/009). Un solo lugar decide qué modo cierra cada Esc, por prioridad: cobro → cuenta → pedir/walk-in/venta rápida → detalle → deselect.
-- [ ] T9 · Test de componente: `↑`/`↓` recorren las tres secciones de la lista de punta a punta; `Enter` abre el detalle; `Esc` vuelve **con el foco en la fila de origen**.
+- [x] T5 · `salon-desktop.tsx` — `DemorasPanel` y `ActiveTablesList`/`ActiveTableRow` como zonas encadenadas (FR-006/007). Fila activa con ring + `aria-current`; sin `focus()` automático al entrar al panel.
+- [x] T6 · `reservations-panel.tsx` — misma zona, encadenada entre Demoras y Mesas (FR-006).
+- [x] T7 · `salon-desktop.tsx` · `TableDetail` — zona sobre los controles del detalle vía `useArrowFocus` (FR-008); el `⋯` se abre con Enter y ya trae sus flechas. Conserva el autofocus de la primaria de la spec 066.
+- [x] T8 · `salon-desktop.tsx` — cadena de modos con `Esc`/`Backspace` en `cerrarModoActual` (FR-004), con guarda para no robarle el Esc a un modal abierto adentro del panel. Un solo lugar decide qué modo cierra cada Esc, por prioridad: cobro → cuenta → pedir/walk-in/venta rápida → detalle → deselect.
+- [x] T9 · Test de componente: `↑`/`↓` recorren las tres secciones de la lista de punta a punta; `Enter` abre el detalle; `Esc` vuelve **con el foco en la fila de origen**.
 
 ## P2 · Cargar pedido, venta rápida y walk-in
 

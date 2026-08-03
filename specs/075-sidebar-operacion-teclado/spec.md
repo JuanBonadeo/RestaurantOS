@@ -87,7 +87,9 @@ Consecuencias que se aprovechan:
 
 - **FR-002**: DEBE existir un hook de lista con **foco real** (roving): registra los elementos, mueve el foco, mantiene el activo a la vista con `scrollIntoView({ block: "nearest" })` y expone el handoff hacia la zona anterior/siguiente. Un solo elemento de la lista queda en el orden de tabulación (`tabIndex=0`), el resto `-1`.
 
-- **FR-003**: Al abrir un modo, DEBE guardarse el elemento que lo abrió; al cerrarlo, el foco DEBE volver ahí. Cerrar un modo nunca DEBE dejar el foco en el `<body>`.
+- **FR-003**: Cerrar un modo DEBE devolver el foco a la fila desde la que se abrió, nunca dejarlo en el `<body>`.
+
+  Se recuerda **la clave de la fila** (`mesa:<id>`), no el elemento: abrir un modo desmonta la lista entera, así que para cuando hay que devolver el foco el botón original ya no existe. Lo que sobrevive es la mesa.
 
 - **FR-004**: `Esc` (y `Backspace` fuera de un campo de texto) DEBE subir **un** nivel de la cadena de modos, en el mismo orden en que se abrieron: cobro → cuenta → detalle → lista → mesa deseleccionada.
 
@@ -101,7 +103,9 @@ Consecuencias que se aprovechan:
 
 ### Detalle de mesa
 
-- **FR-008**: El detalle DEBE ser una zona: `↑`/`↓` recorren la acción primaria, los ítems del menú `⋯` y Anular; `Enter` dispara la enfocada. Hoy sólo se autoenfoca la primaria ([spec 066, FR-007](../066-teclado-operacion/spec.md)) y el resto sólo se alcanza con Tab a ciegas.
+- **FR-008**: El detalle DEBE ser una zona: `↑`/`↓` recorren sus controles (cerrar, acción primaria, menú `⋯`) y `Enter` dispara el enfocado. Hoy sólo se autoenfoca la primaria ([spec 066, FR-007](../066-teclado-operacion/spec.md)) y el resto sólo se alcanza con Tab a ciegas.
+
+  Los ítems del `⋯` **no** se aplanan en la zona: el menú se abre con `Enter` y ya trae sus propias flechas (Base UI). Aplanarlo sería reimplementar un `menu` que ya funciona con teclado.
 
 - **FR-009**: `Esc` DEBE volver a la lista **con el foco en la fila de la mesa de donde vino**, no al principio de la lista.
 

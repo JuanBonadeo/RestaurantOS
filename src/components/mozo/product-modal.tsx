@@ -206,6 +206,9 @@ export function ProductModal({
             first.focus();
           }
         }}
+        role="dialog"
+        aria-modal="true"
+        aria-label={product.name}
         className={`w-full max-w-md ${embedded ? "max-h-full" : "max-h-[92dvh]"} overflow-y-auto rounded-t-3xl bg-white pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl`}
       >
         <form onSubmit={(e) => { e.preventDefault(); handleAdd(); }}>

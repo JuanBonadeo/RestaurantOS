@@ -23,7 +23,7 @@ import {
 import { sentarReserva } from "@/lib/reservations/booking-actions";
 import { updateReservationStatus } from "@/lib/reservations/booking-actions";
 
-import type { SalonReservationRef } from "./salon-desktop";
+import type { SalonReservationRef, SalonRowProps } from "./salon-desktop";
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString("es-AR", {
@@ -36,6 +36,7 @@ export function ReservationsPanel({
   reservations,
   slug,
   tableLabelById,
+  rowProps,
   pickingForId = null,
   onAsignarMesa,
   onNewReservation,
@@ -43,6 +44,9 @@ export function ReservationsPanel({
   reservations: SalonReservationRef[];
   slug: string;
   tableLabelById: Record<string, string>;
+  /** Props de teclado de la fila (spec 075): las reservas son un tramo de la
+   *  zona única del panel, entre las demoras y las mesas. */
+  rowProps: SalonRowProps;
   /** Reserva que está esperando que toquen una mesa en el plano (spec 059). */
   pickingForId?: string | null;
   /** Pone el plano del salón en modo "elegí una mesa" para esta reserva.
@@ -167,7 +171,8 @@ export function ReservationsPanel({
                     r.table_id ? handleSentar(r.id) : onAsignarMesa?.(r, "seat")
                   }
                   disabled={pending || (!r.table_id && !canPickOnPlan)}
-                  className={`flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm transition active:scale-[0.97] disabled:opacity-60 ${
+                  {...rowProps(`reserva:${r.id}`)}
+                  className={`flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm outline-none transition active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-emerald-900/30 disabled:opacity-60 ${
                     picking
                       ? "bg-emerald-700 ring-2 ring-emerald-300"
                       : "bg-emerald-600 hover:bg-emerald-700"
