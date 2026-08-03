@@ -8,7 +8,6 @@ import {
   buildMenuSteps,
   choicesDeltaCents,
   initialOptionIndex,
-  optionIndexFromKey,
   pruneBlockedSelections,
   type DailyMenuSelection,
   type DailyMenuSelections,
@@ -20,6 +19,7 @@ import type {
   DailyMenuForMozo,
 } from "@/lib/mozo/daily-menus-query";
 import { moveSelection } from "@/lib/mozo/product-search";
+import { indexFromDigit } from "@/lib/ui/roving";
 import { useEscapeToClose } from "@/lib/ui/use-escape-to-close";
 
 /**
@@ -250,7 +250,7 @@ export function DailyMenuWizard({
         setActiveIndex(length - 1);
         return;
       }
-      const byDigit = optionIndexFromKey(e.key, length);
+      const byDigit = indexFromDigit(e.key, length);
       if (byDigit !== null) {
         e.preventDefault();
         const option = step.group.options[byDigit];

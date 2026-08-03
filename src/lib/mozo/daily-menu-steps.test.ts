@@ -5,7 +5,6 @@ import {
   buildMenuSteps,
   choicesDeltaCents,
   initialOptionIndex,
-  optionIndexFromKey,
   pruneBlockedSelections,
   type DailyMenuSelections,
 } from "./daily-menu-steps";
@@ -216,23 +215,8 @@ describe("pruneBlockedSelections (FR-004)", () => {
   });
 });
 
-describe("optionIndexFromKey", () => {
-  it("traduce 1–9 a índice base 0", () => {
-    expect(optionIndexFromKey("1", 5)).toBe(0);
-    expect(optionIndexFromKey("5", 5)).toBe(4);
-  });
-
-  it("devuelve null si el dígito se pasa de la cantidad de opciones", () => {
-    expect(optionIndexFromKey("6", 5)).toBeNull();
-  });
-
-  it("devuelve null para el 0 y para cualquier tecla que no sea un dígito", () => {
-    expect(optionIndexFromKey("0", 5)).toBeNull();
-    expect(optionIndexFromKey("a", 5)).toBeNull();
-    expect(optionIndexFromKey("Enter", 5)).toBeNull();
-    expect(optionIndexFromKey("ArrowDown", 5)).toBeNull();
-  });
-});
+// Los tests del atajo por dígito viven en `lib/ui/roving.test.ts` desde la
+// spec 075 (`indexFromDigit`), junto con la función.
 
 describe("initialOptionIndex", () => {
   const g = group("g1", "Entrada", 3);

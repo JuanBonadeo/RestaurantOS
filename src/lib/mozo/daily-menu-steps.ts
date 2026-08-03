@@ -68,18 +68,9 @@ export function buildMenuSteps(
   return steps;
 }
 
-/**
- * Índice de la opción que activa una tecla de dígito (`1`–`9` → 0–8), o `null`
- * si la tecla no es un dígito nuestro o se pasa de la cantidad de opciones.
- *
- * Mismo criterio que los dígitos del walk-in (`partySizeFromKey`, spec 066):
- * el atajo es la posición que el usuario ve escrita en la fila.
- */
-export function optionIndexFromKey(key: string, length: number): number | null {
-  if (key.length !== 1 || key < "1" || key > "9") return null;
-  const index = Number(key) - 1;
-  return index < length ? index : null;
-}
+// El atajo "elegir la opción N con un dígito" nació acá (spec 072) y resultó
+// genérico —lo usan también el walk-in y el selector de método de pago—, así
+// que la spec 075 lo mudó a `lib/ui/roving.ts` como `indexFromDigit`.
 
 /**
  * Con qué opción se entra a un paso: la que ya estaba elegida si el usuario
