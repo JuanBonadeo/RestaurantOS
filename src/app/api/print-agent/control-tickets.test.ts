@@ -38,15 +38,15 @@ vi.mock("@/lib/supabase/service", () => ({
             data:
               table === "businesses"
                 ? businessRow
-                : table === "control_tickets"
+                : table === "print_jobs"
                   ? controlPostRow
                   : // `comandas` siempre vacía: el POST tiene que caer al
-                    // camino de control, que es lo que se está probando.
+                    // camino de print_jobs, que es lo que se está probando.
                     null,
           }),
           then: (resolve: (v: { data: Row[]; error: null }) => unknown) =>
             resolve({
-              data: table === "control_tickets" ? controlRows : [],
+              data: table === "print_jobs" ? controlRows : [],
               error: null,
             }),
         };
@@ -191,7 +191,7 @@ describe("POST · confirmación de un control", () => {
     };
     const res = await POST(postReq({ comanda_id: "ct1", business_id: "biz1" }));
     expect(await res.json()).toEqual({ status: "impreso", changed: true });
-    const upd = captured.updates.find((u) => u.table === "control_tickets");
+    const upd = captured.updates.find((u) => u.table === "print_jobs");
     expect(upd?.vals).toMatchObject({
       status: "impreso",
       print_failed_at: null,
@@ -210,7 +210,7 @@ describe("POST · confirmación de un control", () => {
       postReq({ comanda_id: "ct1", business_id: "biz1", result: "failed" }),
     );
     expect(await res.json()).toMatchObject({ status: "pendiente" });
-    const upd = captured.updates.find((u) => u.table === "control_tickets");
+    const upd = captured.updates.find((u) => u.table === "print_jobs");
     expect(Object.keys(upd!.vals)).toEqual(["print_failed_at"]);
   });
 

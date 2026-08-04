@@ -166,6 +166,9 @@ export type Database = {
           control_printer_port: number
           created_at: string
           currency: string
+          cuenta_printer_enabled: boolean
+          cuenta_printer_ip: string | null
+          cuenta_printer_port: number
           customer_channel: string
           delivery_fee_cents: number
           email: string | null
@@ -206,6 +209,9 @@ export type Database = {
           control_printer_port?: number
           created_at?: string
           currency?: string
+          cuenta_printer_enabled?: boolean
+          cuenta_printer_ip?: string | null
+          cuenta_printer_port?: number
           customer_channel?: string
           delivery_fee_cents?: number
           email?: string | null
@@ -246,6 +252,9 @@ export type Database = {
           control_printer_port?: number
           created_at?: string
           currency?: string
+          cuenta_printer_enabled?: boolean
+          cuenta_printer_ip?: string | null
+          cuenta_printer_port?: number
           customer_channel?: string
           delivery_fee_cents?: number
           email?: string | null
@@ -1110,54 +1119,6 @@ export type Database = {
           },
         ]
       }
-      control_tickets: {
-        Row: {
-          business_id: string
-          emitted_at: string
-          id: string
-          order_id: string
-          print_failed_at: string | null
-          printed_at: string | null
-          reprint_requested_at: string | null
-          status: string
-        }
-        Insert: {
-          business_id: string
-          emitted_at?: string
-          id?: string
-          order_id: string
-          print_failed_at?: string | null
-          printed_at?: string | null
-          reprint_requested_at?: string | null
-          status?: string
-        }
-        Update: {
-          business_id?: string
-          emitted_at?: string
-          id?: string
-          order_id?: string
-          print_failed_at?: string | null
-          printed_at?: string | null
-          reprint_requested_at?: string | null
-          status?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "control_tickets_business_id_fkey"
-            columns: ["business_id"]
-            isOneToOne: false
-            referencedRelation: "businesses"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "control_tickets_order_id_fkey"
-            columns: ["order_id"]
-            isOneToOne: true
-            referencedRelation: "orders"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       customer_addresses: {
         Row: {
           apartment: string | null
@@ -1459,6 +1420,9 @@ export type Database = {
           background_opacity: number
           business_id: string
           created_at: string
+          cuenta_printer_enabled: boolean
+          cuenta_printer_ip: string | null
+          cuenta_printer_port: number
           height: number
           id: string
           name: string
@@ -1470,6 +1434,9 @@ export type Database = {
           background_opacity?: number
           business_id: string
           created_at?: string
+          cuenta_printer_enabled?: boolean
+          cuenta_printer_ip?: string | null
+          cuenta_printer_port?: number
           height?: number
           id?: string
           name?: string
@@ -1481,6 +1448,9 @@ export type Database = {
           background_opacity?: number
           business_id?: string
           created_at?: string
+          cuenta_printer_enabled?: boolean
+          cuenta_printer_ip?: string | null
+          cuenta_printer_port?: number
           height?: number
           id?: string
           name?: string
@@ -2778,6 +2748,60 @@ export type Database = {
             columns: ["business_id"]
             isOneToOne: true
             referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      print_jobs: {
+        Row: {
+          business_id: string
+          emitted_at: string
+          id: string
+          kind: string
+          order_id: string
+          print_failed_at: string | null
+          printed_at: string | null
+          reprint_requested_at: string | null
+          requested_by: string | null
+          status: string
+        }
+        Insert: {
+          business_id: string
+          emitted_at?: string
+          id?: string
+          kind: string
+          order_id: string
+          print_failed_at?: string | null
+          printed_at?: string | null
+          reprint_requested_at?: string | null
+          requested_by?: string | null
+          status?: string
+        }
+        Update: {
+          business_id?: string
+          emitted_at?: string
+          id?: string
+          kind?: string
+          order_id?: string
+          print_failed_at?: string | null
+          printed_at?: string | null
+          reprint_requested_at?: string | null
+          requested_by?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "print_jobs_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "print_jobs_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
             referencedColumns: ["id"]
           },
         ]

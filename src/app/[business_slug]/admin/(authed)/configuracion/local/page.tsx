@@ -1,12 +1,23 @@
 import { notFound } from "next/navigation";
 
-import { ClipboardList, Fingerprint, MonitorDown, Printer } from "lucide-react";
+import {
+  ClipboardList,
+  Fingerprint,
+  MonitorDown,
+  Printer,
+  Receipt,
+} from "lucide-react";
 
 import { ClockOriginsForm } from "@/components/admin/settings/clock-origins-form";
 import {
   ControlPrinterForm,
   type ControlPrinterRow,
 } from "@/components/admin/settings/control-printer-form";
+import {
+  CuentaPrintersForm,
+  type CuentaPrinterConfig,
+  type FloorPlanPrinterRow,
+} from "@/components/admin/settings/cuenta-printers-form";
 import { PrintAgentCard } from "@/components/admin/settings/print-agent-card";
 import { SettingsSection } from "@/components/admin/settings/settings-section";
 import {
@@ -29,7 +40,13 @@ export default async function ConfiguracionLocalPage({
   if (!business) notFound();
 
   const service = createSupabaseServiceClient();
-  const [clockOrigins, { data: stations }, { data: bizFlag }, { data: agentStatus }] =
+  const [
+    clockOrigins,
+    { data: stations },
+    { data: bizFlag },
+    { data: floorPlans },
+    { data: agentStatus },
+  ] =
     await Promise.all([
       listClockOrigins(business.id),
       service
@@ -40,10 +57,17 @@ export default async function ConfiguracionLocalPage({
       service
         .from("businesses")
         .select(
-          "print_agent_key_set, control_printer_ip, control_printer_port, control_printer_enabled",
+          "print_agent_key_set, control_printer_ip, control_printer_port, control_printer_enabled, cuenta_printer_ip, cuenta_printer_port, cuenta_printer_enabled",
         )
         .eq("id", business.id)
         .maybeSingle(),
+      service
+        .from("floor_plans")
+        .select(
+          "id, name, cuenta_printer_ip, cuenta_printer_port, cuenta_printer_enabled",
+        )
+        .eq("business_id", business.id)
+        .order("name"),
       service
         .from("print_agent_status")
         .select("last_seen_at")
@@ -61,6 +85,14 @@ export default async function ConfiguracionLocalPage({
       (bizFlag as ControlPrinterRow | null)?.control_printer_port ?? 9100,
     control_printer_enabled:
       (bizFlag as ControlPrinterRow | null)?.control_printer_enabled ?? true,
+  };
+  const cuentaPrinter: CuentaPrinterConfig = {
+    cuenta_printer_ip:
+      (bizFlag as CuentaPrinterConfig | null)?.cuenta_printer_ip ?? null,
+    cuenta_printer_port:
+      (bizFlag as CuentaPrinterConfig | null)?.cuenta_printer_port ?? 9100,
+    cuenta_printer_enabled:
+      (bizFlag as CuentaPrinterConfig | null)?.cuenta_printer_enabled ?? true,
   };
   const printAgentLastSeenAt =
     (agentStatus as { last_seen_at?: string } | null)?.last_seen_at ?? null;
@@ -84,6 +116,18 @@ export default async function ConfiguracionLocalPage({
         description="Además de las comandas de cocina, cada delivery y cada retiro imprime un «control de pedido» — el papel que se lleva el repartidor: el pedido completo con precios, cliente, dirección, horario de entrega y cuánta plata cobrar. Dejá la IP vacía para no imprimirlos."
       >
         <ControlPrinterForm slug={business_slug} initial={controlPrinter} />
+      </SettingsSection>
+
+      <SettingsSection
+        icon={<Receipt className="size-5" strokeWidth={1.75} />}
+        title="Comandera de cuentas"
+        description="Dónde sale la cuenta que se le da al cliente cuando el mozo toca «Imprimir cuenta». Cada salón puede tener la suya; los que no, usan la del local."
+      >
+        <CuentaPrintersForm
+          slug={business_slug}
+          business={cuentaPrinter}
+          floorPlans={(floorPlans ?? []) as FloorPlanPrinterRow[]}
+        />
       </SettingsSection>
 
       <SettingsSection

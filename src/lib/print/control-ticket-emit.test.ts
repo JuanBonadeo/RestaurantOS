@@ -23,7 +23,7 @@ function fakeService() {
           eq: () => ({ maybeSingle: async () => ({ data: orderRow }) }),
         }),
         upsert: async (row: Record<string, unknown>, opts: unknown) => {
-          if (table === "control_tickets") upserts.push({ row, opts });
+          if (table === "print_jobs") upserts.push({ row, opts });
           return { error: upsertError };
         },
       };
@@ -44,7 +44,11 @@ describe("emitControlTicket", () => {
     const res = await emitControlTicket(fakeService(), "o1", "biz1");
     expect(res).toEqual({ emitted: true });
     expect(upserts).toHaveLength(1);
-    expect(upserts[0].row).toEqual({ order_id: "o1", business_id: "biz1" });
+    expect(upserts[0].row).toEqual({
+      order_id: "o1",
+      business_id: "biz1",
+      kind: "control",
+    });
   });
 
   it("emite para retiro", async () => {
@@ -62,7 +66,7 @@ describe("emitControlTicket", () => {
   });
 
   it("es idempotente: el upsert va con ignoreDuplicates sobre order_id", async () => {
-    // La unicidad la garantiza el índice `control_tickets_order_uniq`; lo que
+    // La unicidad la garantiza el índice parcial `print_jobs_control_uniq`; lo que
     // se prueba acá es que el insert no explote ni duplique cuando se marcha
     // dos veces (reintento del cron, "marchar ahora" sobre algo ya tomado).
     await emitControlTicket(fakeService(), "o1", "biz1");

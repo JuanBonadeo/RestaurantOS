@@ -10,7 +10,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  * programados, webhook de MP, venta de mostrador) desembocan ahí. Emitir acá
  * cubre todas sin repetir la regla en cada una.
  *
- * Idempotente por el índice único de `control_tickets.order_id`: marchar dos
+ * Idempotente por el índice único parcial `print_jobs(order_id) where kind =
+ * 'control'` (spec 080): marchar dos
  * veces (reintento, ticks solapados del cron, "marchar ahora" sobre algo que el
  * cron ya tomó) deja **un** solo papel.
  */
@@ -37,9 +38,9 @@ export async function emitControlTicket(
   }
 
   const { error } = await service
-    .from("control_tickets")
+    .from("print_jobs")
     .upsert(
-      { order_id: orderId, business_id: businessId },
+      { order_id: orderId, business_id: businessId, kind: "control" },
       { onConflict: "order_id", ignoreDuplicates: true },
     );
 

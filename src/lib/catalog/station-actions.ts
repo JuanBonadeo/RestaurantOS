@@ -266,3 +266,94 @@ export async function setControlPrinter(
   revalidatePath(`/${businessSlug}/admin/configuracion`);
   return actionOk(null);
 }
+
+/**
+ * Comandera de **cuentas** del negocio (spec 080): el default del local para el
+ * papel que se le da a la mesa. Un salón puede pisarla con la suya
+ * (`setFloorPlanCuentaPrinter`).
+ */
+export async function setCuentaPrinter(
+  businessSlug: string,
+  input: unknown,
+): Promise<ActionResult<null>> {
+  const parsed = StationPrinterInput.safeParse(input);
+  if (!parsed.success) {
+    const first = parsed.error.issues[0];
+    return actionError(
+      first ? `${first.path.join(".") || "campo"}: ${first.message}` : "Datos inválidos.",
+    );
+  }
+
+  const business = await getBusiness(businessSlug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctx = await ensureAdminAccess(business.id, businessSlug);
+  if (!canManageBusiness(ctx)) {
+    return actionError("No tenés permisos para configurar las comanderas.");
+  }
+
+  const service = createSupabaseServiceClient();
+  const { error } = await service
+    .from("businesses")
+    .update({
+      cuenta_printer_ip: parsed.data.printer_ip,
+      cuenta_printer_port: parsed.data.printer_port,
+      cuenta_printer_enabled: parsed.data.printer_enabled,
+    })
+    .eq("id", business.id);
+
+  if (error) {
+    console.error("setCuentaPrinter", error);
+    return actionError("No pudimos guardar la comandera de cuentas.");
+  }
+
+  revalidatePath(`/${businessSlug}/admin/configuracion`);
+  return actionOk(null);
+}
+
+/**
+ * Comandera de cuentas propia de un **salón** (spec 080). IP vacía = hereda la
+ * del negocio; el switch apagado = ese salón no imprime cuentas (el "off"
+ * explícito gana, no cae al fallback).
+ */
+export async function setFloorPlanCuentaPrinter(
+  businessSlug: string,
+  floorPlanId: string,
+  input: unknown,
+): Promise<ActionResult<null>> {
+  const parsed = StationPrinterInput.safeParse(input);
+  if (!parsed.success) {
+    const first = parsed.error.issues[0];
+    return actionError(
+      first ? `${first.path.join(".") || "campo"}: ${first.message}` : "Datos inválidos.",
+    );
+  }
+
+  const business = await getBusiness(businessSlug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctx = await ensureAdminAccess(business.id, businessSlug);
+  if (!canManageBusiness(ctx)) {
+    return actionError("No tenés permisos para configurar las comanderas.");
+  }
+
+  const service = createSupabaseServiceClient();
+  const { error } = await service
+    .from("floor_plans")
+    .update({
+      cuenta_printer_ip: parsed.data.printer_ip,
+      cuenta_printer_port: parsed.data.printer_port,
+      cuenta_printer_enabled: parsed.data.printer_enabled,
+    })
+    .eq("id", floorPlanId)
+    // Scope por negocio: sin esto se podría configurar el salón de otro tenant.
+    .eq("business_id", business.id);
+
+  if (error) {
+    console.error("setFloorPlanCuentaPrinter", error);
+    return actionError("No pudimos guardar la comandera del salón.");
+  }
+
+  revalidatePath(`/${businessSlug}/admin/configuracion`);
+  return actionOk(null);
+}

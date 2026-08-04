@@ -2,7 +2,15 @@
 
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Lock, Receipt, Scissors, Trash2, X } from "lucide-react";
+import {
+  ArrowRight,
+  Lock,
+  Printer,
+  Receipt,
+  Scissors,
+  Trash2,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import type { BusinessRole } from "@/lib/admin/context";
@@ -21,6 +29,7 @@ import { cn } from "@/lib/utils";
 
 import { PageShell } from "@/components/admin/shell/page-shell";
 import { Button } from "@/components/ui/button";
+import { imprimirCuenta } from "@/lib/print/cuenta-print-actions";
 import {
   Dialog,
   DialogContent,
@@ -138,6 +147,23 @@ export function CuentaClient({
   const total = Math.max(0, subtotal + tipCents - discountCents);
 
   const [dividirOpen, setDividirOpen] = useState(false);
+  const [imprimiendo, setImprimiendo] = useState(false);
+
+  // Imprimir la cuenta (spec 080). El action resuelve la comandera del salón
+  // ANTES de encolar, así que un local sin comandera configurada se entera acá
+  // y no se queda esperando un papel que nunca sale.
+  const handleImprimir = async () => {
+    setImprimiendo(true);
+    const r = await imprimirCuenta(tableId, slug);
+    setImprimiendo(false);
+    if (!r.ok) {
+      toast.error(r.error);
+      return;
+    }
+    toast.success(
+      r.data.reprint ? "Cuenta reimpresa." : "Cuenta enviada a la impresora.",
+    );
+  };
   const [cancelarItemId, setCancelarItemId] = useState<string | null>(null);
 
   const dirty =
@@ -510,17 +536,30 @@ export function CuentaClient({
               {formatCurrency(total)}
             </span>
           </div>
-          <button
-            type="button"
-            onClick={() => setDividirOpen(true)}
-            disabled={total === 0}
-            className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold text-zinc-700 ring-1 ring-zinc-200 transition hover:bg-zinc-50 disabled:opacity-50"
-          >
-            <Scissors className="size-4" />
-            {cuenta.splits.length > 0
-              ? `Volver a dividir (${cuenta.splits.length})`
-              : "Dividir cuenta"}
-          </button>
+          <div className="mt-4 grid gap-2">
+            {/* Spec 080: el papel que se le da a la mesa. Se puede tocar las
+                veces que haga falta — agregan un café y la vuelven a pedir. */}
+            <button
+              type="button"
+              onClick={handleImprimir}
+              disabled={total === 0 || imprimiendo}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold text-zinc-700 ring-1 ring-zinc-200 transition hover:bg-zinc-50 disabled:opacity-50"
+            >
+              <Printer className="size-4" />
+              {imprimiendo ? "Imprimiendo…" : "Imprimir cuenta"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setDividirOpen(true)}
+              disabled={total === 0}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold text-zinc-700 ring-1 ring-zinc-200 transition hover:bg-zinc-50 disabled:opacity-50"
+            >
+              <Scissors className="size-4" />
+              {cuenta.splits.length > 0
+                ? `Volver a dividir (${cuenta.splits.length})`
+                : "Dividir cuenta"}
+            </button>
+          </div>
         </section>
       </PageShell>
       </div>

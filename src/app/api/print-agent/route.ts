@@ -5,6 +5,11 @@ import {
   buildControlTicketContent,
   type ControlTicketData,
 } from "@/lib/print/control-ticket";
+import { resolveCuentaPrinter } from "@/lib/print/cuenta-printer";
+import {
+  buildCuentaTicketContent,
+  type CuentaTicketData,
+} from "@/lib/print/cuenta-ticket";
 import { buildComandaContent } from "@/lib/print/ticket";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
@@ -209,9 +214,14 @@ export async function GET(req: Request) {
   // Viajan en el MISMO array que las comandas, con su propio UUID, su IP y su
   // contenido ya renderizado: para el agente instalado en el local son un ítem
   // más de la lista y no hace falta recompilar nada (D2 del spec).
-  const controls = await buildPrintableControlTickets(service, businessId);
+  const [controls, cuentas] = await Promise.all([
+    buildPrintableControlTickets(service, businessId),
+    buildPrintableCuentaTickets(service, businessId),
+  ]);
 
-  return NextResponse.json({ comandas: [...printable, ...controls] });
+  return NextResponse.json({
+    comandas: [...printable, ...controls, ...cuentas],
+  });
 }
 
 /** Item de un pedido con su sector, para el bloque «COMBINA CON» de los tickets. */
@@ -368,7 +378,7 @@ async function buildPrintableControlTickets(
   }
 
   const { data: tickets, error } = await service
-    .from("control_tickets")
+    .from("print_jobs")
     .select(
       `
       id,
@@ -401,12 +411,13 @@ async function buildPrintableControlTickets(
     `,
     )
     .eq("business_id", businessId)
+    .eq("kind", "control")
     .or("status.eq.pendiente,reprint_requested_at.not.is.null")
     .order("emitted_at", { ascending: true });
 
   if (error) {
     // No tumba el GET: las comandas de cocina se devuelven igual.
-    console.error("print-agent GET · control_tickets", error);
+    console.error("print-agent GET · print_jobs control", error);
     return [];
   }
 
@@ -472,7 +483,7 @@ async function buildPrintableControlTickets(
     const content = buildControlTicketContent(data);
     return {
       // El agente confirma con este id; el POST lo resuelve contra
-      // `control_tickets` cuando no está en `comandas`.
+      // `print_jobs` cuando no está en `comandas`.
       comanda_id: t.id,
       station_id: null,
       station_name: "CONTROL",
@@ -551,10 +562,10 @@ export async function POST(req: Request) {
     .maybeSingle();
 
   if (!row) {
-    // Spec 063: puede ser un control de pedido. El agente reporta cualquier
-    // impresión con el campo `comanda_id`, así que el id se resuelve contra la
-    // otra tabla antes de dar por perdido el reporte.
-    return handleControlTicketReport(
+    // Specs 063 + 080: puede ser un control de pedido o una cuenta. El agente
+    // reporta cualquier impresión con el campo `comanda_id`, así que el id se
+    // resuelve contra `print_jobs` antes de dar por perdido el reporte.
+    return handlePrintJobReport(
       service,
       comandaId,
       body.business_id,
@@ -627,23 +638,23 @@ export async function POST(req: Request) {
 }
 
 /**
- * Confirmación / fallo de un **control de pedido** (spec 063). Espeja el
- * tratamiento de las comandas: `ok` lo marca impreso y limpia los flags
- * laterales, `failed` setea `print_failed_at` sin cambiar el estado (se
- * reintenta en el próximo pull).
+ * Confirmación / fallo de un **print job** — control de pedido (spec 063) o
+ * cuenta de mesa (spec 080). Espeja el tratamiento de las comandas: `ok` lo
+ * marca impreso y limpia los flags laterales, `failed` setea `print_failed_at`
+ * sin cambiar el estado (se reintenta en el próximo pull).
  *
  * A diferencia de la comanda, no notifica: el aviso de impresión fallida (spec
- * 33) está pensado para cocina, y un control que no salió no bloquea la
- * preparación. Queda el flag para verlo.
+ * 33) está pensado para cocina, y un control o una cuenta que no salieron no
+ * bloquean la preparación. Queda el flag para verlo.
  */
-async function handleControlTicketReport(
+async function handlePrintJobReport(
   service: ReturnType<typeof createSupabaseServiceClient>,
   ticketId: string,
   businessId: string,
   result: "ok" | "failed",
 ) {
   const { data } = await service
-    .from("control_tickets")
+    .from("print_jobs")
     .select("id, business_id, status, print_failed_at, reprint_requested_at")
     .eq("id", ticketId)
     .maybeSingle();
@@ -670,14 +681,14 @@ async function handleControlTicketReport(
       });
     }
     await service
-      .from("control_tickets")
+      .from("print_jobs")
       .update({ print_failed_at: new Date().toISOString() })
       .eq("id", ticketId);
     return NextResponse.json({ status: ticket.status, notified: false });
   }
 
   const { error } = await service
-    .from("control_tickets")
+    .from("print_jobs")
     .update({
       status: "impreso",
       printed_at: new Date().toISOString(),
@@ -687,9 +698,169 @@ async function handleControlTicketReport(
     .eq("id", ticketId);
 
   if (error) {
-    console.error("print-agent confirm · control", error);
+    console.error("print-agent confirm · print_job", error);
     return NextResponse.json({ error: "update failed" }, { status: 500 });
   }
 
   return NextResponse.json({ status: "impreso", changed: true });
+}
+
+/**
+ * Las cuentas de mesa `pendiente` del negocio, con la forma que el agente ya
+ * sabe consumir (spec 080).
+ *
+ * La comandera se resuelve **por salón** con `resolveCuentaPrinter` — la misma
+ * función que usa el action al encolar, así que lo que se le prometió al mozo
+ * ("sale en la comandera de la terraza") es lo que efectivamente pasa acá. Un
+ * job sin destino se saltea y queda pendiente: si el encargado configura la IP
+ * más tarde, sale sola en el próximo poll.
+ */
+async function buildPrintableCuentaTickets(
+  service: ReturnType<typeof createSupabaseServiceClient>,
+  businessId: string,
+) {
+  const { data: business } = await service
+    .from("businesses")
+    .select(
+      "name, address, phone, cuenta_printer_ip, cuenta_printer_port, cuenta_printer_enabled",
+    )
+    .eq("id", businessId)
+    .maybeSingle();
+
+  const biz = business as {
+    name: string;
+    address: string | null;
+    phone: string | null;
+    cuenta_printer_ip: string | null;
+    cuenta_printer_port: number | null;
+    cuenta_printer_enabled: boolean | null;
+  } | null;
+  if (!biz) return [];
+
+  const { data: jobs, error } = await service
+    .from("print_jobs")
+    .select(
+      `
+      id,
+      status,
+      emitted_at,
+      reprint_requested_at,
+      orders!inner(
+        order_number,
+        subtotal_cents,
+        discount_cents,
+        discount_reason,
+        tip_cents,
+        total_cents,
+        total_paid_cents,
+        tables!orders_table_id_fkey(
+          label,
+          floor_plans!inner(
+            name,
+            cuenta_printer_ip,
+            cuenta_printer_port,
+            cuenta_printer_enabled
+          )
+        ),
+        order_items(
+          quantity,
+          unit_price_cents,
+          notes,
+          cancelled_at,
+          products(name)
+        )
+      )
+    `,
+    )
+    .eq("business_id", businessId)
+    .eq("kind", "cuenta")
+    .eq("status", "pendiente")
+    .order("emitted_at", { ascending: true });
+
+  if (error) {
+    // No tumba el GET: las comandas de cocina se devuelven igual.
+    console.error("print-agent GET · print_jobs cuenta", error);
+    return [];
+  }
+
+  const out = [];
+  for (const j of jobs ?? []) {
+    const order = j.orders as unknown as {
+      order_number: number;
+      subtotal_cents: number;
+      discount_cents: number;
+      discount_reason: string | null;
+      tip_cents: number;
+      total_cents: number;
+      total_paid_cents: number;
+      tables: {
+        label: string;
+        floor_plans: {
+          name: string;
+          cuenta_printer_ip: string | null;
+          cuenta_printer_port: number | null;
+          cuenta_printer_enabled: boolean | null;
+        } | null;
+      } | null;
+      order_items: {
+        quantity: number;
+        unit_price_cents: number;
+        notes: string | null;
+        cancelled_at: string | null;
+        products: { name: string } | null;
+      }[];
+    };
+
+    const floorPlan = order.tables?.floor_plans ?? null;
+    const printer = resolveCuentaPrinter(floorPlan, biz);
+    // Sin destino no se entrega: queda pendiente para cuando lo configuren.
+    if (!printer) continue;
+
+    const data: CuentaTicketData = {
+      print_job_id: j.id,
+      business_name: sanitizeTicketText(biz.name) ?? "—",
+      business_address: sanitizeTicketText(biz.address),
+      business_phone: sanitizeTicketText(biz.phone),
+      table_label: sanitizeTicketText(order.tables?.label) ?? "—",
+      floor_plan_name: sanitizeTicketText(floorPlan?.name),
+      order_number: order.order_number,
+      emitted_at: j.emitted_at,
+      subtotal_cents: order.subtotal_cents,
+      discount_cents: order.discount_cents,
+      discount_reason: sanitizeTicketText(order.discount_reason),
+      tip_cents: order.tip_cents,
+      total_cents: order.total_cents,
+      total_paid_cents: order.total_paid_cents ?? 0,
+      reprint: Boolean(j.reprint_requested_at),
+      items: (order.order_items ?? [])
+        // Un ítem anulado no se le cobra a la mesa, así que no se le muestra.
+        .filter((it) => !it.cancelled_at)
+        .map((it) => ({
+          product_name: sanitizeTicketText(it.products?.name) ?? "—",
+          quantity: it.quantity,
+          line_total_cents: it.unit_price_cents * it.quantity,
+          notes: sanitizeTicketText(it.notes),
+        })),
+    };
+
+    const content = buildCuentaTicketContent(data);
+    out.push({
+      comanda_id: j.id,
+      station_id: null,
+      station_name: "CUENTA",
+      printer_ip: printer.ip,
+      printer_port: printer.port,
+      printer_enabled: true,
+      batch: 1,
+      emitted_at: j.emitted_at,
+      cancelled: false,
+      cancelled_reason: null,
+      reprint: Boolean(j.reprint_requested_at),
+      table_label: data.table_label,
+      items: data.items ?? [],
+      content_escpos_b64: content.escpos_b64,
+      content_plain: content.plain,
+    });
+  }
+  return out;
 }
