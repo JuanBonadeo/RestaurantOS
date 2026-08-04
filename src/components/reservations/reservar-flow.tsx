@@ -706,12 +706,6 @@ export function ReservarFlow({
             Hasta {settings.max_party_size} personas. Para más, escribinos.
           </div>
         </div>
-        {/* Spec 080 — clubes: cuántos invitados entran por socio y cómo se
-            registran. Va acá porque es donde el socio decide cuántos van.
-            En negocios sin política el componente no renderiza nada. */}
-        <div style={{ marginTop: 14 }}>
-          <GuestPolicyNotice slug={slug} phone={businessPhone} />
-        </div>
       </Section>
 
       {/* Section: Salón (solo si hay más de uno) */}
@@ -792,6 +786,11 @@ export function ReservarFlow({
                   );
                 })}
               </div>
+
+              {/* Spec 080 — clubes: cuántos invitados entran por socio y cómo
+                  se registran. Va atado al servicio (en el Golf, sólo la cena);
+                  en negocios sin política no renderiza nada. */}
+              <GuestPolicyNotice slug={slug} phone={businessPhone} service={service} />
 
               {loadingFlex ? (
                 <SlotsSkeleton />

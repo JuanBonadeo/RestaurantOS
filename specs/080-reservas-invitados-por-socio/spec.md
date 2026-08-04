@@ -4,11 +4,11 @@
 
 **Created**: 2026-08-04
 
-**Status**: 📝 Spec aprobada (decisiones de Juan, 2026-08-04) — lista para implementar.
+**Status**: ✅ Implementada (2026-08-04). **Ampliación del mismo día:** el registro de invitados es **sólo del servicio de la noche** — al mediodía cada socio se hace cargo de los suyos (Juan). Ver § Alcance por servicio.
 
 **Input**: Juan, 2026-08-04: *"habría que aclarar, en la parte de reservas, que por cada socio solo puede haber dos invitados, que deben mandar el dni + nombre apellido al wsp del negocio, con un btn que lo lleve a wsp con el número configurado del club"*.
 
-**Issue**: _pendiente de crear._
+**Issue**: [#128](https://github.com/gachetponzellini/RestaurantOS-app/issues/128) · ampliación por servicio: [#130](https://github.com/gachetponzellini/RestaurantOS-app/issues/130).
 
 **Relacionada**: [`077-reservas-cupo-real`](../077-reservas-cupo-real/spec.md) (cupo del modo flexible) · [`059-reservas-modo-flexible`](../059-reservas-modo-flexible/spec.md).
 
@@ -27,6 +27,16 @@ No hay entidad **socio** en el sistema (la spec 059 la dejó explícitamente fue
 | ¿Qué número? | El **teléfono del negocio** (`businesses.phone`), que ya existe y ya alimenta el `wa.me` de la confirmación de pedidos. `golf-jcr` lo tiene cargado. |
 
 Como el texto va fijo, la política se acota **por slug de negocio** en una constante del código: si apareciera en todos los negocios sería un bug de multi-tenancy (`demo` no tiene socios). Es deuda consciente y está anotada abajo.
+
+## Alcance por servicio (ampliación, 2026-08-04)
+
+Juan: *"las invitaciones de los socios serían solo para la noche, al mediodía se hace cargo cada socio"*. El aviso queda atado al **servicio**, no al negocio entero:
+
+- **FR-008**: La política DEBE declarar en qué servicios aplica. En `golf-jcr`: sólo `Cena`.
+- **FR-009**: Sin servicio elegido (todavía no lo eligió, o el negocio está en modo estricto y no tiene servicios) el aviso NO DEBE mostrarse: no sabemos si es la cena, y avisar de más en el almuerzo confunde.
+- **FR-010**: La comparación del nombre del servicio DEBE ignorar mayúsculas y espacios — lo tipea el encargado en la config.
+- En la pantalla de reserva el aviso se movió de la sección "¿Cuántos son?" a **debajo del picker de servicio**, que es donde recién se sabe si es la cena. En la confirmación sale de `reservations.service`.
+- **No se muestra nada en el almuerzo.** Si más adelante se quiere un texto ahí ("cada socio se hace cargo de sus invitados"), es otra vuelta.
 
 ## User Scenarios & Testing *(mandatory)*
 

@@ -17,15 +17,35 @@
 export type GuestPolicy = {
   /** Invitados que puede traer cada socio. */
   maxGuests: number;
+  /**
+   * Servicios donde hay que registrar invitados. En el Golf el trámite es sólo
+   * de la cena: al mediodía cada socio se hace cargo de los suyos, sin aviso.
+   * Se comparan sin distinguir mayúsculas ni espacios.
+   */
+  services: string[];
 };
 
 const GUEST_POLICY_BY_SLUG: Record<string, GuestPolicy> = {
-  "golf-jcr": { maxGuests: 2 },
+  "golf-jcr": { maxGuests: 2, services: ["Cena"] },
 };
 
 /** Política del negocio, o `null` si no tiene (la mayoría). */
 export function getGuestPolicy(slug: string): GuestPolicy | null {
   return GUEST_POLICY_BY_SLUG[slug] ?? null;
+}
+
+/**
+ * ¿La política aplica al servicio elegido? Sin servicio devuelve `false`: no
+ * sabemos si es la cena, y avisar de más en el almuerzo confunde al socio
+ * (el modo estricto no tiene servicios, así que ahí nunca aplica).
+ */
+export function guestPolicyAppliesTo(
+  policy: GuestPolicy,
+  service: string | null | undefined,
+): boolean {
+  const s = (service ?? "").trim().toLowerCase();
+  if (!s) return false;
+  return policy.services.some((x) => x.trim().toLowerCase() === s);
 }
 
 /** `wa.me` no acepta "+", espacios ni guiones. */

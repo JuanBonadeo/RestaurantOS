@@ -142,7 +142,7 @@ export async function getComandasTabData(
   if (!ctxResult.ok) return ctxResult;
 
   const [comandas, stations, mozos, printAgentHealth] = await Promise.all([
-    getActiveComandas(business.id, business.timezone),
+    getActiveComandas(business.id),
     getStationsForLocal(business.id),
     getMozosByBusiness(business.id),
     getPrintAgentHealth(business.id),

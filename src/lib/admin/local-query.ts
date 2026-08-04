@@ -3,7 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { startOfTodayUtc } from "@/lib/admin/orders-query";
+import { entregadasCutoff } from "@/lib/comandas/entregadas-window";
 import type { ComandaStatus, KitchenItemStatus } from "@/lib/comandas/types";
 
 type GenericClient = SupabaseClient;
@@ -75,27 +75,26 @@ export type LocalStation = {
 };
 
 /**
- * Comandas del día operativo. Usado por la tab "Comandas" del nuevo
+ * Comandas vivas del operativo. Usado por la tab "Comandas" del nuevo
  * `/admin/local`.
  *
  * No filtramos por mozo/encargado — esta vista es panorámica del operativo.
  *
  * "Activas" (pendiente | en_preparacion) se traen sin recorte temporal.
- * Las "entregado" se traen desde la medianoche del business (día operativo):
- * la columna Entregadas muestra todo lo que salió hoy, ordenado por hora de
- * entrega desc, con un tope de seguridad para no inflar el DOM en un local de
- * mucho volumen. El corte por día se elige porque el KDS se "resetea" cada
- * jornada; si hiciera falta turno-de-caja o últimas-N es un cambio de una línea.
+ * Las "entregado", sólo las de los últimos `ENTREGADAS_VISIBLE_MINUTES`
+ * (spec 082): sirven como acuse de recibo de lo que acaba de salir, no como
+ * archivo del día. El cliente aplica el MISMO corte con su reloj vivo, así que
+ * una card no espera al próximo refetch para irse. El tope sigue como red de
+ * seguridad para el DOM.
  */
 export async function getActiveComandas(
   businessId: string,
-  timezone: string,
 ): Promise<LocalComanda[]> {
   const supabase = (await createSupabaseServerClient()) as unknown as GenericClient;
 
-  const startOfDay = startOfTodayUtc(timezone).toISOString();
+  const entregadasDesde = entregadasCutoff().toISOString();
 
-  // Dos queries paralelas: pendientes/en_preparacion + entregadas del día.
+  // Dos queries paralelas: pendientes/en_preparacion + entregadas recientes.
   // Antes había una sola con `.or()` + `and()` anidado pero la sintaxis
   // PostgREST con timestamp ISO embebido era frágil.
   const select = `
@@ -130,7 +129,7 @@ export async function getActiveComandas(
       .select(select)
       .eq("orders.business_id", businessId)
       .eq("status", "entregado")
-      .gte("delivered_at", startOfDay)
+      .gte("delivered_at", entregadasDesde)
       .order("delivered_at", { ascending: false })
       .limit(100),
   ]);

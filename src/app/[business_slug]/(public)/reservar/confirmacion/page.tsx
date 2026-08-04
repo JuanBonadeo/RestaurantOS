@@ -307,6 +307,7 @@ export default async function ReservarConfirmacionPage({
           <GuestPolicyNotice
             slug={business_slug}
             phone={business.phone ?? null}
+            service={reservation.service ?? null}
             dayLabel={dayLabel}
             timeLabel={timeLabel}
           />

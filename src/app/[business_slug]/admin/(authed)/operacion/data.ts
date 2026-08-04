@@ -220,11 +220,10 @@ export async function loadSalon(
 
 export async function loadComandas(
   businessId: string,
-  timezone: string,
 ): Promise<ComandasData> {
   const [initialComandas, stations, mozos, printAgentHealth] =
     await Promise.all([
-      getActiveComandas(businessId, timezone),
+      getActiveComandas(businessId),
       getStationsForLocal(businessId),
       getMozosByBusiness(businessId),
       getPrintAgentHealth(businessId),

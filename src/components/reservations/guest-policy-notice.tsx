@@ -1,5 +1,9 @@
 import { I } from "@/components/delivery/primitives";
-import { buildGuestWhatsappLink, getGuestPolicy } from "@/lib/reservations/guest-policy";
+import {
+  buildGuestWhatsappLink,
+  getGuestPolicy,
+  guestPolicyAppliesTo,
+} from "@/lib/reservations/guest-policy";
 
 /**
  * Spec 080 — aviso de invitados por socio (clubes). Se renderiza en `/reservar`
@@ -9,22 +13,28 @@ import { buildGuestWhatsappLink, getGuestPolicy } from "@/lib/reservations/guest
  * Es informativo: no valida ni limita nada (no hay entidad socio en el
  * sistema). El botón lleva a WhatsApp del negocio con el mensaje ya armado —
  * sin teléfono cargado se muestra el texto sin botón, nunca un `wa.me` roto.
+ *
+ * El aviso está atado al **servicio**: en el Golf el registro de invitados es
+ * sólo de la cena; al mediodía cada socio se hace cargo de los suyos.
  */
 export function GuestPolicyNotice({
   slug,
   phone,
+  service,
   dayLabel,
   timeLabel,
 }: {
   slug: string;
   phone: string | null | undefined;
+  /** Servicio elegido (o el de la reserva). Sin él, el aviso no se muestra. */
+  service: string | null | undefined;
   /** Día de la reserva, ya formateado. Sólo desde la confirmación. */
   dayLabel?: string;
   /** Hora de la reserva, ya formateada. Sólo desde la confirmación. */
   timeLabel?: string;
 }) {
   const policy = getGuestPolicy(slug);
-  if (!policy) return null;
+  if (!policy || !guestPolicyAppliesTo(policy, service)) return null;
 
   const href = buildGuestWhatsappLink({
     phone,

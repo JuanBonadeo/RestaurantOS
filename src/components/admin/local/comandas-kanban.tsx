@@ -49,6 +49,10 @@ import type {
 } from "@/lib/comandas/actions";
 import type { LocalComanda, LocalStation } from "@/lib/admin/local-query";
 import { matchesSalon } from "@/lib/admin/salon-filter";
+import {
+  ENTREGADAS_VISIBLE_MINUTES,
+  isEntregadaVisible,
+} from "@/lib/comandas/entregadas-window";
 import type { ComandaStatus } from "@/lib/comandas/types";
 import {
   Dialog,
@@ -112,6 +116,9 @@ type Column = {
    *  comanda (no el próximo) para que la card lea como un bloque coherente. */
   buttonClass: string;
   emptyHint: string;
+  /** Aclaración chica bajo el título. Hoy sólo la usa Entregadas, para que el
+   *  encargado sepa por qué las cards se van solas (spec 082). */
+  note?: string;
 };
 
 const COLUMNS: Column[] = [

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { buildGuestWhatsappLink, getGuestPolicy } from "./guest-policy";
+import {
+  buildGuestWhatsappLink,
+  getGuestPolicy,
+  guestPolicyAppliesTo,
+} from "./guest-policy";
 
 /**
  * Spec 080 — política de invitados por socio. La política va fija en código
@@ -8,13 +12,40 @@ import { buildGuestWhatsappLink, getGuestPolicy } from "./guest-policy";
  * sería un bug de multi-tenancy, no una feature.
  */
 describe("getGuestPolicy", () => {
-  it("el club tiene política de 2 invitados por socio", () => {
-    expect(getGuestPolicy("golf-jcr")).toEqual({ maxGuests: 2 });
+  it("el club tiene política de 2 invitados por socio, sólo en la cena", () => {
+    expect(getGuestPolicy("golf-jcr")).toEqual({ maxGuests: 2, services: ["Cena"] });
   });
 
   it("un negocio sin política no ve nada", () => {
     expect(getGuestPolicy("demo")).toBeNull();
     expect(getGuestPolicy("cualquier-otro")).toBeNull();
+  });
+});
+
+/**
+ * El registro de invitados es sólo del servicio de la noche: al mediodía cada
+ * socio se hace cargo de los suyos y no hay nada que avisar.
+ */
+describe("guestPolicyAppliesTo", () => {
+  const policy = getGuestPolicy("golf-jcr")!;
+
+  it("aplica a la cena", () => {
+    expect(guestPolicyAppliesTo(policy, "Cena")).toBe(true);
+  });
+
+  it("no aplica al almuerzo", () => {
+    expect(guestPolicyAppliesTo(policy, "Almuerzo")).toBe(false);
+  });
+
+  it("sin servicio elegido no aplica (no sabemos si es la cena)", () => {
+    expect(guestPolicyAppliesTo(policy, null)).toBe(false);
+    expect(guestPolicyAppliesTo(policy, undefined)).toBe(false);
+    expect(guestPolicyAppliesTo(policy, "  ")).toBe(false);
+  });
+
+  it("no se cuelga de mayúsculas ni espacios (el nombre lo tipea el encargado)", () => {
+    expect(guestPolicyAppliesTo(policy, " cena ")).toBe(true);
+    expect(guestPolicyAppliesTo(policy, "CENA")).toBe(true);
   });
 });
 
