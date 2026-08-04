@@ -159,6 +159,22 @@ describe("buildTicketLines · destino del pedido", () => {
     expect(texts.some((t) => t.startsWith("MESA"))).toBe(false);
   });
 
+  it("los subtítulos entran en un renglón: nada se parte al ancho útil", () => {
+    // «pasa a buscarlo el cliente» eran 26 col en un renglón de 24 y salía
+    // partido, con un «te» suelto y centrado en doble alto.
+    for (const tipo of ["delivery", "pickup"] as const) {
+      const lines = buildTicketLines({ ...base, delivery_type: tipo });
+      for (const l of lines.filter((x) => x.size === "tall"))
+        expect(l.text.length).toBeLessThanOrEqual(24);
+    }
+  });
+
+  it("venta de mostrador (dine_in sin mesa) → MOSTRADOR, no «MESA —»", () => {
+    const texts = buildTicketLines({ ...base, table_label: "—" }).map((l) => l.text);
+    expect(texts).toContain("MOSTRADOR");
+    expect(texts.some((t) => t.startsWith("MESA"))).toBe(false);
+  });
+
   it("dine_in o ausente → «MESA x», el encabezado de siempre", () => {
     expect(buildTicketLines(base).map((l) => l.text)).toContain("MESA 5");
     expect(

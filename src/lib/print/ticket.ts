@@ -208,12 +208,23 @@ export function buildTicketLines(c: TicketComanda): Line[] {
   // El destino manda: un pedido de delivery no tiene mesa (salía «MESA —») y la
   // cocina necesita ver de una que ese plato se lo lleva el repartidor, no un
   // mozo al salón. `dine_in` / ausente = comportamiento de siempre.
+  // Los subtítulos van cortos a propósito: entran en un renglón de `COLS.tall`
+  // (24 col). «pasa a buscarlo el cliente» son 26 y salía partido, con un «te»
+  // suelto y centrado en doble alto.
+  const subtitulo = (text: string) => {
+    for (const l of wrap(text, COLS.tall))
+      push(l, { size: "tall", bold: true, align: "center" });
+  };
   if (c.delivery_type === "delivery") {
     banner("DELIVERY");
-    push("lo lleva el repartidor", { size: "tall", bold: true, align: "center" });
+    subtitulo("lo lleva el repartidor");
   } else if (c.delivery_type === "pickup") {
     banner("RETIRA");
-    push("pasa a buscarlo el cliente", { size: "tall", bold: true, align: "center" });
+    subtitulo("lo retira el cliente");
+  } else if (!c.table_label || c.table_label === "—" || c.table_label === "-") {
+    // Venta de mostrador: se persiste `dine_in` SIN mesa (venta-mostrador.ts),
+    // así que caía en el else y salía «MESA —».
+    banner("MOSTRADOR");
   } else {
     banner(`MESA ${c.table_label}`);
   }

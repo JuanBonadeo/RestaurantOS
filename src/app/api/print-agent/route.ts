@@ -166,10 +166,11 @@ export async function GET(req: Request) {
         | "delivery"
         | "pickup"
         | null,
-      // Con qué combina: lo del MISMO pedido que sale de los otros sectores.
+      // Con qué combina: lo del MISMO envío que sale de los otros sectores.
       otros_sectores: agruparOtrosSectores(
         otrosPorPedido.get(order?.id) ?? [],
         c.station_id as string | null,
+        c.emitted_at as string | null,
       ),
       items: ((c.comanda_items ?? []) as unknown[]).map((ci) => {
         const item = ci as {
@@ -220,12 +221,27 @@ type ItemDePedido = {
   product_name: string;
   station_id: string | null;
   stations: { name: string } | null;
+  comanda_items:
+    | { comandas: { emitted_at: string; cancelled_at: string | null } | null }[]
+    | null;
 };
 
 /**
+ * Ventana para considerar que dos comandas salieron en el MISMO envío.
+ *
+ * `createComandasForItems` crea una comanda por sector en un loop secuencial
+ * (dos viajes a Supabase por sector), así que las del mismo envío quedan
+ * separadas por cientos de ms — no por un timestamp idéntico. 10 s cubre un
+ * envío lento de 5 sectores y, para la cocina, dos envíos separados por menos
+ * de 10 s son el mismo momento de servicio igual.
+ */
+const VENTANA_ENVIO_MS = 10_000;
+
+/**
  * Los items vivos (sin anular y todavía no entregados) de los pedidos dados,
- * indexados por pedido. Se saltean los que no pasan por cocina (`station_id`
- * null: las bebidas que sirve el mozo) — no hay nada que coordinar con ellos.
+ * indexados por pedido, con el `emitted_at` de la comanda a la que pertenecen.
+ * Se saltean los que no pasan por cocina (`station_id` null: las bebidas que
+ * sirve el mozo) — no hay nada que coordinar con ellos.
  */
 async function loadItemsPorPedido(
   service: ReturnType<typeof createSupabaseServiceClient>,
@@ -236,13 +252,15 @@ async function loadItemsPorPedido(
 
   const { data, error } = await service
     .from("order_items")
-    .select("order_id, quantity, product_name, station_id, stations(name)")
+    .select(
+      "order_id, quantity, product_name, station_id, stations(name), comanda_items(comandas(emitted_at, cancelled_at))",
+    )
     .in("order_id", orderIds)
     .is("cancelled_at", null)
     .not("station_id", "is", null)
     .neq("kitchen_status", "delivered");
   if (error) {
-    // El «va con» es contexto: si falla, el ticket igual sale con sus ítems.
+    // El «combina con» es contexto: si falla, el ticket igual sale con sus ítems.
     console.error("print-agent GET · items del pedido", error);
     return porPedido;
   }
@@ -256,17 +274,55 @@ async function loadItemsPorPedido(
 }
 
 /**
- * Agrupa por sector los items del pedido que NO son de `stationId`: con qué
+ * Agrupa por sector los items del MISMO envío que NO son de `stationId`: con qué
  * combina lo que este ticket manda a cocinar. Sin esto, la parrilla no sabe que
  * el entrecot sale con las papas de fritera y cada sector cocina a destiempo.
+ *
+ * Acotar al envío es la parte delicada. `kitchen_status` sólo llega a
+ * `delivered` cuando alguien lo tilda a mano, así que filtrar por eso deja
+ * entrar toda tanda anterior que el mozo levantó sin tocar el celular: el
+ * ticket del bife listaría la picada que la mesa ya se comió y la parrilla
+ * esperaría a coordinar con un plato que no existe. Se resuelve mirando la
+ * comanda de cada item:
+ *
+ * - sin comanda todavía → es el envío en vuelo (los `order_items` se insertan
+ *   ANTES que las comandas, así que este es el caso normal del sector que
+ *   todavía no se creó). Entra.
+ * - con comanda dentro de la ventana → mismo envío. Entra.
+ * - con comanda vieja → tanda anterior. Fuera.
+ * - con comanda anulada → no se está cocinando. Fuera.
  */
-function agruparOtrosSectores(items: ItemDePedido[], stationId: string | null) {
+function agruparOtrosSectores(
+  items: ItemDePedido[],
+  stationId: string | null,
+  emittedAt: string | null,
+) {
+  const ref = emittedAt ? new Date(emittedAt).getTime() : NaN;
   const porSector = new Map<
     string,
     { station_name: string; items: { product_name: string; quantity: number }[] }
   >();
   for (const it of items) {
     if (!it.station_id || it.station_id === stationId) continue;
+
+    const comandas = (it.comanda_items ?? [])
+      .map((ci) => ci.comandas)
+      .filter((c): c is { emitted_at: string; cancelled_at: string | null } =>
+        Boolean(c),
+      );
+    if (comandas.length > 0) {
+      const vivas = comandas.filter((c) => !c.cancelled_at);
+      if (vivas.length === 0) continue; // toda su comanda está anulada
+      const delEnvio =
+        Number.isNaN(ref) ||
+        vivas.some(
+          (c) =>
+            Math.abs(new Date(c.emitted_at).getTime() - ref) <=
+            VENTANA_ENVIO_MS,
+        );
+      if (!delEnvio) continue; // tanda anterior: ya se cocinó, no se coordina
+    }
+
     const sector = porSector.get(it.station_id) ?? {
       station_name: sanitizeTicketText(it.stations?.name) ?? "Otro sector",
       items: [],

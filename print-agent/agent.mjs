@@ -199,12 +199,20 @@ function ticketLines(c) {
   banner(String(c.station_name).toUpperCase());
   // Delivery / retiro no tienen mesa (salía «MESA —»): la cocina ve de una que
   // ese plato se lo lleva el repartidor. `dine_in` / ausente = el de siempre.
+  // Los subtítulos van cortos: entran en un renglón de COLS.tall (24 col).
+  const subtitulo = (text) => {
+    for (const l of wrap(text, COLS.tall))
+      push(l, { size: "tall", bold: true, align: "center" });
+  };
   if (c.delivery_type === "delivery") {
     banner("DELIVERY");
-    push("lo lleva el repartidor", { size: "tall", bold: true, align: "center" });
+    subtitulo("lo lleva el repartidor");
   } else if (c.delivery_type === "pickup") {
     banner("RETIRA");
-    push("pasa a buscarlo el cliente", { size: "tall", bold: true, align: "center" });
+    subtitulo("lo retira el cliente");
+  } else if (!c.table_label || c.table_label === "—" || c.table_label === "-") {
+    // Venta de mostrador: `dine_in` sin mesa → salía «MESA —».
+    banner("MOSTRADOR");
   } else {
     banner(`MESA ${c.table_label}`);
   }

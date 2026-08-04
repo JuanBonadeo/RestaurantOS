@@ -113,6 +113,31 @@ function makeRow(
   };
 }
 
+// `makeRow` emite a las 00:00:00Z. Una comanda del mismo envío cae a menos de
+// 10 s; una tanda anterior, mucho antes.
+const MISMO_ENVIO = "2026-01-01T00:00:00.600Z";
+const TANDA_ANTERIOR = "2025-12-31T23:30:00Z"; // media hora antes
+
+/** Fila de `order_items` con su sector y la comanda a la que pertenece (si tiene). */
+function itemDePedido(
+  product_name: string,
+  station_id: string,
+  stationName: string,
+  comandaEmittedAt?: string,
+  cancelledAt: string | null = null,
+): Row {
+  return {
+    order_id: "o1",
+    quantity: 1,
+    product_name,
+    station_id,
+    stations: { name: stationName },
+    comanda_items: comandaEmittedAt
+      ? [{ comandas: { emitted_at: comandaEmittedAt, cancelled_at: cancelledAt } }]
+      : [],
+  };
+}
+
 function getReq(auth = "Bearer test-key") {
   return new Request("http://localhost/api/print-agent?business_id=biz1", {
     headers: auth ? { authorization: auth } : {},
@@ -265,27 +290,11 @@ describe("GET /api/print-agent — printer_ip por comanda (spec 28)", () => {
     rows = [makeRow("Cocina", "192.168.10.50")];
     itemRows = [
       // El item propio del sector no se repite en el bloque.
-      {
-        order_id: "o1",
-        quantity: 2,
-        product_name: "Ensalada Queso Azul",
-        station_id: "st-Cocina",
-        stations: { name: "Cocina" },
-      },
-      {
-        order_id: "o1",
-        quantity: 1,
-        product_name: "Entrecot",
-        station_id: "st-Parrilla",
-        stations: { name: "Parrilla" },
-      },
-      {
-        order_id: "o1",
-        quantity: 1,
-        product_name: "Papas Rejilla",
-        station_id: "st-Fritera",
-        stations: { name: "Fritera" },
-      },
+      itemDePedido("Ensalada Queso Azul", "st-Cocina", "Cocina"),
+      // Con comanda del mismo envío (mismo emitted_at que la del ticket).
+      itemDePedido("Entrecot", "st-Parrilla", "Parrilla", MISMO_ENVIO),
+      // Todavía sin comanda: el sector que aún no se creó (envío en vuelo).
+      itemDePedido("Papas Rejilla", "st-Fritera", "Fritera"),
     ];
     const res = await GET(getReq());
     const body = (await res.json()) as {
@@ -305,6 +314,54 @@ describe("GET /api/print-agent — printer_ip por comanda (spec 28)", () => {
     // Lo propio del sector no se duplica abajo.
     expect(cocina.otros_sectores.flatMap((s) => s.items.map((i) => i.product_name)))
       .not.toContain("Ensalada Queso Azul");
+  });
+
+  it("combina con: NO arrastra la tanda anterior (la picada que la mesa ya se comió)", async () => {
+    // `kitchen_status` sólo llega a `delivered` si alguien lo tilda a mano, así
+    // que filtrar por eso deja entrar toda tanda vieja que el mozo levantó sin
+    // tocar el celular. El corte real es la comanda: si es de otro envío, fuera.
+    rows = [makeRow("Parrilla", "192.168.10.50")];
+    itemRows = [
+      itemDePedido("Picada", "st-Cocina", "Cocina", TANDA_ANTERIOR),
+      itemDePedido("Papas Rejilla", "st-Fritera", "Fritera", MISMO_ENVIO),
+    ];
+    const res = await GET(getReq());
+    const body = (await res.json()) as {
+      comandas: { otros_sectores: { station_name: string }[]; content_plain: string }[];
+    };
+    const parrilla = body.comandas[0]!;
+    expect(parrilla.otros_sectores.map((s) => s.station_name)).toEqual(["Fritera"]);
+    expect(parrilla.content_plain).not.toContain("Picada");
+  });
+
+  it("combina con: ignora los items cuya comanda está anulada", async () => {
+    rows = [makeRow("Parrilla", "192.168.10.50")];
+    itemRows = [
+      itemDePedido("Flan", "st-Cocina", "Cocina", MISMO_ENVIO, "2026-01-01T00:00:05Z"),
+    ];
+    const res = await GET(getReq());
+    const body = (await res.json()) as {
+      comandas: { otros_sectores: unknown[] }[];
+    };
+    expect(body.comandas[0]!.otros_sectores).toEqual([]);
+  });
+
+  it("venta de mostrador (dine_in sin mesa) → MOSTRADOR, no «MESA —»", async () => {
+    rows = [
+      makeRow("Cocina", "192.168.10.50", {
+        orders: {
+          id: "o1",
+          business_id: "biz1",
+          table_id: null,
+          delivery_type: "dine_in",
+          tables: null,
+        },
+      }),
+    ];
+    const res = await GET(getReq());
+    const body = (await res.json()) as { comandas: { content_plain: string }[] };
+    expect(body.comandas[0]!.content_plain).toContain("MOSTRADOR");
+    expect(body.comandas[0]!.content_plain).not.toContain("MESA");
   });
 
   it("comanda de delivery → el ticket dice DELIVERY y el repartidor, no «MESA —»", async () => {
