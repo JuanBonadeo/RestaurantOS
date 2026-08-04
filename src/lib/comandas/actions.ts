@@ -388,17 +388,29 @@ export async function enviarComanda(
     .map((i) => i.client_line_key)
     .filter((k): k is string => !!k);
   const dispatchedKeyToItemId = new Map<string, string>();
+  // Líneas ya insertadas que NUNCA llegaron a una comanda (el ruteo falló y se
+  // borró la comanda huérfana). Saltearlas por idempotencia dejaría el reintento
+  // en un no-op silencioso: respuesta OK, sin comanda, y cocina sin el ticket.
+  // Se re-rutean con su id existente en vez de reinsertarlas (el índice UNIQUE
+  // sobre (order_id, client_line_key) rechazaría el insert igual).
+  const huerfanos: { id: string; station_id: string }[] = [];
   if (inputKeys.length > 0) {
     const { data: existingRows } = await service
       .from("order_items")
-      .select("id, client_line_key")
+      .select("id, client_line_key, station_id, comanda_items(comanda_id)")
       .eq("order_id", orderId)
       .in("client_line_key", inputKeys);
     for (const row of (existingRows ?? []) as {
       id: string;
       client_line_key: string | null;
+      station_id: string | null;
+      comanda_items: { comanda_id: string }[] | null;
     }[]) {
       if (row.client_line_key) dispatchedKeyToItemId.set(row.client_line_key, row.id);
+      // `station_id` null (bebidas / stock) nunca genera comanda: no es huérfano.
+      if (row.station_id && (row.comanda_items ?? []).length === 0) {
+        huerfanos.push({ id: row.id, station_id: row.station_id });
+      }
     }
   }
 
@@ -407,6 +419,14 @@ export async function enviarComanda(
   // se insertan con `station_id=null` y NO generan comanda — el mozo los
   // gestiona directo. Decisión 2026-05-07.
   const itemsByStation = new Map<string, string[]>();
+
+  // Los huérfanos de un ruteo fallido anterior entran primero: este envío es su
+  // segunda (y única) oportunidad de llegar a cocina.
+  for (const h of huerfanos) {
+    const bucket = itemsByStation.get(h.station_id) ?? [];
+    bucket.push(h.id);
+    itemsByStation.set(h.station_id, bucket);
+  }
 
   for (const [idx, inputItem] of productItems.entries()) {
     // Idempotencia (spec 42): línea ya enviada → saltear (no reinsertar).
