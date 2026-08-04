@@ -9,6 +9,7 @@ import {
   consumeReservationIntent,
   getReservationIntentByToken,
 } from "@/lib/reservations/chatbot-actions";
+import { getBusinessBySlug, getReservationSettings } from "@/lib/reservations/queries";
 
 /**
  * Server action invoked by the chatbot-handoff confirmation page
@@ -40,6 +41,19 @@ export async function confirmReservationFromIntent(
   const intent = await getReservationIntentByToken(parsed.data.token);
   if (!intent) {
     return actionError("Este link ya no es válido. Pedí uno nuevo al chatbot.");
+  }
+
+  // Spec 077 — el intent guarda un `slot` del modelo estricto. Si el negocio
+  // pasó a flexible mientras tanto, crearlo por este camino metería una reserva
+  // con otro modelo y sin pasar por el cupo del servicio.
+  const business = await getBusinessBySlug(parsed.data.business_slug);
+  if (business) {
+    const settings = await getReservationSettings(business.id, { useService: true });
+    if (settings.mode === "flexible") {
+      return actionError(
+        "Este local cambió cómo toma las reservas. Hacela desde la página de reservas del local.",
+      );
+    }
   }
 
   const result = await createReservationFromCustomer({

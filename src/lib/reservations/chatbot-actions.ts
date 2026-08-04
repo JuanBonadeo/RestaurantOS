@@ -61,6 +61,7 @@ export { normalizePhone };
 
 type Business = {
   id: string;
+  slug: string;
   timezone: string;
 };
 
@@ -68,10 +69,26 @@ async function getBusinessById(businessId: string): Promise<Business | null> {
   const service = createSupabaseServiceClient() as unknown as GenericClient;
   const { data } = await service
     .from("businesses")
-    .select("id, timezone")
+    .select("id, slug, timezone")
     .eq("id", businessId)
     .maybeSingle();
   return (data as Business | null) ?? null;
+}
+
+/**
+ * Spec 077 — el bot todavía razona en modo **estricto** (slots de `schedule` +
+ * `pickTable` + ventana de 90 min). Contra un negocio **flexible** eso promete
+ * un modelo que el local no usa y, peor, esquiva el cupo del servicio que la
+ * web sí respeta. Hasta que las tools sepan de servicios (US3 de la spec), el
+ * bot no ofrece ni reserva en flexible: deriva al flujo web, que es correcto.
+ */
+function flexibleModeHandoff(slug: string) {
+  return {
+    diagnostic: "flexible_mode_web_only" as const,
+    booking_url_path: `/${slug}/reservar`,
+    hint:
+      "Este local maneja las reservas por servicio (mediodía / cena) y el bot todavía no puede tomarlas. Pasale al cliente el link de reservas del local para que la haga ahí, o decile que llame.",
+  };
 }
 
 /**
@@ -133,6 +150,18 @@ export async function checkAvailabilityForChatbot(
   if (!business) return { error: "business_not_found" as const };
 
   const settings = await getReservationSettings(businessId, { useService: true });
+
+  // Spec 077 — negocio flexible: el bot deriva a la web en vez de ofrecer los
+  // slots viejos de `schedule`, que el local ya no usa.
+  if (settings.mode === "flexible") {
+    return {
+      date,
+      party_size: partySize,
+      slots: [] as string[],
+      count: 0,
+      ...flexibleModeHandoff(business.slug),
+    };
+  }
 
   if (partySize < 1) {
     return { error: "invalid_party_size" as const };
@@ -297,6 +326,11 @@ export async function createReservationIntent(input: {
   if (!business) return { ok: false, error: "business_not_found" };
 
   const settings = await getReservationSettings(input.businessId, { useService: true });
+  // Spec 077 — sin soporte flexible en el bot, no se generan intents: el
+  // camino estricto crearía una reserva con otro modelo y salteando el cupo.
+  if (settings.mode === "flexible") {
+    return { ok: false, error: "flexible_mode_web_only" };
+  }
   if (input.partySize < 1 || input.partySize > settings.max_party_size) {
     return {
       ok: false,
