@@ -287,3 +287,136 @@ describe("computeFlexibleAvailability", () => {
     expect(out).toBeNull();
   });
 });
+
+/**
+ * Spec 077 — el cupo es DURO para el cliente (web/chatbot) y BLANDO para el
+ * encargado. La asimetría vive acá, en la función pura: `enforceCapacity`.
+ * Corta el que se agote primero: cubiertos o mesas libres.
+ */
+describe("computeFlexibleAvailability · enforceCapacity (spec 077)", () => {
+  const tables = [
+    makeTable({ id: "T1", seats: 4, floor_plan_id: "adentro" }),
+    makeTable({ id: "T2", seats: 2, floor_plan_id: "adentro" }),
+    makeTable({ id: "T3", seats: 6, floor_plan_id: "afuera" }),
+  ];
+
+  it("cliente: sobre el cupo de cubiertos → no disponible (sin-cupo)", () => {
+    const out = computeFlexibleAvailability({
+      date: DATE,
+      service: { ...CENA, soft_capacity: 5 },
+      partySize: 4,
+      tables,
+      reservations: [makeRes({ starts_at: CENA_2100, party_size: 3 })],
+      timezone: TZ,
+      enforceCapacity: true,
+    })!;
+    // 3 reservados + 4 nuevos = 7 > 5.
+    expect(out.available).toBe(false);
+    expect(out.reason).toBe("sin-cupo");
+    expect(out.overCapacity).toBe(true);
+  });
+
+  it("encargado: el mismo caso sigue disponible, sólo avisa", () => {
+    const out = computeFlexibleAvailability({
+      date: DATE,
+      service: { ...CENA, soft_capacity: 5 },
+      partySize: 4,
+      tables,
+      reservations: [makeRes({ starts_at: CENA_2100, party_size: 3 })],
+      timezone: TZ,
+    })!;
+    expect(out.available).toBe(true);
+    expect(out.warning).toBe("sobre-capacidad");
+    expect(out.reason).toBeUndefined();
+  });
+
+  it("cliente: justo en el límite del cupo todavía entra (el tope es estricto)", () => {
+    const out = computeFlexibleAvailability({
+      date: DATE,
+      service: { ...CENA, soft_capacity: 7 },
+      partySize: 4,
+      tables,
+      reservations: [makeRes({ starts_at: CENA_2100, party_size: 3 })],
+      timezone: TZ,
+      enforceCapacity: true,
+    })!;
+    // 3 + 4 = 7, no lo supera.
+    expect(out.available).toBe(true);
+    expect(out.overCapacity).toBe(false);
+  });
+
+  it("cliente: sin mesas libres → no disponible aunque sobre cupo de cubiertos", () => {
+    const out = computeFlexibleAvailability({
+      date: DATE,
+      service: { ...CENA, soft_capacity: 100 },
+      partySize: 4,
+      tables,
+      reservations: [
+        // Las dos mesas de 'adentro' que entran un party de 4: T1 tomada; T2 es
+        // chica de por sí. Quedan cero mesas para este party en esa zona.
+        makeRes({ table_id: "T1", starts_at: CENA_2100, party_size: 2, floor_plan_id: "adentro" }),
+      ],
+      timezone: TZ,
+      floorPlanId: "adentro",
+      enforceCapacity: true,
+    })!;
+    expect(out.freeTables).toHaveLength(0);
+    expect(out.available).toBe(false);
+    expect(out.reason).toBe("sin-mesas");
+  });
+
+  it("cliente: sin cupo configurado (null) no bloquea por cubiertos, sí por mesas", () => {
+    const conMesas = computeFlexibleAvailability({
+      date: DATE,
+      service: CENA, // soft_capacity: null
+      partySize: 4,
+      tables,
+      reservations: [makeRes({ starts_at: CENA_2100, party_size: 40 })],
+      timezone: TZ,
+      enforceCapacity: true,
+    })!;
+    expect(conMesas.available).toBe(true);
+    expect(conMesas.overCapacity).toBe(false);
+
+    const sinMesas = computeFlexibleAvailability({
+      date: DATE,
+      service: CENA,
+      partySize: 8, // ninguna mesa tiene 8 asientos
+      tables,
+      reservations: [],
+      timezone: TZ,
+      enforceCapacity: true,
+    })!;
+    expect(sinMesas.available).toBe(false);
+    expect(sinMesas.reason).toBe("sin-mesas");
+  });
+
+  it("mesa puntual ocupada gana como motivo, aunque el servicio esté lleno", () => {
+    const out = computeFlexibleAvailability({
+      date: DATE,
+      service: { ...CENA, soft_capacity: 1 },
+      partySize: 4,
+      tables,
+      reservations: [makeRes({ table_id: "T1", starts_at: CENA_2100, party_size: 2 })],
+      timezone: TZ,
+      tableId: "T1",
+      enforceCapacity: true,
+    })!;
+    expect(out.available).toBe(false);
+    expect(out.reason).toBe("mesa-ocupada");
+  });
+
+  it("las reservas de otro servicio no consumen el cupo de este", () => {
+    const out = computeFlexibleAvailability({
+      date: DATE,
+      service: { ...CENA, soft_capacity: 4 },
+      partySize: 4,
+      tables,
+      reservations: [makeRes({ starts_at: MEDIODIA_1300, party_size: 10 })],
+      timezone: TZ,
+      enforceCapacity: true,
+    })!;
+    expect(out.reservedCovers).toBe(0);
+    expect(out.available).toBe(true);
+  });
+});

@@ -141,6 +141,7 @@ export async function fetchFlexibleAvailability(
       service: parsed.data.service,
       partySize: parsed.data.party_size,
       floorPlanId: parsed.data.floor_plan_id ?? null,
+      enforceCapacity: parsed.data.enforce_capacity,
     },
     { useService: true },
   );

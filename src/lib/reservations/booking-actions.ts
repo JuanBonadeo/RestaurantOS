@@ -14,6 +14,7 @@ import {
   getAllReservableTables,
   getBusinessBySlug,
   getBusinessTables,
+  getFlexibleAvailability,
   getReservationActor,
   getReservationServiceByName,
   getReservationSettings,
@@ -413,6 +414,40 @@ export async function createFlexibleReservation(
     }
     tableId = target.id;
     floorPlanId = target.floor_plan_id;
+  }
+
+  // Spec 077 — el cupo es DURO para el cliente (web/chatbot) y BLANDO para el
+  // encargado: puede pasarse, pero sólo confirmándolo (`allow_overbook`). Se
+  // consulta sin `tableId` a propósito: los motivos de la mesa puntual ya se
+  // resolvieron arriba con mensajes propios; acá sólo interesa el cupo.
+  const avail = await getFlexibleAvailability(
+    business.id,
+    business.timezone,
+    {
+      date: data.date,
+      service: data.service,
+      partySize: data.party_size,
+      floorPlanId,
+      enforceCapacity: true,
+    },
+    { useService: true },
+  );
+  if (avail && !avail.available) {
+    const sinCupo = avail.reason === "sin-cupo";
+    if (data.source !== "admin") {
+      return actionError(
+        sinCupo
+          ? "Ese servicio ya está completo. Probá otro horario, otra fecha u otro salón."
+          : "No quedan mesas disponibles para ese servicio.",
+      );
+    }
+    if (!data.allow_overbook) {
+      return actionError(
+        sinCupo
+          ? `El servicio está completo (${avail.reservedCovers}/${avail.softCapacity} cubiertos). Confirmá para reservar igual.`
+          : "No quedan mesas libres en ese servicio. Confirmá para reservar igual.",
+      );
+    }
   }
 
   const service = createSupabaseServiceClient() as unknown as GenericClient;

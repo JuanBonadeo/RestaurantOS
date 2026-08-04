@@ -237,12 +237,27 @@ export function ReservaForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, slug, date, service, partySize, floorPlanId]);
 
+  // Spec 077 — el servicio está lleno cuando se agotaron los cubiertos del cupo
+  // o cuando no queda mesa libre que entre el party. Al cliente eso lo frena; a
+  // el encargado sólo le pide confirmar (`allow_overbook`).
+  const sinMesasLibres = mode === "flexible" && !!service && !loadingFlex && flexTables.length === 0;
+  const servicioLleno = !!flexInfo?.overCapacity || sinMesasLibres;
+
+  const [overbookOk, setOverbookOk] = useState(false);
+  // Cambió el servicio/fecha/personas → la confirmación anterior ya no aplica.
+  useEffect(() => {
+    setOverbookOk(false);
+  }, [service, date, partySize, floorPlanId]);
+
   // El teléfono es opcional cuando la carga el encargado (el libro del club no
   // siempre lo tiene). El cliente web sí lo necesita — eso lo valida el server.
   const baseValid = name.trim().length > 0 && !pending;
   const canSubmit =
     mode === "flexible"
-      ? baseValid && service.length > 0 && arrivalTime.length > 0
+      ? baseValid &&
+        service.length > 0 &&
+        arrivalTime.length > 0 &&
+        (!servicioLleno || overbookOk)
       : baseValid && selectedSlot !== null;
 
   const handleSubmit = () => {
@@ -259,6 +274,7 @@ export function ReservaForm({
               customer_phone: phone.trim(),
               notes: notes.trim() || undefined,
               source: "admin",
+              ...(overbookOk ? { allow_overbook: true } : {}),
               ...(arrivalTime ? { arrival_time: arrivalTime } : {}),
               ...(effectiveTableId ? { table_id: effectiveTableId } : {}),
               ...(floorPlanId ? { floor_plan_id: floorPlanId } : {}),
@@ -591,8 +607,27 @@ export function ReservaForm({
                 }`}
               >
                 {flexInfo.reservedCovers}/{flexInfo.softCapacity} cubiertos reservados
-                {flexInfo.overCapacity ? " — te pasás del cupo (igual podés reservar)" : ""}
+                {flexInfo.overCapacity ? " — te pasás del cupo" : ""}
               </p>
+            ) : null}
+
+            {/* Spec 077 — el cliente ya no puede reservar acá, pero el mostrador
+                sí: lo confirma a propósito para que no se le escape. */}
+            {servicioLleno ? (
+              <label className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
+                <input
+                  type="checkbox"
+                  checked={overbookOk}
+                  onChange={(e) => setOverbookOk(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 accent-amber-600"
+                />
+                <span>
+                  {sinMesasLibres
+                    ? "No quedan mesas libres en este servicio."
+                    : "Este servicio ya está completo."}{" "}
+                  <span className="font-semibold">Reservar igual.</span>
+                </span>
+              </label>
             ) : null}
 
             {tableField}

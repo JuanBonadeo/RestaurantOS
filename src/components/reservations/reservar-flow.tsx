@@ -7,7 +7,10 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { I, ImageTile } from "@/components/delivery/primitives";
-import { fetchAvailability } from "@/lib/reservations/availability-actions";
+import {
+  fetchAvailability,
+  fetchFlexibleAvailability,
+} from "@/lib/reservations/availability-actions";
 import { arrivalSlots } from "@/lib/reservations/flexible-availability";
 import {
   createFlexibleReservation,
@@ -155,6 +158,11 @@ export function ReservarFlow({
   // Flexible (spec 059): servicio + hora de llegada opcional + mesa opcional.
   const [service, setService] = useState<string>("");
   const [arrivalTime, setArrivalTime] = useState<string>("");
+  // Spec 077: veredicto de cupo del servicio (null = todavía sin consultar).
+  const [flexAvail, setFlexAvail] = useState<{ available: boolean; reason?: string } | null>(null);
+  const [loadingFlex, setLoadingFlex] = useState(false);
+  // Se incrementa tras un rechazo del server para re-consultar el cupo.
+  const [availReloadKey, setAvailReloadKey] = useState(0);
   const [name, setName] = useState(user.name ?? "");
   const [phone, setPhone] = useState(user.phone ?? "");
   const [notes, setNotes] = useState("");
@@ -249,6 +257,46 @@ export function ReservarFlow({
     }
   }, [isFlexible, serviceNames, service]);
 
+  /**
+   * Spec 077 — el cupo del servicio ahora frena al cliente. Antes esta pantalla
+   * nunca consultaba disponibilidad en flexible: ofrecía toda la ventana del
+   * servicio y el server aceptaba siempre, así que el local se enteraba del
+   * overbooking cuando la gente llegaba.
+   */
+  useEffect(() => {
+    if (!isFlexible || !service) {
+      setFlexAvail(null);
+      return;
+    }
+    if (multiSalon && !salonId) {
+      setFlexAvail(null);
+      return;
+    }
+    setFlexAvail(null);
+    setLoadingFlex(true);
+    const t = setTimeout(() => {
+      void (async () => {
+        const result = await fetchFlexibleAvailability({
+          business_slug: slug,
+          date,
+          service,
+          party_size: partySize,
+          enforce_capacity: true,
+          ...(salonId ? { floor_plan_id: salonId } : {}),
+        });
+        setFlexAvail(
+          result.ok
+            ? { available: result.data.available, reason: result.data.reason }
+            : // Servicio inexistente ese día (o error): tratarlo como sin lugar
+              // es lo seguro — antes de 077 se ofrecía igual.
+              { available: false },
+        );
+        setLoadingFlex(false);
+      })();
+    }, 120);
+    return () => clearTimeout(t);
+  }, [isFlexible, service, date, partySize, slug, salonId, multiSalon, availReloadKey]);
+
   useEffect(() => {
     if (!selectedSlot) return;
     const id = window.setTimeout(() => {
@@ -260,6 +308,8 @@ export function ReservarFlow({
   function onConfirm() {
     const done = isFlexible ? service.length > 0 : selectedSlot !== null;
     if (!done) return;
+    // Spec 077 — el servicio se llenó (o se llenó mientras miraba la pantalla).
+    if (isFlexible && servicioSinLugar) return;
 
     if (isFlexible && !arrivalTime) {
       toast.error("Elegí un horario de llegada.");
@@ -308,15 +358,22 @@ export function ReservarFlow({
         router.push(`/${slug}/reservar/confirmacion?id=${result.data.id}`);
       } else {
         toast.error(result.error);
+        // Puede haber sido el cupo: re-consultamos para que la pantalla refleje
+        // el estado real en vez de dejar al cliente reintentando a ciegas.
+        if (isFlexible) setAvailReloadKey((k) => k + 1);
         setSubmitting(false);
       }
     })();
   }
 
   const grouped = slots ? groupSlotsByService(slots) : null;
-  const selectionDone = isFlexible ? service.length > 0 : !!selectedSlot;
+  // Spec 077 — servicio sin lugar: ni horarios ni formulario ni CTA.
+  const servicioSinLugar = isFlexible && flexAvail !== null && !flexAvail.available;
+  const selectionDone = isFlexible
+    ? service.length > 0 && !servicioSinLugar
+    : !!selectedSlot;
   const hasFooter = selectionDone;
-  const ctaDisabled = submitting || (isFlexible && !arrivalTime);
+  const ctaDisabled = submitting || (isFlexible && (!arrivalTime || servicioSinLugar));
   const initials = getInitial(user);
   const firstName = getFirstName(user);
 
@@ -726,7 +783,11 @@ export function ReservarFlow({
                 })}
               </div>
 
-              {shownArrivalOptions.length > 0 ? (
+              {loadingFlex ? (
+                <SlotsSkeleton />
+              ) : servicioSinLugar ? (
+                <FullService reason={flexAvail?.reason} />
+              ) : shownArrivalOptions.length > 0 ? (
                 <div>
                   <div style={{ fontSize: 12, color: "var(--ink-2)", marginBottom: 8 }}>Horario</div>
                   <div
@@ -1094,6 +1155,38 @@ function SlotsSkeleton() {
           }}
         />
       ))}
+    </div>
+  );
+}
+
+/**
+ * Spec 077 — el servicio elegido no tiene lugar: se agotaron los cubiertos del
+ * cupo o no queda mesa para esa cantidad de personas. Antes de 077 esta
+ * pantalla ofrecía el servicio igual y el "no" llegaba recién en el salón.
+ */
+function FullService({ reason }: { reason?: string }) {
+  const sinMesas = reason === "sin-mesas";
+  return (
+    <div
+      style={{
+        padding: "20px 16px",
+        textAlign: "center",
+        borderRadius: 12,
+        border: "1px dashed var(--hairline-2)",
+        color: "var(--ink-2)",
+        fontSize: 13,
+        lineHeight: 1.5,
+      }}
+    >
+      {sinMesas
+        ? "No nos queda mesa para esa cantidad de personas."
+        : "Ese servicio ya está completo."}
+      <br />
+      <span style={{ color: "var(--ink-3)", fontSize: 12 }}>
+        {sinMesas
+          ? "Probá otro servicio, otra fecha o menos personas."
+          : "Probá otro servicio, otra fecha u otro salón."}
+      </span>
     </div>
   );
 }

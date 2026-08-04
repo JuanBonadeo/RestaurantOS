@@ -356,6 +356,8 @@ export async function getFlexibleAvailability(
     partySize: number;
     tableId?: string | null;
     floorPlanId?: string | null;
+    /** Spec 077 — tope duro (canales de cliente). Default `false` = advisory. */
+    enforceCapacity?: boolean;
   },
   options: { useService?: boolean } = {},
 ): Promise<FlexibleAvailability | null> {
@@ -398,6 +400,7 @@ export async function getFlexibleAvailability(
     timezone,
     tableId: params.tableId ?? null,
     floorPlanId: params.floorPlanId ?? null,
+    enforceCapacity: params.enforceCapacity ?? false,
   });
 }
 

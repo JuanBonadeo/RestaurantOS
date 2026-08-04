@@ -141,13 +141,23 @@ export type FlexibleAvailabilityParams = {
   tableId?: string | null;
   /** Zona a la que se acota (cubiertos + mesas libres). */
   floorPlanId?: string | null;
+  /**
+   * Spec 077 — trata el cupo como **tope duro**: sin cubiertos o sin mesas
+   * libres, `available: false`. Lo activa el server para los canales de cliente
+   * (web/chatbot); el encargado consulta sin el flag y sólo recibe el aviso.
+   */
+  enforceCapacity?: boolean;
 };
 
 export type FlexibleUnavailableReason =
   | "mesa-ocupada"
   | "mesa-chica"
   | "mesa-inexistente"
-  | "fecha-invalida";
+  | "fecha-invalida"
+  /** Spec 077 — se agotaron los cubiertos del servicio/zona (sólo con `enforceCapacity`). */
+  | "sin-cupo"
+  /** Spec 077 — no queda ninguna mesa libre que entre el party (sólo con `enforceCapacity`). */
+  | "sin-mesas";
 
 export type FlexibleAvailability = {
   window: ServiceWindow;
@@ -158,9 +168,11 @@ export type FlexibleAvailability = {
   /** `true` si sumar este party supera el umbral blando (sólo avisa). */
   overCapacity: boolean;
   /**
-   * `true` si la reserva se puede tomar. En flexible siempre es `true` para las
-   * **genéricas** (la capacidad es blanda); sólo es `false` si se pidió una
-   * **mesa puntual** que está ocupada, es chica o no existe.
+   * `true` si la reserva se puede tomar. Sin `enforceCapacity` (encargado) es
+   * siempre `true` para las **genéricas** —la capacidad es blanda— y sólo
+   * `false` si se pidió una **mesa puntual** ocupada, chica o inexistente.
+   * Con `enforceCapacity` (cliente, spec 077) también es `false` cuando se
+   * agotaron los cubiertos o no queda mesa libre para el party.
    */
   available: boolean;
   reason?: FlexibleUnavailableReason;
@@ -179,7 +191,17 @@ export type FlexibleAvailability = {
 export function computeFlexibleAvailability(
   params: FlexibleAvailabilityParams,
 ): FlexibleAvailability | null {
-  const { date, service, partySize, tables, reservations, timezone, tableId, floorPlanId } = params;
+  const {
+    date,
+    service,
+    partySize,
+    tables,
+    reservations,
+    timezone,
+    tableId,
+    floorPlanId,
+    enforceCapacity = false,
+  } = params;
 
   const window = flexibleServiceWindow(date, service, timezone);
   if (!window) return null;
@@ -210,6 +232,19 @@ export function computeFlexibleAvailability(
     } else if (!isTableFreeForService(reservations, tableId, window)) {
       available = false;
       reason = "mesa-ocupada";
+    }
+  }
+
+  // Spec 077 — tope duro para el cliente. Corta el que se agote primero:
+  // cubiertos del servicio/zona o mesas libres que entren el party. El motivo
+  // de la mesa puntual (más específico) tiene prioridad si ya falló arriba.
+  if (enforceCapacity && available) {
+    if (overCapacity) {
+      available = false;
+      reason = "sin-cupo";
+    } else if (freeTables.length === 0) {
+      available = false;
+      reason = "sin-mesas";
     }
   }
 

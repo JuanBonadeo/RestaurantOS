@@ -158,6 +158,11 @@ export const CreateFlexibleReservationInputSchema = z
     .optional()
     .transform((v) => (!v ? null : v)),
   source: z.enum(["web", "chatbot", "admin"]).default("web"),
+  /**
+   * Spec 077 — el encargado confirmó que se pasa del cupo del servicio. Sólo
+   * se honra con `source: "admin"`; nunca saltea la regla una-reserva-por-mesa.
+   */
+  allow_overbook: z.boolean().optional().default(false),
   })
   .refine((v) => v.source === "admin" || v.customer_phone.length >= 4, {
     message: "Necesitamos un teléfono de contacto.",
@@ -251,6 +256,11 @@ export const FlexibleAvailabilityQuerySchema = z.object({
   service: z.string().trim().min(1).max(40),
   party_size: z.coerce.number().int().min(1).max(100),
   floor_plan_id: z.string().uuid().optional(),
+  /**
+   * Spec 077 — el flujo del cliente lo manda en `true` para que el veredicto
+   * incluya el tope de cupo. El modal del encargado lo omite (advisory).
+   */
+  enforce_capacity: z.boolean().optional().default(false),
 });
 
 export type ListSalonesQuery = z.infer<typeof ListSalonesQuerySchema>;
