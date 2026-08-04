@@ -72,6 +72,11 @@ export default async function CobrarPage({
     getInvoiceForOrder(business.id, cuenta.order.id),
   ]);
 
+  // Si el negocio factura, la pantalla NO se auto-cierra al cobrar: el mozo
+  // necesita tiempo para emitir el comprobante (#136).
+  const biz = business as Record<string, unknown>;
+  const afipConfigured = !!(biz.afip_cuit && biz.afip_punto_venta);
+
   return (
     <CobrarClient
       slug={business_slug}
@@ -81,6 +86,7 @@ export default async function CobrarPage({
       cuenta={cuenta}
       init={init.data}
       existingInvoice={existingInvoice}
+      afipConfigured={afipConfigured}
     />
   );
 }

@@ -78,6 +78,7 @@ type Props = {
   cuenta: CuentaState;
   init: IniciarCobroResult;
   existingInvoice: Invoice | null;
+  afipConfigured: boolean;
 };
 
 export function CobrarClient({
@@ -88,6 +89,7 @@ export function CobrarClient({
   cuenta,
   init,
   existingInvoice,
+  afipConfigured,
 }: Props) {
   const router = useRouter();
 
@@ -144,13 +146,17 @@ export function CobrarClient({
   // Cobrado/cierre = señal del server, NO math del cliente (FR-005).
   const allPaid = closed;
 
-  // Redirigir al salón cuando el server cierra la orden.
+  // Redirigir al salón cuando el server cierra la orden — pero SOLO si el
+  // negocio no factura. Con AFIP configurado, la sección de facturación se
+  // monta con la misma condición (`allPaid`) que dispara este timer, así que
+  // el mozo tenía 1,5s para cargar CUIT y emitir: imposible, y por eso nunca
+  // se emitió un comprobante (#136). Ahí sale a mano.
   useEffect(() => {
-    if (closed) {
+    if (closed && !afipConfigured) {
       const t = setTimeout(() => router.push(`/${slug}/mozo`), 1500);
       return () => clearTimeout(t);
     }
-  }, [closed, slug, router]);
+  }, [closed, afipConfigured, slug, router]);
 
   return (
     <div className="min-h-dvh bg-zinc-100/60 pb-12">
@@ -275,7 +281,9 @@ export function CobrarClient({
                   Mesa cobrada
                 </p>
                 <p className="text-xs text-emerald-700">
-                  Volviendo al salón…
+                  {afipConfigured
+                    ? "Emití el comprobante o volvé al salón."
+                    : "Volviendo al salón…"}
                 </p>
               </div>
             </section>
@@ -286,6 +294,17 @@ export function CobrarClient({
               slug={slug}
               existingInvoice={existingInvoice}
             />
+
+            {/* Sin auto-redirect (#136), la salida es explícita. */}
+            {afipConfigured && (
+              <Button
+                variant="outline"
+                className="h-12 w-full text-base"
+                onClick={() => router.push(`/${slug}/mozo`)}
+              >
+                Listo, volver al salón
+              </Button>
+            )}
           </>
         )}
       </PageShell>
