@@ -7,6 +7,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { I } from "@/components/delivery/primitives";
 import { CancelReservationButton } from "@/components/reservations/cancel-reservation-button";
+import { GuestPolicyNotice } from "@/components/reservations/guest-policy-notice";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
@@ -297,6 +298,20 @@ export default async function ReservarConfirmacionPage({
           <DetailRow label="Notas" value={reservation.notes} />
         ) : null}
       </div>
+
+      {/* Spec 080 — clubes: registrar los invitados por WhatsApp. Sólo con la
+          reserva viva (una cancelada o pasada no tiene invitados que sumar).
+          El mensaje sale con el día y la hora de esta reserva. */}
+      {isCancellable ? (
+        <div style={{ padding: "8px 16px 16px" }}>
+          <GuestPolicyNotice
+            slug={business_slug}
+            phone={business.phone ?? null}
+            dayLabel={dayLabel}
+            timeLabel={timeLabel}
+          />
+        </div>
+      ) : null}
 
       {/* Footer actions */}
       <div

@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { I, ImageTile } from "@/components/delivery/primitives";
+import { GuestPolicyNotice } from "@/components/reservations/guest-policy-notice";
 import {
   fetchAvailability,
   fetchFlexibleAvailability,
@@ -39,6 +40,8 @@ type Props = {
   salones: Salon[];
   mode: ReservationMode;
   services: ReservationService[];
+  /** Spec 080 — `businesses.phone`, para el botón del aviso de invitados. */
+  businessPhone: string | null;
   user: {
     isLoggedIn: boolean;
     name: string | null;
@@ -138,6 +141,7 @@ export function ReservarFlow({
   salones,
   mode,
   services,
+  businessPhone,
   user,
 }: Props) {
   const router = useRouter();
@@ -701,6 +705,12 @@ export function ReservarFlow({
           <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.4 }}>
             Hasta {settings.max_party_size} personas. Para más, escribinos.
           </div>
+        </div>
+        {/* Spec 080 — clubes: cuántos invitados entran por socio y cómo se
+            registran. Va acá porque es donde el socio decide cuántos van.
+            En negocios sin política el componente no renderiza nada. */}
+        <div style={{ marginTop: 14 }}>
+          <GuestPolicyNotice slug={slug} phone={businessPhone} />
         </div>
       </Section>
 

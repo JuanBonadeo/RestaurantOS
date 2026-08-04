@@ -78,6 +78,9 @@ export default async function ReservarPage({
       salones={salones}
       mode={reservationSettings.mode ?? "estricto"}
       services={services}
+      // Spec 080 — teléfono del negocio para el botón de WhatsApp del aviso
+      // de invitados (sólo se usa en los negocios que tienen política).
+      businessPhone={business.phone ?? null}
       user={{ isLoggedIn: !!user, name, phone, email }}
     />
   );
