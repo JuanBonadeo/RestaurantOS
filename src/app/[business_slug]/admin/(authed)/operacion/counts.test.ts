@@ -2,14 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   countCajas,
-  countComandasActivas,
   countPedidosNuevos,
   countPresentes,
   countRendicionesPendientes,
   countReservasPorSentar,
   countSalonOcupadas,
 } from "./counts";
-import type { LocalComanda } from "@/lib/admin/local-query";
 import type { AdminOrder } from "@/lib/admin/orders-query";
 import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
 import type { CajaConEstado, RendicionMozoPendiente } from "@/lib/caja/types";
@@ -17,7 +15,6 @@ import type { PresentEmployee } from "@/lib/rrhh/clock-actions";
 
 // Fixtures mínimos: sólo los campos que el predicado mira, casteados al tipo.
 const order = (status: AdminOrder["status"]) => ({ status }) as AdminOrder;
-const comanda = (status: LocalComanda["status"]) => ({ status }) as LocalComanda;
 const table = (
   status: "active" | "inactive",
   operational_status: string | null,
@@ -39,15 +36,6 @@ describe("operacion/counts — predicados de pills (FR-012)", () => {
       order("cancelled"),
     ];
     expect(countPedidosNuevos(orders)).toBe(2);
-  });
-
-  it("countComandasActivas: todo lo que no está entregado", () => {
-    const comandas = [
-      comanda("pendiente"),
-      comanda("en_preparacion"),
-      comanda("entregado"),
-    ];
-    expect(countComandasActivas(comandas)).toBe(2);
   });
 
   it("countSalonOcupadas: mesas activas NO libres, aplanando floor plans", () => {
@@ -87,7 +75,6 @@ describe("operacion/counts — predicados de pills (FR-012)", () => {
 
   it("listas vacías → 0 (nunca undefined/NaN)", () => {
     expect(countPedidosNuevos([])).toBe(0);
-    expect(countComandasActivas([])).toBe(0);
     expect(countSalonOcupadas([])).toBe(0);
     expect(countRendicionesPendientes([])).toBe(0);
     expect(countReservasPorSentar([])).toBe(0);
@@ -98,10 +85,6 @@ describe("operacion/counts — predicados de pills (FR-012)", () => {
 // Spec 065 — las pills cuentan sobre el MISMO dato filtrado que muestra la tab.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const comandaEn = (
-  status: LocalComanda["status"],
-  floor_plan_id: string | null,
-) => ({ status, floor_plan_id }) as LocalComanda;
 const planDe = (
   id: string,
   tables: FloorPlanWithTables["tables"],
@@ -117,24 +100,6 @@ const reservaEn = (
 });
 
 describe("operacion/counts — filtro por salón (spec 065)", () => {
-  it("countComandasActivas: con un salón puntual cuenta sólo las de ese salón", () => {
-    const comandas = [
-      comandaEn("pendiente", "terraza"),
-      comandaEn("en_preparacion", "terraza"),
-      comandaEn("pendiente", "comedor"),
-      comandaEn("entregado", "terraza"),
-      comandaEn("pendiente", null), // delivery / mostrador
-    ];
-    expect(countComandasActivas(comandas, [])).toBe(4);
-    expect(countComandasActivas(comandas, ["terraza"])).toBe(2);
-    expect(countComandasActivas(comandas, ["comedor"])).toBe(1);
-  });
-
-  it("countComandasActivas: sin filtro explícito se comporta como «Todos»", () => {
-    const comandas = [comandaEn("pendiente", "terraza"), comandaEn("pendiente", null)];
-    expect(countComandasActivas(comandas)).toBe(2);
-  });
-
   it("countSalonOcupadas: con un salón puntual sólo mira ese plano", () => {
     const floorPlans = [
       planDe("terraza", [table("active", "ocupada"), table("active", "libre")]),
@@ -161,9 +126,6 @@ describe("operacion/counts — filtro por salón (spec 065)", () => {
 
   it("un salón sin nada da 0, no el total sin filtrar", () => {
     expect(
-      countComandasActivas([comandaEn("pendiente", "terraza")], ["quincho"]),
-    ).toBe(0);
-    expect(
       countReservasPorSentar([reservaEn("confirmed", "terraza")], ["quincho"]),
     ).toBe(0);
     expect(countSalonOcupadas([planDe("terraza", [table("active", "ocupada")])], ["quincho"])).toBe(0);
@@ -171,16 +133,6 @@ describe("operacion/counts — filtro por salón (spec 065)", () => {
 });
 
 describe("operacion/counts — dos salones a la vez (fast-follow 065)", () => {
-  it("countComandasActivas suma los dos salones elegidos, no los demás", () => {
-    const comandas = [
-      comandaEn("pendiente", "terraza"),
-      comandaEn("pendiente", "comedor"),
-      comandaEn("pendiente", "quincho"),
-      comandaEn("pendiente", null),
-    ];
-    expect(countComandasActivas(comandas, ["terraza", "comedor"])).toBe(2);
-  });
-
   it("countSalonOcupadas mira los dos planos elegidos", () => {
     const floorPlans = [
       planDe("terraza", [table("active", "ocupada")]),

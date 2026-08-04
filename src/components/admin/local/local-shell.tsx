@@ -26,7 +26,6 @@ import {
 } from "@/components/skeletons/operacion-skeleton";
 import {
   countCajas,
-  countComandasActivas,
   countPedidosNuevos,
   countPresentes,
   countRendicionesPendientes,
@@ -534,11 +533,10 @@ function TabsInner({
       >
         Reservas
       </TabButton>
-      <TabButton
-        active={active === "comandas"}
-        onClick={() => setTab("comandas")}
-        count={<Pill promise={comandas} compute={(d) => countComandasActivas(d.initialComandas, salonFilter)} />}
-      >
+      {/* Comandas va SIN pill: el contador de "activas" no coincidía con lo que
+          se ve en el kanban de la tab, así que un número mal es peor que
+          ninguno. La tab muestra el estado real. */}
+      <TabButton active={active === "comandas"} onClick={() => setTab("comandas")}>
         Comandas
       </TabButton>
       <TabButton
@@ -688,7 +686,8 @@ function TabButton({
 }: {
   active: boolean;
   onClick: () => void;
-  count: ReactNode;
+  /** Sin `count` la tab se dibuja sin badge (no un badge vacío). */
+  count?: ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -702,16 +701,18 @@ function TabButton({
       )}
     >
       {children}
-      <span
-        className={cn(
-          "rounded-full px-1.5 py-0.5 text-[0.65rem] font-semibold tabular-nums",
-          active
-            ? "bg-white text-zinc-900 ring-1 ring-zinc-200"
-            : "bg-zinc-100 text-zinc-500",
-        )}
-      >
-        {count}
-      </span>
+      {count !== undefined && (
+        <span
+          className={cn(
+            "rounded-full px-1.5 py-0.5 text-[0.65rem] font-semibold tabular-nums",
+            active
+              ? "bg-white text-zinc-900 ring-1 ring-zinc-200"
+              : "bg-zinc-100 text-zinc-500",
+          )}
+        >
+          {count}
+        </span>
+      )}
     </button>
   );
 }

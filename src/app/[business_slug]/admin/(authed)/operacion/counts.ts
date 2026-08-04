@@ -1,4 +1,3 @@
-import type { LocalComanda } from "@/lib/admin/local-query";
 import type { AdminOrder } from "@/lib/admin/orders-query";
 import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
 import { matchesSalon, reservaSalonId } from "@/lib/admin/salon-filter";
@@ -22,22 +21,6 @@ import type { PresentEmployee } from "@/lib/rrhh/clock-actions";
 export function countPedidosNuevos(orders: AdminOrder[]): number {
   return orders.filter((o) => ["pending", "confirmed"].includes(o.status))
     .length;
-}
-
-/**
- * Comandas activas = todavía no entregadas.
- *
- * `salones` (spec 065) recorta a los salones elegidos en el shell (lista vacía
- * = todos); las comandas sin mesa (delivery / retiro / mostrador) sólo cuentan
- * sin filtro.
- */
-export function countComandasActivas(
-  comandas: LocalComanda[],
-  salones: readonly string[] = [],
-): number {
-  return comandas.filter(
-    (c) => c.status !== "entregado" && matchesSalon(salones, c.floor_plan_id),
-  ).length;
 }
 
 /**
