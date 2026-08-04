@@ -1,4 +1,4 @@
--- Spec 085 · El grupo de opciones del menú del día pasa a ser una entidad.
+-- Spec 087 · El grupo de opciones del menú del día pasa a ser una entidad.
 --
 -- Hasta acá el "grupo" no existía: era un uuid pelado (`choice_group_id`, sin
 -- tabla ni FK) repetido en N filas, con el nombre denormalizado en cada una
@@ -58,9 +58,9 @@ create table if not exists public.daily_menu_choice_groups (
 );
 
 comment on table public.daily_menu_choice_groups is
-  'Spec 085. Grupo de opciones de un menú del día. Antes era un uuid repetido en las filas de `daily_menu_components`; ahora es una fila con nombre, orden y condición.';
+  'Spec 087. Grupo de opciones de un menú del día. Antes era un uuid repetido en las filas de `daily_menu_components`; ahora es una fila con nombre, orden y condición.';
 comment on column public.daily_menu_choice_groups.applies_when_group_id is
-  'Spec 085. NULL = el grupo aplica siempre. Si no, el grupo del que depende: aplica sólo si ESE grupo está activo y lo elegido en él está en `applies_when_product_ids`. Reemplaza a `daily_menu_components.blocks_choice_group_ids` (que era por opción y en negativo).';
+  'Spec 087. NULL = el grupo aplica siempre. Si no, el grupo del que depende: aplica sólo si ESE grupo está activo y lo elegido en él está en `applies_when_product_ids`. Reemplaza a `daily_menu_components.blocks_choice_group_ids` (que era por opción y en negativo).';
 comment on column public.daily_menu_choice_groups.sort_order is
   'Orden del grupo. Se backfillea con el `min(sort_order)` de sus opciones para conservar el mismo espacio numérico que los componentes sueltos y no tener que renumerar `daily_menu_components`.';
 
@@ -140,8 +140,7 @@ with bloqueos as (
 ),
 -- Sólo se traduce cuando hay UNA fuente: con dos o más haría falta un AND de
 -- condiciones, que este modelo no expresa. La auditoría previa a esta
--- migración verificó que no existen (y el `raise notice` de abajo avisa si
--- aparecieran en otra base).
+-- migración verificó que no existen.
 unica_fuente as (
   -- `(array_agg(...))[1]` y no `min()`: Postgres no define min() sobre uuid, y
   -- con `count(distinct) = 1` cualquiera de los valores es EL valor.
