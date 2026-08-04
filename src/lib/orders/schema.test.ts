@@ -154,16 +154,40 @@ describe("StaffOrderInput (spec 054)", () => {
     expect(result.success).toBe(true);
   });
 
-  it("no acepta scheduled_at (fuera de fase 1)", () => {
-    // `scheduled_at` no está en el schema staff → Zod lo ignora, no lo persiste.
+  // ── Spec 085 · el encargado programa ────────────────────────────────────
+  //
+  // `scheduled_at` entró al schema staff (spec 054 lo había dejado afuera "fuera
+  // de fase 1"). Acá sólo la forma: las reglas de negocio —hoy, anticipación,
+  // chip de la grilla— dependen del negocio y las aplica `validateScheduledOrder`
+  // dentro de `persistOrder`, igual que en el camino público.
+  it("acepta scheduled_at ISO con offset", () => {
     const result = StaffOrderInput.safeParse({
       ...staffBase,
       scheduled_at: "2026-08-01T13:00:00-03:00",
     });
     expect(result.success).toBe(true);
     if (result.success) {
-      expect("scheduled_at" in result.data).toBe(false);
+      expect(result.data.scheduled_at).toBe("2026-08-01T13:00:00-03:00");
     }
+  });
+
+  it("rechaza scheduled_at que no es un instante con offset", () => {
+    // Sin offset no hay instante: "21:00" en qué zona. El público exige lo
+    // mismo, así que el staff no puede ser la puerta de atrás.
+    expect(
+      StaffOrderInput.safeParse({ ...staffBase, scheduled_at: "2026-08-01T13:00:00" })
+        .success,
+    ).toBe(false);
+    expect(
+      StaffOrderInput.safeParse({ ...staffBase, scheduled_at: "mañana 21hs" })
+        .success,
+    ).toBe(false);
+  });
+
+  it("sin scheduled_at sigue siendo un pedido para ahora", () => {
+    const result = StaffOrderInput.safeParse(staffBase);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.scheduled_at).toBeUndefined();
   });
 });
 

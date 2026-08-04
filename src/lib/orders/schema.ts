@@ -108,8 +108,12 @@ export type CreateOrderInput = z.infer<typeof CreateOrderInput>;
  * (spec 054), más laxo que el público `CreateOrderInput`:
  * - `customer_name` opcional (el mostrador anónimo cae en "Mostrador").
  * - `customer_phone` opcional en pickup (se guarda "-"); requerido en delivery.
- * - sin `scheduled_at` / `promo_code` / `payment_method` (el cobro es aparte,
- *   US3): el pedido nace en efectivo/pendiente y se cobra desde la card.
+ * - sin `promo_code` / `payment_method` (el cobro es aparte, US3): el pedido
+ *   nace en efectivo/pendiente y se cobra desde la card.
+ * - **con** `scheduled_at` desde spec 085: el encargue telefónico ("para las
+ *   21") que antes sólo podía entrar por el checkout del cliente. Mismas reglas
+ *   —hoy, anticipación mínima, chip de la grilla— porque las aplica el mismo
+ *   `validateScheduledOrder` dentro de `persistOrder`: acá sólo la forma.
  * El action `cargarPedidoStaff` mapea esto a `CreateOrderInput` aplicando los
  * defaults antes de llamar a `persistOrder`.
  */
@@ -121,6 +125,8 @@ export const StaffOrderInput = z
     customer_phone: z.string().max(20).optional(),
     delivery_address: z.string().max(200).optional(),
     delivery_notes: z.string().max(500).optional(),
+    /** Spec 085 — instante de retiro/entrega. Ausente = "para ahora". */
+    scheduled_at: z.string().datetime({ offset: true }).optional(),
     items: z.array(StaffOrderItemInput).min(1),
   })
   .superRefine((data, ctx) => {

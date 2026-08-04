@@ -74,7 +74,10 @@ export default async function LocalEnVivoPage({
   // pinta apenas resuelve `salon`, sin esperar a las demás.
   const salon = loadSalon(business.id, service, { todayStart, tomorrowStart });
   const comandas = loadComandas(business.id);
-  const pedidos = loadPedidos(business.id, business.timezone);
+  const pedidos = loadPedidos(business.id, business.timezone, {
+    pickupMin: business.scheduled_march_lead_pickup_min,
+    deliveryMin: business.scheduled_march_lead_delivery_min,
+  });
   const caja = loadCaja(business.id);
   const rendicion = loadRendicion(business.id, service);
   const fichaje = loadFichaje(business.id, business_slug);

@@ -30,6 +30,24 @@ vi.mock("./persist-order", () => ({
   persistOrder: (...args: unknown[]) => persistOrderMock(...args),
 }));
 
+// Spec 085: el único uso del service client acá es avalar el programado
+// (`update {status:'confirmed'} where id = …`). El mock devuelve la forma de
+// Supabase —`{ error }`— para poder simular también el fallo.
+const updateMock = vi.fn(
+  async (_values: unknown, _orderId: string) =>
+    ({ error: null }) as { error: { message: string } | null },
+);
+
+vi.mock("@/lib/supabase/service", () => ({
+  createSupabaseServiceClient: () => ({
+    from: () => ({
+      update: (values: unknown) => ({
+        eq: (_col: string, orderId: string) => updateMock(values, orderId),
+      }),
+    }),
+  }),
+}));
+
 import { cargarPedidoStaff } from "./staff-order";
 
 const UUID = "00000000-0000-4000-8000-000000000000";
@@ -54,6 +72,7 @@ function lastPersistCall() {
 beforeEach(() => {
   currentRole = "encargado";
   persistOrderMock.mockClear();
+  updateMock.mockClear();
 });
 
 describe("cargarPedidoStaff — gate (canCargarPedido, fase 1)", () => {
@@ -211,5 +230,78 @@ describe("cargarPedidoStaff — precio por ítem (spec 069)", () => {
     const res = await cargarPedidoStaff(conPrecio({}));
     expect(res.ok).toBe(true);
     expect(lastPersistCall().options?.priceOverrides).toEqual([null]);
+  });
+});
+
+// ── Spec 085 · el encargado programa un pedido ────────────────────────────
+//
+// El motor del diferido no cambia: `persistOrder` valida `scheduled_at` (hoy,
+// anticipación, chip de la grilla) igual que en el checkout público. Lo propio
+// de este camino es el **aval**: el pedido que carga el encargado nace
+// `confirmed`, así el cron lo marcha sin pedir un «Aceptar» redundante.
+
+describe("cargarPedidoStaff — pedido programado (spec 085)", () => {
+  const enTresHoras = () =>
+    new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
+
+  it("pasa scheduled_at a persistOrder tal cual", async () => {
+    const scheduled = enTresHoras();
+    const res = await cargarPedidoStaff({
+      business_slug: "golf",
+      delivery_type: "pickup",
+      scheduled_at: scheduled,
+      items,
+    });
+    expect(res.ok).toBe(true);
+    expect(lastPersistCall().mapped.scheduled_at).toBe(scheduled);
+  });
+
+  it("el programado queda avalado (status confirmed), sin gesto extra", async () => {
+    const res = await cargarPedidoStaff({
+      business_slug: "golf",
+      delivery_type: "pickup",
+      scheduled_at: enTresHoras(),
+      items,
+    });
+    expect(res.ok).toBe(true);
+    expect(updateMock).toHaveBeenCalledWith({ status: "confirmed" }, "o1");
+    expect(res.ok && res.data.needs_accept).toBeFalsy();
+  });
+
+  it("si el aval falla, el pedido queda creado y se pide aceptarlo a mano", async () => {
+    // Degradación segura: la orden existe y cae en «Próximos» con su botón
+    // «Aceptar». Devolver error haría creer que no se cargó nada.
+    updateMock.mockResolvedValueOnce({ error: { message: "boom" } });
+    const res = await cargarPedidoStaff({
+      business_slug: "golf",
+      delivery_type: "pickup",
+      scheduled_at: enTresHoras(),
+      items,
+    });
+    expect(res.ok).toBe(true);
+    expect(res.ok && res.data.needs_accept).toBe(true);
+  });
+
+  it("un pedido para ahora no toca el status (camino de siempre)", async () => {
+    const res = await cargarPedidoStaff({
+      business_slug: "golf",
+      delivery_type: "pickup",
+      items,
+    });
+    expect(res.ok).toBe(true);
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
+  it("una hora ya pasada no se avala: es un pedido para ahora", async () => {
+    // El instante pasado lo rechaza `persistOrder` (mockeado acá), pero aunque
+    // pasara, `confirmed` sólo aplica a lo que todavía no llegó.
+    const res = await cargarPedidoStaff({
+      business_slug: "golf",
+      delivery_type: "pickup",
+      scheduled_at: new Date(Date.now() - 60_000).toISOString(),
+      items,
+    });
+    expect(res.ok).toBe(true);
+    expect(updateMock).not.toHaveBeenCalled();
   });
 });

@@ -7,10 +7,21 @@ import {
 } from "@/lib/comandas/price-override";
 import { requireMozoActionContext } from "@/lib/mozo/auth";
 import { canCargarPedido } from "@/lib/permissions/can";
+import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
 import { persistOrder, type CreateOrderResult } from "./persist-order";
+import { isScheduledForLater } from "./scheduled";
 import { StaffOrderInput, type CreateOrderInput } from "./schema";
+
+/**
+ * Lo que devuelve `cargarPedidoStaff`. `needs_accept` sólo aparece en el caso
+ * degradado de un programado que quedó creado pero sin avalar (spec 085): la
+ * UI avisa que hay que aceptarlo a mano desde «Próximos».
+ */
+export type CargarPedidoStaffResult = CreateOrderResult & {
+  needs_accept?: boolean;
+};
 
 /**
  * Carga a mano un pedido para llevar / delivery SIN mesa desde operación
@@ -26,10 +37,17 @@ import { StaffOrderInput, type CreateOrderInput } from "./schema";
  * El pedido nace en efectivo/`pending` y NO marcha a cocina: aparece en el
  * board (columna «Nuevos») y se marcha con el «Confirmar» existente
  * (`confirmarPedido`, spec 047). El cobro es aparte (US3, desde la card).
+ *
+ * **Programado (spec 085).** Con `scheduled_at` el pedido no va al kanban sino
+ * a «Próximos», y lo marcha el cron con el lead del negocio. En ese caso queda
+ * `confirmed` en vez de `pending`: el aval humano que exige spec 047 ya ocurrió
+ * —lo cargó el encargado en persona—, así que pedirle además el «Aceptar» de
+ * `aceptarPedidoProgramado` sería un gesto redundante que, si se olvida, deja
+ * el pedido sin salir nunca.
  */
 export async function cargarPedidoStaff(
   input: unknown,
-): Promise<ActionResult<CreateOrderResult>> {
+): Promise<ActionResult<CargarPedidoStaffResult>> {
   const parsed = StaffOrderInput.safeParse(input);
   if (!parsed.success) {
     return actionError(
@@ -72,6 +90,9 @@ export async function cargarPedidoStaff(
     delivery_address: data.delivery_address?.trim() || undefined,
     delivery_notes: data.delivery_notes?.trim() || undefined,
     payment_method: "cash",
+    // Spec 085: `persistOrder` lo valida contra la grilla del negocio (hoy,
+    // anticipación, horario) — la misma validación del checkout público.
+    scheduled_at: data.scheduled_at,
     // Sacamos el precio pisado de los items: a partir de acá el input tiene la
     // forma del checkout público y NINGUNA línea lleva precio. El override ya
     // está validado y viaja por `options.priceOverrides`. Si lo dejáramos acá
@@ -87,10 +108,26 @@ export async function cargarPedidoStaff(
   };
 
   try {
-    return await persistOrder(mapped, ctxResult.data.userId, {
+    const result = await persistOrder(mapped, ctxResult.data.userId, {
       mozoId: ctxResult.data.userId,
       priceOverrides,
     });
+    if (!result.ok || !isScheduledForLater(data.scheduled_at)) return result;
+
+    // Avalar el programado (ver docblock). Si el update falla, la orden ya
+    // existe: la devolvemos igual con `needs_accept` para que la UI diga que
+    // hay que aceptarla desde «Próximos», en vez de dar un error que haría
+    // creer que no se cargó nada.
+    const service = createSupabaseServiceClient();
+    const { error } = await service
+      .from("orders")
+      .update({ status: "confirmed" })
+      .eq("id", result.data.order_id);
+    if (error) {
+      console.error("cargarPedidoStaff · avalar programado", error);
+      return { ...result, data: { ...result.data, needs_accept: true } };
+    }
+    return result;
   } catch (err) {
     console.error("cargarPedidoStaff unexpected error", err);
     return actionError("No pudimos cargar el pedido. Intentá de nuevo.");

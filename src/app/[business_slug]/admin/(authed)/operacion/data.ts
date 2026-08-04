@@ -29,6 +29,11 @@ import type {
 } from "@/lib/caja/types";
 import { getMozosByBusiness } from "@/lib/mozo/queries";
 import type { MozoMember } from "@/lib/mozo/queries";
+import { orderSlotsForDay } from "@/lib/orders/scheduled";
+import {
+  getReservationServices,
+  getReservationSettings,
+} from "@/lib/reservations/queries";
 import type { FloorTable } from "@/lib/reservations/types";
 import { getCurrentPresent } from "@/lib/rrhh/clock-actions";
 import type { PresentEmployee } from "@/lib/rrhh/clock-actions";
@@ -64,7 +69,19 @@ export type ComandasData = {
   printAgentLastSeenAt: string | null;
 };
 
-export type PedidosData = { initialOrders: AdminOrder[] };
+/**
+ * Tab Pedidos. Además del board, lleva lo que necesita «Cargar pedido» para
+ * **programar** (spec 085): los horarios que el negocio ofrece hoy —los mismos
+ * chips que ve el cliente al programar (spec 064)— y el lead de marcha por
+ * tipo, para que la UI diga cuánto antes va a salir la comanda con el número
+ * real del negocio y no con un 40 escrito a mano.
+ */
+export type PedidosData = {
+  initialOrders: AdminOrder[];
+  scheduledSlots: string[];
+  marchLeadPickupMin: number;
+  marchLeadDeliveryMin: number;
+};
 
 export type CajaData = { cajas: CajaConEstado[] };
 
@@ -239,8 +256,36 @@ export async function loadComandas(
 export async function loadPedidos(
   businessId: string,
   timezone: string,
+  marchLead: { pickupMin: number; deliveryMin: number },
 ): Promise<PedidosData> {
-  return { initialOrders: await getTodayOrders(businessId, timezone) };
+  const [initialOrders, reservationSettings, reservationServices] =
+    await Promise.all([
+      getTodayOrders(businessId, timezone),
+      getReservationSettings(businessId),
+      getReservationServices(businessId),
+    ]);
+
+  // Los horarios se resuelven acá (server) con "hoy" en la TZ del local, igual
+  // que en el checkout: el chip que ve el encargado no puede depender del reloj
+  // ni de la zona del navegador. El filtro por anticipación mínima corre en el
+  // cliente, que es donde el tiempo sigue pasando mientras el sheet está
+  // abierto.
+  const scheduledSlots = orderSlotsForDay(
+    {
+      mode: reservationSettings.mode ?? null,
+      schedule: reservationSettings.schedule,
+      services: reservationServices,
+    },
+    new Date(),
+    timezone,
+  );
+
+  return {
+    initialOrders,
+    scheduledSlots,
+    marchLeadPickupMin: marchLead.pickupMin,
+    marchLeadDeliveryMin: marchLead.deliveryMin,
+  };
 }
 
 export async function loadCaja(businessId: string): Promise<CajaData> {

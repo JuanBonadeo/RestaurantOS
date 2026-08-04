@@ -210,13 +210,21 @@ function PedidosPanel({
   businessId: string;
   timezone: string;
 }) {
-  const { initialOrders } = use(promise);
+  const {
+    initialOrders,
+    scheduledSlots,
+    marchLeadPickupMin,
+    marchLeadDeliveryMin,
+  } = use(promise);
   return (
     <OrdersRealtimeBoard
       businessId={businessId}
       slug={slug}
       timezone={timezone}
       initialOrders={initialOrders}
+      scheduledSlots={scheduledSlots}
+      marchLeadPickupMin={marchLeadPickupMin}
+      marchLeadDeliveryMin={marchLeadDeliveryMin}
     />
   );
 }

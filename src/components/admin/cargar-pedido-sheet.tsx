@@ -8,9 +8,11 @@ import {
   useState,
   useTransition,
 } from "react";
+import { fromZonedTime } from "date-fns-tz";
 import {
   ArrowLeft,
   Bike,
+  Clock,
   Loader2,
   Minus,
   Plus,
@@ -30,6 +32,11 @@ import { formatCurrency } from "@/lib/currency";
 import type { CatalogForMozo, CatalogProduct } from "@/lib/mozo/catalog-query";
 import { loadPedirCatalog } from "@/lib/mozo/pedir-panel-data";
 import { confirmarPedido } from "@/lib/orders/confirm-order";
+import {
+  filterSlotsByLead,
+  localYmd,
+  SCHEDULED_MIN_LEAD_MIN,
+} from "@/lib/orders/scheduled";
 import { cargarPedidoStaff } from "@/lib/orders/staff-order";
 import { ProductModal, type AddToCartItem } from "@/components/mozo/product-modal";
 import { CustomerFields } from "@/components/shared/customer-fields";
@@ -56,6 +63,8 @@ function effectiveUnitPriceCents(c: CartItem): number {
 }
 type DeliveryType = "pickup" | "delivery";
 type View = "carga" | "datos";
+/** Spec 085 — para ahora (lo de siempre) o programado a una hora de hoy. */
+type When = "now" | "scheduled";
 
 /** Compone una dirección guardada en una línea editable. */
 function formatDireccion(a: ClienteDireccion): string {
@@ -78,11 +87,21 @@ export function CargarPedidoSheet({
   open,
   onClose,
   onCreated,
+  timezone,
+  scheduledSlots,
+  marchLeadPickupMin,
+  marchLeadDeliveryMin,
 }: {
   slug: string;
   open: boolean;
   onClose: () => void;
   onCreated?: () => void;
+  /** TZ del negocio: el chip "21:00" es hora del local, no del navegador. */
+  timezone: string;
+  /** Horarios que el negocio ofrece hoy (spec 085); vacío = no se programa. */
+  scheduledSlots: string[];
+  marchLeadPickupMin: number;
+  marchLeadDeliveryMin: number;
 }) {
   const [catalog, setCatalog] = useState<CatalogForMozo | null>(null);
   const [loadingCatalog, setLoadingCatalog] = useState(false);
@@ -99,6 +118,11 @@ export function CargarPedidoSheet({
   const [priceTargetKey, setPriceTargetKey] = useState<string | null>(null);
 
   const [deliveryType, setDeliveryType] = useState<DeliveryType>("pickup");
+  // ── ¿Para cuándo? (spec 085) ──
+  // El encargue telefónico para una hora de hoy. Los chips son los mismos que
+  // ve el cliente al programar; el server revalida en `persistOrder`.
+  const [when, setWhen] = useState<When>("now");
+  const [schedSlot, setSchedSlot] = useState<string | null>(null);
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [deliveryAddress, setDeliveryAddress] = useState("");
@@ -217,11 +241,26 @@ export function CargarPedidoSheet({
     onType: escribirEnBuscador,
   });
 
+  // Chips de horario (spec 085): los de hoy que todavía cumplen la anticipación
+  // mínima. Dependen de "ahora", así que se calculan en el cliente — pero sólo
+  // se renderizan al tocar «Programar», así que no hay mismatch de hidratación.
+  // Al enviar se revalidan, por si el encargado tardó en cargar el pedido.
+  const availableSlots = useMemo(
+    () => filterSlotsByLead(scheduledSlots, timezone),
+    [scheduledSlots, timezone],
+  );
+  const canSchedule = availableSlots.length > 0;
+  const isScheduled = when === "scheduled";
+  const marchLeadMin =
+    deliveryType === "delivery" ? marchLeadDeliveryMin : marchLeadPickupMin;
+
   function reset() {
     setView("carga");
     searchApi.setSearch("");
     setCart([]);
     setDeliveryType("pickup");
+    setWhen("now");
+    setSchedSlot(null);
     setCustomerName("");
     setCustomerPhone("");
     setDeliveryAddress("");
@@ -311,6 +350,8 @@ export function CargarPedidoSheet({
   const canSubmit =
     cart.length > 0 &&
     !pending &&
+    // Programar sin hora no es un pedido: es una intención (spec 085).
+    (!isScheduled || !!schedSlot) &&
     (deliveryType === "pickup" ||
       (deliveryAddress.trim().length > 0 && customerPhone.trim().length >= 6));
 
@@ -319,10 +360,32 @@ export function CargarPedidoSheet({
       toast.error("Agregá al menos un producto.");
       return;
     }
+
+    // Pedido programado (spec 085): el chip es una hora del local; armamos el
+    // instante en su TZ. Revalidamos contra la anticipación mínima porque el
+    // sheet pudo quedar abierto un rato. `persistOrder` valida igual.
+    let scheduledAtIso: string | undefined;
+    if (isScheduled) {
+      if (!schedSlot) {
+        toast.error("Elegí la hora del pedido.");
+        return;
+      }
+      if (!filterSlotsByLead(scheduledSlots, timezone).includes(schedSlot)) {
+        setSchedSlot(null);
+        toast.error("Ese horario ya no está disponible. Elegí otro.");
+        return;
+      }
+      scheduledAtIso = fromZonedTime(
+        `${localYmd(new Date(), timezone)}T${schedSlot}:00`,
+        timezone,
+      ).toISOString();
+    }
+
     startTransition(async () => {
       const r = await cargarPedidoStaff({
         business_slug: slug,
         delivery_type: deliveryType,
+        scheduled_at: scheduledAtIso,
         customer_name: customerName.trim() || undefined,
         customer_phone: customerPhone.trim() || undefined,
         delivery_address:
@@ -344,7 +407,19 @@ export function CargarPedidoSheet({
         toast.error(r.error);
         return;
       }
-      if (marchar) {
+      if (isScheduled) {
+        // El programado no marcha ahora: sale solo antes de la hora (o a mano
+        // desde «Próximos»). Si el aval falló, avisamos que hay que aceptarlo.
+        if (r.data.needs_accept) {
+          toast.warning(
+            `Pedido #${r.data.order_number} programado para las ${schedSlot}, pero quedó sin aceptar — aceptalo desde «Próximos» para que salga solo`,
+          );
+        } else {
+          toast.success(
+            `Pedido #${r.data.order_number} programado para las ${schedSlot} · la comanda sale sola ${marchLeadMin} min antes`,
+          );
+        }
+      } else if (marchar) {
         const c = await confirmarPedido(r.data.order_id, slug);
         if (!c.ok) {
           toast.warning(`Pedido #${r.data.order_number} cargado, pero no marchó: ${c.error}`);
@@ -368,11 +443,12 @@ export function CargarPedidoSheet({
       <div
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
-          // Cmd/Ctrl+Enter: en carga → ir a datos; en datos → cargar y marchar.
+          // Cmd/Ctrl+Enter: en carga → ir a datos; en datos → cargar y marchar
+          // (o programar, que nunca marcha al toque).
           if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !openProduct) {
             e.preventDefault();
             if (view === "carga" && cart.length > 0) setView("datos");
-            else if (view === "datos" && canSubmit) submit(true);
+            else if (view === "datos" && canSubmit) submit(!isScheduled);
           }
         }}
         className="relative flex h-full w-full max-w-md flex-col overflow-hidden bg-zinc-50 shadow-2xl"
@@ -700,6 +776,77 @@ export function CargarPedidoSheet({
                 </div>
               </section>
 
+              {/* ─── ¿Para cuándo? (spec 085) ───
+                  El encargue telefónico: mismos horarios que ve el cliente,
+                  sólo hoy. Al programar, la comanda no sale ahora — la manda el
+                  cron con el lead del negocio. */}
+              <section className="space-y-2.5 rounded-2xl bg-white p-3 ring-1 ring-zinc-200">
+                <h3 className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">
+                  ¿Para cuándo?
+                </h3>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setWhen("now")}
+                    className={`h-9 flex-1 rounded-xl text-sm font-semibold transition ${
+                      !isScheduled
+                        ? "bg-zinc-900 text-white"
+                        : "bg-white text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100"
+                    }`}
+                  >
+                    Ahora
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!canSchedule}
+                    onClick={() => setWhen("scheduled")}
+                    className={`flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                      isScheduled
+                        ? "bg-zinc-900 text-white"
+                        : "bg-white text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100"
+                    }`}
+                  >
+                    <Clock className="h-4 w-4" /> Programar
+                  </button>
+                </div>
+                {!canSchedule ? (
+                  <p className="text-[11px] leading-snug text-zinc-500">
+                    No quedan horarios para hoy — se programa con al menos{" "}
+                    {SCHEDULED_MIN_LEAD_MIN} min de anticipación, sobre los
+                    horarios del local.
+                  </p>
+                ) : (
+                  isScheduled && (
+                    <>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {availableSlots.map((slot) => {
+                          const active = schedSlot === slot;
+                          return (
+                            <button
+                              key={slot}
+                              type="button"
+                              onClick={() => setSchedSlot(slot)}
+                              className={`h-9 rounded-xl text-sm font-semibold tabular-nums transition ${
+                                active
+                                  ? "bg-emerald-600 text-white"
+                                  : "bg-white text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100"
+                              }`}
+                            >
+                              {slot}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="text-[11px] leading-snug text-zinc-500">
+                        {schedSlot
+                          ? `La comanda sale sola ${marchLeadMin} min antes de las ${schedSlot}. Hasta entonces queda en «Próximos».`
+                          : "Elegí la hora del retiro o la entrega — sólo para hoy."}
+                      </p>
+                    </>
+                  )
+                )}
+              </section>
+
               {/* Resumen del pedido */}
               <div className="flex items-center justify-between rounded-2xl bg-zinc-100 px-4 py-3">
                 <span className="text-sm font-medium text-zinc-600">
@@ -711,23 +858,43 @@ export function CargarPedidoSheet({
               </div>
             </div>
 
-            {/* Footer datos */}
+            {/* Footer datos — programado: una sola acción, porque "enviar a
+                cocina" contradice el diferido (spec 085). */}
             <footer className="shrink-0 space-y-2 border-t border-zinc-200 bg-white px-3 py-3">
-              <button
-                onClick={() => submit(true)}
-                disabled={!canSubmit}
-                className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 text-sm font-semibold text-white transition active:scale-[0.98] disabled:opacity-40"
-              >
-                {pending && <Loader2 className="h-4 w-4 animate-spin" />}
-                Cargar y enviar a cocina
-              </button>
-              <button
-                onClick={() => submit(false)}
-                disabled={!canSubmit}
-                className="h-10 w-full rounded-2xl bg-zinc-100 text-sm font-semibold text-zinc-700 transition active:scale-[0.98] disabled:opacity-40"
-              >
-                Sólo cargar (marchar después)
-              </button>
+              {isScheduled ? (
+                <button
+                  onClick={() => submit(false)}
+                  disabled={!canSubmit}
+                  className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 text-sm font-semibold text-white transition active:scale-[0.98] disabled:opacity-40"
+                >
+                  {pending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Clock className="h-4 w-4" />
+                  )}
+                  {schedSlot
+                    ? `Programar para las ${schedSlot}`
+                    : "Elegí una hora"}
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={() => submit(true)}
+                    disabled={!canSubmit}
+                    className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 text-sm font-semibold text-white transition active:scale-[0.98] disabled:opacity-40"
+                  >
+                    {pending && <Loader2 className="h-4 w-4 animate-spin" />}
+                    Cargar y enviar a cocina
+                  </button>
+                  <button
+                    onClick={() => submit(false)}
+                    disabled={!canSubmit}
+                    className="h-10 w-full rounded-2xl bg-zinc-100 text-sm font-semibold text-zinc-700 transition active:scale-[0.98] disabled:opacity-40"
+                  >
+                    Sólo cargar (marchar después)
+                  </button>
+                </>
+              )}
             </footer>
           </>
         )}

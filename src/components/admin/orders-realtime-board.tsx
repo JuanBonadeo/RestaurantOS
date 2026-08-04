@@ -113,11 +113,18 @@ export function OrdersRealtimeBoard({
   slug,
   timezone,
   initialOrders,
+  scheduledSlots,
+  marchLeadPickupMin,
+  marchLeadDeliveryMin,
 }: {
   businessId: string;
   slug: string;
   timezone: string;
   initialOrders: AdminOrder[];
+  /** Horarios que el negocio ofrece hoy para programar (spec 085). */
+  scheduledSlots: string[];
+  marchLeadPickupMin: number;
+  marchLeadDeliveryMin: number;
 }) {
   const [orders, setOrders] = useState<AdminOrder[]>(initialOrders);
   const [newlyArrived, setNewlyArrived] = useState<Set<string>>(new Set());
@@ -383,6 +390,10 @@ export function OrdersRealtimeBoard({
         slug={slug}
         open={cargarOpen}
         onClose={() => setCargarOpen(false)}
+        timezone={timezone}
+        scheduledSlots={scheduledSlots}
+        marchLeadPickupMin={marchLeadPickupMin}
+        marchLeadDeliveryMin={marchLeadDeliveryMin}
       />
 
       {/* Próximos / agendados (spec 31): diferidos pagados esperando su hora.
