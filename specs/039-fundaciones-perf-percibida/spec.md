@@ -112,6 +112,7 @@ Para que specs posteriores puedan reemplazar `router.refresh()` por actualizaci�
 - **FR-010**: Cada consulta de datos de `/admin/operacion` MUST conservar su filtro por `business_id` (aislamiento multi-tenant); ninguna reestructuración puede quitar ese filtro (las consultas usan `service_role`, sin RLS de red).
 - **FR-011**: Ninguna consulta diferida puede quedar "flotando" sin ser consumida dentro de un boundary con manejo de error (evitar rechazos no manejados).
 - **FR-012**: Si los contadores de las pills se derivan de una fuente distinta a las queries de detalle, MUST usar predicados idénticos (mismo criterio, misma ventana "hoy" en la timezone del negocio).
+  - **2026-08-04 ([#125](https://github.com/gachetponzellini/RestaurantOS-app/issues/125)):** la tab **Comandas** se quedó sin pill. El badge no coincidía con la tab, y ante eso este mismo FR dice que ninguno es mejor que uno mal. `TabButton` acepta `count` opcional; las otras seis tabs no cambian.
 
 **Fundación action-returns-row (US4)**
 

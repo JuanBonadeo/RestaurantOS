@@ -3,10 +3,10 @@
 - [x] **T001** Tests rojos de [`use-sticky-filter.test.ts`](../../src/lib/ui/use-sticky-filter.test.ts): sin preferencia arranca en el fallback, respeta la guardada, valor guardado que ya no existe cae al fallback, `set` persiste, volver al fallback borra la clave, storage roto no rompe.
 - [x] **T002** `src/lib/ui/use-sticky-filter.ts`: hook genérico `[value, setValue]` con clave de storage, fallback y **lista de opciones válidas** (firma estable, sin loops de effect); inicial sincrónico = fallback (sin mismatch de hidratación), preferencia aplicada en effect.
 - [x] **T003** `local-query.ts`: `LocalComanda.floor_plan_id` (select `tables(label, floor_plan_id)` + mapeo).
-- [x] **T004** Tests de [`salon-filter.test.ts`](../../src/lib/admin/salon-filter.test.ts) + [`counts.test.ts`](<../../src/app/[business_slug]/admin/(authed)/operacion/counts.test.ts>): los tres contadores con `salonId` (incluye comanda sin mesa y reserva sin mesa ni zona).
+- [x] **T004** Tests de [`salon-filter.test.ts`](../../src/lib/admin/salon-filter.test.ts) + [`counts.test.ts`](<../../src/app/[business_slug]/admin/(authed)/operacion/counts.test.ts>): los tres contadores con `salonId` (incluye comanda sin mesa y reserva sin mesa ni zona). ⚠️ 2026-08-04 (#125): la parte de Comandas se borró junto con la pill — quedan Mesas y Reservas.
 - [x] **T005** `src/lib/admin/salon-filter.ts`: `SALON_ALL`, `matchesSalon`, `reservaSalonId` (puros, compartidos entre tabs y pills); `counts.ts` los usa y acepta `salon`.
 - [x] **T006** `operacion/page.tsx` + `getSalonOptions`: resolver los salones (id + nombre) y pasarlos a `LocalShell`.
-- [x] **T007** `local-shell.tsx`: selector de salón persistido, visible sólo en Mesas / Comandas / Reservas, propagado a los tres paneles y a las pills.
+- [x] **T007** `local-shell.tsx`: selector de salón persistido, visible sólo en Mesas / Comandas / Reservas, propagado a los tres paneles y a las pills. ⚠️ 2026-08-04 (#125): Comandas ya no tiene pill (el selector sí sigue).
 - [x] **T008** `salon-desktop.tsx`: prop `pinnedPlanId` — fija el plano, esconde el selector interno y limpia la mesa seleccionada al cambiar.
 - [x] **T009** `comandas-kanban.tsx`: filtro por salón compuesto con "solo fallidas" (kanban + saturación + alerta miran el mismo subconjunto) + aviso «N comandas de delivery / mostrador ocultas».
 - [x] **T010** `admin-day-list.tsx`: prop `salonId`, filtrado por mesa → zona → sin zona, aplicado una vez arriba (KPIs, chips y lista no pueden discrepar).

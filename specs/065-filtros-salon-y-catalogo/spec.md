@@ -61,6 +61,8 @@ Aplica también a la página `/admin/reservas`, que comparte el componente `Admi
 
 Los contadores de Mesas, Comandas y Reservas se calculan **sobre el dato ya filtrado**. Un badge que dice 12 sobre una tab que muestra 3 es peor que no tener badge — y rompe la invariante de [spec 39, FR-012](../../../wiki/specs/) (pill y tab derivan del mismo predicado sobre el mismo dato).
 
+> **Actualización 2026-08-04 ([#125](https://github.com/gachetponzellini/RestaurantOS-app/issues/125)):** la tab **Comandas** quedó **sin pill**. El badge no coincidía con lo que mostraba la tab y se aplicó el criterio de este mismo FR — ninguno es mejor que uno mal. `countComandasActivas` se borró; `TabButton` acepta `count` opcional. Mesas y Reservas siguen igual, y T004/T007 de [tasks.md](./tasks.md) describen tests de Comandas que ya no existen.
+
 ### FR-007 — Catálogo: filtros básicos y persistidos
 
 La tab Productos ofrece tres filtros, todos guardados por máquina + negocio en `localStorage`:
