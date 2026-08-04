@@ -150,18 +150,25 @@ const COLUMNS: Column[] = [
     countBg: "bg-emerald-50",
     countText: "text-emerald-800",
     buttonClass: "bg-emerald-500 hover:bg-emerald-600 text-white",
-    emptyHint: "Aún no se entregó nada",
+    emptyHint: "Sin entregas recientes",
+    note: `Últimos ${ENTREGADAS_VISIBLE_MINUTES} min`,
   },
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function useElapsedMinutes(iso: string): number {
+/** Reloj vivo: `Date.now()` que se refresca cada `everyMs`. */
+function useNow(everyMs: number): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const i = setInterval(() => setNow(Date.now()), 30_000);
+    const i = setInterval(() => setNow(Date.now()), everyMs);
     return () => clearInterval(i);
-  }, []);
+  }, [everyMs]);
+  return now;
+}
+
+function useElapsedMinutes(iso: string): number {
+  const now = useNow(30_000);
   return Math.max(0, Math.floor((now - new Date(iso).getTime()) / 60_000));
 }
 
@@ -426,12 +433,25 @@ export function ComandasKanban({
     return m;
   }, [mozos]);
 
-  // ── Filtro por salón (spec 065) ──
+  // Reloj vivo para la ventana de entregadas (spec 082): sin esto, una comanda
+  // que cumple los 30 min con la pantalla quieta se quedaría hasta el próximo
+  // evento de realtime. 30 s = misma cadencia que el contador de las cards.
+  const now = useNow(30_000);
+
+  // ── Qué se ve: filtro por salón (spec 065) + ventana de entregadas (082) ──
   // Todo lo que sigue (saturación por sector, alerta de impresión, kanban) mira
   // `visibles`, no `comandas`: la tab y sus números tienen que contar lo mismo.
+  // La ventana se aplica ACÁ y no sólo al armar las columnas para que la alerta
+  // de impresión no cuente una comanda que ya no se muestra — el filtro "solo
+  // fallidas" abriría una columna vacía sin explicación.
   const visibles = useMemo(
-    () => comandas.filter((c) => matchesSalon(salonIds, c.floor_plan_id)),
-    [comandas, salonIds],
+    () =>
+      comandas.filter(
+        (c) =>
+          matchesSalon(salonIds, c.floor_plan_id) &&
+          (c.status !== "entregado" || isEntregadaVisible(c.delivered_at, now)),
+      ),
+    [comandas, salonIds, now],
   );
 
   // Comandas activas que el filtro dejó afuera por no tener mesa (delivery,
@@ -509,7 +529,7 @@ export function ComandasKanban({
       if (showOnlyFailed && !c.print_failed_at) continue;
       groups[c.status].push(c);
     }
-    // Entregadas ya vienen acotadas al día operativo + tope 100 desde la
+    // Entregadas ya vienen acotadas a la ventana de 30 min + tope 100 desde la
     // query, ordenadas por delivered_at desc. Alineamos el cap de display al
     // mismo 100 del server para no recortar lo que sí trajo la query.
     groups.entregado = groups.entregado.slice(0, 100);
@@ -577,8 +597,13 @@ export function ComandasKanban({
               <div className="flex flex-col gap-2">
                 <div className={`h-1 w-10 rounded-full ${col.accent}`} />
                 <div className="flex items-center justify-between gap-2">
-                  <h2 className="text-foreground text-base font-bold tracking-tight">
+                  <h2 className="text-foreground flex min-w-0 items-baseline gap-1.5 text-base font-bold tracking-tight">
                     {col.label}
+                    {col.note && (
+                      <span className="text-muted-foreground/70 truncate text-[11px] font-medium tracking-normal">
+                        {col.note}
+                      </span>
+                    )}
                   </h2>
                   <span
                     className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-2 text-xs font-bold tabular-nums ${col.countBg} ${col.countText}`}
