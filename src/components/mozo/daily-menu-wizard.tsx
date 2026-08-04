@@ -5,6 +5,7 @@ import { ArrowLeft, Check, Minus, Plus, X } from "lucide-react";
 
 import { formatCurrency } from "@/lib/currency";
 import {
+  autoResolvedModifierIds,
   buildMenuSteps,
   choicesDeltaCents,
   initialOptionIndex,
@@ -13,6 +14,11 @@ import {
   type DailyMenuSelections,
   type MenuStep,
 } from "@/lib/mozo/daily-menu-steps";
+import {
+  isSingleChoiceGroup,
+  missingSelections,
+  type ComboModifier,
+} from "@/lib/orders/combo-modifiers";
 import type {
   DailyMenuChoiceGroup,
   DailyMenuComponent,
@@ -101,7 +107,7 @@ export function DailyMenuWizard({
   useEffect(() => {
     if (!menu || !step) return;
     const t = setTimeout(() => {
-      if (step.kind === "choice") {
+      if (step.kind === "choice" || step.kind === "modifiers") {
         const el = optionRefs.current[activeIndex];
         el?.focus({ preventScroll: true });
         el?.scrollIntoView({ block: "nearest" });
@@ -132,9 +138,19 @@ export function DailyMenuWizard({
   ) => {
     const next = withSteps[target];
     setStepIndex(target);
-    setActiveIndex(
-      next?.kind === "choice" ? initialOptionIndex(next.group, withSelections) : 0,
-    );
+    if (next?.kind === "choice") {
+      setActiveIndex(initialOptionIndex(next.group, withSelections));
+      return;
+    }
+    if (next?.kind === "modifiers") {
+      // Volver a un paso de modificadores entra en el que ya estaba elegido,
+      // mismo criterio que `initialOptionIndex` con las opciones del menú.
+      const chosen = withSelections.get(next.choiceGroupId)?.modifier_ids ?? [];
+      const i = next.group.modifiers.findIndex((m) => chosen.includes(m.id));
+      setActiveIndex(i >= 0 ? i : 0);
+      return;
+    }
+    setActiveIndex(0);
   };
 
   const choose = (group: DailyMenuChoiceGroup, option: DailyMenuComponent) => {
@@ -174,6 +190,53 @@ export function DailyMenuWizard({
     );
   };
 
+  /** Los modificadores elegidos para el producto de un grupo del menú. */
+  const modifiersOf = (choiceGroupId: string) =>
+    selections.get(choiceGroupId)?.modifiers ?? [];
+
+  /**
+   * Marcar / desmarcar un modificador (spec 083).
+   *
+   * Obligatorio de a uno: reemplaza y avanza, igual que un grupo del menú
+   * (FR-002). El resto sólo marca — el paso se cierra con «Seguir» (FR-003).
+   */
+  const toggleModifier = (
+    step: Extract<MenuStep, { kind: "modifiers" }>,
+    modifier: ComboModifier,
+  ) => {
+    const current = selections.get(step.choiceGroupId);
+    if (!current) return;
+    const chosen = current.modifiers ?? [];
+    const single = isSingleChoiceGroup(step.group);
+    const ownIds = new Set(step.group.modifiers.map((m) => m.id));
+    const yaEsta = chosen.some((m) => m.id === modifier.id);
+
+    let next: ComboModifier[];
+    if (single) {
+      // Uno solo de ESTE grupo; lo de los otros grupos del producto no se toca.
+      next = [...chosen.filter((m) => !ownIds.has(m.id)), modifier];
+    } else if (yaEsta) {
+      next = chosen.filter((m) => m.id !== modifier.id);
+    } else {
+      const enEsteGrupo = chosen.filter((m) => ownIds.has(m.id)).length;
+      if (enEsteGrupo >= step.group.max_selection) return; // tope: no hace nada
+      next = [...chosen, modifier];
+    }
+
+    const draft = new Map(selections);
+    draft.set(step.choiceGroupId, {
+      ...current,
+      modifiers: next,
+      modifier_ids: next.map((m) => m.id),
+    });
+    setSelections(draft);
+
+    if (single) {
+      const nextSteps = buildMenuSteps(menu.choice_groups, draft);
+      goToStep(Math.min(currentIndex + 1, nextSteps.length - 1), draft, nextSteps);
+    }
+  };
+
   /** Volver: al paso anterior, o cerrar si ya estamos en el primero. */
   const goBack = () => {
     if (currentIndex === 0) {
@@ -190,7 +253,18 @@ export function DailyMenuWizard({
   };
 
   const handleAdd = () => {
-    onAdd(menu, quantity, [...selections.values()]);
+    // Los grupos obligatorios de una sola opción nunca se mostraron (serían un
+    // paso con una sola salida), pero el validador del server los exige igual.
+    const auto = autoResolvedModifierIds(menu.choice_groups, selections);
+    const payload = [...selections.values()].map((sel) => {
+      const extra = auto.get(sel.choice_group_id) ?? [];
+      if (extra.length === 0) return sel;
+      return {
+        ...sel,
+        modifier_ids: [...new Set([...sel.modifier_ids, ...extra])],
+      };
+    });
+    onAdd(menu, quantity, payload);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -225,6 +299,47 @@ export function DailyMenuWizard({
     if (e.key === "ArrowLeft" || e.key === "Backspace") {
       e.preventDefault();
       goBack();
+      return;
+    }
+
+    // El paso de modificadores se navega igual que uno del menú: las flechas y
+    // los dígitos son los mismos, sólo cambia qué hace elegir (FR-002/003).
+    if (step.kind === "modifiers") {
+      const length = step.group.modifiers.length;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setActiveIndex((i) => moveSelection(i, 1, length));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setActiveIndex((i) => moveSelection(i, -1, length));
+        return;
+      }
+      if (e.key === "Home") {
+        e.preventDefault();
+        setActiveIndex(0);
+        return;
+      }
+      if (e.key === "End") {
+        e.preventDefault();
+        setActiveIndex(length - 1);
+        return;
+      }
+      const byDigit = indexFromDigit(e.key, length);
+      if (byDigit !== null) {
+        e.preventDefault();
+        const modifier = step.group.modifiers[byDigit];
+        if (modifier) toggleModifier(step, modifier);
+        return;
+      }
+      if (e.key === "Enter" || e.key === " ") {
+        const role = target.getAttribute("role");
+        if (role !== "radio" && role !== "checkbox") return;
+        e.preventDefault();
+        const modifier = step.group.modifiers[activeIndex];
+        if (modifier) toggleModifier(step, modifier);
+      }
       return;
     }
 
@@ -281,7 +396,19 @@ export function DailyMenuWizard({
   };
 
   const stepLabel =
-    step.kind === "choice" ? step.group.label : "Confirmá el menú";
+    step.kind === "choice"
+      ? step.group.label
+      : step.kind === "modifiers"
+        ? `${step.group.name} · ${step.productName}`
+        : "Confirmá el menú";
+
+  const faltan =
+    step.kind === "modifiers"
+      ? missingSelections(
+          step.group,
+          modifiersOf(step.choiceGroupId).map((m) => m.id),
+        )
+      : 0;
 
   return (
     <div
@@ -411,6 +538,15 @@ export function DailyMenuWizard({
                 );
               })}
             </ul>
+          ) : step.kind === "modifiers" ? (
+            <ModifierStep
+              step={step}
+              activeIndex={activeIndex}
+              chosen={modifiersOf(step.choiceGroupId)}
+              optionRefs={optionRefs}
+              onToggle={(m) => toggleModifier(step, m)}
+              onHover={setActiveIndex}
+            />
           ) : (
             <ConfirmStep
               steps={steps}
@@ -432,6 +568,39 @@ export function DailyMenuWizard({
                 {formatCurrency(menu.price_cents + delta)}
               </p>
             </div>
+          ) : step.kind === "modifiers" ? (
+            isSingleChoiceGroup(step.group) ? (
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs text-zinc-500">Elegí una opción para seguir</p>
+                <p className="text-base font-extrabold text-emerald-700 tabular-nums">
+                  {formatCurrency(menu.price_cents + delta)}
+                </p>
+              </div>
+            ) : (
+              // Opcional o de varias: «ninguno» y «dos» son respuestas válidas,
+              // así que el paso lo cierra el usuario (FR-003).
+              <div className="flex items-center gap-3">
+                <p className="min-w-0 flex-1 text-xs text-zinc-500">
+                  {faltan > 0
+                    ? `Elegí ${faltan} para seguir`
+                    : `Total ${formatCurrency(menu.price_cents + delta)}`}
+                </p>
+                <button
+                  ref={submitRef}
+                  type="button"
+                  disabled={faltan > 0}
+                  onClick={() =>
+                    goToStep(
+                      Math.min(currentIndex + 1, steps.length - 1),
+                      selections,
+                    )
+                  }
+                  className="flex h-11 shrink-0 items-center rounded-2xl bg-emerald-600 px-5 text-sm font-semibold text-white transition active:scale-[0.98] disabled:opacity-50"
+                >
+                  Seguir
+                </button>
+              </div>
+            )
           ) : (
             <div className="flex items-center gap-3">
               <div className="flex items-center rounded-full ring-1 ring-zinc-200">
@@ -481,6 +650,108 @@ export function DailyMenuWizard({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Un grupo de modificadores del producto elegido (spec 083).
+ *
+ * Es la misma fila que las opciones del menú a propósito: el mozo ya sabe cómo
+ * se maneja. Lo único que cambia es el `role` —radio cuando hay que elegir uno,
+ * checkbox cuando se puede elegir varios o ninguno— y que en el segundo caso el
+ * paso se cierra con «Seguir» en vez de avanzar solo.
+ */
+function ModifierStep({
+  step,
+  activeIndex,
+  chosen,
+  optionRefs,
+  onToggle,
+  onHover,
+}: {
+  step: Extract<MenuStep, { kind: "modifiers" }>;
+  activeIndex: number;
+  chosen: ComboModifier[];
+  optionRefs: React.RefObject<(HTMLButtonElement | null)[]>;
+  onToggle: (m: ComboModifier) => void;
+  onHover: (i: number) => void;
+}) {
+  const single = isSingleChoiceGroup(step.group);
+  const chosenIds = chosen.map((m) => m.id);
+  const enEsteGrupo = step.group.modifiers.filter((m) =>
+    chosenIds.includes(m.id),
+  ).length;
+
+  return (
+    <>
+      {!single && (
+        <p className="mb-2 px-1 text-xs text-zinc-500">
+          {step.group.min_selection > 0
+            ? `Elegí ${step.group.min_selection}`
+            : "Opcional"}
+          {step.group.max_selection > 1 && ` · hasta ${step.group.max_selection}`}
+        </p>
+      )}
+      <ul
+        role={single ? "radiogroup" : "group"}
+        aria-label={step.group.name}
+        className="space-y-1.5"
+      >
+        {step.group.modifiers.map((m, i) => {
+          const isActive = i === activeIndex;
+          const isChosen = chosenIds.includes(m.id);
+          // Con el tope cubierto, lo no elegido se apaga: un botón que existe y
+          // no hace nada es peor que decir que ya no se puede.
+          const topeCubierto =
+            !single && !isChosen && enEsteGrupo >= step.group.max_selection;
+          return (
+            <li key={m.id}>
+              <button
+                ref={(el) => {
+                  optionRefs.current[i] = el;
+                }}
+                type="button"
+                role={single ? "radio" : "checkbox"}
+                aria-checked={isChosen}
+                disabled={topeCubierto}
+                tabIndex={isActive ? 0 : -1}
+                onClick={() => onToggle(m)}
+                onMouseEnter={() => onHover(i)}
+                className={`flex min-h-[52px] w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition focus:outline-none active:scale-[0.99] disabled:opacity-40 ${
+                  isChosen
+                    ? "bg-emerald-50 ring-2 ring-emerald-500"
+                    : isActive
+                      ? "bg-white ring-2 ring-emerald-400"
+                      : "bg-zinc-50 ring-1 ring-zinc-100"
+                }`}
+              >
+                <span
+                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold tabular-nums ${
+                    isChosen
+                      ? "bg-emerald-600 text-white"
+                      : "bg-white text-zinc-500 ring-1 ring-zinc-200"
+                  }`}
+                >
+                  {isChosen ? (
+                    <Check className="h-3.5 w-3.5" strokeWidth={3} />
+                  ) : (
+                    i + 1
+                  )}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-zinc-900">
+                  {m.name}
+                </span>
+                {m.price_delta_cents > 0 && (
+                  <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-bold tabular-nums text-amber-800">
+                    +{formatCurrency(m.price_delta_cents)}
+                  </span>
+                )}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </>
   );
 }
 

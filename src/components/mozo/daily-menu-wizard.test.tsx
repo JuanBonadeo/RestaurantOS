@@ -317,3 +317,97 @@ describe("asistente del menú del día · grupos condicionados (spec 074)", () =
     expect(screen.getByText(/Paso 2 de 4/)).toBeTruthy();
   });
 });
+
+describe("asistente del menú del día · modificadores del producto (spec 083)", () => {
+  /** «Salsa para pasta» de los Ñoquis: obligatorio, 1 de 3, dos con adicional. */
+  const SALSA = {
+    id: "g-salsa",
+    name: "Salsa para pasta",
+    is_required: true,
+    min_selection: 1,
+    max_selection: 1,
+    sort_order: 0,
+    modifiers: [
+      { id: "m-fileto", name: "Fileto", price_delta_cents: 0, is_available: true, sort_order: 0 },
+      { id: "m-bolo", name: "Bolognesa", price_delta_cents: 450000, is_available: true, sort_order: 1 },
+      { id: "m-pesto", name: "Pesto", price_delta_cents: 450000, is_available: true, sort_order: 2 },
+    ],
+  };
+
+  /** Principal con Ñoquis (lleva salsa) y Milanesa (no lleva nada). */
+  function menuConSalsa(): DailyMenuForMozo {
+    sortOrder = 0;
+    const noquis = { ...option("gp", "Principal", 1), product_name: "Ñoquis", modifier_groups: [SALSA] };
+    const mila = { ...option("gp", "Principal", 2), product_name: "Milanesa" };
+    return {
+      ...MENU,
+      price_cents: 2400000,
+      components: [noquis, mila],
+      choice_groups: [{ choice_group_id: "gp", label: "Plato Principal", options: [noquis, mila] }],
+      has_choices: true,
+    };
+  }
+
+  it("elegir el producto con modificadores abre su paso", async () => {
+    renderWizard(menuConSalsa());
+    await expectFocusOn(/Ñoquis/);
+    fireEvent.keyDown(focused(), { key: "1" });
+
+    await expectFocusOn(/Fileto/);
+    expect(screen.getByRole("radiogroup", { name: "Salsa para pasta" })).toBeTruthy();
+    expect(screen.getByText(/Paso 2 de 3/)).toBeTruthy();
+  });
+
+  it("elegir el producto sin modificadores va derecho a confirmar", async () => {
+    renderWizard(menuConSalsa());
+    await expectFocusOn(/Ñoquis/);
+    fireEvent.keyDown(focused(), { key: "2" }); // Milanesa
+    await expectFocusOn(/Agregar/);
+    expect(screen.queryByRole("radiogroup", { name: "Salsa para pasta" })).toBeNull();
+  });
+
+  it("el adicional del modificador se suma al total (FR-004)", async () => {
+    renderWizard(menuConSalsa());
+    await expectFocusOn(/Ñoquis/);
+    fireEvent.keyDown(focused(), { key: "1" });
+    await expectFocusOn(/Fileto/);
+
+    fireEvent.keyDown(focused(), { key: "2" }); // Bolognesa +$4.500
+    // 24.000 + 4.500
+    await waitFor(() => expect(focused()).toHaveAccessibleName(/28\.500/));
+  });
+
+  it("lo elegido viaja en modifier_ids", async () => {
+    const { onAdd } = renderWizard(menuConSalsa());
+    await expectFocusOn(/Ñoquis/);
+    fireEvent.keyDown(focused(), { key: "1" });
+    await expectFocusOn(/Fileto/);
+    fireEvent.keyDown(focused(), { key: "2" }); // Bolognesa
+    await expectFocusOn(/Agregar/);
+    fireEvent.click(focused());
+
+    const choices = onAdd.mock.calls[0]![2];
+    expect(choices[0].modifier_ids).toEqual(["m-bolo"]);
+  });
+
+  it("cambiar de plato descarta el modificador elegido", async () => {
+    const { onAdd } = renderWizard(menuConSalsa());
+    await expectFocusOn(/Ñoquis/);
+    fireEvent.keyDown(focused(), { key: "1" });
+    await expectFocusOn(/Fileto/);
+    fireEvent.keyDown(focused(), { key: "2" }); // Bolognesa +$4.500
+    await expectFocusOn(/Agregar/);
+
+    fireEvent.keyDown(focused(), { key: "ArrowLeft" }); // vuelve a la salsa
+    await expectFocusOn(/Bolognesa/);
+    fireEvent.keyDown(focused(), { key: "ArrowLeft" }); // vuelve al principal
+    await expectFocusOn(/Ñoquis/);
+    fireEvent.keyDown(focused(), { key: "2" }); // Milanesa
+
+    await expectFocusOn(/Agregar/);
+    // El adicional de la salsa que ya no aplica no se cobra.
+    expect(focused()).toHaveAccessibleName(/24\.000/);
+    fireEvent.click(focused());
+    expect(onAdd.mock.calls[0]![2][0].modifier_ids).toEqual([]);
+  });
+});

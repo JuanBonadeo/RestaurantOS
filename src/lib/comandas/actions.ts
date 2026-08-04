@@ -25,6 +25,26 @@ import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
 import { resolveComboUpcharge } from "@/lib/orders/combo-pricing";
+import {
+  resolveModifiers,
+  type ComboModifier,
+} from "@/lib/orders/combo-modifiers";
+
+/** El componente `choice` al que corresponde una opción elegida. */
+function choiceComponentFor(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  components: any[],
+  sc: { choice_group_id: string; product_id: string },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): any {
+  return components.find(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (c: any) =>
+      c.kind === "choice" &&
+      c.choice_group_id === sc.choice_group_id &&
+      c.product_id === sc.product_id,
+  );
+}
 
 import {
   applyPriceOverride,
@@ -535,7 +555,10 @@ export async function enviarComanda(
     const { data: menuRow } = await service
       .from("daily_menus")
       .select(
-        "id, name, price_cents, image_url, business_id, is_active, is_available, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, extra_price_cents, blocks_choice_group_ids)",
+        // `products.modifier_groups` es la fuente de verdad del adicional de
+        // los modificadores del combo (spec 083): el payload dice qué se
+        // eligió, el precio sale de acá.
+        "id, name, price_cents, image_url, business_id, is_active, is_available, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, extra_price_cents, blocks_choice_group_ids, products(id, name, modifier_groups(id, name, is_required, min_selection, max_selection, sort_order, modifiers(id, name, price_delta_cents, is_available, sort_order))))",
       )
       .eq("id", menuItem.daily_menu_id)
       .maybeSingle();
@@ -571,7 +594,26 @@ export async function enviarComanda(
     );
     if (!upcharge.ok) return actionError(upcharge.error);
 
-    const menuPrice = Number(menu.price_cents) + upcharge.deltaCents;
+    // Modificadores del producto elegido en cada grupo (spec 083). Igual que el
+    // adicional de la opción: se resuelven contra la DB y suman al PADRE; los
+    // hijos siguen en $0 (invariante de `is_combo_component`).
+    const modifiersByGroup = new Map<string, ComboModifier[]>();
+    let modifiersDelta = 0;
+    for (const sc of menuItem.selected_choices ?? []) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const comp: any = choiceComponentFor(components, sc);
+      const resolved = resolveModifiers(
+        comp?.products?.modifier_groups ?? [],
+        sc.modifier_ids ?? [],
+        comp?.products?.name ?? comp?.label ?? "ese producto",
+      );
+      if (!resolved.ok) return actionError(resolved.error);
+      modifiersDelta += resolved.deltaCents;
+      modifiersByGroup.set(sc.choice_group_id, resolved.chosen);
+    }
+
+    const menuPrice =
+      Number(menu.price_cents) + upcharge.deltaCents + modifiersDelta;
     const menuSubtotal = menuPrice * menuItem.quantity;
 
     // Desglose de las opciones elegidas para el snapshot (todo de la DB: el
@@ -590,6 +632,12 @@ export async function enviarComanda(
         choice_group_label: comp?.choice_group_label ?? "Opción",
         product_name: comp?.label ?? "",
         extra_price_cents: Number(comp?.extra_price_cents ?? 0),
+        // Con nombre y adicional: es lo que después explica en la cuenta por qué
+        // el menú salió $28.500 y no $24.000 (spec 083, FR-008).
+        modifiers: (modifiersByGroup.get(sc.choice_group_id) ?? []).map((m) => ({
+          name: m.name,
+          price_delta_cents: Math.max(0, m.price_delta_cents),
+        })),
       };
     });
 
@@ -638,8 +686,14 @@ export async function enviarComanda(
     for (const c of components) {
       if (c.kind === "product" && c.product_id) childProductIds.push(c.product_id);
     }
+    // Los modificadores van pegados al hijo de SU opción, así que el product_id
+    // no alcanza como clave: el mismo producto puede aparecer en dos grupos.
+    const modifiersForChild: (ComboModifier[] | null)[] = components
+      .filter((c: { kind?: string; product_id?: string | null }) => c.kind === "product" && c.product_id)
+      .map(() => null);
     for (const sc of menuItem.selected_choices ?? []) {
       childProductIds.push(sc.product_id);
+      modifiersForChild.push(modifiersByGroup.get(sc.choice_group_id) ?? []);
     }
 
     if (childProductIds.length > 0) {
@@ -663,7 +717,7 @@ export async function enviarComanda(
       // componente; si acá deduplicábamos con Set, un combo con el mismo
       // producto repetido descontaba stock/receta 1 vez en el mozo y N en el
       // público. `missingIds` sí puede deduplicar (es solo para fetchear).
-      for (const pid of childProductIds) {
+      for (const [childIndex, pid] of childProductIds.entries()) {
         const childProduct = productById.get(pid);
         if (!childProduct) continue;
         const childStation = resolveStation(
@@ -689,6 +743,26 @@ export async function enviarComanda(
           } as any)
           .select("id")
           .single();
+
+        // Los modificadores del hijo (spec 083): con esto la comanda del sector
+        // sale «Ñoquis» + «+ Bolognesa» sin tocar el renderer del ticket, que
+        // ya los imprime. `modifier_name` es snapshot, como en el flujo suelto.
+        const childModifiers = modifiersForChild[childIndex] ?? [];
+        if (childRow && childModifiers.length > 0) {
+          const { error: modErr } = await service
+            .from("order_item_modifiers")
+            .insert(
+              childModifiers.map((m) => ({
+                order_item_id: (childRow as { id: string }).id,
+                modifier_id: m.id,
+                modifier_name: m.name,
+                price_delta_cents: Math.max(0, m.price_delta_cents),
+              })),
+            );
+          if (modErr) {
+            console.error("enviarComanda · combo child modifier insert", modErr);
+          }
+        }
 
         if (childRow && childStation) {
           const bucket = itemsByStation.get(childStation) ?? [];

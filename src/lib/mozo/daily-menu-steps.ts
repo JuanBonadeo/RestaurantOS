@@ -16,6 +16,12 @@ import {
   activeChoiceGroups,
   pruneBlockedSelections,
 } from "@/lib/orders/combo-choices";
+import {
+  askableModifierGroups,
+  isAutoResolved,
+  type ComboModifier,
+  type ComboModifierGroup,
+} from "@/lib/orders/combo-modifiers";
 
 import type { DailyMenuChoiceGroup } from "./daily-menus-query";
 
@@ -27,7 +33,14 @@ export type DailyMenuSelection = {
   product_id: string;
   product_name: string;
   extra_price_cents: number;
+  /** Lo único que el server lee para re-derivar el precio (spec 083). */
   modifier_ids: string[];
+  /**
+   * Los mismos modificadores con nombre y adicional, para que el carrito y el
+   * resumen puedan mostrar el desglose sin volver a buscarlos. El server los
+   * **ignora**: el precio siempre sale de la DB.
+   */
+  modifiers?: ComboModifier[];
 };
 
 /** Elecciones en curso, indexadas por `choice_group_id`. */
@@ -35,6 +48,17 @@ export type DailyMenuSelections = Map<string, DailyMenuSelection>;
 
 export type MenuStep =
   | { kind: "choice"; group: DailyMenuChoiceGroup }
+  /**
+   * Un grupo de modificadores del producto que se eligió en `choiceGroupId`
+   * (spec 083): «Salsa para pasta» aparece porque el mozo eligió Ñoquis, y se
+   * va si cambia a Milanesa.
+   */
+  | {
+      kind: "modifiers";
+      choiceGroupId: string;
+      productName: string;
+      group: ComboModifierGroup;
+    }
   | { kind: "confirm" };
 
 /**
@@ -61,11 +85,53 @@ export function buildMenuSteps(
   groups: DailyMenuChoiceGroup[],
   selections: DailyMenuSelections = new Map(),
 ): MenuStep[] {
-  const steps: MenuStep[] = activeChoiceGroups(groups, selections).map(
-    (group) => ({ kind: "choice" as const, group }),
-  );
+  const steps: MenuStep[] = [];
+  for (const group of activeChoiceGroups(groups, selections)) {
+    steps.push({ kind: "choice", group });
+    // Los modificadores del producto elegido acá van pegados a su grupo, antes
+    // del siguiente del menú (spec 083, FR-001): la pregunta «¿con qué salsa?»
+    // pertenece al plato, no al final del combo.
+    const chosen = selections.get(group.choice_group_id);
+    if (!chosen) continue;
+    const option = group.options.find((o) => o.product_id === chosen.product_id);
+    if (!option) continue;
+    for (const modifierGroup of askableModifierGroups(option.modifier_groups)) {
+      // Un obligatorio de una sola opción no se pregunta: sería un paso con una
+      // sola salida. El asistente lo da por elegido al confirmar.
+      if (isAutoResolved(modifierGroup)) continue;
+      steps.push({
+        kind: "modifiers",
+        choiceGroupId: group.choice_group_id,
+        productName: chosen.product_name,
+        group: modifierGroup,
+      });
+    }
+  }
   steps.push({ kind: "confirm" });
   return steps;
+}
+
+/**
+ * Los modificadores que se resuelven solos (obligatorios de una sola opción) y
+ * hay que dar por elegidos aunque nunca se hayan mostrado: si no, el validador
+ * del server rechaza la orden por un grupo obligatorio sin cubrir.
+ */
+export function autoResolvedModifierIds(
+  groups: DailyMenuChoiceGroup[],
+  selections: DailyMenuSelections,
+): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const group of activeChoiceGroups(groups, selections)) {
+    const chosen = selections.get(group.choice_group_id);
+    if (!chosen) continue;
+    const option = group.options.find((o) => o.product_id === chosen.product_id);
+    if (!option) continue;
+    const ids = askableModifierGroups(option.modifier_groups)
+      .filter(isAutoResolved)
+      .map((g) => g.modifiers[0]!.id);
+    if (ids.length > 0) out.set(group.choice_group_id, ids);
+  }
+  return out;
 }
 
 // El atajo "elegir la opción N con un dígito" nació acá (spec 072) y resultó
@@ -95,6 +161,12 @@ export function choicesDeltaCents(selections: DailyMenuSelections): number {
   let total = 0;
   for (const sel of selections.values()) {
     total += sel.extra_price_cents ?? 0;
+    // Los modificadores también suman (spec 083, FR-004): Bolognesa +$4.500 en
+    // un menú de $24.000 lo deja en $28.500. Esto es lo que se MUESTRA; el
+    // cobro lo re-deriva el server de la DB.
+    for (const m of sel.modifiers ?? []) {
+      total += Math.max(0, m.price_delta_cents ?? 0);
+    }
   }
   return total;
 }
