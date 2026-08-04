@@ -137,6 +137,77 @@ describe("buildTicketLines · todo en cuerpo grande", () => {
   });
 });
 
+describe("buildTicketLines · destino del pedido", () => {
+  it("delivery → DELIVERY + el repartidor, en vez de «MESA —»", () => {
+    const texts = buildTicketLines({
+      ...base,
+      table_label: "—",
+      delivery_type: "delivery",
+    }).map((l) => l.text);
+    expect(texts).toContain("DELIVERY");
+    expect(texts.some((t) => t.includes("repartidor"))).toBe(true);
+    expect(texts.some((t) => t.startsWith("MESA"))).toBe(false);
+  });
+
+  it("pickup → RETIRA", () => {
+    const texts = buildTicketLines({
+      ...base,
+      table_label: "—",
+      delivery_type: "pickup",
+    }).map((l) => l.text);
+    expect(texts).toContain("RETIRA");
+    expect(texts.some((t) => t.startsWith("MESA"))).toBe(false);
+  });
+
+  it("dine_in o ausente → «MESA x», el encabezado de siempre", () => {
+    expect(buildTicketLines(base).map((l) => l.text)).toContain("MESA 5");
+    expect(
+      buildTicketLines({ ...base, delivery_type: "dine_in" }).map((l) => l.text),
+    ).toContain("MESA 5");
+  });
+});
+
+describe("buildTicketLines · con qué combina (otros sectores)", () => {
+  const conOtros = {
+    ...base,
+    otros_sectores: [
+      {
+        station_name: "Parrilla",
+        items: [{ quantity: 1, product_name: "Entrecot" }],
+      },
+      { station_name: "Fritera", items: [] }, // sin items → no se imprime
+    ],
+  };
+
+  it("lista bajo «COMBINA CON» lo que el mismo pedido lleva en otros sectores", () => {
+    const texts = buildTicketLines(conOtros).map((l) => l.text);
+    expect(texts).toContain("COMBINA CON");
+    expect(texts).toContain("PARRILLA");
+    expect(texts).toContain("- 1x Entrecot");
+  });
+
+  it("es referencia, no trabajo: va en tall, no en el xl de los ítems", () => {
+    const lines = buildTicketLines(conOtros);
+    const vaCon = lines.findIndex((l) => l.text === "COMBINA CON");
+    expect(vaCon).toBeGreaterThan(0);
+    for (const l of lines.slice(vaCon))
+      if (l.text) expect(l.size).toBe("tall");
+  });
+
+  it("un sector sin items no aparece", () => {
+    expect(buildTicketLines(conOtros).map((l) => l.text)).not.toContain("FRITERA");
+  });
+
+  it("una comanda anulada no lo imprime: no hay nada que coordinar", () => {
+    const texts = buildTicketLines({ ...conOtros, cancelled: true }).map((l) => l.text);
+    expect(texts).not.toContain("COMBINA CON");
+  });
+
+  it("sin el campo, el ticket sale igual que siempre (aditivo)", () => {
+    expect(buildTicketLines(base).map((l) => l.text)).not.toContain("COMBINA CON");
+  });
+});
+
 describe("buildTicketLines · solo ASCII imprimible", () => {
   it("saca tildes y eñes: la térmica no las imprime", () => {
     const texts = buildTicketLines({

@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type Row = Record<string, unknown>;
 let rows: Row[]; // filas del GET
+let itemRows: Row[]; // `order_items` del pedido → bloque «COMBINA CON» del ticket
 let postRow: Row | null; // fila del select del POST (maybeSingle)
 let captured: { updates: Record<string, unknown>[]; orFilters: string[] };
 let notifyCalls: { businessId: string; comandaId: string }[];
@@ -27,10 +28,14 @@ vi.mock("@/lib/print-agent/credentials", () => ({
 
 vi.mock("@/lib/supabase/service", () => ({
   createSupabaseServiceClient: () => ({
-    from: () => ({
+    from: (table: string) => ({
       select: () => {
         const b = {
           eq: () => b,
+          in: () => b,
+          is: () => b,
+          not: () => b,
+          neq: () => b,
           or: (filter: string) => {
             captured.orFilters.push(filter);
             return b;
@@ -38,7 +43,10 @@ vi.mock("@/lib/supabase/service", () => ({
           order: () => b,
           maybeSingle: async () => ({ data: postRow }),
           then: (resolve: (v: { data: Row[]; error: null }) => unknown) =>
-            resolve({ data: rows, error: null }),
+            resolve({
+              data: table === "order_items" ? itemRows : rows,
+              error: null,
+            }),
         };
         return b;
       },
@@ -94,10 +102,11 @@ function makeRow(
       printer_port: 9100,
       printer_enabled: true,
     },
-    orders: {
+    orders: extra.orders ?? {
       id: "o1",
       business_id: "biz1",
       table_id: "t1",
+      delivery_type: "dine_in",
       tables: { label: "Mesa 1" },
     },
     comanda_items: extra.comanda_items ?? unItem(),
@@ -130,6 +139,7 @@ function postReq(body: unknown, auth = "Bearer test-key") {
 beforeEach(() => {
   process.env.PRINT_AGENT_KEY = "test-key";
   rows = [makeRow("Cocina", "192.168.10.50"), makeRow("Bar", null)];
+  itemRows = [];
   postRow = null;
   captured = { updates: [], orFilters: [] };
   notifyCalls = [];
@@ -249,6 +259,75 @@ describe("GET /api/print-agent — printer_ip por comanda (spec 28)", () => {
     expect(cocina?.items).toHaveLength(1);
     expect(cocina?.cancelled).toBe(false);
     expect(cocina?.reprint).toBe(false);
+  });
+
+  it("con qué combina: lista los items del MISMO pedido que salen de otros sectores", async () => {
+    rows = [makeRow("Cocina", "192.168.10.50")];
+    itemRows = [
+      // El item propio del sector no se repite en el bloque.
+      {
+        order_id: "o1",
+        quantity: 2,
+        product_name: "Ensalada Queso Azul",
+        station_id: "st-Cocina",
+        stations: { name: "Cocina" },
+      },
+      {
+        order_id: "o1",
+        quantity: 1,
+        product_name: "Entrecot",
+        station_id: "st-Parrilla",
+        stations: { name: "Parrilla" },
+      },
+      {
+        order_id: "o1",
+        quantity: 1,
+        product_name: "Papas Rejilla",
+        station_id: "st-Fritera",
+        stations: { name: "Fritera" },
+      },
+    ];
+    const res = await GET(getReq());
+    const body = (await res.json()) as {
+      comandas: {
+        otros_sectores: { station_name: string; items: { product_name: string }[] }[];
+        content_plain: string;
+      }[];
+    };
+    const cocina = body.comandas[0]!;
+    expect(cocina.otros_sectores.map((s) => s.station_name)).toEqual([
+      "Parrilla",
+      "Fritera",
+    ]);
+    expect(cocina.content_plain).toContain("COMBINA CON");
+    expect(cocina.content_plain).toContain("PARRILLA");
+    expect(cocina.content_plain).toContain("- 1x Entrecot");
+    // Lo propio del sector no se duplica abajo.
+    expect(cocina.otros_sectores.flatMap((s) => s.items.map((i) => i.product_name)))
+      .not.toContain("Ensalada Queso Azul");
+  });
+
+  it("comanda de delivery → el ticket dice DELIVERY y el repartidor, no «MESA —»", async () => {
+    rows = [
+      makeRow("Cocina", "192.168.10.50", {
+        orders: {
+          id: "o1",
+          business_id: "biz1",
+          table_id: null,
+          delivery_type: "delivery",
+          tables: null,
+        },
+      }),
+    ];
+    const res = await GET(getReq());
+    const body = (await res.json()) as {
+      comandas: { delivery_type: string; content_plain: string }[];
+    };
+    const c = body.comandas[0]!;
+    expect(c.delivery_type).toBe("delivery");
+    expect(c.content_plain).toContain("DELIVERY");
+    expect(c.content_plain).toContain("repartidor");
+    expect(c.content_plain).not.toContain("MESA");
   });
 
   it("comanda a medio crear (todavía sin comanda_items) NO se entrega al agente", async () => {

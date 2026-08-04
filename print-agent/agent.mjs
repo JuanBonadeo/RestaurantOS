@@ -195,9 +195,19 @@ function ticketLines(c) {
     push(RULE);
   }
 
-  // Sector / estación + mesa: lo primero que lee la cocina, bien grande.
+  // Sector / estación + destino: lo primero que lee la cocina, bien grande.
   banner(String(c.station_name).toUpperCase());
-  banner(`MESA ${c.table_label}`);
+  // Delivery / retiro no tienen mesa (salía «MESA —»): la cocina ve de una que
+  // ese plato se lo lleva el repartidor. `dine_in` / ausente = el de siempre.
+  if (c.delivery_type === "delivery") {
+    banner("DELIVERY");
+    push("lo lleva el repartidor", { size: "tall", bold: true, align: "center" });
+  } else if (c.delivery_type === "pickup") {
+    banner("RETIRA");
+    push("pasa a buscarlo el cliente", { size: "tall", bold: true, align: "center" });
+  } else {
+    banner(`MESA ${c.table_label}`);
+  }
   push(`Tanda ${c.batch}`, { size: "tall", bold: true, align: "center" });
 
   // Metadata de referencia: lo más chico del ticket, pero igual en doble alto
@@ -229,6 +239,22 @@ function ticketLines(c) {
       for (const l of wrap(`obs: ${it.notes}`, COLS.tall)) push(l, { size: "tall", bold: true });
   });
   if (items.length === 0) banner("(sin items)");
+
+  // Con qué combina: lo del MISMO pedido que sale de otros sectores. Referencia,
+  // no trabajo de este sector → `tall`, no `xl`. En una anulada no va.
+  const otros = (c.otros_sectores ?? []).filter((s) => s.items.length > 0);
+  if (otros.length > 0 && !c.cancelled) {
+    pad(1);
+    push(RULE);
+    push("COMBINA CON", { size: "tall", bold: true, align: "center" });
+    for (const sector of otros) {
+      for (const l of wrap(String(sector.station_name).toUpperCase(), COLS.tall))
+        push(l, { size: "tall", bold: true });
+      for (const it of sector.items)
+        for (const l of wrap(`- ${it.quantity}x ${it.product_name}`, COLS.tall))
+          push(l, { size: "tall" });
+    }
+  }
 
   pad(EDGE_PADDING); // aire entre el último ítem y el corte (o la línea del pie)
 

@@ -56,6 +56,12 @@ export type TicketItem = {
   modifiers?: ReadonlyArray<string | null | undefined> | null;
 };
 
+/** Lo que el MISMO pedido lleva en otro sector. */
+export type TicketSectorHermano = {
+  station_name: string;
+  items: TicketItem[];
+};
+
 export type TicketComanda = {
   comanda_id: string;
   station_name: string;
@@ -66,6 +72,17 @@ export type TicketComanda = {
   cancelled_reason?: string | null;
   reprint?: boolean;
   items?: TicketItem[] | null;
+  /**
+   * `orders.delivery_type`. Ausente ⇒ salón (encabezado «MESA x», el de
+   * siempre). Campo aditivo: los fixtures congelados no lo traen.
+   */
+  delivery_type?: "dine_in" | "delivery" | "pickup" | null;
+  /**
+   * Con qué combina: los items del mismo pedido que se preparan en OTROS
+   * sectores. Sin esto la parrilla no sabe que el entrecot sale con las papas de
+   * fritera, y cada sector cocina a destiempo. Campo aditivo.
+   */
+  otros_sectores?: TicketSectorHermano[] | null;
 };
 
 export type Size = "sm" | "tall" | "xl";
@@ -186,9 +203,20 @@ export function buildTicketLines(c: TicketComanda): Line[] {
     push(RULE);
   }
 
-  // Sector / estación + mesa: lo primero que lee la cocina, bien grande.
+  // Sector / estación + destino: lo primero que lee la cocina, bien grande.
   banner(String(c.station_name).toUpperCase());
-  banner(`MESA ${c.table_label}`);
+  // El destino manda: un pedido de delivery no tiene mesa (salía «MESA —») y la
+  // cocina necesita ver de una que ese plato se lo lleva el repartidor, no un
+  // mozo al salón. `dine_in` / ausente = comportamiento de siempre.
+  if (c.delivery_type === "delivery") {
+    banner("DELIVERY");
+    push("lo lleva el repartidor", { size: "tall", bold: true, align: "center" });
+  } else if (c.delivery_type === "pickup") {
+    banner("RETIRA");
+    push("pasa a buscarlo el cliente", { size: "tall", bold: true, align: "center" });
+  } else {
+    banner(`MESA ${c.table_label}`);
+  }
   push(`Tanda ${c.batch}`, { size: "tall", bold: true, align: "center" });
 
   // Metadata de referencia (no operativa): la más chica del ticket, pero igual
@@ -223,6 +251,25 @@ export function buildTicketLines(c: TicketComanda): Line[] {
       for (const l of wrap(`obs: ${it.notes}`, COLS.tall)) push(l, { size: "tall", bold: true });
   });
   if (items.length === 0) banner("(sin items)");
+
+  // ── Con qué combina ──────────────────────────────────────────────────────
+  // Los items del mismo pedido que salen de otros sectores. Es referencia, no
+  // trabajo de este sector: va en `tall` (no `xl`) y con sangría, para que no
+  // compita con la lista de arriba. En una comanda anulada no se imprime — no
+  // hay nada que coordinar.
+  const otros = (c.otros_sectores ?? []).filter((s) => s.items.length > 0);
+  if (otros.length > 0 && !c.cancelled) {
+    pad(1);
+    push(RULE);
+    push("COMBINA CON", { size: "tall", bold: true, align: "center" });
+    for (const sector of otros) {
+      for (const l of wrap(String(sector.station_name).toUpperCase(), COLS.tall))
+        push(l, { size: "tall", bold: true });
+      for (const it of sector.items)
+        for (const l of wrap(`- ${it.quantity}x ${it.product_name}`, COLS.tall))
+          push(l, { size: "tall" });
+    }
+  }
 
   pad(EDGE_PADDING); // aire entre el último ítem y el corte (o la línea del pie)
 

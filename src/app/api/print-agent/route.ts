@@ -63,6 +63,7 @@ export async function GET(req: Request) {
         id,
         business_id,
         table_id,
+        delivery_type,
         tables!orders_table_id_fkey(label)
       ),
       comanda_items(
@@ -96,6 +97,22 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "query failed" }, { status: 500 });
   }
 
+  // «Combina con»: con qué combina lo de este sector. Se arma desde los `order_items`
+  // del pedido —NO desde las comandas hermanas— porque `enviarComanda` inserta
+  // todos los items ANTES de crear cualquier comanda: cuando una comanda existe,
+  // los items de los otros sectores ya están, aunque su comanda todavía no.
+  // Leerlo de las comandas dejaría al primer ticket del envío sin la mitad.
+  const otrosPorPedido = await loadItemsPorPedido(
+    service,
+    [
+      ...new Set(
+        (comandas ?? []).map(
+          (c) => (c.orders as unknown as { id: string }).id,
+        ),
+      ),
+    ],
+  );
+
   // Una comanda a medio crear NO se le entrega al agente. `enviarComanda` crea
   // la fila de `comandas` y sus `comanda_items` en dos viajes separados a
   // Supabase; el agente pollea cada 1s, así que puede levantarla en el medio,
@@ -113,6 +130,7 @@ export async function GET(req: Request) {
       id: string;
       business_id: string;
       table_id: string | null;
+      delivery_type: string | null;
       tables: { label: string } | null;
     };
     const station = c.stations as unknown as {
@@ -142,6 +160,17 @@ export async function GET(req: Request) {
       // que reemplaza a uno anterior. Campo aditivo (un agente viejo lo ignora).
       reprint: Boolean(c.reprint_requested_at),
       table_label: sanitizeTicketText(order?.tables?.label) ?? "—",
+      // Destino del pedido: delivery / retiro no tienen mesa (salía «MESA —»).
+      delivery_type: (order?.delivery_type ?? null) as
+        | "dine_in"
+        | "delivery"
+        | "pickup"
+        | null,
+      // Con qué combina: lo del MISMO pedido que sale de los otros sectores.
+      otros_sectores: agruparOtrosSectores(
+        otrosPorPedido.get(order?.id) ?? [],
+        c.station_id as string | null,
+      ),
       items: ((c.comanda_items ?? []) as unknown[]).map((ci) => {
         const item = ci as {
           order_item_id: string;
@@ -182,6 +211,73 @@ export async function GET(req: Request) {
   const controls = await buildPrintableControlTickets(service, businessId);
 
   return NextResponse.json({ comandas: [...printable, ...controls] });
+}
+
+/** Item de un pedido con su sector, para el bloque «COMBINA CON» de los tickets. */
+type ItemDePedido = {
+  order_id: string;
+  quantity: number;
+  product_name: string;
+  station_id: string | null;
+  stations: { name: string } | null;
+};
+
+/**
+ * Los items vivos (sin anular y todavía no entregados) de los pedidos dados,
+ * indexados por pedido. Se saltean los que no pasan por cocina (`station_id`
+ * null: las bebidas que sirve el mozo) — no hay nada que coordinar con ellos.
+ */
+async function loadItemsPorPedido(
+  service: ReturnType<typeof createSupabaseServiceClient>,
+  orderIds: string[],
+): Promise<Map<string, ItemDePedido[]>> {
+  const porPedido = new Map<string, ItemDePedido[]>();
+  if (orderIds.length === 0) return porPedido;
+
+  const { data, error } = await service
+    .from("order_items")
+    .select("order_id, quantity, product_name, station_id, stations(name)")
+    .in("order_id", orderIds)
+    .is("cancelled_at", null)
+    .not("station_id", "is", null)
+    .neq("kitchen_status", "delivered");
+  if (error) {
+    // El «va con» es contexto: si falla, el ticket igual sale con sus ítems.
+    console.error("print-agent GET · items del pedido", error);
+    return porPedido;
+  }
+
+  for (const row of (data ?? []) as unknown as ItemDePedido[]) {
+    const bucket = porPedido.get(row.order_id) ?? [];
+    bucket.push(row);
+    porPedido.set(row.order_id, bucket);
+  }
+  return porPedido;
+}
+
+/**
+ * Agrupa por sector los items del pedido que NO son de `stationId`: con qué
+ * combina lo que este ticket manda a cocinar. Sin esto, la parrilla no sabe que
+ * el entrecot sale con las papas de fritera y cada sector cocina a destiempo.
+ */
+function agruparOtrosSectores(items: ItemDePedido[], stationId: string | null) {
+  const porSector = new Map<
+    string,
+    { station_name: string; items: { product_name: string; quantity: number }[] }
+  >();
+  for (const it of items) {
+    if (!it.station_id || it.station_id === stationId) continue;
+    const sector = porSector.get(it.station_id) ?? {
+      station_name: sanitizeTicketText(it.stations?.name) ?? "Otro sector",
+      items: [],
+    };
+    sector.items.push({
+      product_name: sanitizeTicketText(it.product_name) ?? "—",
+      quantity: it.quantity ?? 1,
+    });
+    porSector.set(it.station_id, sector);
+  }
+  return [...porSector.values()];
 }
 
 /**
