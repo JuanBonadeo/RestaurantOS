@@ -5,6 +5,7 @@ import { currentDayOfWeek } from "@/lib/day-of-week";
 import { formatCurrency } from "@/lib/currency";
 import { createNotification } from "@/lib/notifications/create";
 import { createPreference } from "@/lib/payments/mercadopago";
+import { customerPhoneKey } from "@/lib/phone";
 import { validatePromoCode } from "@/lib/promos/validate";
 import {
   applyPriceOverride,
@@ -460,7 +461,7 @@ export async function persistOrder(
       .from("customers")
       .select("id")
       .eq("business_id", business.id)
-      .eq("phone", data.customer_phone)
+      .eq("phone", customerPhoneKey(data.customer_phone))
       .maybeSingle();
 
     const validation = await validatePromoCode(supabase, {
@@ -492,7 +493,12 @@ export async function persistOrder(
     .upsert(
       {
         business_id: business.id,
-        phone: data.customer_phone,
+        // Clave de identidad normalizada (issue #114): el checkout acepta
+        // "+54 341…", "341 506-8633", etc. Sin colapsarlas, el mismo cliente se
+        // duplica y no engancha su `user_id` (crítico con login Google, que no
+        // trae teléfono y deja el campo vacío). El valor tipeado se conserva en
+        // `orders.customer_phone` para mostrar/contactar.
+        phone: customerPhoneKey(data.customer_phone),
         name: data.customer_name,
         email: data.customer_email ?? null,
         user_id: userId ?? null,

@@ -3,6 +3,7 @@ import "server-only";
 import { fromZonedTime } from "date-fns-tz";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { normalizePhone } from "@/lib/phone";
 import {
   getAvailability,
   getBusinessSalones,
@@ -52,15 +53,11 @@ export type ReservationIntent = {
 /**
  * Digits-only phone normalization. Anything that doesn't look phone-like
  * collapses to "" — the tools use that to ask the user explicitly.
+ *
+ * Vive en `@/lib/phone` porque la comparten checkout, walk-in y reservas para
+ * identificar clientes (issue #114). Se re-exporta acá para no romper imports.
  */
-export function normalizePhone(raw: string | null | undefined): string {
-  if (!raw) return "";
-  const digits = raw.replace(/\D+/g, "");
-  // Require a minimum so emails like "x@y.com" don't accidentally normalize
-  // to "" (they already do, but stray strings with two digits shouldn't pass).
-  if (digits.length < 6) return "";
-  return digits;
-}
+export { normalizePhone };
 
 type Business = {
   id: string;

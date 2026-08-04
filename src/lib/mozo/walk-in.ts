@@ -7,6 +7,7 @@ import { z } from "zod";
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { requireMozoActionContext } from "@/lib/mozo/auth";
 import { openTable } from "@/lib/mozo/open-table";
+import { customerPhoneKey } from "@/lib/phone";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
@@ -80,13 +81,16 @@ export async function sentarWalkIn(
   };
 
   // Customer upsert por (business_id, phone). Idempotente.
+  // La clave va normalizada (issue #114) para que el mismo número tipeado en
+  // otro formato acá, en el checkout o en una reserva sea el mismo cliente.
+  const phoneKey = customerPhoneKey(input.phone);
   let customerId: string | null = null;
-  if (input.phone) {
+  if (phoneKey) {
     const { data: existing } = await service
       .from("customers")
       .select("id, name")
       .eq("business_id", business.id)
-      .eq("phone", input.phone)
+      .eq("phone", phoneKey)
       .maybeSingle();
     const existingRow = existing as { id: string; name: string | null } | null;
     if (existingRow) {
@@ -103,7 +107,7 @@ export async function sentarWalkIn(
         .from("customers")
         .insert({
           business_id: business.id,
-          phone: input.phone,
+          phone: phoneKey,
           name: input.name ?? null,
         })
         .select("id")

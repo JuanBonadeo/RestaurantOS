@@ -8,6 +8,7 @@ import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { createNotification } from "@/lib/notifications/create";
 import { notifyReservationConfirmed } from "@/lib/notifications/reservation-notify";
 import { canManageReservations } from "@/lib/permissions/can";
+import { customerPhoneKey } from "@/lib/phone";
 import { isTableAvailableForReservation, pickTableExcluding } from "@/lib/reservations/assign-table";
 import {
   getAllReservableTables,
@@ -557,14 +558,15 @@ export async function sentarReserva(
     id: string; operational_status: string; opened_at: string | null; mozo_id: string | null;
   };
 
-  // Customer upsert por phone.
+  // Customer upsert por phone (clave normalizada — issue #114).
+  const phoneKey = customerPhoneKey(reservation.customer_phone);
   let customerId: string | null = null;
-  if (reservation.customer_phone) {
+  if (phoneKey) {
     const { data: existing } = await service
       .from("customers")
       .select("id, name")
       .eq("business_id", business.id)
-      .eq("phone", reservation.customer_phone)
+      .eq("phone", phoneKey)
       .maybeSingle();
     const existingRow = existing as { id: string; name: string | null } | null;
     if (existingRow) {
@@ -575,7 +577,7 @@ export async function sentarReserva(
     } else {
       const { data: created } = await service
         .from("customers")
-        .insert({ business_id: business.id, phone: reservation.customer_phone, name: reservation.customer_name })
+        .insert({ business_id: business.id, phone: phoneKey, name: reservation.customer_name })
         .select("id")
         .single();
       if (created) customerId = (created as { id: string }).id;
