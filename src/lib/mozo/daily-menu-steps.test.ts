@@ -35,6 +35,7 @@ function group(
       extra_price_cents: 0,
       blocks_choice_group_ids: blocksByOption[i] ?? [],
       sort_order: i,
+      modifier_groups: [],
     })),
   };
 }

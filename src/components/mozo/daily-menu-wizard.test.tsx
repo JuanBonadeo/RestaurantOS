@@ -37,6 +37,7 @@ function option(
     extra_price_cents: extra,
     blocks_choice_group_ids: blocks,
     sort_order: sortOrder++,
+    modifier_groups: [],
   };
 }
 
@@ -69,6 +70,7 @@ const MENU: DailyMenuForMozo = {
       extra_price_cents: 0,
       blocks_choice_group_ids: [],
       sort_order: 0,
+      modifier_groups: [],
     },
     ...entradas,
     ...principales,

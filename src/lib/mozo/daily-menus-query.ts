@@ -1,6 +1,9 @@
 import "server-only";
 
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
+import type { ComboModifierGroup } from "@/lib/orders/combo-modifiers";
+
+export type { ComboModifierGroup };
 
 export type DailyMenuComponent = {
   id: string;
@@ -21,6 +24,12 @@ export type DailyMenuComponent = {
   /** `sort_order` del componente: define el orden de los grupos, y el orden ES
    *  la regla de resolución (sólo se puede bloquear hacia adelante). */
   sort_order: number;
+  /**
+   * Grupos de modificadores del producto de esta opción (spec 083). Los mismos
+   * que el mozo ve al cargar el producto suelto: «Salsa para pasta» de los
+   * ñoquis, «Punto de cocción» del bife. Vacío si el producto no tiene.
+   */
+  modifier_groups: ComboModifierGroup[];
 };
 
 export type DailyMenuChoiceGroup = {
@@ -60,7 +69,10 @@ export async function getDailyMenusForToday(
   const { data, error } = await supabase
     .from("daily_menus")
     .select(
-      "id, name, description, price_cents, image_url, sort_order, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, extra_price_cents, blocks_choice_group_ids, products(id, name, image_url))",
+      // Los `modifier_groups` del producto de cada opción (spec 083) son los
+      // mismos que ve el mozo al cargar el producto suelto: el asistente los
+      // pregunta en un paso propio y el server re-deriva de ahí el adicional.
+      "id, name, description, price_cents, image_url, sort_order, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, extra_price_cents, blocks_choice_group_ids, products(id, name, image_url, modifier_groups(id, name, is_required, min_selection, max_selection, sort_order, modifiers(id, name, price_delta_cents, is_available, sort_order))))",
     )
     .eq("business_id", businessId)
     .eq("is_active", true)
@@ -91,6 +103,21 @@ export async function getDailyMenusForToday(
         extra_price_cents: Number(c.extra_price_cents ?? 0),
         blocks_choice_group_ids: c.blocks_choice_group_ids ?? [],
         sort_order: Number(c.sort_order ?? 0),
+        modifier_groups: (c.products?.modifier_groups ?? []).map((g: any) => ({
+          id: g.id,
+          name: g.name,
+          is_required: !!g.is_required,
+          min_selection: Number(g.min_selection ?? 0),
+          max_selection: Number(g.max_selection ?? 1),
+          sort_order: Number(g.sort_order ?? 0),
+          modifiers: (g.modifiers ?? []).map((mod: any) => ({
+            id: mod.id,
+            name: mod.name,
+            price_delta_cents: Number(mod.price_delta_cents ?? 0),
+            is_available: mod.is_available !== false,
+            sort_order: Number(mod.sort_order ?? 0),
+          })),
+        })),
       }));
 
     const groupMap = new Map<string, DailyMenuChoiceGroup>();
