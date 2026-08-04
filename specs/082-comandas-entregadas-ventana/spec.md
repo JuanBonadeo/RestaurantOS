@@ -18,6 +18,8 @@ La columna **Entregadas** del KDS (`/admin/operacion` → tab Comandas) mostraba
 
 Una comanda entregada sirve como **acuse de recibo** ("sí, eso ya salió, hace 3 minutos"). Ese valor se agota a los minutos: pasado un rato, el plato está comido y la card sólo ocupa pantalla en la hora pico, que es justo cuando el encargado menos puede scrollear.
 
+⚠️ **Esto revierte una decisión previa.** La ventana de <30 min **ya existía** y el 2026-05-29 se cambió a día operativo con el argumento inverso: *"prácticamente siempre se veía vacía y el encargado perdía visibilidad de lo que salió en el turno"* (ver [`wiki/features/comandas.md`](../../../../wiki/features/comandas.md)). Las dos observaciones son compatibles: en mayo el sistema estaba casi sin volumen (hoy, 2026-08-04, `golf-jcr` lleva 5 entregadas en todo el día), y con volumen real el problema se da vuelta. Si vuelve a aparecer el pedido de "quiero ver todo lo del turno", la salida **no es volver al día operativo** — es separar acuse-de-recibo (KDS) de histórico (reportes / la mesa), que es donde ese dato pertenece.
+
 ## Decisiones de producto
 
 | Pregunta | Decisión |
