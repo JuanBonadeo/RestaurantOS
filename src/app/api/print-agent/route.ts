@@ -96,7 +96,19 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "query failed" }, { status: 500 });
   }
 
-  const printable = (comandas ?? []).map((c) => {
+  // Una comanda a medio crear NO se le entrega al agente. `enviarComanda` crea
+  // la fila de `comandas` y sus `comanda_items` en dos viajes separados a
+  // Supabase; el agente pollea cada 1s, así que puede levantarla en el medio,
+  // con la lista de items todavía vacía. Ese ticket sale «(sin items)» y —peor—
+  // el ACK la pasa a `en_preparacion`, así que nunca se reimprime: la comanda se
+  // pierde para cocina (visto en golf el 2026-08-04, mesa R4).
+  //
+  // Sin items no hay nada que imprimir. Se saltea y sale completa en el próximo
+  // poll, un segundo después. También cubre el caso de una comanda cuyos
+  // `order_items` ya no existen (el `!inner` del select los descarta).
+  const printable = (comandas ?? []).filter(
+    (c) => ((c.comanda_items ?? []) as unknown[]).length > 0,
+  ).map((c) => {
     const order = c.orders as unknown as {
       id: string;
       business_id: string;

@@ -54,6 +54,26 @@ vi.mock("@/lib/supabase/service", () => ({
 
 const { GET, POST } = await import("./route");
 
+/**
+ * Una comanda real SIEMPRE viaja con al menos un item (`createComandasForItems`
+ * no crea comandas vacías). El fixture lo refleja; una fila con
+ * `comanda_items: []` representa una comanda a medio crear — ver el test de la
+ * ventana de carrera con el print-agent.
+ */
+const unItem = () => [
+  {
+    order_item_id: "oi-1",
+    order_items: {
+      id: "oi-1",
+      quantity: 2,
+      notes: null,
+      unit_price_cents: 1000,
+      products: { name: "Ensalada Queso Azul" },
+      order_item_modifiers: [],
+    },
+  },
+];
+
 function makeRow(
   name: string,
   printerIp: string | null,
@@ -80,7 +100,7 @@ function makeRow(
       table_id: "t1",
       tables: { label: "Mesa 1" },
     },
-    comanda_items: [],
+    comanda_items: extra.comanda_items ?? unItem(),
   };
 }
 
@@ -221,12 +241,28 @@ describe("GET /api/print-agent — printer_ip por comanda (spec 28)", () => {
     expect(escpos.startsWith("\x1b@")).toBe(true); // init ESC @
     expect(escpos).toContain("COCINA");
     expect(cocina?.content_plain).toContain("COCINA");
-    expect(cocina?.content_plain).toContain("(sin items)"); // makeRow no trae items
+    // El nombre se corta por palabra a 11 col (doble ancho), así que se busca
+    // el arranque de la línea del item, no el nombre entero.
+    expect(cocina?.content_plain).toContain("2x Ensalada");
     // El payload estructurado viejo sigue intacto (aditivo → un agente viejo lo usa).
     expect(cocina?.station_name).toBe("Cocina");
-    expect(cocina?.items).toEqual([]);
+    expect(cocina?.items).toHaveLength(1);
     expect(cocina?.cancelled).toBe(false);
     expect(cocina?.reprint).toBe(false);
+  });
+
+  it("comanda a medio crear (todavía sin comanda_items) NO se entrega al agente", async () => {
+    // `enviarComanda` inserta la comanda y sus links en dos viajes separados; el
+    // agente pollea cada 1s y puede levantarla en el medio. Si se la damos, sale
+    // un ticket «(sin items)» y el ACK la pasa a `en_preparacion` → cocina nunca
+    // ve el pedido. Se saltea: en el próximo poll ya está completa.
+    rows = [
+      makeRow("Cocina", "192.168.10.50", { comanda_items: [] }),
+      makeRow("Bar", "192.168.10.51"),
+    ];
+    const res = await GET(getReq());
+    const body = (await res.json()) as { comandas: { station_name: string }[] };
+    expect(body.comandas.map((c) => c.station_name)).toEqual(["Bar"]);
   });
 
   it("sin Bearer válido → 401", async () => {

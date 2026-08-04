@@ -67,6 +67,11 @@ export async function createComandasForItems(
     );
     if (linkErr) {
       console.error("createComandasForItems · link insert", linkErr);
+      // La comanda ya está insertada: sin sus links queda como una comanda vacía
+      // que cocina ve sin items y que el print-agent saltea (ver el filtro del
+      // `GET /api/print-agent`). Se borra para sostener el invariante «toda
+      // comanda tiene al menos un item».
+      await service.from("comandas").delete().eq("id", comandaId);
       return { ok: false, error: "No pudimos vincular items a la comanda." };
     }
   }
