@@ -310,6 +310,26 @@ export function evaluarGuardas(
   return { ok: true };
 }
 
+/**
+ * Guardas de la **anulación** de una línea de cobro. Casi las mismas que
+ * corregir, con una diferencia: acá la rendición del mozo se mira siempre (no
+ * sólo si se cambia la atribución), porque sacar el cobro le baja la
+ * liquidación a alguien que ya rindió.
+ */
+export function evaluarGuardasDeAnulacion(
+  ctx: ContextoCorreccion,
+): ValidacionResultado {
+  const base = evaluarGuardas(ctx, {});
+  if (!base.ok) return base;
+  if (ctx.rendicionesPosteriores.length > 0) {
+    return {
+      ok: false,
+      error: `Ese cobro ya entró en la rendición de ${ctx.rendicionesPosteriores[0].nombre}: anularlo le cambiaría una liquidación cerrada.`,
+    };
+  }
+  return { ok: true };
+}
+
 const ERRORES_RPC: Record<string, string> = {
   REASON_REQUIRED: "La corrección requiere un motivo.",
   PAYMENT_NOT_FOUND: "No se encontró el cobro.",

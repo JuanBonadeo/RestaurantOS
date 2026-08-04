@@ -184,6 +184,7 @@ Como **admin**, quiero ver las correcciones del turno sin tener que ir a buscarl
 - **FR-017**: Toda corrección DEBE dejar rastro en una tabla de auditoría, **un renglón por campo cambiado**, con `field`, `from_value`, `to_value`, `by_user_id`, `reason` y `created_at`.
 - **FR-018**: La auditoría y el update DEBEN ser **atómicos**: van en una RPC transaccional (`corregir_pago_tx`), con `FOR UPDATE` sobre el pago y su orden — mismo criterio que `registrar_pago_tx` (migración 0007).
 - **FR-019**: Ninguna fila se borra nunca. Anular es un estado, no un `DELETE`.
+- **FR-019b**: DEBE poder anularse **una** línea de cobro desde el panel (`anularLineaDeCobro` → RPC `anular_pago_tx`, migración `0033`), con motivo obligatorio y las mismas guardas que corregir **más** la de rendición cerrada —que acá aplica siempre, porque anular le baja la liquidación al mozo atribuido. La línea pasa a `refunded`, deja de sumar en la caja y en la rendición, y sigue visible tachada. La cuenta **no se reabre**: se recalcula `total_paid_cents` y, si queda sin cubrir, su `payment_status` vuelve a `pending` (cerrada e impaga es exactamente lo que pasó). Se distingue de `anularCobro`, que deshace **todos** los pagos de la orden y devuelve la mesa.
 
 ### El libro de movimientos
 
@@ -222,6 +223,8 @@ Como **admin**, quiero ver las correcciones del turno sin tener que ir a buscarl
 
 **D8 — El libro vive en Operación, no en Reportes.** `reportes` es `none` para el encargado ([`sections.ts`](../../src/lib/permissions/sections.ts)) y el encargado es el que corrige. El libro cuelga de Operación (que ya tiene `full` para encargado), no de la sección Cajas (que es config admin-only).
 
+**D11 — Borrar no; anular sí.** Pedido de Juan (2026-08-03): *"¿y que te deje borrar una línea directamente?"*. Un `DELETE` deja el arqueo sin explicación —la plata del período cambia y no queda rastro de por qué— y contradice el principio del producto. La anulación da el mismo resultado operativo (la línea deja de contar) conservando el rastro: motivo, responsable, hora. Lo que **sí** faltaba era poder anular **una** línea: `anularCobro` sólo sabe deshacer el cobro entero de la orden, inútil cuando de tres pagos hay uno que no existió.
+
 **D10 — La factura no es una frontera de la caja; la re-emisión ya existe.** La primera versión bloqueaba corregir el monto de un cobro cuya cuenta estaba facturada. Estaba de más: `emitInvoice` factura `order.total_cents − tip_cents`, o sea la **cuenta**, no el pago — mover cuánta plata entró a la caja no cambia el comprobante. Y para el caso en que sí está mal el importe facturado, el producto ya sabe hacerlo: `anularFactura` emite la **nota de crédito** referenciando la original y `emitInvoice` permite re-facturar cuando la anterior quedó `cancelled` (el botón «Re-facturar» del detalle de comprobante, spec 09 + 053). Lo que faltaba era el puente: la línea del libro ahora muestra el comprobante y linkea a él. Pedido de Juan (2026-08-03): *"tendría que haber una manera de re-emitir un comprobante, anulando el anterior y haciendo uno nuevo"* — existe, y ahora se llega.
 
 **D9 — La propina se corrige junto con el monto.** No es scope creep: `amount_cents` **incluye** la propina, así que permitir bajar el monto sin tocar `tip_cents` habilita el estado imposible `tip > amount`, que rompe `calcularRendicionMozo` en silencio.
@@ -250,6 +253,7 @@ Como **admin**, quiero ver las correcciones del turno sin tener que ir a buscarl
 ## Alcance
 
 **Toca:**
+- `supabase/migrations/0033_anular_linea_de_cobro.sql` **(nueva)** — RPC `anular_pago_tx` (D11).
 - `supabase/migrations/00NN_caja_correcciones.sql` **(nueva)** — `caja_audit_log` + RPC `corregir_pago_tx` + (P2) columnas de anulación en `caja_movimientos`. ⚠️ Numerar al implementar: la [spec 069](../069-precio-por-item-con-motivo/) reclama la `0030`.
 - `src/lib/permissions/can.ts` + `can.test.ts` — `canCorregirCobro`.
 - `src/lib/caja/correcciones.ts` **(nuevo, puro)** + test — qué campos cambian, invariantes (`tip <= amount`, `amount > 0`) y el veredicto de cobertura de la orden (FR-010 a FR-012).

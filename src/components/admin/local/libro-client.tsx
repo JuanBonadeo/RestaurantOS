@@ -11,6 +11,7 @@ import {
   History,
   Link2,
   FileText,
+  Ban,
   Lock,
   MoreHorizontal,
   QrCode,
@@ -38,6 +39,7 @@ import {
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  anularLineaDeCobro,
   corregirCobro,
   corregirMovimiento,
   verCorrecciones,
@@ -496,6 +498,7 @@ function DetalleSheet({
   const [notes, setNotes] = useState("");
   const [motivo, setMotivo] = useState("");
   const [anular, setAnular] = useState(false);
+  const [confirmandoAnular, setConfirmandoAnular] = useState(false);
   const [pending, startTransition] = useTransition();
 
   // Cada línea abre con sus valores actuales cargados: el formulario ES el
@@ -510,6 +513,7 @@ function DetalleSheet({
     setNotes("");
     setMotivo("");
     setAnular(false);
+    setConfirmandoAnular(false);
   }, [entry]);
 
   useEffect(() => {
@@ -596,6 +600,24 @@ function DetalleSheet({
         return;
       }
       toast.success(anular ? "Movimiento anulado" : "Línea corregida");
+      onDone();
+    });
+  }
+
+  function anularLinea() {
+    if (!entry) return;
+    const linea = entry;
+    startTransition(async () => {
+      const r = await anularLineaDeCobro({
+        paymentId: linea.id,
+        slug,
+        motivo: motivo.trim(),
+      });
+      if (!r.ok) {
+        toast.error(r.error);
+        return;
+      }
+      toast.success("Cobro anulado");
       onDone();
     });
   }
@@ -907,6 +929,54 @@ function DetalleSheet({
                     ? `Corregir ${cambios.join(" + ")}`
                     : "Corregir"}
               </Button>
+
+              {/* Anular ≠ borrar: la línea deja de sumar pero sigue acá, con
+                  motivo y responsable. Una fila borrada dejaría el arqueo sin
+                  explicación. */}
+              {esCobro && (
+                <div className="border-t border-zinc-100 pt-4">
+                  {!confirmandoAnular ? (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmandoAnular(true)}
+                      className="inline-flex items-center gap-2 text-sm font-semibold text-rose-700 underline-offset-2 hover:underline"
+                    >
+                      <Ban className="size-4" /> Anular este cobro
+                    </button>
+                  ) : (
+                    <div className="rounded-xl bg-rose-50 p-3 ring-1 ring-rose-200">
+                      <p className="text-sm text-rose-900">
+                        La línea deja de contar para el arqueo y para la
+                        rendición, pero <strong>sigue visible acá</strong>,
+                        tachada, con el motivo y quién la anuló. Si la cuenta
+                        queda sin cubrir, pasa a impaga — la mesa no se toca.
+                      </p>
+                      <div className="mt-3 flex items-center gap-2">
+                        <Button
+                          className="h-11 bg-rose-600 px-4 text-base hover:bg-rose-700"
+                          disabled={pending || motivo.trim() === ""}
+                          onClick={anularLinea}
+                        >
+                          {pending ? "Anulando…" : "Anular"}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          className="h-11 px-4 text-base"
+                          disabled={pending}
+                          onClick={() => setConfirmandoAnular(false)}
+                        >
+                          Cancelar
+                        </Button>
+                      </div>
+                      {motivo.trim() === "" && (
+                        <p className="mt-2 text-sm font-medium text-rose-700">
+                          Cargá el motivo arriba para poder anular.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

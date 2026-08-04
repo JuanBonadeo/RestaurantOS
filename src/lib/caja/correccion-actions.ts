@@ -12,6 +12,7 @@ import { getBusiness } from "@/lib/tenant";
 
 import {
   evaluarGuardas,
+  evaluarGuardasDeAnulacion,
   mapCorreccionError,
   validarCorreccion,
   type CorreccionPatch,
@@ -272,6 +273,99 @@ export async function corregirCobro(
   revalidatePath(`/${input.slug}/admin/operacion`);
   revalidatePath(`/${input.slug}/admin/operacion/movimientos`);
   return actionOk({ changedFields: row.changed_fields ?? [] });
+}
+
+/**
+ * Anula UNA línea de cobro (spec 070). No la borra: la marca.
+ *
+ * Una fila borrada deja el arqueo sin explicación —la plata cambia y no hay
+ * rastro de por qué— y contradice el principio del producto: todo peso que
+ * entra se registra y se puede auditar. Anulada, la línea deja de sumar pero
+ * sigue en el libro, tachada, con motivo y responsable.
+ *
+ * Distinta de `anularCobro`, que deshace **todos** los pagos de la orden, la
+ * reabre y devuelve la mesa: eso sirve cuando se cae el cobro entero, no
+ * cuando de tres pagos hay uno que no existió.
+ */
+export async function anularLineaDeCobro(input: {
+  paymentId: string;
+  slug: string;
+  motivo: string;
+}): Promise<ActionResult<{ ordenSaldada: boolean }>> {
+  const business = await getBusiness(input.slug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  const ctx = ctxResult.data;
+
+  if (!canCorregirCobro(ctx.role)) {
+    return actionError("Solo encargado o admin pueden anular un cobro.");
+  }
+  const motivo = (input.motivo ?? "").trim();
+  if (motivo === "") return actionError("La anulación requiere un motivo.");
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+
+  const { data: paymentData } = await service
+    .from("payments")
+    .select(
+      "id, business_id, order_id, split_id, payment_status, mp_payment_id, created_at, method, amount_cents, tip_cents, attributed_mozo_id, caja_id, last_four, card_brand, notes",
+    )
+    .eq("id", input.paymentId)
+    .maybeSingle();
+  const pago = paymentData as PaymentRow | null;
+  if (!pago) return actionError("No se encontró el cobro.");
+
+  const ultimoCorteOrigen = await ultimoCorteDe(
+    service,
+    pago.caja_id,
+    business.id,
+  );
+
+  // Sacar el cobro le baja la liquidación al mozo atribuido: si ya rindió, la
+  // frontera es la misma que para reatribuirlo.
+  const rendicionesPosteriores: Array<{ mozoId: string; nombre: string }> = [];
+  if (
+    pago.attributed_mozo_id &&
+    (await tieneRendicionPosterior(
+      service,
+      business.id,
+      pago.attributed_mozo_id,
+      pago.created_at,
+    ))
+  ) {
+    rendicionesPosteriores.push({
+      mozoId: pago.attributed_mozo_id,
+      nombre: await nombreDeUsuario(service, business.id, pago.attributed_mozo_id),
+    });
+  }
+
+  const guardas = evaluarGuardasDeAnulacion({
+    pago,
+    businessId: business.id,
+    ultimoCorteOrigen,
+    ultimoCorteDestino: null,
+    rendicionesPosteriores,
+  });
+  if (!guardas.ok) return actionError(guardas.error);
+
+  const { data: rpcData, error } = await service.rpc("anular_pago_tx", {
+    p_payment_id: pago.id,
+    p_business_id: business.id,
+    p_by_user_id: ctx.userId,
+    p_reason: motivo,
+  });
+  if (error) return actionError(mapCorreccionError(error.message));
+
+  const row = (Array.isArray(rpcData) ? rpcData[0] : rpcData) as
+    | { payment: unknown; fully_paid: boolean }
+    | undefined;
+  if (!row) return actionError("No se pudo anular el cobro.");
+
+  revalidatePath(`/${input.slug}/admin/operacion`);
+  revalidatePath(`/${input.slug}/admin/operacion/movimientos`);
+  return actionOk({ ordenSaldada: row.fully_paid });
 }
 
 export type CorregirMovimientoInput = {

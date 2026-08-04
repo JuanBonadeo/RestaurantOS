@@ -4,6 +4,7 @@ import {
   diffPatch,
   estaCubierta,
   evaluarGuardas,
+  evaluarGuardasDeAnulacion,
   mapCorreccionError,
   validarCorreccion,
   veredictoDeMonto,
@@ -232,6 +233,50 @@ describe("caja / evaluarGuardas", () => {
       { attributed_mozo_id: null },
     );
     expect(r.ok).toBe(false);
+  });
+});
+
+describe("caja / evaluarGuardasDeAnulacion", () => {
+  it("deja anular una línea del período abierto", () => {
+    expect(evaluarGuardasDeAnulacion(CTX)).toEqual({ ok: true });
+  });
+
+  it("no anula un cobro de un arqueo cerrado", () => {
+    expect(
+      evaluarGuardasDeAnulacion({
+        ...CTX,
+        ultimoCorteOrigen: "2026-07-30T21:00:00.000Z",
+      }).ok,
+    ).toBe(false);
+  });
+
+  it("no anula un cobro de Mercado Pago", () => {
+    expect(
+      evaluarGuardasDeAnulacion({
+        ...CTX,
+        pago: { ...CTX.pago, mp_payment_id: "mp-1" },
+      }).ok,
+    ).toBe(false);
+  });
+
+  it("no anula un cobro ya anulado", () => {
+    expect(
+      evaluarGuardasDeAnulacion({
+        ...CTX,
+        pago: { ...CTX.pago, payment_status: "refunded" },
+      }).ok,
+    ).toBe(false);
+  });
+
+  // Anular baja la liquidación del mozo: si ya rindió, es la misma frontera
+  // que reatribuir — pero acá aplica siempre, no sólo al cambiar el mozo.
+  it("no anula un cobro que ya entró en una rendición, y lo dice con nombre", () => {
+    const r = evaluarGuardasDeAnulacion({
+      ...CTX,
+      rendicionesPosteriores: [{ mozoId: "mozo-1", nombre: "Ana" }],
+    });
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.error).toContain("Ana");
   });
 });
 
