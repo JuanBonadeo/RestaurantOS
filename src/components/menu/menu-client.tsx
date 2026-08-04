@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 
@@ -126,6 +126,38 @@ export function MenuClient({
     () => displayTabs.find((t) => t.id === active) ?? displayTabs[0],
     [active, displayTabs],
   );
+
+  // La barra de categorías scrollea en horizontal y en un celular no se nota
+  // que hay más categorías afuera de pantalla. Marcamos con un degradé + chevron
+  // de qué lado queda contenido, y sólo cuando efectivamente lo hay.
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const [tabsOverflow, setTabsOverflow] = useState({
+    left: false,
+    right: false,
+  });
+  useEffect(() => {
+    const el = tabsRef.current;
+    if (!el) return;
+    const update = () => {
+      // 1px de tolerancia: los anchos sub-pixel dejan un resto que nunca llega
+      // a 0 y dispararía el degradé con la barra ya scrolleada hasta el final.
+      setTabsOverflow({
+        left: el.scrollLeft > 1,
+        right: el.scrollLeft + el.clientWidth < el.scrollWidth - 1,
+      });
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    // El contenedor por el resize de viewport; los botones porque su ancho
+    // cambia cuando termina de cargar la tipografía del negocio.
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    for (const child of Array.from(el.children)) ro.observe(child);
+    return () => {
+      el.removeEventListener("scroll", update);
+      ro.disconnect();
+    };
+  }, [displayTabs]);
 
   const items = useCart(slug, (s) => s.items);
   const count = cartCount(items);
@@ -423,6 +455,7 @@ export function MenuClient({
           }}
         >
           <div
+            ref={tabsRef}
             style={{
               display: "flex",
               gap: 20,
@@ -462,6 +495,48 @@ export function MenuClient({
                 </button>
               );
             })}
+          </div>
+
+          {/* Pistas de "hay más categorías" — decorativas, no roban el tap. */}
+          <div
+            aria-hidden
+            style={{
+              position: "absolute",
+              top: 0,
+              bottom: 0,
+              left: 0,
+              width: 40,
+              display: "flex",
+              alignItems: "center",
+              paddingLeft: 2,
+              background:
+                "linear-gradient(to right, var(--bg) 45%, transparent)",
+              opacity: tabsOverflow.left ? 1 : 0,
+              transition: "opacity 160ms ease",
+              pointerEvents: "none",
+            }}
+          >
+            {I.chevLeft("var(--ink-3)", 15)}
+          </div>
+          <div
+            aria-hidden
+            style={{
+              position: "absolute",
+              top: 0,
+              bottom: 0,
+              right: 0,
+              width: 40,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "flex-end",
+              paddingRight: 2,
+              background: "linear-gradient(to left, var(--bg) 45%, transparent)",
+              opacity: tabsOverflow.right ? 1 : 0,
+              transition: "opacity 160ms ease",
+              pointerEvents: "none",
+            }}
+          >
+            {I.chevRight("var(--ink-3)", 15)}
           </div>
         </div>
       )}
