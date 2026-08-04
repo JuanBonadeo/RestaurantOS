@@ -153,6 +153,7 @@ export async function saveReservationServiceGroups(
         opens_at: svc.opens_at,
         closes_at: svc.closes_at,
         soft_capacity: svc.soft_capacity ?? null,
+        hold_tables: svc.hold_tables ?? 0,
         floor_plan_id: zoneId,
       }));
 

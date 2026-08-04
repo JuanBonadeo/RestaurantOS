@@ -365,23 +365,34 @@ describe("computeFlexibleAvailability · enforceCapacity (spec 077)", () => {
     expect(out.reason).toBe("sin-mesas");
   });
 
-  it("cliente: sin cupo configurado (null) no bloquea por cubiertos, sí por mesas", () => {
+  it("cliente: sin cupo configurado (null) no bloquea por cubiertos mientras queden mesas", () => {
+    // 24 cubiertos reservados y ningún `soft_capacity`: los cubiertos no
+    // frenan. Las mesas sí alcanzan (quedan 2 de 12 libres).
+    const salonGrande = [1, 2, 3, 4].map((i) =>
+      makeTable({ id: `G${i}`, seats: 12, floor_plan_id: "adentro" }),
+    );
     const conMesas = computeFlexibleAvailability({
       date: DATE,
       service: CENA, // soft_capacity: null
       partySize: 4,
-      tables,
-      reservations: [makeRes({ starts_at: CENA_2100, party_size: 40 })],
+      tables: salonGrande,
+      reservations: [
+        makeRes({ starts_at: CENA_2100, party_size: 12 }),
+        makeRes({ starts_at: CENA_2100, party_size: 12 }),
+      ],
       timezone: TZ,
       enforceCapacity: true,
     })!;
     expect(conMesas.available).toBe(true);
     expect(conMesas.overCapacity).toBe(false);
 
+    // Spec 081 — un party que no entra ni sumando TODAS las mesas libres.
+    // (Antes alcanzaba con que ninguna mesa sola lo entrara; ahora el club
+    // junta mesas, así que 8 personas en mesas de 4+2+6 sí entran.)
     const sinMesas = computeFlexibleAvailability({
       date: DATE,
       service: CENA,
-      partySize: 8, // ninguna mesa tiene 8 asientos
+      partySize: 20,
       tables,
       reservations: [],
       timezone: TZ,
@@ -389,6 +400,20 @@ describe("computeFlexibleAvailability · enforceCapacity (spec 077)", () => {
     })!;
     expect(sinMesas.available).toBe(false);
     expect(sinMesas.reason).toBe("sin-mesas");
+  });
+
+  it("cliente: un grupo que ninguna mesa entra sola se acomoda partido (spec 081)", () => {
+    // 8 personas en un salón de mesas de 4, 2 y 6: entra usando 6+2.
+    const out = computeFlexibleAvailability({
+      date: DATE,
+      service: CENA,
+      partySize: 8,
+      tables,
+      reservations: [],
+      timezone: TZ,
+      enforceCapacity: true,
+    })!;
+    expect(out.available).toBe(true);
   });
 
   it("mesa puntual ocupada gana como motivo, aunque el servicio esté lleno", () => {
@@ -417,6 +442,143 @@ describe("computeFlexibleAvailability · enforceCapacity (spec 077)", () => {
       enforceCapacity: true,
     })!;
     expect(out.reservedCovers).toBe(0);
+    expect(out.available).toBe(true);
+  });
+});
+
+/**
+ * Spec 081 — el control primario es la cantidad de MESAS del salón, con un
+ * colchón que el local deja libre para walk-ins. Antes las reservas genéricas
+ * no consumían mesa: 30 reservas de 2 entraban en un salón de 10 mesas.
+ */
+describe("computeFlexibleAvailability · cupo por mesas (spec 081)", () => {
+  const salon = (n: number, seats = 4) =>
+    Array.from({ length: n }, (_, i) =>
+      makeTable({ id: `S${i + 1}`, seats, floor_plan_id: "adentro" }),
+    );
+  const genericas = (n: number, partySize = 2) =>
+    Array.from({ length: n }, () =>
+      makeRes({ starts_at: CENA_2100, party_size: partySize, floor_plan_id: "adentro" }),
+    );
+
+  it("30 reservas de 2 ya no entran en un salón de 10 mesas", () => {
+    const out = computeFlexibleAvailability({
+      date: DATE,
+      service: CENA,
+      partySize: 2,
+      tables: salon(10),
+      reservations: genericas(30),
+      timezone: TZ,
+      floorPlanId: "adentro",
+      enforceCapacity: true,
+    })!;
+    expect(out.available).toBe(false);
+    expect(out.reason).toBe("sin-mesas");
+  });
+
+  it("con colchón de 2, un salón de 10 mesas corta en la octava reserva", () => {
+    const service = { ...CENA, hold_tables: 2 };
+    const septima = computeFlexibleAvailability({
+      date: DATE,
+      service,
+      partySize: 2,
+      tables: salon(10),
+      reservations: genericas(7),
+      timezone: TZ,
+      floorPlanId: "adentro",
+      enforceCapacity: true,
+    })!;
+    expect(septima.available).toBe(true); // consume la octava, justo en el tope
+
+    const novena = computeFlexibleAvailability({
+      date: DATE,
+      service,
+      partySize: 2,
+      tables: salon(10),
+      reservations: genericas(8),
+      timezone: TZ,
+      floorPlanId: "adentro",
+      enforceCapacity: true,
+    })!;
+    expect(novena.available).toBe(false);
+    expect(novena.reason).toBe("sin-mesas");
+  });
+
+  it("sin colchón el tope es la cantidad de mesas", () => {
+    const out = computeFlexibleAvailability({
+      date: DATE,
+      service: CENA, // hold_tables ausente → 0
+      partySize: 2,
+      tables: salon(10),
+      reservations: genericas(9),
+      timezone: TZ,
+      floorPlanId: "adentro",
+      enforceCapacity: true,
+    })!;
+    expect(out.available).toBe(true); // la décima entra
+  });
+
+  it("un grupo grande consume las mesas que necesita, no una", () => {
+    // Salón de 4 mesas de 4: una reserva de 10 ya se comió 3.
+    const out = computeFlexibleAvailability({
+      date: DATE,
+      service: CENA,
+      partySize: 6,
+      tables: salon(4),
+      reservations: [
+        makeRes({ starts_at: CENA_2100, party_size: 10, floor_plan_id: "adentro" }),
+      ],
+      timezone: TZ,
+      floorPlanId: "adentro",
+      enforceCapacity: true,
+    })!;
+    // Queda 1 mesa de 4: un party de 6 no entra.
+    expect(out.available).toBe(false);
+    expect(out.reason).toBe("sin-mesas");
+  });
+
+  it("el colchón no frena al encargado (sin enforceCapacity)", () => {
+    const out = computeFlexibleAvailability({
+      date: DATE,
+      service: { ...CENA, hold_tables: 2 },
+      partySize: 2,
+      tables: salon(10),
+      reservations: genericas(30),
+      timezone: TZ,
+      floorPlanId: "adentro",
+    })!;
+    expect(out.available).toBe(true);
+  });
+
+  it("un colchón que se come el salón deja el servicio sin reservas web", () => {
+    const out = computeFlexibleAvailability({
+      date: DATE,
+      service: { ...CENA, hold_tables: 10 },
+      partySize: 2,
+      tables: salon(10),
+      reservations: [],
+      timezone: TZ,
+      floorPlanId: "adentro",
+      enforceCapacity: true,
+    })!;
+    expect(out.available).toBe(false);
+    expect(out.reason).toBe("sin-mesas");
+  });
+
+  it("las reservas de otra zona no consumen mesas de esta", () => {
+    const out = computeFlexibleAvailability({
+      date: DATE,
+      service: CENA,
+      partySize: 2,
+      tables: salon(2),
+      reservations: [
+        makeRes({ starts_at: CENA_2100, party_size: 2, floor_plan_id: "afuera" }),
+        makeRes({ starts_at: CENA_2100, party_size: 2, floor_plan_id: "afuera" }),
+      ],
+      timezone: TZ,
+      floorPlanId: "adentro",
+      enforceCapacity: true,
+    })!;
     expect(out.available).toBe(true);
   });
 });

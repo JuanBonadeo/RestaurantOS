@@ -34,6 +34,8 @@ type FlexibleAvailabilityDTO = {
   reservedCovers: number;
   softCapacity: number | null;
   overCapacity: boolean;
+  /** Spec 081 — el servicio se quedó sin mesas para este party. */
+  outOfTables: boolean;
   available: boolean;
   reason?: string;
 };
@@ -152,6 +154,7 @@ export async function fetchFlexibleAvailability(
     reservedCovers: avail.reservedCovers,
     softCapacity: avail.softCapacity,
     overCapacity: avail.overCapacity,
+    outOfTables: avail.outOfTables,
     available: avail.available,
     reason: avail.reason,
   });

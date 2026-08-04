@@ -115,8 +115,17 @@ export type ReservationService = {
   opens_at: string;
   /** "HH:MM" local. Si es <= `opens_at` se interpreta que cruza medianoche. */
   closes_at: string;
-  /** Umbral advisory de cubiertos (NO bloquea). null = sin umbral. */
+  /**
+   * Cupo de cubiertos del servicio. null = sin umbral. Desde la spec 077 es
+   * **duro para el cliente** y advisory para el encargado.
+   */
   soft_capacity: number | null;
+  /**
+   * Spec 081 — mesas de la zona que quedan siempre libres para walk-ins. El
+   * tope de reservas del servicio es `mesas activas de la zona - hold_tables`.
+   * Opcional para compilar sin la columna (default 0 en DB).
+   */
+  hold_tables?: number;
   /** Zona (floor_plan) a la que aplica el cupo. null = servicio entero. */
   floor_plan_id: string | null;
 };

@@ -119,6 +119,7 @@ export function ReservaForm({
     reservedCovers: number;
     softCapacity: number | null;
     overCapacity: boolean;
+    outOfTables: boolean;
   } | null>(null);
   const [loadingFlex, setLoadingFlex] = useState(false);
 
@@ -227,6 +228,7 @@ export function ReservaForm({
           reservedCovers: r.data.reservedCovers,
           softCapacity: r.data.softCapacity,
           overCapacity: r.data.overCapacity,
+          outOfTables: r.data.outOfTables,
         });
       } else {
         setFlexTables([]);
@@ -240,7 +242,11 @@ export function ReservaForm({
   // Spec 077 — el servicio está lleno cuando se agotaron los cubiertos del cupo
   // o cuando no queda mesa libre que entre el party. Al cliente eso lo frena; a
   // el encargado sólo le pide confirmar (`allow_overbook`).
-  const sinMesasLibres = mode === "flexible" && !!service && !loadingFlex && flexTables.length === 0;
+  // Spec 081 — el veredicto de mesas lo da el motor (cuenta lo que consumen las
+  // reservas vivas + el colchón de walk-ins), no la lista de mesas asignables:
+  // para un grupo de 10 puede no haber ninguna mesa individual y sí lugar
+  // juntando dos.
+  const sinMesasLibres = mode === "flexible" && !!service && !loadingFlex && !!flexInfo?.outOfTables;
   const servicioLleno = !!flexInfo?.overCapacity || sinMesasLibres;
 
   const [overbookOk, setOverbookOk] = useState(false);

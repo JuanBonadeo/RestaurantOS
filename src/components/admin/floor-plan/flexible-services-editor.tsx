@@ -45,6 +45,8 @@ type Group = {
   opens_at: string;
   closes_at: string;
   soft_capacity: number | null;
+  /** Spec 081 — mesas que quedan libres para walk-ins (0 = sin colchón). */
+  hold_tables: number;
   /** true si las filas del grupo NO comparten horario/cupo (config vieja o duplicados). */
   mixed: boolean;
 };
@@ -64,6 +66,7 @@ function groupServices(services: ReservationService[]): Group[] {
         opens_at: hhmm(s.opens_at),
         closes_at: hhmm(s.closes_at),
         soft_capacity: s.soft_capacity,
+        hold_tables: s.hold_tables ?? 0,
         mixed: false,
       });
       continue;
@@ -73,7 +76,8 @@ function groupServices(services: ReservationService[]): Group[] {
     if (
       hhmm(s.opens_at) !== existing.opens_at ||
       hhmm(s.closes_at) !== existing.closes_at ||
-      (s.soft_capacity ?? null) !== existing.soft_capacity
+      (s.soft_capacity ?? null) !== existing.soft_capacity ||
+      (s.hold_tables ?? 0) !== existing.hold_tables
     ) {
       existing.mixed = true;
     }
@@ -88,6 +92,7 @@ type SvcDraft = {
   opens_at: string;
   closes_at: string;
   soft_capacity: string;
+  hold_tables: string;
   /** Nombre con el que ya existía (para reescribir ese grupo). */
   previousName?: string;
 };
@@ -150,9 +155,10 @@ export function FlexibleServicesEditor({
               closes_at: existing.closes_at,
               soft_capacity:
                 existing.soft_capacity == null ? "" : String(existing.soft_capacity),
+              hold_tables: existing.hold_tables ? String(existing.hold_tables) : "",
               previousName: existing.name,
             }
-          : { ...fallback, soft_capacity: "" },
+          : { ...fallback, soft_capacity: "", hold_tables: "" },
       };
     });
   }
@@ -193,6 +199,7 @@ export function FlexibleServicesEditor({
         opens_at: g.opens_at,
         closes_at: g.closes_at,
         soft_capacity: g.soft_capacity == null ? "" : String(g.soft_capacity),
+        hold_tables: g.hold_tables ? String(g.hold_tables) : "",
         previousName: g.name,
       },
     });
@@ -211,6 +218,7 @@ export function FlexibleServicesEditor({
           opens_at: d.opens_at,
           closes_at: d.closes_at,
           soft_capacity: d.soft_capacity === "" ? null : Number(d.soft_capacity),
+          hold_tables: d.hold_tables === "" ? 0 : Number(d.hold_tables),
         })),
         days,
         every_day: everyDay,
@@ -255,8 +263,10 @@ export function FlexibleServicesEditor({
         <h2 className="text-lg font-semibold">Servicios</h2>
         <p className="text-sm text-muted-foreground">
           Marcá los <strong>servicios</strong> y los <strong>días</strong>, y se cargan todos
-          juntos. Cada servicio lleva su horario y un <strong>cupo blando</strong> de cubiertos
-          opcional (avisa, no bloquea).
+          juntos. Cada servicio lleva su horario, un <strong>cupo de cubiertos</strong> opcional y
+          las <strong>mesas que querés dejar libres</strong> para los que caen sin reservar: el
+          tope de reservas del servicio es <em>mesas de la zona − esas mesas</em>. Los dos topes
+          frenan al cliente (el encargado siempre puede cargar igual, confirmando).
         </p>
       </header>
 
@@ -280,7 +290,10 @@ export function FlexibleServicesEditor({
                 </span>
               )}
               <span className="text-muted-foreground">
-                {g.soft_capacity == null ? "sin cupo" : `cupo ${g.soft_capacity}`}
+                {g.soft_capacity == null ? "sin cupo" : `cupo ${g.soft_capacity} cub.`}
+                {g.hold_tables > 0
+                  ? ` · ${g.hold_tables} ${g.hold_tables === 1 ? "mesa libre" : "mesas libres"}`
+                  : ""}
               </span>
               {salones.length > 0 ? (
                 <span className="text-muted-foreground">· {zoneName(g.floorPlanId)}</span>
@@ -403,11 +416,20 @@ export function FlexibleServicesEditor({
                   <Input
                     type="number"
                     min={1}
-                    placeholder="cupo (opcional)"
+                    placeholder="cupo de cubiertos"
                     value={d.soft_capacity}
                     onChange={(e) => patchService(name, { soft_capacity: e.target.value })}
                     className="w-40"
-                    aria-label={`${name}: cupo blando`}
+                    aria-label={`${name}: cupo de cubiertos`}
+                  />
+                  <Input
+                    type="number"
+                    min={0}
+                    placeholder="mesas p/ walk-ins"
+                    value={d.hold_tables}
+                    onChange={(e) => patchService(name, { hold_tables: e.target.value })}
+                    className="w-40"
+                    aria-label={`${name}: mesas libres para walk-ins`}
                   />
                 </div>
               );
@@ -493,8 +515,8 @@ export function FlexibleServicesEditor({
               })}
             </div>
             <p className="text-xs text-muted-foreground">
-              El cupo se cuenta por zona. Sin zonas marcadas, el servicio vale para todo el
-              negocio.
+              El cupo y las mesas se cuentan por zona. Sin zonas marcadas, el servicio vale para
+              todo el negocio.
             </p>
           </div>
         ) : null}

@@ -1,5 +1,6 @@
 import { fromZonedTime } from "date-fns-tz";
 
+import { assignParty, simulateTableUsage } from "@/lib/reservations/table-capacity";
 import type { FloorTable, Reservation, ReservationService } from "@/lib/reservations/types";
 import { LIVE_RESERVATION_STATUSES } from "@/lib/reservations/types";
 
@@ -130,7 +131,7 @@ export function reservedCovers(
 export type FlexibleAvailabilityParams = {
   /** "YYYY-MM-DD" en la TZ del negocio. */
   date: string;
-  service: Pick<ReservationService, "opens_at" | "closes_at" | "soft_capacity">;
+  service: Pick<ReservationService, "opens_at" | "closes_at" | "soft_capacity" | "hold_tables">;
   partySize: number;
   /** Mesas del negocio (se filtra `active` acá). */
   tables: FloorTable[];
@@ -165,8 +166,15 @@ export type FlexibleAvailability = {
   freeTables: FloorTable[];
   reservedCovers: number;
   softCapacity: number | null;
-  /** `true` si sumar este party supera el umbral blando (sólo avisa). */
+  /** `true` si sumar este party supera el cupo de cubiertos. */
   overCapacity: boolean;
+  /**
+   * Spec 081 — `true` si el servicio ya no tiene mesas para este party, contando
+   * lo que consumen las reservas vivas y el colchón de walk-ins. Se calcula
+   * siempre (aunque no se aplique) para que el encargado vea el mismo estado
+   * que frena al cliente.
+   */
+  outOfTables: boolean;
   /**
    * `true` si la reserva se puede tomar. Sin `enforceCapacity` (encargado) es
    * siempre `true` para las **genéricas** —la capacidad es blanda— y sólo
@@ -218,6 +226,24 @@ export function computeFlexibleAvailability(
   const softCapacity = service.soft_capacity ?? null;
   const overCapacity = softCapacity != null && covers + partySize > softCapacity;
 
+  // Spec 081 — el control primario: MESAS. Las reservas genéricas no tienen
+  // mesa asignada, así que hasta acá no consumían nada y un salón de 10 mesas
+  // podía comprometer 30 reservas. Se simula la ocupación real (los grupos
+  // grandes se parten en varias mesas) y se compara contra las mesas de la
+  // zona menos el colchón que el local reserva para walk-ins.
+  const zoneTables = tables.filter((t) => t.status === "active").filter(inZone);
+  const liveInZone = reservations
+    .filter((r) => isLiveInWindow(r, window))
+    .filter((r) => (floorPlanId == null ? true : r.floor_plan_id === floorPlanId));
+  const { usedCount, freeSeats } = simulateTableUsage(
+    zoneTables.map((t) => ({ id: t.id, seats: t.seats })),
+    liveInZone.map((r) => ({ tableId: r.table_id, partySize: r.party_size ?? 0 })),
+  );
+  const holdTables = service.hold_tables ?? 0;
+  const tableCapacity = Math.max(0, zoneTables.length - holdTables);
+  const needed = assignParty(partySize, freeSeats);
+  const outOfTables = needed == null || usedCount + needed.count > tableCapacity;
+
   let available = true;
   let reason: FlexibleUnavailableReason | undefined;
 
@@ -242,7 +268,7 @@ export function computeFlexibleAvailability(
     if (overCapacity) {
       available = false;
       reason = "sin-cupo";
-    } else if (freeTables.length === 0) {
+    } else if (outOfTables) {
       available = false;
       reason = "sin-mesas";
     }
@@ -254,6 +280,7 @@ export function computeFlexibleAvailability(
     reservedCovers: covers,
     softCapacity,
     overCapacity,
+    outOfTables,
     available,
     reason,
     warning: overCapacity ? "sobre-capacidad" : undefined,

@@ -99,6 +99,8 @@ export const ReservationServiceGroupsInputSchema = z
           opens_at: z.string().regex(TIME_HHMM, "Hora inválida"),
           closes_at: z.string().regex(TIME_HHMM, "Hora inválida"),
           soft_capacity: z.coerce.number().int().min(1).max(100000).nullable().optional(),
+          /** Spec 081 — mesas que quedan libres para walk-ins. 0 = sin colchón. */
+          hold_tables: z.coerce.number().int().min(0).max(1000).nullable().optional(),
         }),
       )
       .min(1, "Marcá al menos un servicio."),
