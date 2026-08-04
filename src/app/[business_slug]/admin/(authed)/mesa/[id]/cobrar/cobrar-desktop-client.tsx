@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { BusinessRole } from "@/lib/admin/context";
+import type { Invoice } from "@/lib/afip/types";
 import {
   anularCobro,
   iniciarPagoMp,
@@ -43,6 +44,7 @@ import {
 } from "@/lib/billing/cobro-actions";
 import type { CuentaState, OrderSplit } from "@/lib/billing/types";
 import { CobroForm } from "@/components/billing/cobro-form";
+import { FacturacionSection } from "@/components/billing/facturacion-section";
 import type { PaymentMethodConfig } from "@/lib/caja/types";
 import { useCajaPreferida } from "@/lib/caja/use-caja-preferida";
 import { formatCurrency } from "@/lib/currency";
@@ -68,6 +70,16 @@ type Props = {
    *  pago parcial, porque embebido el `init` viene de estado del cliente y
    *  `router.refresh()` no lo actualiza. */
   onReload?: () => void;
+  /** Comprobante ya emitido para esta orden, si lo hay: con uno cargado la
+   *  sección lo muestra en vez del formulario. No alcanza con el guard del
+   *  server, que es por TIPO — sin este dato se podría emitir una Factura A
+   *  sobre una orden que ya tiene una B. */
+  existingInvoice?: Invoice | null;
+  /** El negocio tiene AFIP configurado (CUIT + punto de venta). Con esto en
+   *  true la pantalla ofrece emitir el comprobante al terminar de cobrar y NO
+   *  se cierra sola: era el único de los cuatro puntos de cobro que no
+   *  facturaba, y el encargado no llega a la sección Facturación (#137). */
+  afipConfigured?: boolean;
 };
 
 export function CobrarDesktopClient({
@@ -81,6 +93,8 @@ export function CobrarDesktopClient({
   onClose,
   onClosed,
   onReload,
+  existingInvoice = null,
+  afipConfigured = false,
 }: Props) {
   void _tableId;
   const router = useRouter();
@@ -113,14 +127,34 @@ export function CobrarDesktopClient({
   const activeSplit = splits.find((s) => s.id === activeSplitId) ?? null;
 
   const total = cuenta.totals.total_cents;
+  // El server avisó que cerró la orden y nos quedamos en la pantalla para
+  // facturar (#137). Sin esto habría que recargar para ver "Mesa cobrada", y
+  // recargar es justamente lo que no podemos hacer: `getCuentaForTable` exige
+  // la orden `open`, así que el refetch devolvería "no hay cuenta" y se
+  // llevaría puesta la sección de facturación.
+  const [closedLocal, setClosedLocal] = useState(false);
+
+  // Cerrada = señal del SERVER (lifecycle o el `orderClosed` que acaba de
+  // devolver el pago), nunca una suma del cliente. Un total 0 con la orden
+  // abierta —mesa sin ítems, todo anulado, descuento del 100%— da
+  // `totalPending === 0` sin que nadie haya pagado, y esa orden no se cierra
+  // sola nunca (`closeOrderIfFullyPaid` exige `total_cents > 0`). Facturar ahí
+  // sería emitir un comprobante fiscal de una mesa impaga.
+  const orderClosed = cuenta.order.lifecycle_status !== "open" || closedLocal;
+
   const splitsActivos = splits.filter((s) => s.status !== "cancelled");
-  const totalPaid = splitsActivos.reduce(
-    (acc, s) => acc + s.paid_amount_cents,
-    0,
-  );
+  // Con la orden ya cerrada los splits de `init` quedaron viejos (no se
+  // refetchea, ver arriba): el cobro fue completo, así que el total pagado es
+  // el total. Sin esto la barra queda en 0% y "Anular cobro" desaparece justo
+  // cuando más se necesita.
+  const totalPaid = orderClosed
+    ? total
+    : splitsActivos.reduce((acc, s) => acc + s.paid_amount_cents, 0);
   const totalPending = Math.max(0, total - totalPaid);
   const progressPct = total === 0 ? 0 : Math.min(100, (totalPaid / total) * 100);
-  const allPaid = totalPending === 0;
+  // Para el cartel y la barra alcanza con que no quede saldo (comportamiento
+  // previo). Para FACTURAR se exige `orderClosed`.
+  const allPaid = totalPending === 0 || orderClosed;
 
   const body = (
     <div
@@ -188,23 +222,30 @@ export function CobrarDesktopClient({
             </Surface>
           )}
 
-          {/* Splits */}
-          <section className="space-y-2.5">
-            <p className="px-1 text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-              {splits.length === 1 ? "Pago único" : `${splits.length} sub-cuentas`}
-            </p>
-            <ul className="space-y-2.5">
-              {splits.map((s) => (
-                <li key={s.id}>
-                  <SplitRow
-                    split={s}
-                    isActive={activeSplitId === s.id}
-                    onSelect={() => setActiveSplitId(s.id)}
-                  />
-                </li>
-              ))}
-            </ul>
-          </section>
+          {/* Splits. Con la orden cerrada no se listan: los de `init` quedaron
+              viejos (sin refetch) y mostrarían "Cobrar" habilitado sobre una
+              mesa ya cobrada — el server rechazaría el pago, pero la pantalla
+              estaría invitando a un callejón. */}
+          {!orderClosed && (
+            <section className="space-y-2.5">
+              <p className="px-1 text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                {splits.length === 1
+                  ? "Pago único"
+                  : `${splits.length} sub-cuentas`}
+              </p>
+              <ul className="space-y-2.5">
+                {splits.map((s) => (
+                  <li key={s.id}>
+                    <SplitRow
+                      split={s}
+                      isActive={activeSplitId === s.id}
+                      onSelect={() => setActiveSplitId(s.id)}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
           {/* Anular cobro (admin / encargado) */}
           {(role === "admin" || role === "encargado") && totalPaid > 0 && (
@@ -225,7 +266,9 @@ export function CobrarDesktopClient({
                   Mesa cobrada
                 </p>
                 <p className="text-xs text-emerald-700">
-                  La mesa se va a marcar para limpiar.
+                  {afipConfigured
+                    ? "Emití el comprobante o volvé al salón."
+                    : "La mesa se va a marcar para limpiar."}
                 </p>
               </div>
               <button
@@ -238,11 +281,24 @@ export function CobrarDesktopClient({
               </button>
             </section>
           )}
+
+          {/* Emitir el comprobante sin salir del cobro (#137). Mismo componente
+              que usa el mozo: el encargado pide los mismos datos de la misma
+              forma. Sin AFIP configurado no se muestra nada. Se exige
+              `orderClosed` (server), no `allPaid`: ver arriba. */}
+          {orderClosed && afipConfigured && (
+            <FacturacionSection
+              orderId={cuenta.order.id}
+              totalCents={total}
+              slug={slug}
+              existingInvoice={existingInvoice}
+            />
+          )}
         </div>
 
         {/* ── Columna derecha (página) / debajo (embebido): form de cobro ── */}
         <aside className={cn(!embedded && "lg:sticky lg:top-4 lg:self-start")}>
-          {activeSplit ? (
+          {activeSplit && !orderClosed ? (
             <CobrarSplitPanel
               key={activeSplit.id}
               split={activeSplit}
@@ -254,7 +310,17 @@ export function CobrarDesktopClient({
               onPaid={({ orderClosed }) => {
                 if (orderClosed) {
                   toast.success("Mesa cobrada");
-                  goHome();
+                  // Con AFIP configurado NO nos vamos ni recargamos: la
+                  // sección de facturación se monta recién ahora, y tanto
+                  // salir como refetchear la haría inalcanzable (la orden
+                  // cerrada ya no vuelve a este panel). La salida es
+                  // explícita: el botón "Volver al salón".
+                  if (!afipConfigured) {
+                    goHome();
+                    return;
+                  }
+                  setClosedLocal(true);
+                  setActiveSplitId(null);
                   return;
                 }
                 setActiveSplitId(null);

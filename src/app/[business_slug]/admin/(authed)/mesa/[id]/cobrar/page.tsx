@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { PageHeader, PageShell } from "@/components/admin/shell/page-shell";
+import { getInvoiceForOrder } from "@/lib/afip/queries";
 import { ensureAdminAccess } from "@/lib/admin/context";
 import { iniciarCobro } from "@/lib/billing/cobro-actions";
 import { getCuentaForTable } from "@/lib/billing/cuenta-query";
@@ -73,11 +74,15 @@ export default async function AdminCobrarPage({
   }
 
   const service = createSupabaseServiceClient();
-  const { data: tableRow } = await service
-    .from("tables")
-    .select("label")
-    .eq("id", tableId)
-    .single();
+  const [{ data: tableRow }, existingInvoice] = await Promise.all([
+    service.from("tables").select("label").eq("id", tableId).single(),
+    getInvoiceForOrder(business.id, cuenta.order.id),
+  ]);
+
+  // Con AFIP configurado el cobro ofrece emitir el comprobante y no se cierra
+  // solo al terminar (#137). Mismo criterio que el cobro del mozo.
+  const biz = business as Record<string, unknown>;
+  const afipConfigured = !!(biz.afip_cuit && biz.afip_punto_venta);
 
   return (
     <CobrarDesktopClient
@@ -87,6 +92,8 @@ export default async function AdminCobrarPage({
       role={ctx.isPlatformAdmin ? "admin" : (ctx.role ?? "admin")}
       cuenta={cuenta}
       init={init.data}
+      existingInvoice={existingInvoice}
+      afipConfigured={afipConfigured}
     />
   );
 }

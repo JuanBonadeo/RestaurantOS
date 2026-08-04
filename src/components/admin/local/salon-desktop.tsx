@@ -1382,6 +1382,8 @@ export function SalonDesktop({
                 role={role}
                 cuenta={cobroData.cuenta}
                 init={cobroData.init}
+                afipConfigured={cobroData.afipConfigured}
+                existingInvoice={cobroData.existingInvoice}
                 embedded
                 onClose={closeCobro}
                 onClosed={() => {

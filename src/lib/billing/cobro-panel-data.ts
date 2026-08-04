@@ -1,6 +1,8 @@
 "use server";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
+import { getInvoiceForOrder } from "@/lib/afip/queries";
+import type { Invoice } from "@/lib/afip/types";
 import type { BusinessRole } from "@/lib/admin/context";
 import type { IniciarCobroResult } from "@/lib/billing/cobro-actions";
 import { getCuentaForTable } from "@/lib/billing/cuenta-query";
@@ -44,6 +46,15 @@ export type CobroPanelData =
       cuenta: CuentaState;
       init: IniciarCobroResult;
       tableLabel: string;
+      /** El negocio tiene AFIP configurado (CUIT + punto de venta): el panel
+       *  ofrece emitir el comprobante al cobrar y no se cierra solo (#137).
+       *  Sale de `business`, sin query extra en la ruta caliente. */
+      afipConfigured: boolean;
+      /** Factura ya emitida para esta orden. Sin esto el panel mostraría el
+       *  formulario sobre una orden ya facturada, y el guard del server es
+       *  por TIPO (`invoices_order_tipo_active_uq`): dejaría pasar una A
+       *  sobre una B existente. Sólo se consulta si el negocio factura. */
+      existingInvoice: Invoice | null;
     }
   | { kind: "no_cuenta"; tableLabel: string }
   | { kind: "no_caja"; error: string; tableLabel: string };
@@ -160,7 +171,24 @@ export async function loadCobroForTable(
     methodConfigs,
   };
 
-  return actionOk({ kind: "ok", cuenta, init, tableLabel });
+  const biz = business as unknown as Record<string, unknown>;
+  const afipConfigured = !!(biz.afip_cuit && biz.afip_punto_venta);
+
+  // Ola 3, y sólo para negocios que facturan: la invoice depende de
+  // `cuenta.order.id`, que recién existe después de la ola 2. Un negocio sin
+  // AFIP no paga este round-trip.
+  const existingInvoice = afipConfigured
+    ? await getInvoiceForOrder(business.id, cuenta.order.id)
+    : null;
+
+  return actionOk({
+    kind: "ok",
+    cuenta,
+    init,
+    tableLabel,
+    afipConfigured,
+    existingInvoice,
+  });
 }
 
 export async function loadCuentaForTable(
