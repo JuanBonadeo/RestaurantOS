@@ -44,7 +44,11 @@ import {
   formatNotificationTime,
   viewForNotification,
 } from "@/lib/notifications/view";
-import { canMoveTable, canTransitionMesa } from "@/lib/permissions/can";
+import {
+  canCancelItem,
+  canMoveTable,
+  canTransitionMesa,
+} from "@/lib/permissions/can";
 import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
 import type { FloorTable } from "@/lib/reservations/types";
 
@@ -68,6 +72,8 @@ export type ComandaForMozo = {
   station_name: string;
   emitted_at: string;
   delivered_at: string | null;
+  /** Anulada (spec 049): la fila se pinta «Anulada» y pierde sus acciones. */
+  cancelled_at: string | null;
   items: { product_name: string; quantity: number; prep_time_minutes: number | null }[];
 };
 
@@ -822,6 +828,8 @@ export function MozoClient({
                 order={orderByTable[selectedSync.id]!}
                 slug={businessSlug}
                 hideComandasIfAllDelivered={selectedStatus === "pidio_cuenta"}
+                canAnular={canCancelItem(role)}
+                tableLabel={selectedSync.label}
               />
             )}
 

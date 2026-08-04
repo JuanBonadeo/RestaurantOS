@@ -95,6 +95,7 @@ import { type OperationalStatus } from "@/lib/mozo/state-machine";
 import { useTablesRealtime } from "@/lib/mozo/use-tables-realtime";
 import {
   canAssignMozo,
+  canCancelItem,
   canCargarPedido,
   canMoveTable,
   canTransitionMesa,
@@ -120,6 +121,8 @@ export type SalonOrderRef = {
     station_name: string;
     emitted_at: string;
     delivered_at: string | null;
+    /** Anulada (spec 049): la fila se pinta «Anulada» y pierde sus acciones. */
+    cancelled_at: string | null;
     items: { product_name: string; quantity: number; prep_time_minutes: number | null }[];
   }[];
 };
@@ -2568,6 +2571,8 @@ function TableDetail({
             order={order}
             slug={slug}
             hideComandasIfAllDelivered={status === "pidio_cuenta"}
+            canAnular={canCancelItem(role)}
+            tableLabel={table.label}
           />
         )}
 

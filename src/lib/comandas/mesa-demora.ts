@@ -39,6 +39,8 @@ export type DelayComanda = {
   delivered_at: string | null;
   station_name: string;
   items: DelayItem[];
+  /** Anulada (spec 049). Opcional: no todas las fuentes lo traen. */
+  cancelled_at?: string | null;
 };
 
 /** Demora calculada de una mesa (su comanda pendiente más demorada). */
@@ -93,6 +95,11 @@ export function delayLevel(excessMin: number): number {
  * exceso. Devuelve `null` si no hay comandas pendientes. El consumidor filtra
  * por `level >= 1` (punto / entrada en la lista); el objeto puede venir con
  * `level 0` cuando hay pendientes pero ninguna pasada de su tiempo.
+ *
+ * Una comanda **anulada** no se entrega nunca (no le entra `delivered_at`), así
+ * que sin este filtro la mesa quedaba pintada con una demora que crece sola
+ * para siempre — y encima con `items` vacíos, o sea contra el tiempo por
+ * defecto. Se ve apenas se anula desde el panel de la mesa (spec 078).
  */
 export function tableDelay(
   comandas: DelayComanda[],
@@ -102,6 +109,7 @@ export function tableDelay(
   let worst: TableDelay | null = null;
   for (const c of comandas) {
     if (c.delivered_at !== null) continue; // solo comandas pendientes
+    if (c.cancelled_at) continue; // la anulada no está en cocina
     const expectedMinutes = expectedComandaMinutes(c.items, fallback);
     const excess = excessMinutes(c.emitted_at, nowMs, expectedMinutes);
     if (worst === null || excess > worst.excessMinutes) {

@@ -118,6 +118,7 @@ function mapDineInOrders(rows: unknown[]): SalonOrderRef[] {
     station_id: string | null;
     emitted_at: string;
     delivered_at: string | null;
+    cancelled_at: string | null;
     stations: { name: string } | { name: string }[] | null;
     comanda_items: RawComandaItem[];
   };
@@ -169,6 +170,7 @@ function mapDineInOrders(rows: unknown[]): SalonOrderRef[] {
           station_name: station?.name ?? "—",
           emitted_at: c.emitted_at,
           delivered_at: c.delivered_at,
+          cancelled_at: c.cancelled_at,
           items,
         };
       }),
@@ -186,7 +188,7 @@ export async function loadSalon(
     service
       .from("orders")
       .select(
-        "id, order_number, table_id, total_cents, created_at, status, customer_name, order_items(product_name, quantity, cancelled_at), comandas(id, batch, status, station_id, emitted_at, delivered_at, stations(name), comanda_items(order_items(product_name, quantity, cancelled_at, products(prep_time_minutes))))",
+        "id, order_number, table_id, total_cents, created_at, status, customer_name, order_items(product_name, quantity, cancelled_at), comandas(id, batch, status, station_id, emitted_at, delivered_at, cancelled_at, stations(name), comanda_items(order_items(product_name, quantity, cancelled_at, products(prep_time_minutes))))",
       )
       .eq("business_id", businessId)
       .eq("delivery_type", "dine_in")

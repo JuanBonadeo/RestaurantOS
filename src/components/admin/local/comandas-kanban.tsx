@@ -36,7 +36,6 @@ import {
 
 import {
   advanceComandaStatus,
-  cancelarComanda,
   cancelarItem,
   editarItemComanda,
   getComandasTabData,
@@ -65,6 +64,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { AnularComandaModal } from "@/components/shared/anular-comanda-modal";
 
 /**
  * Umbral (ms) para considerar "caído" al print agent: sin heartbeat hace más
@@ -613,7 +613,10 @@ export function ComandasKanban({
       {anularTarget && (
         <AnularComandaModal
           slug={slug}
-          comanda={anularTarget}
+          comandaId={anularTarget.id}
+          stationName={anularTarget.station_name}
+          batch={anularTarget.batch}
+          origen={comandaOrigen(anularTarget)}
           onClose={() => setAnularTarget(null)}
           onDone={() => {
             setAnularTarget(null);
@@ -1045,87 +1048,11 @@ function formatPrice(cents: number): string {
   return `$${(cents / 100).toLocaleString("es-AR")}`;
 }
 
-function AnularComandaModal({
-  slug,
-  comanda,
-  onClose,
-  onDone,
-}: {
-  slug: string;
-  comanda: LocalComanda;
-  onClose: () => void;
-  onDone: () => void;
-}) {
-  const [motivo, setMotivo] = useState("");
-  const [pending, startTransition] = useTransition();
-
-  const submit = () => {
-    const m = motivo.trim();
-    if (!m) {
-      toast.error("Indicá un motivo.");
-      return;
-    }
-    startTransition(async () => {
-      const res = await cancelarComanda(slug, comanda.id, m);
-      if (res.ok) {
-        toast.success("Comanda anulada · se reimprime ANULADA en cocina.");
-        onDone();
-      } else {
-        toast.error(res.error ?? "No pudimos anular la comanda.");
-      }
-    });
-  };
-
-  const origen =
-    comanda.delivery_type === "dine_in"
-      ? `Mesa ${comanda.table_label ?? "?"}`
-      : comanda.customer_name || "Pedido online";
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Anular comanda</DialogTitle>
-        </DialogHeader>
-        <p className="text-muted-foreground text-sm">
-          Se cancelan todos los ítems de{" "}
-          <span className="text-foreground font-semibold">
-            {comanda.station_name} · tanda {comanda.batch}
-          </span>{" "}
-          ({origen}). Sale un ticket{" "}
-          <span className="font-semibold">ANULADA</span> en la comandera del
-          sector y se avisa al mozo.
-        </p>
-        <textarea
-          value={motivo}
-          onChange={(e) => setMotivo(e.target.value)}
-          rows={3}
-          autoFocus
-          placeholder="Motivo (ej: mesa se levantó, error de carga)"
-          className="border-input bg-background focus-visible:ring-ring w-full rounded-lg border px-3 py-2 text-sm outline-none focus-visible:ring-2"
-        />
-        <DialogFooter>
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={pending}
-            className="text-muted-foreground ring-border/70 hover:bg-muted/60 inline-flex h-9 items-center justify-center rounded-lg px-4 text-sm font-semibold ring-1 transition disabled:opacity-50"
-          >
-            Volver
-          </button>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={pending}
-            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:opacity-50"
-          >
-            <Ban className="size-4" strokeWidth={2.5} />
-            {pending ? "Anulando…" : "Anular comanda"}
-          </button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
+/** De dónde salió la comanda, para que el modal diga qué se está anulando. */
+function comandaOrigen(comanda: LocalComanda): string {
+  return comanda.delivery_type === "dine_in"
+    ? `Mesa ${comanda.table_label ?? "?"}`
+    : comanda.customer_name || "Pedido online";
 }
 
 // ─── Editar comanda ya impresa (spec 049) ───────────────────────────────────

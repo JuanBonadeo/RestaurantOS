@@ -108,6 +108,18 @@ describe("tableDelay", () => {
     expect(tableDelay([entregada], now)).toBeNull();
   });
 
+  it("ignora comandas anuladas (spec 078)", () => {
+    // La anulada nunca se entrega: sin este filtro la mesa quedaba con una
+    // demora que crece sola para siempre, y contra el tiempo por defecto
+    // porque sus ítems ya están cancelados (llegan vacíos).
+    const anulada = comanda({
+      emitted_at: "2026-06-25T10:00:00Z",
+      cancelled_at: "2026-06-25T10:05:00Z",
+      items: [],
+    });
+    expect(tableDelay([anulada], now)).toBeNull();
+  });
+
   it("elige la comanda pendiente con mayor exceso", () => {
     // Cocina: marchada 11:30, esperado 25 → transcurrido 30, exceso 5 (nivel 0)
     // Parrilla: marchada 11:00, esperado 20 → transcurrido 60, exceso 40 (nivel 4)
