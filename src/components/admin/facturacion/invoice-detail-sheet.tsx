@@ -2,10 +2,18 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { Ban, Copy, ExternalLink, RefreshCw, RotateCcw } from "lucide-react";
+import {
+  Ban,
+  Copy,
+  ExternalLink,
+  Printer,
+  RefreshCw,
+  RotateCcw,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { imprimirFactura } from "@/lib/print/factura-print-actions";
 import { Label } from "@/components/ui/label";
 import {
   Sheet,
@@ -46,6 +54,26 @@ export function InvoiceDetailSheet({
   const [refacturando, startRefacturar] = useTransition();
   const [showRaw, setShowRaw] = useState(false);
   const [motivo, setMotivo] = useState("");
+  const [imprimiendo, startImprimir] = useTransition();
+
+  // Imprimir el comprobante (spec 084). El action resuelve la comandera fiscal
+  // de la caja del pago ANTES de encolar, así que si esa caja no tiene una, el
+  // encargado se entera en el acto y con el nombre de la caja.
+  const handleImprimir = () => {
+    if (!invoice) return;
+    startImprimir(async () => {
+      const r = await imprimirFactura(invoice.id, slug);
+      if (!r.ok) {
+        toast.error(r.error);
+        return;
+      }
+      toast.success(
+        r.data.reprint
+          ? "Copia enviada a la comandera fiscal."
+          : "Factura enviada a la comandera fiscal.",
+      );
+    });
+  };
 
   if (!invoice) return null;
 
@@ -282,6 +310,23 @@ export function InvoiceDetailSheet({
                 </div>
               );
             })()}
+
+          {/* Spec 084: imprimir el comprobante en la comandera fiscal de la
+              caja. Sólo autorizadas — una pending no tiene CAE ni QR. */}
+          {invoice.status === "authorized" && (
+            <Button
+              onClick={handleImprimir}
+              disabled={imprimiendo}
+              variant="outline"
+              size="sm"
+              className="justify-self-start"
+            >
+              <Printer
+                className={cn("size-3.5", imprimiendo && "animate-pulse")}
+              />
+              {imprimiendo ? "Enviando…" : "Imprimir factura"}
+            </Button>
+          )}
 
           {invoice.status === "authorized" && (
             <div className="rounded-xl bg-zinc-50 p-4 ring-1 ring-zinc-200/60">

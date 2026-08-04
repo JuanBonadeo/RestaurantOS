@@ -87,7 +87,20 @@ export type TicketComanda = {
 
 export type Size = "sm" | "tall" | "xl";
 export type Align = "left" | "center" | "right";
-export type Line = { text: string; size?: Size; bold?: boolean; align?: Align };
+export type Line = {
+  text: string;
+  size?: Size;
+  bold?: boolean;
+  align?: Align;
+  /**
+   * Spec 084: imprime este contenido como **código QR nativo** de la impresora
+   * en vez de como texto. Se usa para el QR de ARCA (RG 4892) de la factura,
+   * que tiene que ser escaneable — la URL en texto no cumple.
+   * El `text` de la línea se ignora al renderear ESC/POS y se usa como fallback
+   * legible en `renderPlain`.
+   */
+  qr?: string;
+};
 
 // Reemplazos de los caracteres no-ASCII más comunes. La térmica no recibe
 // codepage, así que todo lo que pase de 0x7e sale como el símbolo que tenga
@@ -291,6 +304,40 @@ export function buildTicketLines(c: TicketComanda): Line[] {
   return L;
 }
 
+/**
+ * Comandos ESC/POS de código QR (`GS ( k`, funciones 165/167/169/180/181).
+ *
+ * Los soportan las térmicas modernas; una vieja sin soporte **ignora la
+ * secuencia** y sale sin QR en vez de escupir basura — por eso es seguro
+ * mandarlo, pero hay que verificarlo contra la impresora real antes de dar por
+ * bueno un comprobante fiscal.
+ *
+ * `pL`/`pH` son el largo del payload en little-endian: para almacenar datos, es
+ * `len + 3` (los 3 bytes de `cn fn m` que van antes del contenido).
+ */
+function escPosQr(data: string, moduleSize = 6): string {
+  const gsK = (payload: string) => {
+    const len = payload.length;
+    return (
+      GS +
+      "(k" +
+      String.fromCharCode(len & 0xff) +
+      String.fromCharCode((len >> 8) & 0xff) +
+      payload
+    );
+  };
+  // fn 165: modelo 2 (el estándar). fn 167: tamaño de módulo (1–16 px).
+  // fn 169: corrección de errores — nivel M (49), que aguanta un ticket algo
+  // manchado sin agrandar el QR de más. fn 180: cargar datos. fn 181: imprimir.
+  return (
+    gsK("1A2\x00") +
+    gsK("1C" + String.fromCharCode(moduleSize)) +
+    gsK("1E1") +
+    gsK("1P0" + data) +
+    gsK("1Q0")
+  );
+}
+
 /** Renderiza las líneas como ESC/POS para térmica de red (producción). */
 export function renderEscPos(lines: Line[]): string {
   let out = ESC + "@"; // init (resetea tamaño, énfasis, interlineado y espaciado)
@@ -315,6 +362,11 @@ export function renderEscPos(lines: Line[]): string {
       out += ESC + "E" + (b ? "\x01" : "\x00");
       bold = b;
     }
+    if (ln.qr) {
+      // El QR respeta la alineación ya seteada arriba (va centrado).
+      out += escPosQr(ln.qr) + "\n";
+      continue;
+    }
     out += (ln.text ?? "") + "\n";
   }
   // Reset de estilo + avance + corte parcial.
@@ -330,9 +382,16 @@ export function renderEscPos(lines: Line[]): string {
   return out;
 }
 
-/** Renderiza las líneas como texto plano (transporte windows / dry-run). */
+/**
+ * Renderiza las líneas como texto plano (transporte windows / dry-run). Un QR
+ * cae a su contenido legible: en texto plano no hay forma de dibujarlo, y
+ * perder la URL sería perder el dato.
+ */
 export function renderPlain(lines: Line[]): string {
-  return lines.map((ln) => ln.text ?? "").join("\r\n") + "\r\n\r\n";
+  return (
+    lines.map((ln) => (ln.qr ? ln.qr : (ln.text ?? ""))).join("\r\n") +
+    "\r\n\r\n"
+  );
 }
 
 /**

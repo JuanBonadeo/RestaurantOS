@@ -521,24 +521,36 @@ export type Database = {
         Row: {
           business_id: string
           created_at: string
+          fiscal_printer_enabled: boolean
+          fiscal_printer_ip: string | null
+          fiscal_printer_port: number
           id: string
           is_active: boolean
+          is_default: boolean
           name: string
           sort_order: number
         }
         Insert: {
           business_id: string
           created_at?: string
+          fiscal_printer_enabled?: boolean
+          fiscal_printer_ip?: string | null
+          fiscal_printer_port?: number
           id?: string
           is_active?: boolean
+          is_default?: boolean
           name: string
           sort_order?: number
         }
         Update: {
           business_id?: string
           created_at?: string
+          fiscal_printer_enabled?: boolean
+          fiscal_printer_ip?: string | null
+          fiscal_printer_port?: number
           id?: string
           is_active?: boolean
+          is_default?: boolean
           name?: string
           sort_order?: number
         }
@@ -2758,7 +2770,8 @@ export type Database = {
           emitted_at: string
           id: string
           kind: string
-          order_id: string
+          invoice_id: string | null
+          order_id: string | null
           print_failed_at: string | null
           printed_at: string | null
           reprint_requested_at: string | null
@@ -2770,7 +2783,8 @@ export type Database = {
           emitted_at?: string
           id?: string
           kind: string
-          order_id: string
+          invoice_id?: string | null
+          order_id?: string | null
           print_failed_at?: string | null
           printed_at?: string | null
           reprint_requested_at?: string | null

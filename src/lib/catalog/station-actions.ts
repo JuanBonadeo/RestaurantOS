@@ -357,3 +357,50 @@ export async function setFloorPlanCuentaPrinter(
   revalidatePath(`/${businessSlug}/admin/configuracion`);
   return actionOk(null);
 }
+
+/**
+ * Comandera **fiscal** de una caja (spec 084): dónde sale la factura impresa
+ * de los cobros de esa caja. Por caja y no por negocio porque el papel fiscal
+ * tiene que salir donde está parado el que cobra.
+ */
+export async function setCajaFiscalPrinter(
+  businessSlug: string,
+  cajaId: string,
+  input: unknown,
+): Promise<ActionResult<null>> {
+  const parsed = StationPrinterInput.safeParse(input);
+  if (!parsed.success) {
+    const first = parsed.error.issues[0];
+    return actionError(
+      first ? `${first.path.join(".") || "campo"}: ${first.message}` : "Datos inválidos.",
+    );
+  }
+
+  const business = await getBusiness(businessSlug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctx = await ensureAdminAccess(business.id, businessSlug);
+  if (!canManageBusiness(ctx)) {
+    return actionError("No tenés permisos para configurar las comanderas.");
+  }
+
+  const service = createSupabaseServiceClient();
+  const { error } = await service
+    .from("cajas")
+    .update({
+      fiscal_printer_ip: parsed.data.printer_ip,
+      fiscal_printer_port: parsed.data.printer_port,
+      fiscal_printer_enabled: parsed.data.printer_enabled,
+    })
+    .eq("id", cajaId)
+    // Scope por negocio: sin esto se podría configurar la caja de otro tenant.
+    .eq("business_id", business.id);
+
+  if (error) {
+    console.error("setCajaFiscalPrinter", error);
+    return actionError("No pudimos guardar la comandera fiscal.");
+  }
+
+  revalidatePath(`/${businessSlug}/admin/configuracion`);
+  return actionOk(null);
+}

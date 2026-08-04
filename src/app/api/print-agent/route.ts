@@ -10,6 +10,11 @@ import {
   buildCuentaTicketContent,
   type CuentaTicketData,
 } from "@/lib/print/cuenta-ticket";
+import {
+  buildFacturaTicketContent,
+  type FacturaTicketData,
+} from "@/lib/print/factura-ticket";
+import { resolveFiscalPrinter } from "@/lib/print/fiscal-printer";
 import { buildComandaContent } from "@/lib/print/ticket";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
@@ -214,13 +219,23 @@ export async function GET(req: Request) {
   // Viajan en el MISMO array que las comandas, con su propio UUID, su IP y su
   // contenido ya renderizado: para el agente instalado en el local son un ítem
   // más de la lista y no hace falta recompilar nada (D2 del spec).
-  const [controls, cuentas] = await Promise.all([
-    buildPrintableControlTickets(service, businessId),
-    buildPrintableCuentaTickets(service, businessId),
+  // Cada familia de papel va aislada: un bug armando el control, la cuenta o la
+  // factura NO puede dejar a cocina sin comandas. Es la parte crítica de este
+  // endpoint y la única que, si falla, para el local.
+  const [controls, cuentas, facturas] = await Promise.all([
+    safePrintables("control", () =>
+      buildPrintableControlTickets(service, businessId),
+    ),
+    safePrintables("cuenta", () =>
+      buildPrintableCuentaTickets(service, businessId),
+    ),
+    safePrintables("factura", () =>
+      buildPrintableFacturaTickets(service, businessId),
+    ),
   ]);
 
   return NextResponse.json({
-    comandas: [...printable, ...controls, ...cuentas],
+    comandas: [...printable, ...controls, ...cuentas, ...facturas],
   });
 }
 
@@ -344,6 +359,22 @@ function agruparOtrosSectores(
     porSector.set(it.station_id, sector);
   }
   return [...porSector.values()];
+}
+
+/**
+ * Corre un armador de papeles y, si explota, devuelve `[]` en vez de tumbar el
+ * GET. El resto —sobre todo las comandas de cocina— sigue saliendo.
+ */
+async function safePrintables<T>(
+  label: string,
+  build: () => Promise<T[]>,
+): Promise<T[]> {
+  try {
+    return await build();
+  } catch (e) {
+    console.error(`print-agent GET · ${label}`, e);
+    return [];
+  }
 }
 
 /**
@@ -858,6 +889,164 @@ async function buildPrintableCuentaTickets(
       reprint: Boolean(j.reprint_requested_at),
       table_label: data.table_label,
       items: data.items ?? [],
+      content_escpos_b64: content.escpos_b64,
+      content_plain: content.plain,
+    });
+  }
+  return out;
+}
+
+/**
+ * Las facturas pendientes de imprimir del negocio (spec 084).
+ *
+ * La comandera sale de la **caja del pago** de cada factura; sin pago asociado
+ * (nota de crédito, comprobante suelto), de la caja por defecto. Un job sin
+ * destino se saltea y queda pendiente: si el encargado configura la IP más
+ * tarde, sale sola en el próximo poll.
+ *
+ * El contenido incluye el QR de ARCA como comandos ESC/POS nativos dentro de
+ * `content_escpos_b64`, así que el agente del local no necesita cambios.
+ */
+async function buildPrintableFacturaTickets(
+  service: ReturnType<typeof createSupabaseServiceClient>,
+  businessId: string,
+) {
+  const { data: business } = await service
+    .from("businesses")
+    .select("name, address, afip_cuit")
+    .eq("id", businessId)
+    .maybeSingle();
+  const biz = business as {
+    name: string;
+    address: string | null;
+    afip_cuit: string | null;
+  } | null;
+  if (!biz) return [];
+
+  const cajaCols =
+    "id, name, fiscal_printer_ip, fiscal_printer_port, fiscal_printer_enabled";
+
+  const [{ data: jobs, error }, { data: defaultCaja }] = await Promise.all([
+    service
+      .from("print_jobs")
+      .select(
+        `
+        id,
+        status,
+        emitted_at,
+        reprint_requested_at,
+        invoices!inner(
+          tipo_comprobante,
+          punto_venta,
+          numero,
+          cae,
+          cae_vencimiento,
+          cuit_receptor,
+          razon_social_receptor,
+          condicion_iva_receptor,
+          neto_cents,
+          iva_cents,
+          iva_rate,
+          total_cents,
+          qr_url,
+          created_at,
+          payments(cajas(${cajaCols}))
+        )
+      `,
+      )
+      .eq("business_id", businessId)
+      .eq("kind", "factura")
+      .eq("status", "pendiente")
+      .order("emitted_at", { ascending: true }),
+    service
+      .from("cajas")
+      .select(cajaCols)
+      .eq("business_id", businessId)
+      .eq("is_default", true)
+      .maybeSingle(),
+  ]);
+
+  if (error) {
+    // No tumba el GET: las comandas de cocina se devuelven igual.
+    console.error("print-agent GET · print_jobs factura", error);
+    return [];
+  }
+
+  const out = [];
+  for (const j of jobs ?? []) {
+    const inv = j.invoices as unknown as {
+      tipo_comprobante: FacturaTicketData["tipo_comprobante"];
+      punto_venta: number;
+      numero: number | null;
+      cae: string | null;
+      cae_vencimiento: string | null;
+      cuit_receptor: string | null;
+      razon_social_receptor: string | null;
+      condicion_iva_receptor: FacturaTicketData["condicion_iva_receptor"];
+      neto_cents: number;
+      iva_cents: number;
+      iva_rate: number;
+      total_cents: number;
+      qr_url: string | null;
+      created_at: string;
+      payments: { cajas: unknown } | null;
+    };
+
+    // El `!inner` lo garantiza en producción, pero una fila sin factura no
+    // justifica perder el resto del lote.
+    if (!inv) continue;
+
+    const rawCaja = inv.payments?.cajas;
+    const caja =
+      ((Array.isArray(rawCaja) ? rawCaja[0] : rawCaja) as
+        | Parameters<typeof resolveFiscalPrinter>[0]
+        | undefined) ?? null;
+    const printer =
+      resolveFiscalPrinter(caja) ??
+      resolveFiscalPrinter(
+        (defaultCaja as Parameters<typeof resolveFiscalPrinter>[0]) ?? null,
+      );
+    if (!printer) continue;
+
+    const data: FacturaTicketData = {
+      print_job_id: j.id,
+      business_name: sanitizeTicketText(biz.name) ?? "—",
+      business_address: sanitizeTicketText(biz.address),
+      business_cuit: sanitizeTicketText(biz.afip_cuit),
+      tipo_comprobante: inv.tipo_comprobante,
+      punto_venta: inv.punto_venta,
+      numero: inv.numero,
+      // La fecha del comprobante es la de la FACTURA, no la del pedido de
+      // impresión: una reimpresión de mañana sigue siendo de hoy.
+      emitted_at: inv.created_at,
+      cae: sanitizeTicketText(inv.cae),
+      cae_vencimiento: inv.cae_vencimiento,
+      cuit_receptor: sanitizeTicketText(inv.cuit_receptor),
+      razon_social_receptor: sanitizeTicketText(inv.razon_social_receptor),
+      condicion_iva_receptor: inv.condicion_iva_receptor,
+      neto_cents: inv.neto_cents,
+      iva_cents: inv.iva_cents,
+      iva_rate: inv.iva_rate,
+      total_cents: inv.total_cents,
+      qr_url: sanitizeTicketText(inv.qr_url),
+      reprint: Boolean(j.reprint_requested_at),
+    };
+
+    const content = buildFacturaTicketContent(data);
+    out.push({
+      comanda_id: j.id,
+      station_id: null,
+      station_name: "FISCAL",
+      printer_ip: printer.ip,
+      printer_port: printer.port,
+      printer_enabled: true,
+      batch: 1,
+      emitted_at: j.emitted_at,
+      cancelled: false,
+      cancelled_reason: null,
+      reprint: Boolean(j.reprint_requested_at),
+      table_label: `${inv.punto_venta}-${inv.numero ?? "?"}`,
+      items: [],
       content_escpos_b64: content.escpos_b64,
       content_plain: content.plain,
     });

@@ -30,8 +30,15 @@ vi.mock("@/lib/supabase/service", () => ({
   createSupabaseServiceClient: () => ({
     from: (table: string) => ({
       select: () => {
+        // El mock tiene que distinguir por `kind`: desde spec 084 el GET
+        // consulta `print_jobs` tres veces (control / cuenta / factura) y sin
+        // esto las filas de control se colarían por las otras dos ramas.
+        let kind: string | null = null;
         const b = {
-          eq: () => b,
+          eq: (col: string, val: unknown) => {
+            if (col === "kind") kind = String(val);
+            return b;
+          },
           or: () => b,
           order: () => b,
           maybeSingle: async () => ({
@@ -46,7 +53,8 @@ vi.mock("@/lib/supabase/service", () => ({
           }),
           then: (resolve: (v: { data: Row[]; error: null }) => unknown) =>
             resolve({
-              data: table === "print_jobs" ? controlRows : [],
+              data:
+                table === "print_jobs" && kind === "control" ? controlRows : [],
               error: null,
             }),
         };

@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 
 import {
   ClipboardList,
+  FileText,
   Fingerprint,
   MonitorDown,
   Printer,
@@ -18,6 +19,10 @@ import {
   type CuentaPrinterConfig,
   type FloorPlanPrinterRow,
 } from "@/components/admin/settings/cuenta-printers-form";
+import {
+  FiscalPrintersForm,
+  type CajaFiscalPrinterRow,
+} from "@/components/admin/settings/fiscal-printers-form";
 import { PrintAgentCard } from "@/components/admin/settings/print-agent-card";
 import { SettingsSection } from "@/components/admin/settings/settings-section";
 import {
@@ -45,6 +50,7 @@ export default async function ConfiguracionLocalPage({
     { data: stations },
     { data: bizFlag },
     { data: floorPlans },
+    { data: cajas },
     { data: agentStatus },
   ] =
     await Promise.all([
@@ -68,6 +74,14 @@ export default async function ConfiguracionLocalPage({
         )
         .eq("business_id", business.id)
         .order("name"),
+      service
+        .from("cajas")
+        .select(
+          "id, name, is_default, fiscal_printer_ip, fiscal_printer_port, fiscal_printer_enabled",
+        )
+        .eq("business_id", business.id)
+        .eq("is_active", true)
+        .order("sort_order"),
       service
         .from("print_agent_status")
         .select("last_seen_at")
@@ -127,6 +141,17 @@ export default async function ConfiguracionLocalPage({
           slug={business_slug}
           business={cuentaPrinter}
           floorPlans={(floorPlans ?? []) as FloorPlanPrinterRow[]}
+        />
+      </SettingsSection>
+
+      <SettingsSection
+        icon={<FileText className="size-5" strokeWidth={1.75} />}
+        title="Comandera fiscal"
+        description="Dónde sale la factura impresa —con el QR de ARCA— cuando el encargado toca «Imprimir factura». Es por caja: el papel fiscal tiene que salir donde está parado el que cobra."
+      >
+        <FiscalPrintersForm
+          slug={business_slug}
+          cajas={(cajas ?? []) as CajaFiscalPrinterRow[]}
         />
       </SettingsSection>
 
