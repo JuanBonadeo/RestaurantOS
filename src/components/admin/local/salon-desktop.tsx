@@ -54,6 +54,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { BusinessRole } from "@/lib/admin/context";
 import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
+import { planReservationsByTable } from "@/lib/mozo/plan-reservation";
 import { tableDisplayName } from "@/lib/mozo/table-display-name";
 import { MozoPedirClient } from "@/app/[business_slug]/mozo/mesa/[id]/pedir/pedir-client";
 import { CobrarDesktopClient } from "@/app/[business_slug]/admin/(authed)/mesa/[id]/cobrar/cobrar-desktop-client";
@@ -664,6 +665,26 @@ export function SalonDesktop({
     return m;
   }, [reservations, tableStatusById]);
 
+  // Lo que ve el PLANO es más angosto que lo de arriba: una reserva se dibuja
+  // sobre la mesa recién 3 h antes de su hora (issue #117 — a las 12 no queremos
+  // ver la de las 21), y con dos reservas del día sobre la misma mesa gana la
+  // próxima. El sidebar y el panel de reservas siguen con el día completo.
+  const planReservationByTable = useMemo(
+    () =>
+      planReservationsByTable(
+        reservations.filter(
+          (r) =>
+            !(
+              r.status === "seated" &&
+              r.table_id &&
+              tableStatusById[r.table_id] === "libre"
+            ),
+        ),
+        now,
+      ),
+    [reservations, tableStatusById, now],
+  );
+
   const orderByTable = useMemo(() => {
     const m: Record<string, SalonOrderRef> = {};
     for (const o of dineInOrders) {
@@ -1136,7 +1157,8 @@ export function SalonDesktop({
     const out: Record<string, TableExtra> = {};
     for (const t of activeTables) {
       const order = orderByTable[t.id];
-      const reservation = reservationByTable[t.id];
+      // La del plano (ventana de 3 h), no la del día — issue #117.
+      const reservation = planReservationByTable[t.id];
       const delay = delayByTable[t.id];
       // En paint mode usamos `localAssign` (optimistic) para que el tap
       // pinte la mesa de inmediato sin esperar al server.
@@ -1183,7 +1205,7 @@ export function SalonDesktop({
   }, [
     activeTables,
     orderByTable,
-    reservationByTable,
+    planReservationByTable,
     delayByTable,
     mozoNameById,
     distribuirOpen,
