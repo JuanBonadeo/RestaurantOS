@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useForm, useFieldArray, useFormContext } from "react-hook-form";
+import { useForm, useFormContext } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Plus, Trash2, GripVertical } from "lucide-react";
+import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -26,7 +26,19 @@ import {
   createDailyMenu,
   updateDailyMenu,
 } from "@/lib/daily-menus/daily-menu-actions";
-import { DailyMenuInput } from "@/lib/daily-menus/schemas";
+import {
+  addOption,
+  moveCard,
+  moveOption,
+  normalize,
+  pruneBlocks,
+  removeGroup,
+  toCards,
+} from "@/lib/daily-menus/component-order";
+import {
+  DailyMenuInput,
+  type DailyMenuComponentInput,
+} from "@/lib/daily-menus/schemas";
 
 // Orden L..D para que la lectura sea natural (empezar por Lunes).
 const DAY_OPTIONS: { dow: number; label: string }[] = [
@@ -78,18 +90,26 @@ export function DailyMenuForm({
           sort_order: menu.sort_order,
           display_context: menu.display_context,
           is_suggestion: menu.is_suggestion,
-          components: menu.components.map((c) => ({
-            id: c.id,
-            label: c.label,
-            description: c.description ?? undefined,
-            kind: c.kind ?? "text",
-            product_id: c.product_id,
-            choice_group_id: c.choice_group_id,
-            choice_group_label: c.choice_group_label,
-            // Centavos en datos → pesos en el form (igual que price_cents).
-            extra_price_cents: (c.extra_price_cents ?? 0) / 100,
-            blocks_choice_group_ids: c.blocks_choice_group_ids ?? [],
-          })),
+          // `normalize` deja las opciones de cada grupo contiguas (spec 076,
+          // FR-005). Los menús cargados antes pueden tenerlas intercaladas
+          // —agregar una opción hacía `append` al final del menú—, y con el
+          // array desordenado los índices de las tarjetas no coincidirían con
+          // los del form. No cambia nada de lo que se ve: el agrupado siempre
+          // fue por `choice_group_id`.
+          components: normalize(
+            menu.components.map((c) => ({
+              id: c.id,
+              label: c.label,
+              description: c.description ?? undefined,
+              kind: c.kind ?? "text",
+              product_id: c.product_id,
+              choice_group_id: c.choice_group_id,
+              choice_group_label: c.choice_group_label,
+              // Centavos en datos → pesos en el form (igual que price_cents).
+              extra_price_cents: (c.extra_price_cents ?? 0) / 100,
+              blocks_choice_group_ids: c.blocks_choice_group_ids ?? [],
+            })),
+          ),
         }
       : {
           name: "",
@@ -370,6 +390,10 @@ export function DailyMenuForm({
   );
 }
 
+/** El nombre de un grupo/opción no es obligatorio: sin esto los avisos quedan
+ *  con comillas vacías. */
+const nombreODefault = (label: string) => label.trim() || "sin nombre";
+
 const KIND_OPTIONS = [
   { value: "text", label: "Texto" },
   { value: "product", label: "Producto fijo" },
@@ -383,45 +407,128 @@ function ComponentsEditor({
   businessId: string;
   productNames: Map<string, string>;
 }) {
-  const { control, watch, setValue } = useFormContext<DailyMenuInput>();
-  const { fields, append, remove } = useFieldArray({
-    control,
-    name: "components",
-  });
+  const { control, watch, setValue, getValues, reset } =
+    useFormContext<DailyMenuInput>();
   const components = watch("components");
 
-  const choiceGroups = new Map<string, number[]>();
-  components.forEach((c, idx) => {
-    if (c.kind === "choice" && c.choice_group_id) {
-      const arr = choiceGroups.get(c.choice_group_id) ?? [];
-      arr.push(idx);
-      choiceGroups.set(c.choice_group_id, arr);
-    }
+  // Tarjetas: un componente suelto, o un grupo de opciones entero. Es la unidad
+  // que se mueve (spec 076). El array del form está normalizado —`defaultValues`
+  // lo normaliza y todas las operaciones lo mantienen así—, con lo cual la
+  // posición plana de cada tarjeta es la suma de los tamaños de las anteriores.
+  const cards = toCards(components);
+  const cardStart: number[] = [];
+  let flatIndex = 0;
+  for (const card of cards) {
+    cardStart.push(flatIndex);
+    flatIndex += card.kind === "single" ? 1 : card.options.length;
+  }
+
+  // Grupos en el orden en que se van a decidir (spec 074).
+  const orderedGroups = cards.flatMap((card, cardIndex) =>
+    card.kind === "group"
+      ? [{ id: card.groupId, label: card.label, cardIndex }]
+      : [],
+  );
+
+  // Después de mover, el foco vuelve al botón equivalente de la nueva posición
+  // (FR-007): bajar dos lugares es Enter, Enter. Se pide por id porque el
+  // `replace` re-renderiza la lista entera.
+  const pendingFocus = useRef<string | null>(null);
+  useEffect(() => {
+    const id = pendingFocus.current;
+    if (!id) return;
+    pendingFocus.current = null;
+    // Sin `requestAnimationFrame`: el efecto corre después del commit, así que
+    // el botón de la nueva posición ya está en el DOM.
+    document.getElementById(id)?.focus();
   });
 
-  // Grupos en el orden en que se van a decidir (spec 074). La posición de un
-  // grupo es la de su primera opción, porque `sort_order` se persiste como el
-  // índice en este array (ver `syncComponents`).
-  const orderedGroups = [...choiceGroups.entries()]
-    .map(([id, idxs]) => ({
-      id,
-      firstIndex: Math.min(...idxs),
-      label: components[idxs[0]]?.choice_group_label ?? "",
-    }))
-    .sort((a, b) => a.firstIndex - b.firstIndex);
-
-  const addChoiceOption = (groupId: string, groupLabel: string) => {
-    append({
-      label: "",
-      kind: "choice",
-      choice_group_id: groupId,
-      choice_group_label: groupLabel,
-      extra_price_cents: 0,
-      blocks_choice_group_ids: [],
-    });
+  /**
+   * Único punto por donde pasan **todos** los cambios a la lista de componentes
+   * —mover, agregar, borrar—. Hace dos cosas:
+   *
+   * 1. Limpia las reglas que quedaron inválidas (FR-004). Si no, una regla que
+   *    mira hacia atrás queda **invisible** —los checks sólo dibujan los grupos
+   *    posteriores— y el menú no se puede guardar nunca más.
+   * 2. Escribe con `reset` en vez de con `replace` de `useFieldArray`.
+   *
+   * Lo segundo no es capricho: con `replace`, los `Controller` de cada campo
+   * (el `+$` de la opción, el label del componente) **no se re-sincronizan** si
+   * React no los remonta, y como las tarjetas conservan su posición en el DOM
+   * los valores quedan pegados al índice viejo. Se veía feo y mentiroso: mover
+   * la opción de arriba dejaba su `+$` en la que ocupó su lugar. Los errores de
+   * validación quedaban igual de desfasados. `reset` reconstruye el estado del
+   * form entero, así que valores y errores viajan con la tarjeta.
+   */
+  const applyComponents = (
+    next: DailyMenuComponentInput[],
+    focusId?: string,
+  ) => {
+    const { components: cleaned, dropped } = pruneBlocks(next);
+    reset(
+      { ...getValues(), components: cleaned },
+      { keepDefaultValues: true },
+    );
+    for (const d of dropped) {
+      // Los grupos pueden no tener nombre (el label no es obligatorio), y sin
+      // el fallback el aviso quedaba «… ya no condiciona a «»: ahora  se
+      // decide antes que …».
+      const bloqueado = nombreODefault(d.blockedLabel);
+      toast.warning(
+        `«${nombreODefault(d.optionLabel)}» ya no condiciona a «${bloqueado}»: ahora ${bloqueado} se decide antes que ${nombreODefault(d.ownerLabel)}.`,
+      );
+    }
+    if (focusId) pendingFocus.current = focusId;
   };
 
-  const rendered = new Set<string>();
+  /** Borrar un componente por su índice plano (una opción o una tarjeta suelta). */
+  const removeAt = (idx: number) =>
+    applyComponents(components.filter((_, i) => i !== idx));
+
+  /** Mover una tarjeta. En los extremos el botón que se usó queda
+   *  deshabilitado, así que el foco pasa al otro. */
+  const moveCardTo = (from: number, to: number, dir: "up" | "down") => {
+    const focusDir =
+      to === 0 ? "down" : to === cards.length - 1 ? "up" : dir;
+    applyComponents(moveCard(components, from, to), `card-${to}-${focusDir}`);
+  };
+
+  const moveOptionTo = (
+    groupId: string,
+    from: number,
+    to: number,
+    total: number,
+    dir: "up" | "down",
+  ) => {
+    const focusDir = to === 0 ? "down" : to === total - 1 ? "up" : dir;
+    applyComponents(
+      moveOption(components, groupId, from, to),
+      `opt-${groupId}-${to}-${focusDir}`,
+    );
+  };
+
+  const addChoiceOption = (groupId: string, groupLabel: string) => {
+    applyComponents(
+      addOption(components, groupId, {
+        label: "",
+        kind: "choice",
+        choice_group_id: groupId,
+        choice_group_label: groupLabel,
+        extra_price_cents: 0,
+        blocks_choice_group_ids: [],
+      }),
+    );
+  };
+
+  const deleteGroup = (groupId: string, label: string, count: number) => {
+    const ok = window.confirm(
+      `¿Borrar el grupo «${nombreODefault(label)}» y ${
+        count === 1 ? "su única opción" : `sus ${count} opciones`
+      }?`,
+    );
+    if (!ok) return;
+    applyComponents(removeGroup(components, groupId));
+  };
 
   return (
     <section className="space-y-3">
@@ -438,7 +545,12 @@ function ComponentsEditor({
             type="button"
             size="sm"
             variant="outline"
-            onClick={() => append({ label: "", kind: "text", extra_price_cents: 0 })}
+            onClick={() =>
+              applyComponents([
+                ...components,
+                { label: "", kind: "text", extra_price_cents: 0 },
+              ])
+            }
           >
             <Plus className="size-3.5" /> Componente
           </Button>
@@ -446,17 +558,19 @@ function ComponentsEditor({
             type="button"
             size="sm"
             variant="outline"
-            onClick={() => {
-              const groupId = crypto.randomUUID();
-              append({
-                label: "",
-                kind: "choice",
-                choice_group_id: groupId,
-                choice_group_label: "",
-                extra_price_cents: 0,
-                blocks_choice_group_ids: [],
-              });
-            }}
+            onClick={() =>
+              applyComponents([
+                ...components,
+                {
+                  label: "",
+                  kind: "choice",
+                  choice_group_id: crypto.randomUUID(),
+                  choice_group_label: "",
+                  extra_price_cents: 0,
+                  blocks_choice_group_ids: [],
+                },
+              ])
+            }
           >
             <Plus className="size-3.5" /> Grupo de opciones
           </Button>
@@ -464,63 +578,146 @@ function ComponentsEditor({
       </div>
 
       <div className="space-y-3">
-        {fields.map((field, idx) => {
-          const kind = components[idx]?.kind ?? "text";
-          const groupId = components[idx]?.choice_group_id;
+        {cards.map((card, cardIndex) => {
+          const start = cardStart[cardIndex];
+          // Sin nombre, la posición desambigua: dos componentes recién
+          // agregados tienen los dos el label vacío y quedarían con el mismo
+          // `aria-label`.
+          const posicion = `${cardIndex + 1}º`;
+          const move = (
+            <CardMoveButtons
+              id={`card-${cardIndex}`}
+              label={
+                card.kind === "group"
+                  ? `el grupo ${card.label || `sin nombre (${posicion})`}`
+                  : `el componente ${card.component.label || `sin nombre (${posicion})`}`
+              }
+              isFirst={cardIndex === 0}
+              isLast={cardIndex === cards.length - 1}
+              onUp={() => moveCardTo(cardIndex, cardIndex - 1, "up")}
+              onDown={() => moveCardTo(cardIndex, cardIndex + 1, "down")}
+            />
+          );
 
-          if (kind === "choice" && groupId) {
-            if (rendered.has(groupId)) return null;
-            rendered.add(groupId);
-            const groupIndices = choiceGroups.get(groupId) ?? [idx];
-            const groupLabel = components[groupIndices[0]]?.choice_group_label ?? "";
-
+          if (card.kind === "group") {
+            const indices = card.options.map((_, i) => start + i);
             return (
               <ChoiceGroupCard
-                key={groupId}
+                key={card.groupId}
                 businessId={businessId}
-                groupId={groupId}
-                groupLabel={groupLabel}
-                indices={groupIndices}
+                groupId={card.groupId}
+                groupLabel={card.label}
+                indices={indices}
+                moveButtons={move}
                 // Sólo los grupos POSTERIORES se pueden condicionar (FR-002):
                 // uno anterior ya está decidido cuando llegaría la regla.
                 laterGroups={orderedGroups.filter(
-                  (g) => g.firstIndex > Math.min(...groupIndices),
+                  (g) => g.cardIndex > cardIndex,
                 )}
                 control={control}
                 productNames={productNames}
                 onLabelChange={(label) => {
-                  for (const i of groupIndices) {
+                  for (const i of indices) {
                     setValue(`components.${i}.choice_group_label`, label);
                   }
                 }}
-                onAddOption={() => addChoiceOption(groupId, groupLabel)}
-                onRemoveOption={(i) => remove(i)}
+                onAddOption={() => addChoiceOption(card.groupId, card.label)}
+                onRemoveOption={(i) => removeAt(i)}
+                onMoveOption={(from, to, dir) =>
+                  moveOptionTo(
+                    card.groupId,
+                    from,
+                    to,
+                    card.options.length,
+                    dir,
+                  )
+                }
+                onDeleteGroup={() =>
+                  deleteGroup(card.groupId, card.label, card.options.length)
+                }
               />
             );
           }
 
           return (
             <SingleComponentCard
-              key={field.id}
-              idx={idx}
-              kind={kind}
+              // La posición como key: sin estado local propio, reordenar mueve
+              // el nodo en vez de remontarlo (y el `replace` cambia los ids de
+              // `useFieldArray`, así que tampoco servirían de key estable).
+              key={`card-${cardIndex}`}
+              idx={start}
+              kind={card.component.kind ?? "text"}
               businessId={businessId}
               control={control}
               productNames={productNames}
+              moveButtons={move}
               onKindChange={(newKind) => {
-                setValue(`components.${idx}.kind`, newKind);
+                setValue(`components.${start}.kind`, newKind);
                 if (newKind === "text") {
-                  setValue(`components.${idx}.product_id`, null);
-                  setValue(`components.${idx}.choice_group_id`, null);
-                  setValue(`components.${idx}.choice_group_label`, null);
+                  setValue(`components.${start}.product_id`, null);
+                  setValue(`components.${start}.choice_group_id`, null);
+                  setValue(`components.${start}.choice_group_label`, null);
                 }
               }}
-              onRemove={() => remove(idx)}
+              onRemove={() => removeAt(start)}
             />
           );
         })}
       </div>
     </section>
+  );
+}
+
+/**
+ * ▲/▼ para reordenar (spec 076). Botones y no drag & drop: acá hay dos niveles
+ * anidados —tarjetas y opciones dentro de un grupo— y esto se opera con el
+ * teclado y con el dedo sin sensores extra. Los ids son por posición, que es lo
+ * que permite devolver el foco después de mover (FR-007).
+ */
+function CardMoveButtons({
+  id,
+  label,
+  isFirst,
+  isLast,
+  onUp,
+  onDown,
+}: {
+  /** Prefijo del id: se le agrega `-up` / `-down`. */
+  id: string;
+  /** Qué se mueve, para el `aria-label`: "el grupo Guarnición". */
+  label: string;
+  isFirst: boolean;
+  isLast: boolean;
+  onUp: () => void;
+  onDown: () => void;
+}) {
+  return (
+    <div className="flex shrink-0 flex-col">
+      <Button
+        type="button"
+        id={`${id}-up`}
+        size="icon-sm"
+        variant="ghost"
+        className="h-5"
+        disabled={isFirst}
+        onClick={onUp}
+        aria-label={`Subir ${label}`}
+      >
+        <ChevronUp className="size-3.5" />
+      </Button>
+      <Button
+        type="button"
+        id={`${id}-down`}
+        size="icon-sm"
+        variant="ghost"
+        className="h-5"
+        disabled={isLast}
+        onClick={onDown}
+        aria-label={`Bajar ${label}`}
+      >
+        <ChevronDown className="size-3.5" />
+      </Button>
+    </div>
   );
 }
 
@@ -530,6 +727,7 @@ function SingleComponentCard({
   businessId,
   control,
   productNames,
+  moveButtons,
   onKindChange,
   onRemove,
 }: {
@@ -538,6 +736,7 @@ function SingleComponentCard({
   businessId: string;
   control: ReturnType<typeof useFormContext<DailyMenuInput>>["control"];
   productNames: Map<string, string>;
+  moveButtons: React.ReactNode;
   onKindChange: (kind: "text" | "product") => void;
   onRemove: () => void;
 }) {
@@ -547,6 +746,7 @@ function SingleComponentCard({
   return (
     <div className="bg-card space-y-2 rounded-xl border p-3">
       <div className="flex items-start gap-2">
+        {moveButtons}
         <select
           value={kind === "choice" ? "text" : kind}
           onChange={(e) => onKindChange(e.target.value as "text" | "product")}
@@ -636,9 +836,12 @@ function ChoiceGroupCard({
   laterGroups,
   control,
   productNames,
+  moveButtons,
   onLabelChange,
   onAddOption,
   onRemoveOption,
+  onMoveOption,
+  onDeleteGroup,
 }: {
   businessId: string;
   groupId: string;
@@ -648,9 +851,13 @@ function ChoiceGroupCard({
   laterGroups: { id: string; label: string }[];
   control: ReturnType<typeof useFormContext<DailyMenuInput>>["control"];
   productNames: Map<string, string>;
+  moveButtons: React.ReactNode;
   onLabelChange: (label: string) => void;
   onAddOption: () => void;
   onRemoveOption: (idx: number) => void;
+  /** Mover una opción dentro del grupo: posiciones relativas al grupo. */
+  onMoveOption: (from: number, to: number, dir: "up" | "down") => void;
+  onDeleteGroup: () => void;
 }) {
   const { watch, setValue } = useFormContext<DailyMenuInput>();
 
@@ -678,6 +885,7 @@ function ChoiceGroupCard({
   return (
     <div className="bg-card space-y-3 rounded-xl border-2 border-dashed border-amber-300 p-3">
       <div className="flex items-center gap-2">
+        {moveButtons}
         <span className="bg-amber-100 text-amber-800 rounded px-2 py-0.5 text-[0.65rem] font-bold uppercase tracking-wider">
           Elegir una
         </span>
@@ -687,16 +895,32 @@ function ChoiceGroupCard({
           onChange={(e) => onLabelChange(e.target.value)}
           className="flex-1"
         />
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          onClick={onDeleteGroup}
+          aria-label={`Borrar el grupo ${groupLabel || "sin nombre"}`}
+        >
+          <Trash2 className="size-3.5" />
+        </Button>
       </div>
 
       <div className="space-y-2 pl-3">
-        {indices.map((idx) => {
+        {indices.map((idx, optIndex) => {
           const productId = watch(`components.${idx}.product_id`);
           const blocked = watch(`components.${idx}.blocks_choice_group_ids`) ?? [];
           return (
             <div key={idx} className="space-y-1.5">
             <div className="flex items-center gap-2">
-              <GripVertical className="text-muted-foreground size-3.5 shrink-0" />
+              <CardMoveButtons
+                id={`opt-${groupId}-${optIndex}`}
+                label={`la opción ${optIndex + 1} de ${groupLabel || `el grupo sin nombre ${groupId.slice(0, 4)}`}`}
+                isFirst={optIndex === 0}
+                isLast={optIndex === indices.length - 1}
+                onUp={() => onMoveOption(optIndex, optIndex - 1, "up")}
+                onDown={() => onMoveOption(optIndex, optIndex + 1, "down")}
+              />
               <div className="flex-1">
                 <ProductPicker
                   businessId={businessId}
