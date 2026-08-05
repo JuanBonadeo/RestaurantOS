@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import type { OrderStatus } from "@/lib/orders/status";
+import { isOnlinePendingAdvance, type OrderStatus } from "@/lib/orders/status";
 import { updateOrderStatus } from "@/lib/orders/update-status";
 
 const NEXT_LABEL: Partial<Record<OrderStatus, string>> = {
@@ -94,11 +94,29 @@ export function OrderDetailActions({
     });
   };
 
+  // spec 096 · H-51 — callejón sin salida. Este componente no recibe
+  // `onConfirm`, así que el botón caía a `updateOrderStatus` y el server
+  // respondía «Usá "Confirmar" para mandar el pedido a cocina» — mientras el
+  // botón que se acababa de apretar decía, literalmente, «Confirmar». Nunca
+  // funcionó desde acá.
+  //
+  // Se usa **el mismo predicado que el server** para decidir si el avance es
+  // alcanzable: así la UI y la guarda no pueden desincronizarse. Si no lo es,
+  // el botón no se dibuja y se explica dónde está el gesto que sí funciona.
+  const avanceBloqueado = Boolean(
+    next && isOnlinePendingAdvance(status, deliveryType, next),
+  );
+
   if (isTerminal) return null;
 
   return (
     <div className="flex gap-2">
-      {advanceLabel && next && (
+      {avanceBloqueado && (
+        <p className="text-muted-foreground self-center text-xs">
+          Mandalo a cocina desde Operación.
+        </p>
+      )}
+      {!avanceBloqueado && advanceLabel && next && (
         <Button disabled={pending} onClick={handleAdvance} className="flex-1">
           {advanceLabel}
         </Button>

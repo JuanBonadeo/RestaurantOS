@@ -798,7 +798,19 @@ export async function enviarComanda(
 
   // Una comanda por sector con batch autoincremental dentro de (order, station).
   const routeResult = await createComandasForItems(service, orderId, itemsByStation);
-  if (!routeResult.ok) return actionError(routeResult.error);
+  if (!routeResult.ok) {
+    // spec 096 · H-38 — el `return` estaba **antes** del recompute de totales,
+    // y para este punto los ítems ya están persistidos y el stock ya se
+    // descontó. El mozo leía «No pudimos crear la comanda», asumía que no se
+    // envió nada y se iba a cobrar: la pantalla de cobro muestra los ítems
+    // (recompone el total en TS), pero el ticket impreso, la factura ARCA y el
+    // criterio de "saldada" de la RPC salen de `orders.total_cents` — o sea del
+    // total **viejo**. Se cobraba y se facturaba de menos, y la orden cerraba
+    // igual. Recalcular antes de salir no arregla la comanda, pero deja la
+    // orden consistente con lo que efectivamente se cargó.
+    await recomputeOrderTotals(service, orderId);
+    return actionError(routeResult.error);
+  }
   let comandaIds = routeResult.comanda_ids;
 
   // Idempotencia (spec 42): si hubo líneas ya despachadas (retry), devolvemos

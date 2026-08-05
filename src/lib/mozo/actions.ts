@@ -487,6 +487,22 @@ export async function anularMesa(
   // de stock— y derivaba los ítems a cancelar **desde las comandas activas**,
   // así que las bebidas (`station_id` null, nunca entran a `comanda_items`) y lo
   // cargado-sin-enviar quedaban vivos. En el cloud: 29 ítems por $606.200.
+  // spec 096 · H-30 — si no hay ninguna orden abierta, no hay nada que anular.
+  //
+  // `canTransition('libre','libre')` es true por el caso `from === to`, y la
+  // guarda de rol (`isAnulacion`) sólo cubre `from` ocupada/pidio_cuenta — o sea
+  // que sobre una mesa ya libre **también se caía el chequeo de encargado**. El
+  // UPDATE no matcheaba nada y nadie miraba el resultado vacío: igual se
+  // auditaba, se notificaba y se devolvía «Mesa anulada.».
+  //
+  // Lo que pasaba: el mozo cobra la 12 y el encargado le da Anular casi en
+  // simultáneo. El encargado ve «Mesa anulada.» y se queda tranquilo; el mozo
+  // recibe «te anularon la Mesa 12». No se anuló nada. La función hermana
+  // (`updateTableOperationalStatus`) sí tiene este corte — era una omisión.
+  if (openOrderIdsPrev.length === 0) {
+    return actionError("La mesa no tiene una cuenta abierta para anular.");
+  }
+
   const nowIso = new Date().toISOString();
   const openOrderIds = openOrderIdsPrev;
   for (const orderId of openOrderIds) {
@@ -524,8 +540,17 @@ export async function anularMesa(
     reason,
   });
 
-  // La reserva seated (si la hubo) pasa a no_show: la mesa se anuló sin consumo.
-  await closeSeatedReservations(service, tableId, business.id, "no_show");
+  // spec 096 · H-29 — el desenlace de la reserva se **deriva del consumo**, no
+  // se asume. La llamada era incondicional a `no_show` aunque el comentario
+  // dijera "sin consumo": el cliente que reservó, comió y se fue sin pagar abría
+  // «Mis reservas» y leía «No asististe», y al dueño le llegaba una alerta de
+  // que la asistencia se había caído. `conConsumo` ya está calculado arriba.
+  await closeSeatedReservations(
+    service,
+    tableId,
+    business.id,
+    conConsumo ? "completed" : "no_show",
+  );
 
   // Notify the assigned mozo (if any) that their table was cancelled.
   const cancelPayload = { tableLabel: table.label, reason };

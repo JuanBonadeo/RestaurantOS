@@ -57,8 +57,18 @@ export async function deleteOrder(
       .eq("user_id", user.id)
       .maybeSingle(),
   ]);
-  if (!profile?.is_platform_admin && !membership) {
-    return actionError("Permiso denegado.");
+  // spec 096 · H-52 — no alcanza con **ser** miembro: hay que tener rango.
+  //
+  // Antes bastaba cualquier rol del negocio, incluido `mozo` y `personal`. Y el
+  // borrado es duro: la cascada se lleva `order_items`,
+  // `order_item_modifiers`, `order_status_history`, **`comandas`** y
+  // **`order_splits`**; `invoices` e `ingredient_consumptions` quedan con el
+  // FK en SET NULL, o sea comprobantes fiscales huérfanos de su venta.
+  const rol = (membership as { role: string } | null)?.role;
+  const puedeBorrar =
+    profile?.is_platform_admin || rol === "encargado" || rol === "admin";
+  if (!puedeBorrar) {
+    return actionError("Solo encargado o admin pueden eliminar un pedido.");
   }
 
   // Load the order to validate status + tenant match.
@@ -74,6 +84,30 @@ export async function deleteOrder(
   if (order.status !== "cancelled") {
     return actionError(
       "Sólo se pueden eliminar pedidos cancelados. Cancelalo primero.",
+    );
+  }
+
+  // Un pedido con comprobante fiscal no se borra: el FK de `invoices` es
+  // SET NULL, así que la factura sobreviviría sin venta que la explique.
+  // `payments` es RESTRICT y falla con un error genérico; mejor decirlo claro.
+  const [{ count: facturas }, { count: pagos }] = await Promise.all([
+    service
+      .from("invoices")
+      .select("id", { count: "exact", head: true })
+      .eq("order_id", order_id),
+    service
+      .from("payments")
+      .select("id", { count: "exact", head: true })
+      .eq("order_id", order_id),
+  ]);
+  if ((facturas ?? 0) > 0) {
+    return actionError(
+      "Este pedido tiene un comprobante emitido — no se puede eliminar.",
+    );
+  }
+  if ((pagos ?? 0) > 0) {
+    return actionError(
+      "Este pedido tiene pagos registrados — no se puede eliminar.",
     );
   }
 
