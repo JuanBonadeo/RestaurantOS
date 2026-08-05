@@ -325,8 +325,13 @@ export async function getCajaLiveStats(
   let total_ventas_cents = 0;
   let total_propinas_cents = 0;
   for (const p of payments) {
-    ventas_por_metodo[p.method] = (ventas_por_metodo[p.method] ?? 0) + p.amount_cents;
-    total_ventas_cents += p.amount_cents;
+    // spec 097 — la venta es lo que le queda al negocio: `amount − tip`. La
+    // propina viaja dentro de `amount_cents` (es la plata que efectivamente
+    // entró) pero **no es venta**, y sumarla acá la contaba dos veces: una en
+    // «Ventas» y otra en «Propinas», como si fueran conceptos independientes.
+    const venta = p.amount_cents - p.tip_cents;
+    ventas_por_metodo[p.method] = (ventas_por_metodo[p.method] ?? 0) + venta;
+    total_ventas_cents += venta;
     total_propinas_cents += p.tip_cents;
   }
 

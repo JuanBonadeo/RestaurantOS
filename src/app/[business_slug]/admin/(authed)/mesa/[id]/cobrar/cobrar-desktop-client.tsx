@@ -307,6 +307,7 @@ export function CobrarDesktopClient({
               slug={slug}
               isImplicit={init.hasImplicitSplit}
               methodConfigs={init.methodConfigs}
+              orderTipCents={cuenta.order.tip_cents}
               onPaid={({ orderClosed }) => {
                 if (orderClosed) {
                   toast.success("Mesa cobrada");
@@ -508,6 +509,7 @@ function CobrarSplitPanel({
   slug,
   isImplicit,
   methodConfigs,
+  orderTipCents,
   onPaid,
   onClear,
 }: {
@@ -517,6 +519,7 @@ function CobrarSplitPanel({
   slug: string;
   isImplicit: boolean;
   methodConfigs: PaymentMethodConfig[];
+  orderTipCents: number;
   onPaid: (result: { orderClosed: boolean }) => void;
   onClear: () => void;
 }) {
@@ -549,7 +552,13 @@ function CobrarSplitPanel({
         cajas={[]}
         cajaId={cajaId}
         methodConfigs={methodConfigs}
-        tip={{ mode: "editable" }}
+        // spec 097 — la propina viene de la cuenta, no se re-tipea acá.
+        // Arrancaba `editable` en 0, así que cobrar la misma mesa desde el
+        // desktop del encargado guardaba `tip_cents = 0` aunque el cliente
+        // hubiera pagado propina: **la propina del mozo dependía de quién
+        // apretaba el botón**. Es el mismo `mode: "fixed"` que usa la pantalla
+        // del mozo.
+        tip={{ mode: "fixed", cents: orderTipCents }}
         onSubmit={(input) =>
           registrarPago({
             orderId,

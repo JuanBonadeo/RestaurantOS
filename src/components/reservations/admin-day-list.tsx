@@ -14,9 +14,12 @@ import {
   updateReservationDetails,
   updateReservationStatus,
 } from "@/lib/reservations/booking-actions";
+import { arrivalSlots } from "@/lib/reservations/flexible-availability";
+import { OVERBOOK_HINT } from "@/lib/reservations/edit-window";
 import type {
   FloorTable,
   Reservation,
+  ReservationMode,
   ReservationStatus,
 } from "@/lib/reservations/types";
 import { cn } from "@/lib/utils";
@@ -55,6 +58,21 @@ const STATUS_RING: Record<ReservationStatus, string> = {
 };
 
 type Filter = "all" | "upcoming" | "seated" | "past";
+
+/** Spec 097 — lo que manda el panel de edición (lo ausente no se toca). */
+type EditPatch = {
+  table_id: string | null;
+  party_size: number;
+  time?: string;
+  service?: string;
+  allow_overbook?: boolean;
+};
+
+type EditCallbacks = {
+  onDone: () => void;
+  /** El server pidió confirmar sobrecupo (spec 077): se ofrece "Guardar igual". */
+  onOverbook: (message: string) => void;
+};
 
 /* ─── inline icons (kept from original) ─────────────────────────────────── */
 
@@ -669,6 +687,8 @@ function ReservationRow({
   multiSalon,
   activeTables,
   floorPlans,
+  mode,
+  services,
   onSentar,
   onComplete,
   onNoShow,
@@ -681,11 +701,13 @@ function ReservationRow({
   multiSalon: boolean;
   activeTables: FloorTable[];
   floorPlans: Array<{ id: string; name: string }>;
+  mode: ReservationMode;
+  services: DayServiceOption[];
   onSentar: () => void;
   onComplete: () => void;
   onNoShow: () => void;
   onCancel: () => void;
-  onUpdateDetails: (tableId: string, partySize: number) => void;
+  onUpdateDetails: (patch: EditPatch, callbacks: EditCallbacks) => void;
 }) {
   const timeStart = formatInTimeZone(
     new Date(row.starts_at),
@@ -710,20 +732,55 @@ function ReservationRow({
     return map;
   }, [floorPlans]);
 
+  const isFlexible = mode === "flexible";
+
   const [editing, setEditing] = useState(false);
   const [editPartySize, setEditPartySize] = useState(row.party_size);
   const [editTableId, setEditTableId] = useState(row.table_id ?? "");
+  const [editTime, setEditTime] = useState(timeStart);
+  const [editService, setEditService] = useState(row.service ?? "");
+  // Spec 077/097 — el cupo es blando para el encargado: el server rechaza una
+  // vez con el aviso y recién entonces aparece "Guardar igual".
+  const [overbookAsk, setOverbookAsk] = useState<string | null>(null);
+
+  /** Horarios de llegada del servicio elegido (modo flexible). */
+  const serviceSlots = useMemo(() => {
+    if (!isFlexible) return [];
+    const svc = services.find((s) => s.name === editService) ?? services[0];
+    if (!svc) return [];
+    return arrivalSlots(svc.opens_at, svc.closes_at);
+  }, [isFlexible, services, editService]);
 
   function openEdit() {
     setEditPartySize(row.party_size);
     setEditTableId(row.table_id ?? "");
+    setEditTime(timeStart);
+    setEditService(row.service ?? services[0]?.name ?? "");
+    setOverbookAsk(null);
     setEditing(true);
   }
 
-  function handleSave() {
-    if (!editTableId) return;
-    onUpdateDetails(editTableId, editPartySize);
-    setEditing(false);
+  function save(allowOverbook: boolean) {
+    // En estricto la mesa es obligatoria; en flexible "" = genérica (sin mesa).
+    if (!isFlexible && !editTableId) return;
+    onUpdateDetails(
+      {
+        table_id: editTableId || null,
+        party_size: editPartySize,
+        ...(editTime && editTime !== timeStart ? { time: editTime } : {}),
+        ...(isFlexible && editService && editService !== row.service
+          ? { service: editService }
+          : {}),
+        ...(allowOverbook ? { allow_overbook: true } : {}),
+      },
+      {
+        onDone: () => {
+          setEditing(false);
+          setOverbookAsk(null);
+        },
+        onOverbook: (message) => setOverbookAsk(message),
+      },
+    );
   }
 
   return (

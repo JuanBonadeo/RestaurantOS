@@ -11,6 +11,7 @@ import { canManageReservations } from "@/lib/permissions/can";
 import { customerPhoneKey } from "@/lib/phone";
 import { isTableAvailableForReservation, pickTableExcluding } from "@/lib/reservations/assign-table";
 import {
+  dayOfWeekFromDate,
   getAllReservableTables,
   getBusinessBySlug,
   getBusinessTables,
@@ -20,7 +21,16 @@ import {
   getReservationSettings,
   getReservationsInRange,
 } from "@/lib/reservations/queries";
-import { flexibleServiceWindow } from "@/lib/reservations/flexible-availability";
+import {
+  flexibleServiceWindow,
+  serviceDateForStart,
+} from "@/lib/reservations/flexible-availability";
+import {
+  OVERBOOK_HINT,
+  estrictoEditWindow,
+  flexibleEditWindow,
+  localDateOf,
+} from "@/lib/reservations/edit-window";
 import {
   AdminCreateReservationInputSchema,
   CancelOwnReservationInputSchema,
@@ -648,16 +658,61 @@ export async function sentarReserva(
 }
 
 /**
- * Actualizar mesa y/o comensales de una reserva confirmada — atómico.
- * Solo admin/encargado/plataforma. Valida todo cruzado: capacidad de la mesa
- * para el nuevo party_size, solape con otras reservas, cross-tenant, etc.
- * Fuente de verdad de solape: constraint de exclusión en la DB (23P01).
+ * Día local del servicio al que pertenece una reserva flexible (spec 097).
+ *
+ * Casi siempre es el día local de `starts_at`, pero con un servicio que cruza
+ * la medianoche (cena 20:00 → 00:30) la reserva de las 00:15 pertenece al
+ * servicio que abrió el día **anterior**. Como el servicio se busca por día de
+ * la semana, hay que probar los dos días: sin esto se resolvía la config del
+ * día equivocado (o "no existe ese servicio ese día").
+ */
+async function resolveServiceDate(
+  businessId: string,
+  serviceName: string,
+  startsAt: string,
+  timezone: string,
+  floorPlanId: string | null,
+): Promise<string | null> {
+  const start = new Date(startsAt);
+  if (Number.isNaN(start.getTime())) return null;
+  const candidates = [
+    localDateOf(start, timezone),
+    localDateOf(new Date(start.getTime() - 24 * 60 * 60 * 1000), timezone),
+  ];
+  for (const date of new Set(candidates)) {
+    const dow = dayOfWeekFromDate(date);
+    const svc = await getReservationServiceByName(businessId, serviceName, dow, {
+      useService: true,
+      floorPlanId,
+    });
+    if (!svc) continue;
+    const resolved = serviceDateForStart(startsAt, svc, timezone);
+    if (resolved) return resolved;
+  }
+  return null;
+}
+
+/**
+ * Editar una reserva confirmada — mesa, comensales y horario (spec 097).
+ * Solo admin/encargado/plataforma. Valida todo cruzado contra los valores
+ * NUEVOS: capacidad de la mesa para el party nuevo, solape en la ventana nueva,
+ * cupo del servicio nuevo, cross-tenant.
+ *
+ * Los dos modos derivan el cierre distinto:
+ * - **estricto**: `starts + slot_duration_min`, solape con buffer.
+ * - **flexible**: el cierre del servicio, una reserva viva por (mesa, servicio),
+ *   cupo blando con confirmación explícita del encargado (specs 059/077/081).
+ *
+ * Fuente de verdad del solape: el constraint de exclusión de la DB (23P01). El
+ * pre-chequeo es para dar un mensaje bueno, no para reemplazarlo.
  */
 export async function updateReservationDetails(
   input: unknown,
 ): Promise<ActionResult<null>> {
   const parsed = UpdateReservationDetailsInputSchema.safeParse(input);
-  if (!parsed.success) return actionError("Datos inválidos.");
+  if (!parsed.success) {
+    return actionError(parsed.error.issues[0]?.message ?? "Datos inválidos.");
+  }
 
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -679,7 +734,7 @@ export async function updateReservationDetails(
   // Fetch reservation + validate state.
   const { data: reservationRow } = await service
     .from("reservations")
-    .select("id, table_id, party_size, starts_at, ends_at, status")
+    .select("id, table_id, party_size, starts_at, ends_at, status, service, floor_plan_id")
     .eq("id", parsed.data.reservation_id)
     .eq("business_id", business.id)
     .maybeSingle();
@@ -687,47 +742,164 @@ export async function updateReservationDetails(
   const reservation = reservationRow as {
     id: string; table_id: string | null; party_size: number;
     starts_at: string; ends_at: string; status: string;
+    service: string | null; floor_plan_id: string | null;
   };
   if (reservation.status !== "confirmed") {
     return actionError("Solo se pueden editar reservas confirmadas.");
   }
 
+  const isFlexible = settings.mode === "flexible";
   const newPartySize = parsed.data.party_size;
-  const newTableId = parsed.data.table_id;
-
-  // Fetch target table + cross-tenant validation via floor_plans.
-  const { data: tableRow } = await service
-    .from("tables")
-    .select("id, label, seats, status, floor_plans!inner(business_id)")
-    .eq("id", newTableId)
-    .maybeSingle();
-  if (!tableRow) return actionError("Mesa no encontrada.");
-  const fpRaw = (tableRow as unknown as { floor_plans: unknown }).floor_plans;
-  const fp = Array.isArray(fpRaw)
-    ? (fpRaw[0] as { business_id: string } | undefined)
-    : (fpRaw as { business_id: string } | null);
-  if (!fp || fp.business_id !== business.id) {
-    return actionError("Mesa no encontrada.");
-  }
-  const table = tableRow as { id: string; label: string; seats: number; status: string };
-  if (table.status !== "active") {
-    return actionError("La mesa está deshabilitada.");
-  }
-  // Cross-validate: new party_size against new table capacity.
-  if (table.seats < newPartySize) {
-    return actionError(
-      `La mesa "${table.label}" tiene ${table.seats} lugares para ${newPartySize} comensales.`,
-    );
+  // `undefined` = no se toca la mesa; `null` = pasa a genérica.
+  const newTableId =
+    parsed.data.table_id === undefined ? reservation.table_id : parsed.data.table_id;
+  if (!newTableId && !isFlexible) {
+    return actionError("Elegí una mesa para la reserva.");
   }
 
-  // Pre-check overlap (only when table changes).
+  // ── Mesa destino ──────────────────────────────────────────────────────────
+  let table: { id: string; label: string; seats: number; floor_plan_id: string } | null = null;
+  if (newTableId) {
+    // Cross-tenant validation via floor_plans.
+    const { data: tableRow } = await service
+      .from("tables")
+      .select("id, label, seats, status, floor_plan_id, floor_plans!inner(business_id)")
+      .eq("id", newTableId)
+      .maybeSingle();
+    if (!tableRow) return actionError("Mesa no encontrada.");
+    const fpRaw = (tableRow as unknown as { floor_plans: unknown }).floor_plans;
+    const fp = Array.isArray(fpRaw)
+      ? (fpRaw[0] as { business_id: string } | undefined)
+      : (fpRaw as { business_id: string } | null);
+    if (!fp || fp.business_id !== business.id) {
+      return actionError("Mesa no encontrada.");
+    }
+    const row = tableRow as {
+      id: string; label: string; seats: number; status: string; floor_plan_id: string;
+    };
+    if (row.status !== "active") return actionError("La mesa está deshabilitada.");
+    // Cross-validate: new party_size against new table capacity.
+    if (row.seats < newPartySize) {
+      return actionError(
+        `La mesa "${row.label}" tiene ${row.seats} lugares para ${newPartySize} comensales.`,
+      );
+    }
+    table = { id: row.id, label: row.label, seats: row.seats, floor_plan_id: row.floor_plan_id };
+  }
+
   const tableChanged = newTableId !== reservation.table_id;
-  if (tableChanged) {
+  const floorPlanId = table ? table.floor_plan_id : reservation.floor_plan_id;
+
+  // ── Ventana nueva ─────────────────────────────────────────────────────────
+  // No se valida contra el pasado a propósito: en pleno servicio el encargado
+  // tiene que poder corregir la hora de una reserva que ya arrancó.
+  let starts = new Date(reservation.starts_at);
+  let ends = new Date(reservation.ends_at);
+  let windowChanged = false;
+  let serviceName = reservation.service;
+  let serviceDate: string | null = null;
+
+  if (isFlexible) {
+    const targetService = parsed.data.service ?? reservation.service;
+    if (!targetService) {
+      return actionError("La reserva no tiene un servicio asignado.");
+    }
+    const serviceChanged = targetService !== reservation.service;
+
+    // La jornada se ancla en el servicio ACTUAL (el que la reserva tiene hoy),
+    // porque cambiar de servicio no cambia de día.
+    serviceDate =
+      (reservation.service
+        ? await resolveServiceDate(
+            business.id,
+            reservation.service,
+            reservation.starts_at,
+            business.timezone,
+            floorPlanId,
+          )
+        : null) ?? localDateOf(starts, business.timezone);
+
+    const dow = dayOfWeekFromDate(serviceDate);
+    const svc = await getReservationServiceByName(business.id, targetService, dow, {
+      useService: true,
+      floorPlanId,
+    });
+    if (!svc) return actionError(`"${targetService}" no está disponible ese día.`);
+
+    if (parsed.data.time || serviceChanged) {
+      const result = flexibleEditWindow({
+        serviceDate,
+        service: svc,
+        timezone: business.timezone,
+        time: parsed.data.time,
+        serviceChanged,
+        currentStartsAt: reservation.starts_at,
+      });
+      if (!result.ok) {
+        if (result.reason === "fuera-de-servicio") {
+          return actionError(
+            `Ese horario está fuera de ${svc.name} (${svc.opens_at.slice(0, 5)} a ${svc.closes_at.slice(0, 5)}).`,
+          );
+        }
+        return actionError("Hora inválida.");
+      }
+      starts = result.starts;
+      ends = result.ends;
+      windowChanged = true;
+    }
+    serviceName = svc.name;
+  } else if (parsed.data.time) {
+    const result = estrictoEditWindow({
+      currentStartsAt: reservation.starts_at,
+      time: parsed.data.time,
+      timezone: business.timezone,
+      slotDurationMin: settings.slot_duration_min,
+    });
+    if (!result) return actionError("Hora inválida.");
+    starts = result.starts;
+    ends = result.ends;
+    windowChanged = true;
+  }
+
+  // ── Solape y cupo ─────────────────────────────────────────────────────────
+  if (isFlexible && serviceName && serviceDate) {
+    // Una sola consulta resuelve las dos preguntas del modo flexible: si la
+    // mesa está libre ESE servicio y si el cupo (cubiertos + mesas) alcanza.
+    // Excluyendo la reserva editada, que si no se pisa a sí misma.
+    const avail = await getFlexibleAvailability(
+      business.id,
+      business.timezone,
+      {
+        date: serviceDate,
+        service: serviceName,
+        partySize: newPartySize,
+        tableId: newTableId,
+        floorPlanId,
+        enforceCapacity: true,
+        excludeReservationId: reservation.id,
+      },
+      { useService: true },
+    );
+    if (avail && !avail.available) {
+      if (avail.reason === "mesa-ocupada") {
+        return actionError("La mesa ya está reservada en ese servicio.");
+      }
+      if (avail.reason === "mesa-chica" || avail.reason === "mesa-inexistente") {
+        return actionError("Esa mesa no sirve para esta reserva.");
+      }
+      // Spec 077 — el cupo es blando para el encargado: se pasa confirmando.
+      if (!parsed.data.allow_overbook) {
+        return actionError(
+          avail.reason === "sin-cupo"
+            ? `El servicio queda completo (${avail.reservedCovers + newPartySize}/${avail.softCapacity} cubiertos). ${OVERBOOK_HINT}`
+            : `No quedan mesas libres en ese servicio. ${OVERBOOK_HINT}`,
+        );
+      }
+    }
+  } else if (table && (tableChanged || windowChanged)) {
     const bufferMs = settings.buffer_min * 60_000;
-    const windowStart = new Date(reservation.starts_at);
-    const windowEnd = new Date(reservation.ends_at);
-    const lookupStart = new Date(windowStart.getTime() - bufferMs);
-    const lookupEnd = new Date(windowEnd.getTime() + bufferMs);
+    const lookupStart = new Date(starts.getTime() - bufferMs);
+    const lookupEnd = new Date(ends.getTime() + bufferMs);
     const reservations = await getReservationsInRange(
       business.id,
       lookupStart.toISOString(),
@@ -738,8 +910,8 @@ export async function updateReservationDetails(
     const available = isTableAvailableForReservation({
       tableId: table.id,
       reservations,
-      windowStart,
-      windowEnd,
+      windowStart: starts,
+      windowEnd: ends,
       bufferMs,
       excludeReservationId: reservation.id,
     });
@@ -748,10 +920,23 @@ export async function updateReservationDetails(
     }
   }
 
-  // Atomic update.
+  // ── Atomic update ─────────────────────────────────────────────────────────
+  const patch: Record<string, unknown> = {
+    table_id: newTableId,
+    party_size: newPartySize,
+  };
+  if (windowChanged) {
+    patch.starts_at = starts.toISOString();
+    patch.ends_at = ends.toISOString();
+  }
+  if (isFlexible) {
+    patch.service = serviceName;
+    patch.floor_plan_id = floorPlanId;
+  }
+
   const { error } = await service
     .from("reservations")
-    .update({ table_id: newTableId, party_size: newPartySize })
+    .update(patch)
     .eq("id", reservation.id)
     .eq("business_id", business.id);
   if (error) {
@@ -762,7 +947,10 @@ export async function updateReservationDetails(
     return actionError("No pudimos actualizar la reserva.");
   }
 
-  revalidatePath(`/${parsed.data.business_slug}/admin/reservas`);
+  const slug = parsed.data.business_slug;
+  revalidatePath(`/${slug}/admin/reservas`);
+  revalidatePath(`/${slug}/admin/reservas/plano`);
+  revalidatePath(`/${slug}/admin/operacion`);
   return actionOk(null);
 }
 

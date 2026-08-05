@@ -7,6 +7,7 @@ import type { BusinessRole } from "@/lib/admin/context";
 import type {
   FloorTable,
   Reservation,
+  ReservationMode,
   ReservationService,
   ReservationSettings,
 } from "@/lib/reservations/types";
@@ -263,7 +264,7 @@ export async function getAvailability(
 
 const FLEX_DAY_MS = 24 * 60 * 60 * 1000;
 
-function dayOfWeekFromDate(date: string): number | null {
+export function dayOfWeekFromDate(date: string): number | null {
   const [y, m, d] = date.split("-").map(Number);
   if (!y || !m || !d) return null;
   return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
@@ -282,6 +283,46 @@ export async function getReservationServices(
     .eq("business_id", businessId)
     .order("opens_at", { ascending: true });
   return (data ?? []) as ReservationService[];
+}
+
+/** Spec 097 — un servicio elegible del día, como lo consume el editor. */
+export type DayServiceOption = {
+  name: string;
+  /** "HH:MM" local. */
+  opens_at: string;
+  closes_at: string;
+};
+
+/**
+ * Spec 097 — lo que el editor de reservas del admin necesita saber del negocio
+ * para una fecha: en qué modo está y, si es flexible, qué servicios corren ese
+ * día (deduplicados por nombre: el mismo servicio puede estar configurado por
+ * zona). En estricto devuelve la lista vacía.
+ */
+export async function getReservationEditContext(
+  businessId: string,
+  date: string,
+  options: { useService?: boolean } = {},
+): Promise<{ mode: ReservationMode; services: DayServiceOption[] }> {
+  const settings = await getReservationSettings(businessId, options);
+  const mode = settings.mode ?? "estricto";
+  if (mode !== "flexible") return { mode, services: [] };
+
+  const dow = dayOfWeekFromDate(date);
+  const all = await getReservationServices(businessId, options);
+  const seen = new Set<string>();
+  const services: DayServiceOption[] = [];
+  for (const svc of all) {
+    if (svc.day_of_week !== null && svc.day_of_week !== dow) continue;
+    if (seen.has(svc.name)) continue;
+    seen.add(svc.name);
+    services.push({
+      name: svc.name,
+      opens_at: svc.opens_at.slice(0, 5),
+      closes_at: svc.closes_at.slice(0, 5),
+    });
+  }
+  return { mode, services };
 }
 
 /**
@@ -358,6 +399,12 @@ export async function getFlexibleAvailability(
     floorPlanId?: string | null;
     /** Spec 077 — tope duro (canales de cliente). Default `false` = advisory. */
     enforceCapacity?: boolean;
+    /**
+     * Spec 097 — reserva que se está **editando**: no cuenta contra sí misma.
+     * Sin esto, mover o agrandar una reserva ve su propia mesa ocupada y sus
+     * propios cubiertos sumados dos veces.
+     */
+    excludeReservationId?: string | null;
   },
   options: { useService?: boolean } = {},
 ): Promise<FlexibleAvailability | null> {
@@ -381,15 +428,17 @@ export async function getFlexibleAvailability(
   // Cubiertos por zona: las reservas con mesa derivan su zona de la mesa; las
   // genéricas ya traen floor_plan_id. Se resuelve acá para reservedCovers(zona).
   const tableZone = new Map(tables.map((t) => [t.id, t.floor_plan_id]));
-  const forFlex: ReservationForFlexible[] = (reservations as Reservation[]).map((r) => ({
-    table_id: r.table_id,
-    starts_at: r.starts_at,
-    party_size: r.party_size,
-    status: r.status,
-    floor_plan_id: r.table_id
-      ? tableZone.get(r.table_id) ?? r.floor_plan_id ?? null
-      : r.floor_plan_id ?? null,
-  }));
+  const forFlex: ReservationForFlexible[] = (reservations as Reservation[])
+    .filter((r) => !params.excludeReservationId || r.id !== params.excludeReservationId)
+    .map((r) => ({
+      table_id: r.table_id,
+      starts_at: r.starts_at,
+      party_size: r.party_size,
+      status: r.status,
+      floor_plan_id: r.table_id
+        ? tableZone.get(r.table_id) ?? r.floor_plan_id ?? null
+        : r.floor_plan_id ?? null,
+    }));
 
   return computeFlexibleAvailability({
     date: params.date,

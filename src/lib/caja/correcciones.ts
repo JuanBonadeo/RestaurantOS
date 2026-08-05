@@ -282,8 +282,13 @@ export function evaluarGuardas(
   if (!esPosterior(ctx.pago.created_at, ctx.ultimoCorteOrigen)) {
     return {
       ok: false,
+      // spec 097 · H-35 — el mensaje decía «Anulá el cobro y volvé a
+      // registrarlo», que era exactamente la salida equivocada: `anularCobro`
+      // no tenía guarda de período, así que este error empujaba al encargado
+      // por la única puerta que sí podía reescribir un arqueo firmado. Ahora
+      // esa puerta está cerrada, y el consejo apunta a donde corresponde.
       error:
-        "Ese cobro ya entró en un arqueo cerrado. Anulá el cobro y volvé a registrarlo.",
+        "Ese cobro ya entró en un arqueo cerrado. Registrá la diferencia como un movimiento del período actual.",
     };
   }
 

@@ -139,7 +139,13 @@ export function CobrarPedidoSheet({
                 cajaId={cajaId}
                 onCajaChange={setCajaId}
                 methodConfigs={init.methodConfigs}
-                tip={{ mode: "editable" }}
+                // spec 097 — la propina sale de la cuenta, no se tipea al
+                // cobrar. En `editable` el monto quedaba en el saldo y la
+                // propina se sumaba **por encima**, así que el pago guardaba
+                // `amount` sin la plata que de verdad entró: el cadete volvía
+                // con $11.000, la caja esperaba $10.000 y el arqueo cerraba con
+                // sobrante todos los días.
+                tip={{ mode: "fixed", cents: init.order.tip_cents ?? 0 }}
                 onSubmit={(input) =>
                   registrarPago({
                     orderId: order.id,

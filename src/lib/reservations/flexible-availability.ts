@@ -1,4 +1,4 @@
-import { fromZonedTime } from "date-fns-tz";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 
 import { assignParty, simulateTableUsage } from "@/lib/reservations/table-capacity";
 import type { FloorTable, Reservation, ReservationService } from "@/lib/reservations/types";
@@ -52,6 +52,45 @@ export function flexibleServiceWindow(
     ends = new Date(ends.getTime() + DAY_MS);
   }
   return { starts, ends };
+}
+
+/**
+ * Día local ("YYYY-MM-DD") del **servicio** al que pertenece `startsAt`.
+ *
+ * Casi siempre es el día local del arranque, pero un servicio que cruza la
+ * medianoche (cena 20:00 → 00:30) tiene reservas que arrancan a las 00:15 del
+ * día siguiente y pertenecen al servicio del día **anterior**. Sin esto, editar
+ * una de esas reservas resolvía el servicio del día equivocado.
+ *
+ * `null` si el arranque no cae en la ventana de ninguno de los dos días — es
+ * decir, si la reserva no pertenece a ese servicio.
+ */
+export function serviceDateForStart(
+  startsAt: string | Date,
+  service: Pick<ReservationService, "opens_at" | "closes_at">,
+  timezone: string,
+): string | null {
+  const start = new Date(startsAt);
+  if (Number.isNaN(start.getTime())) return null;
+
+  const sameDay = formatInTimeZone(start, timezone, "yyyy-MM-dd");
+  const prevDay = formatInTimeZone(
+    new Date(start.getTime() - DAY_MS),
+    timezone,
+    "yyyy-MM-dd",
+  );
+
+  for (const candidate of prevDay === sameDay ? [sameDay] : [sameDay, prevDay]) {
+    const window = flexibleServiceWindow(candidate, service, timezone);
+    if (!window) continue;
+    if (
+      start.getTime() >= window.starts.getTime() &&
+      start.getTime() < window.ends.getTime()
+    ) {
+      return candidate;
+    }
+  }
+  return null;
 }
 
 function hhmmToMin(hhmm: string): number | null {

@@ -6,6 +6,7 @@ import {
   flexibleServiceWindow,
   isTableFreeForService,
   reservedCovers,
+  serviceDateForStart,
   type ReservationForFlexible,
 } from "./flexible-availability";
 import type { FloorTable } from "./types";
@@ -580,5 +581,27 @@ describe("computeFlexibleAvailability · cupo por mesas (spec 081)", () => {
       enforceCapacity: true,
     })!;
     expect(out.available).toBe(true);
+  });
+});
+
+describe("serviceDateForStart", () => {
+  it("devuelve el día local del arranque", () => {
+    // 21:00 AR del 4 = 00:00Z del 5.
+    expect(serviceDateForStart(CENA_2100, MEDIODIA, TZ)).toBeNull();
+    expect(serviceDateForStart(CENA_2100, CENA, TZ)).toBe("2026-08-04");
+  });
+
+  it("una reserva de madrugada pertenece al servicio del día ANTERIOR", () => {
+    // 00:15 AR del 5 = 03:15Z del 5. La cena del 4 va 20:00 → 00:30 del 5.
+    expect(serviceDateForStart("2026-08-05T03:15:00.000Z", CENA, TZ)).toBe("2026-08-04");
+  });
+
+  it("devuelve null si el arranque no cae en ninguna ventana del servicio", () => {
+    // 17:00 AR: ni mediodía (cierra 16:00) ni cena (abre 20:00).
+    expect(serviceDateForStart("2026-08-04T20:00:00.000Z", CENA, TZ)).toBeNull();
+  });
+
+  it("devuelve null con un arranque inválido", () => {
+    expect(serviceDateForStart("no-es-fecha", CENA, TZ)).toBeNull();
   });
 });

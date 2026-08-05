@@ -81,4 +81,57 @@ describe("calculateExpectedCash", () => {
       }),
     ).toBe(100_000 + 20_000);
   });
+
+  // ── spec 097 · la propina no es plata del negocio ──────────────────
+  //
+  // Decisión de producto (Juan, 2026-08-05): la propina se cobra por el sistema
+  // para poder liquidársela al mozo, pero **no es una venta ni queda en la
+  // caja**. Antes se sumaba `amount_cents` entero y el arqueo esperaba también
+  // la propina, así que cerraba con sobrante todos los días.
+
+  it("no espera la propina en el cajón", () => {
+    // El cliente paga $11.000 por una cuenta de $10.000. En el cajón del
+    // negocio tienen que quedar $10.000: los otros $1.000 son del mozo.
+    expect(
+      calculateExpectedCash({
+        last_closing_cash_cents: 0,
+        payments: [{ method: "cash", amount_cents: 11_000, tip_cents: 1_000 }],
+        movimientos: [],
+      }),
+    ).toBe(10_000);
+  });
+
+  it("un pago sin propina no cambia", () => {
+    expect(
+      calculateExpectedCash({
+        last_closing_cash_cents: 0,
+        payments: [{ method: "cash", amount_cents: 10_000, tip_cents: 0 }],
+        movimientos: [],
+      }),
+    ).toBe(10_000);
+  });
+
+  it("la propina de un pago que NO es efectivo no toca el cajón", () => {
+    // Sólo el efectivo mueve la caja física; una propina cobrada con tarjeta no
+    // resta de un cajón donde nunca entró.
+    expect(
+      calculateExpectedCash({
+        last_closing_cash_cents: 0,
+        payments: [
+          { method: "card_manual", amount_cents: 11_000, tip_cents: 1_000 },
+        ],
+        movimientos: [],
+      }),
+    ).toBe(0);
+  });
+
+  it("`tip_cents` ausente se trata como 0 (compat con filas viejas)", () => {
+    expect(
+      calculateExpectedCash({
+        last_closing_cash_cents: 0,
+        payments: [{ method: "cash", amount_cents: 10_000 }],
+        movimientos: [],
+      }),
+    ).toBe(10_000);
+  });
 });

@@ -7,6 +7,7 @@ import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { getCajasForBusiness, getPaymentMethodConfigs } from "@/lib/caja/queries";
 import type { Caja, PaymentMethod, PaymentMethodConfig } from "@/lib/caja/types";
 import { requireMozoActionContext } from "@/lib/mozo/auth";
+import { bloqueoPorPeriodoCerrado } from "@/lib/caja/periodo-cerrado";
 import { canCancelItem } from "@/lib/permissions/can";
 import { createPreference } from "@/lib/payments/mercadopago";
 import { formatCurrency } from "@/lib/currency";
@@ -802,6 +803,16 @@ export async function anularCobro(
   const order = await loadOrder(service, orderId, business.id);
   if (!order) return actionError("Orden no encontrada.");
 
+  // spec 097 · H-35 — un arqueo firmado no se reescribe.
+  //
+  // Este era el martillo más grande de la caja sin una sola guarda de período,
+  // mientras que anular **una línea suelta** sí las tenía. La asimetría era al
+  // revés de lo razonable: el camino con menos control era el que más plata
+  // movía. Y encima el mensaje de la corrección fina («Anulá el cobro y volvé a
+  // registrarlo») empujaba justo hacia acá.
+  const cerrado = await bloqueoPorPeriodoCerrado(service, business.id, orderId);
+  if (cerrado) return actionError(cerrado);
+
   // spec 092 · H-08 — **reabrir primero, refundar después.**
   //
   // El orden estaba al revés: se refundaban los pagos, se borraban los
@@ -838,7 +849,7 @@ export async function anularCobro(
   }
 
   // Marcar payments paid como refunded (no borrar para auditoría).
-  await service
+  const { data: refundados } = await service
     .from("payments")
     .update({
       payment_status: "refunded",
@@ -846,7 +857,37 @@ export async function anularCobro(
       refunded_reason: motivo.trim(),
     })
     .eq("order_id", orderId)
-    .eq("payment_status", "paid");
+    .eq("payment_status", "paid")
+    .select("id, caja_id, amount_cents");
+
+  // spec 097 · H-35 — el rastro. Hasta acá anular un cobro no dejaba **nada**
+  // en `caja_audit_log` (grep vacío) y `payments` no tiene `refunded_by`, así
+  // que la plata desaparecía del arqueo sin que quedara quién la sacó. Es el
+  // mismo libro donde ya escriben las correcciones de línea, así que el
+  // encargado lo lee en el lugar donde ya mira.
+  const filas = ((refundados ?? []) as Array<{
+    id: string;
+    caja_id: string | null;
+    amount_cents: number;
+  }>).map((p) => ({
+    business_id: business.id,
+    caja_id: p.caja_id,
+    entity_type: "payment",
+    entity_id: p.id,
+    field: "payment_status",
+    from_value: "paid",
+    to_value: "refunded",
+    by_user_id: ctx.userId,
+    reason: motivo.trim(),
+  }));
+  if (filas.length > 0) {
+    const { error: auditErr } = await service
+      .from("caja_audit_log")
+      .insert(filas);
+    // El audit no bloquea la anulación, pero su ausencia sí se loguea fuerte:
+    // un reembolso sin rastro es justo lo que esta spec vino a arreglar.
+    if (auditErr) console.error("anularCobro · caja_audit_log", auditErr);
+  }
 
   // Borrar payments pending (MP en curso, etc).
   await service

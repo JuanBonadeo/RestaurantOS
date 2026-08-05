@@ -233,8 +233,21 @@ export const CancelOwnReservationInputSchema = z.object({
 export const UpdateReservationDetailsInputSchema = z.object({
   business_slug: z.string().min(1),
   reservation_id: z.string().uuid(),
-  table_id: z.string().uuid(),
+  /**
+   * Spec 097 — `undefined` deja la mesa como está; `null` la saca (reserva
+   * GENÉRICA, sólo válido en modo flexible: en estricto la mesa es obligatoria).
+   */
+  table_id: z.string().uuid().nullable().optional(),
   party_size: z.coerce.number().int().min(1).max(100),
+  /** Spec 097 — hora nueva ("HH:MM" local). Ausente = no se toca el horario. */
+  time: z.string().regex(TIME_HHMM, "Hora inválida").optional(),
+  /** Spec 097 — servicio destino (modo flexible). Ausente = conserva el suyo. */
+  service: z.string().trim().min(1).max(60).optional(),
+  /**
+   * Spec 077/097 — el encargado confirmó pasarse del cupo del servicio. Nunca
+   * saltea la regla una-reserva-por-mesa, sólo el cupo blando.
+   */
+  allow_overbook: z.boolean().optional().default(false),
 });
 
 export type UpdateReservationDetailsInput = z.infer<typeof UpdateReservationDetailsInputSchema>;
