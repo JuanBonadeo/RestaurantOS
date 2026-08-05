@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-04
 
-**Status**: ✅ Implementada (2026-08-04). Issue [#138](https://github.com/gachetponzellini/RestaurantOS-app/issues/138). Milestone: Post-demo · Growth & hardening. Queda un `DROP COLUMN` sin aplicar (ver T5) y el verify en vivo con sesión real.
+**Status**: ✅ Implementada y aplicada (2026-08-05). Issue [#138](https://github.com/gachetponzellini/RestaurantOS-app/issues/138). Milestone: Post-demo · Growth & hardening. Queda el verify en vivo con sesión real de encargado.
 
 **Input**: Pedido de Juan 2026-08-04 — *"claramente la lógica de los menús quedó muy fea, repensémosla toda, por lo menos para cargarlos; yo creo que tendría que haber grupo de opciones que sean condicionales, es decir que dependiendo qué producto se agarra te deje o no, algo mejor planeado, más prolijo"*.
 
@@ -68,7 +68,11 @@ Cada uno queda verde y desplegable solo; la migración va siempre antes que el c
 - **T2 · La action sincroniza los grupos** ✅ — en vez de esperar al editor, `syncChoiceGroups` **deriva** los grupos de los componentes en cada guardado, con la misma traducción que el backfill (`choice-groups.ts`, 13 tests). Eso es lo que permitió que los lectores pasaran a la tabla sin coordinar un deploy: guarde quien guarde, con el editor que sea, la tabla queda consistente.
 - **T3 · Lectores y lógica pura** ✅ — los 5 selects traen la tabla; `activeChoiceGroups` evalúa la condición del grupo y cae al modelo viejo si no viene. **Test de paridad**: sobre un menú con la forma del real, las 200 combinaciones de elecciones dan el mismo conjunto activo por los dos caminos.
 - **T4 · Editor nuevo + FK** ✅ — la pantalla de FR-004; el `superRefine` pasa de 40 líneas a validar una condición por grupo. Migración `0037` con el FK compuesto `(menu_id, choice_group_id)` (`not valid` + `validate`) y el unique parcial `(choice_group_id, product_id)`. Antes hubo que borrar el duplicado que encontró T0.
-- **T5 · Contracción** ⚠️ parcial — `validateComboChoices` resuelve por la condición del grupo y los dos caminos de persistencia se la pasan, así que **nadie lee ni escribe ya** `blocks_choice_group_ids` ni `choice_group_label`: salieron de los 5 selects y del payload de la action. La migración `0038` que las dropea **quedó escrita y sin aplicar**: es un DROP irreversible sobre datos de producción. El código anda igual con o sin las columnas, así que se puede aplicar cuando se quiera.
+- **T5 · Contracción** ✅ — `validateComboChoices` resuelve por la condición del grupo y los dos caminos de persistencia se la pasan, así que nadie lee ni escribe ya `blocks_choice_group_ids` ni `choice_group_label`. La migración `0038` que las dropea **se aplicó el 2026-08-05**.
+
+  El drop destapó dos lugares que seguían sacando el **nombre** del grupo de la columna denormalizada y habrían quedado en blanco: el editor (`card.label` sale de `choice_group_label` del componente, así que los grupos se veían sin nombre) y el snapshot de `enviarComanda` (habría caído al literal «Opción»). Los dos ahora lo toman de la fila del grupo. Es la clase de acople que sólo se ve cuando la columna deja de existir — el argumento para contraer y no dejar la columna «por las dudas».
+
+  Rollback en [`rollback-0038.sql`](rollback-0038.sql): no es un volcado de datos sino el inverso exacto del backfill, así que no se pone rancio. Antes de dropear se verificó contra las 53 filas reales que reconstruye ambas columnas con **cero diferencias**.
 
 ### Desviación del plan
 

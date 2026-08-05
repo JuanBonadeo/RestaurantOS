@@ -558,7 +558,7 @@ export async function enviarComanda(
         // `products.modifier_groups` es la fuente de verdad del adicional de
         // los modificadores del combo (spec 083): el payload dice qué se
         // eligió, el precio sale de acá.
-        "id, name, price_cents, image_url, business_id, is_active, is_available, daily_menu_choice_groups(id, applies_when_group_id, applies_when_product_ids), daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, extra_price_cents, products(id, name, modifier_groups(id, name, is_required, min_selection, max_selection, sort_order, modifiers(id, name, price_delta_cents, is_available, sort_order))))",
+        "id, name, price_cents, image_url, business_id, is_active, is_available, daily_menu_choice_groups(id, name, applies_when_group_id, applies_when_product_ids), daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, extra_price_cents, products(id, name, modifier_groups(id, name, is_required, min_selection, max_selection, sort_order, modifiers(id, name, price_delta_cents, is_available, sort_order))))",
       )
       .eq("id", menuItem.daily_menu_id)
       .maybeSingle();
@@ -634,10 +634,15 @@ export async function enviarComanda(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .map((c: any) => [`${c.choice_group_id}::${c.product_id}`, c]),
     );
+    // El nombre del grupo vive en su fila, no repetido en cada opción (spec 087).
+    const nombreDeGrupo = new Map<string, string>(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ((menu.daily_menu_choice_groups ?? []) as any[]).map((g) => [g.id, g.name]),
+    );
     const snapshotChoices = (menuItem.selected_choices ?? []).map((sc) => {
       const comp = choiceCompByKey.get(`${sc.choice_group_id}::${sc.product_id}`);
       return {
-        choice_group_label: comp?.choice_group_label ?? "Opción",
+        choice_group_label: nombreDeGrupo.get(sc.choice_group_id) ?? "Opción",
         product_name: comp?.label ?? "",
         extra_price_cents: Number(comp?.extra_price_cents ?? 0),
         // Con nombre y adicional: es lo que después explica en la cuenta por qué

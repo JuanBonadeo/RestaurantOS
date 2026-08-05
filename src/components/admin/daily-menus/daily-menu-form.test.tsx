@@ -46,7 +46,6 @@ function option(
   groupId: string,
   groupLabel: string,
   name: string,
-  blocks: string[] = [],
   extraCents = 0,
 ): AdminDailyMenuComponent {
   return {
@@ -61,7 +60,6 @@ function option(
     product_name: name,
     product_image_url: null,
     extra_price_cents: extraCents,
-    blocks_choice_group_ids: blocks,
   };
 }
 
@@ -190,9 +188,9 @@ describe("editor del menú del día · los valores viajan con la tarjeta (spec 0
    * con `reset`.
    */
   const CON_PRECIOS = menuCon([
-    option(GRUPO.entrada, "Bebida", "Agua", [], 0),
-    option(GRUPO.entrada, "Bebida", "Cerveza", [], 50000),
-    option(GRUPO.principal, "Postre", "Flan", [], 30000),
+    option(GRUPO.entrada, "Bebida", "Agua", 0),
+    option(GRUPO.entrada, "Bebida", "Cerveza", 50000),
+    option(GRUPO.principal, "Postre", "Flan", 30000),
   ]);
 
   const precios = () =>
@@ -236,7 +234,6 @@ describe("editor del menú del día · los valores viajan con la tarjeta (spec 0
       product_name: null,
       product_image_url: null,
       extra_price_cents: 0,
-      blocks_choice_group_ids: [],
     });
     renderForm(menuCon([texto("Entrada"), texto("Principal"), texto("Postre")]));
     const textos = () =>

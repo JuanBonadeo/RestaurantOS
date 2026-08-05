@@ -15,8 +15,6 @@ export type AdminDailyMenuComponent = {
   product_image_url: string | null;
   /** Adicional de la opción en centavos (spec 29). 0 = incluida. */
   extra_price_cents: number;
-  /** Grupos que esta opción NO habilita (spec 074). */
-  blocks_choice_group_ids: string[];
 };
 
 export type AdminDailyMenu = {
@@ -68,9 +66,7 @@ function mapRow(
           kind?: string;
           product_id?: string | null;
           choice_group_id?: string | null;
-          choice_group_label?: string | null;
           extra_price_cents?: number | null;
-          blocks_choice_group_ids?: string[] | null;
           products?: { id: string; name: string; image_url: string | null } | null;
         }[]
       | null;
@@ -85,6 +81,12 @@ function mapRow(
       | null;
   },
 ): AdminDailyMenu {
+  // El nombre del grupo vive una sola vez, en su fila (spec 087). El editor lo
+  // sigue queriendo pegado a cada opción para armar las tarjetas, así que se lo
+  // repartimos acá en vez de leerlo de la columna que se borró en la 0038.
+  const nombreDeGrupo = new Map<string, string>(
+    (row.daily_menu_choice_groups ?? []).map((g) => [g.id, g.name]),
+  );
   return {
     choice_groups: (row.daily_menu_choice_groups ?? [])
       .slice()
@@ -118,11 +120,12 @@ function mapRow(
         kind: (c.kind as "text" | "product" | "choice") ?? "text",
         product_id: c.product_id ?? null,
         choice_group_id: c.choice_group_id ?? null,
-        choice_group_label: c.choice_group_label ?? null,
+        choice_group_label: c.choice_group_id
+          ? (nombreDeGrupo.get(c.choice_group_id) ?? null)
+          : null,
         product_name: c.products?.name ?? null,
         product_image_url: c.products?.image_url ?? null,
         extra_price_cents: Number(c.extra_price_cents ?? 0),
-        blocks_choice_group_ids: c.blocks_choice_group_ids ?? [],
       })),
   };
 }

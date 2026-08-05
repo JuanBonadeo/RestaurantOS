@@ -107,7 +107,6 @@ export function DailyMenuForm({
               choice_group_label: c.choice_group_label,
               // Centavos en datos → pesos en el form (igual que price_cents).
               extra_price_cents: (c.extra_price_cents ?? 0) / 100,
-              blocks_choice_group_ids: c.blocks_choice_group_ids ?? [],
             })),
           ),
           // El nombre y la condición del grupo salen de su fila, no de las

@@ -229,7 +229,7 @@ export async function persistOrder(
     const { data: menus } = await supabase
       .from("daily_menus")
       .select(
-        "id, name, price_cents, image_url, available_days, is_active, is_available, business_id, daily_menu_choice_groups(id, applies_when_group_id, applies_when_product_ids), daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, extra_price_cents)",
+        "id, name, price_cents, image_url, available_days, is_active, is_available, business_id, daily_menu_choice_groups(id, name, applies_when_group_id, applies_when_product_ids), daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, extra_price_cents)",
       )
       .in("id", menuIds);
     if (!menus || menus.length !== menuIds.length) {
