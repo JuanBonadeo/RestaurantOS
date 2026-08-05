@@ -803,7 +803,7 @@ export async function anularCobro(
   const order = await loadOrder(service, orderId, business.id);
   if (!order) return actionError("Orden no encontrada.");
 
-  // spec 097 · H-35 — un arqueo firmado no se reescribe.
+  // spec 098 · H-35 — un arqueo firmado no se reescribe.
   //
   // Este era el martillo más grande de la caja sin una sola guarda de período,
   // mientras que anular **una línea suelta** sí las tenía. La asimetría era al
@@ -860,7 +860,7 @@ export async function anularCobro(
     .eq("payment_status", "paid")
     .select("id, caja_id, amount_cents");
 
-  // spec 097 · H-35 — el rastro. Hasta acá anular un cobro no dejaba **nada**
+  // spec 098 · H-35 — el rastro. Hasta acá anular un cobro no dejaba **nada**
   // en `caja_audit_log` (grep vacío) y `payments` no tiene `refunded_by`, así
   // que la plata desaparecía del arqueo sin que quedara quién la sacó. Es el
   // mismo libro donde ya escriben las correcciones de línea, así que el

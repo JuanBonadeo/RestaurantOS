@@ -1,6 +1,6 @@
 # Feature Specification: Tres decisiones de plata
 
-**Feature Branch**: `097-tres-decisiones-de-plata`
+**Feature Branch**: `098-tres-decisiones-de-plata`
 
 **Created**: 2026-08-05
 

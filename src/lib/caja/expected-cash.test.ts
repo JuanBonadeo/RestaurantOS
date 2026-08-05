@@ -82,7 +82,7 @@ describe("calculateExpectedCash", () => {
     ).toBe(100_000 + 20_000);
   });
 
-  // ── spec 097 · la propina no es plata del negocio ──────────────────
+  // ── spec 098 · la propina no es plata del negocio ──────────────────
   //
   // Decisión de producto (Juan, 2026-08-05): la propina se cobra por el sistema
   // para poder liquidársela al mozo, pero **no es una venta ni queda en la

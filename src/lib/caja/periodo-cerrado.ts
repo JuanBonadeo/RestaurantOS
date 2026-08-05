@@ -6,7 +6,7 @@ type GenericClient = SupabaseClient;
 
 /**
  * ¿Alguno de estos cobros ya quedó del otro lado de un arqueo o de una
- * rendición? (spec 097 · H-35)
+ * rendición? (spec 098 · H-35)
  *
  * Devuelve el mensaje de error para el encargado, o `null` si se puede seguir.
  *

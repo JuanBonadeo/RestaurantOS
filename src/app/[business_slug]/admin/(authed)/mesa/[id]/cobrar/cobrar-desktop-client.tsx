@@ -552,7 +552,7 @@ function CobrarSplitPanel({
         cajas={[]}
         cajaId={cajaId}
         methodConfigs={methodConfigs}
-        // spec 097 — la propina viene de la cuenta, no se re-tipea acá.
+        // spec 098 — la propina viene de la cuenta, no se re-tipea acá.
         // Arrancaba `editable` en 0, así que cobrar la misma mesa desde el
         // desktop del encargado guardaba `tip_cents = 0` aunque el cliente
         // hubiera pagado propina: **la propina del mozo dependía de quién

@@ -139,7 +139,7 @@ export function CobrarPedidoSheet({
                 cajaId={cajaId}
                 onCajaChange={setCajaId}
                 methodConfigs={init.methodConfigs}
-                // spec 097 — la propina sale de la cuenta, no se tipea al
+                // spec 098 — la propina sale de la cuenta, no se tipea al
                 // cobrar. En `editable` el monto quedaba en el saldo y la
                 // propina se sumaba **por encima**, así que el pago guardaba
                 // `amount` sin la plata que de verdad entró: el cadete volvía

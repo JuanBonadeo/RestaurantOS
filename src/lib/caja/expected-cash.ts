@@ -5,7 +5,7 @@ export type ExpectedCashInput = {
   payments: Array<{
     method: PaymentMethod;
     amount_cents: number;
-    /** Cuánto de `amount_cents` es propina (spec 097). */
+    /** Cuánto de `amount_cents` es propina (spec 098). */
     tip_cents?: number;
   }>;
   movimientos: Array<{
@@ -19,7 +19,7 @@ export type ExpectedCashInput = {
 /**
  * Efectivo que **el negocio** tiene que tener en el cajón.
  *
- * spec 097 — la propina no es plata del negocio: se cobra por el sistema para
+ * spec 098 — la propina no es plata del negocio: se cobra por el sistema para
  * poder liquidársela al mozo, pero no es una venta ni queda en la caja. El
  * cliente paga $11.000 por una cuenta de $10.000 y esos $1.000 son del mozo, no
  * del local.

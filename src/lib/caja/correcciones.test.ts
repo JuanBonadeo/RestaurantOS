@@ -186,7 +186,7 @@ describe("caja / evaluarGuardas", () => {
     expect(r).toEqual({
       ok: false,
       error:
-        // spec 097 · H-35 — el consejo cambió: mandar a «anulá el cobro» era
+        // spec 098 · H-35 — el consejo cambió: mandar a «anulá el cobro» era
         // mandarlo por la única puerta que podía reescribir un arqueo firmado.
         "Ese cobro ya entró en un arqueo cerrado. Registrá la diferencia como un movimiento del período actual.",
     });

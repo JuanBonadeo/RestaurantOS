@@ -1,4 +1,4 @@
--- Spec 097 · H-16 — corregir una línea también corrige el inventario.
+-- Spec 098 · H-16 — corregir una línea también corrige el inventario.
 --
 -- ## El problema
 --
@@ -164,7 +164,7 @@ end;
 $$;
 
 comment on function public.fn_stock_delta_on_item_edit() is
-  'Spec 097 · H-16: al corregir cantidad o producto de una línea, devuelve el consumo viejo (kind=ajuste) y descuenta el nuevo. Sin esto se cobraban 4 y se costeaba 1.';
+  'Spec 098 · H-16: al corregir cantidad o producto de una línea, devuelve el consumo viejo (kind=ajuste) y descuenta el nuevo. Sin esto se cobraban 4 y se costeaba 1.';
 
 drop trigger if exists trg_stock_delta_on_item_edit on public.order_items;
 
