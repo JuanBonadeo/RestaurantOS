@@ -51,19 +51,6 @@ update public.orders
  where lifecycle_status = 'closed'
    and status not in ('delivered', 'cancelled');
 
--- ── D) Ítems vivos colgando de órdenes canceladas ──────────────────────────
--- 29 filas por $606.200. `anularMesa` derivaba los ítems a cancelar desde las
--- comandas activas, así que las bebidas (`station_id` null, nunca entran a
--- `comanda_items`) y todo lo cargado-sin-enviar quedaba vivo: 27 de esos 29
--- nunca pasaron por una comanda. Los seguía contando Top productos.
-update public.order_items oi
-   set cancelled_at = coalesce(o.cancelled_at, now()),
-       cancelled_reason = coalesce(oi.cancelled_reason, 'Backfill spec 091: la orden estaba anulada')
-  from public.orders o
- where o.id = oi.order_id
-   and o.lifecycle_status = 'cancelled'
-   and oi.cancelled_at is null;
-
 -- ── E) Pedidos online terminales con la cuenta abierta ─────────────────────
 -- 5 filas. `delivered` o `cancelled` en el eje de producción pero
 -- `lifecycle_status='open'`: el cobro los seguía considerando cobrables porque
@@ -83,6 +70,22 @@ update public.orders o
      select 1 from public.payments p
       where p.order_id = o.id and p.payment_status = 'paid'
    );
+
+-- ── D) Ítems vivos colgando de órdenes canceladas ──────────────────────────
+-- Va DESPUÉS de E a propósito: E cancela pedidos online que hasta ese momento
+-- figuraban `open`, y sus ítems tienen que entrar en este barrido. Con el orden
+-- inverso quedaban 5 ítems vivos — pasó en el cloud y hubo que barrerlos aparte.
+-- 29 filas por $606.200. `anularMesa` derivaba los ítems a cancelar desde las
+-- comandas activas, así que las bebidas (`station_id` null, nunca entran a
+-- `comanda_items`) y todo lo cargado-sin-enviar quedaba vivo: 27 de esos 29
+-- nunca pasaron por una comanda. Los seguía contando Top productos.
+update public.order_items oi
+   set cancelled_at = coalesce(o.cancelled_at, now()),
+       cancelled_reason = coalesce(oi.cancelled_reason, 'Backfill spec 091: la orden estaba anulada')
+  from public.orders o
+ where o.id = oi.order_id
+   and o.lifecycle_status = 'cancelled'
+   and oi.cancelled_at is null;
 
 alter table public.orders      enable trigger trg_recipe_stock_reversion;
 alter table public.order_items enable trigger trg_stock_reversion_por_item;
