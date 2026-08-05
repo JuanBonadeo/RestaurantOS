@@ -25,6 +25,13 @@ export type SelectedChoiceRef = {
   product_id: string;
 };
 
+/** La condición de un grupo, tal como sale de `daily_menu_choice_groups`. */
+export type ComboChoiceGroupCondition = {
+  id: string;
+  applies_when_group_id: string | null;
+  applies_when_product_ids: string[];
+};
+
 export type ComboChoicesResult =
   | { ok: true; activeGroupIds: string[] }
   | { ok: false; error: string };
@@ -222,6 +229,12 @@ export function pruneBlockedSelections<S extends { product_id: string }>(
 export function validateComboChoices(
   components: ComboChoiceComponent[],
   selectedChoices: SelectedChoiceRef[],
+  /**
+   * Los grupos con su condición (spec 087). Si vienen, la resolución sale de
+   * ellos; si no, del `blocks` de la opción. Es el mismo `activeChoiceGroups`
+   * que usan las dos UIs, así que server y cliente no pueden divergir.
+   */
+  groups?: ComboChoiceGroupCondition[],
 ): ComboChoicesResult {
   const optionByKey = new Map<string, ComboChoiceComponent>();
   for (const c of components) {
@@ -229,8 +242,8 @@ export function validateComboChoices(
     optionByKey.set(`${c.choice_group_id}::${c.product_id}`, c);
   }
 
-  // (1) + duplicados. Se arma el mapa de bloqueos en la misma pasada.
-  const blocksBySelectedGroup = new Map<string, string[]>();
+  // (1) + duplicados.
+  const elegidoPorGrupo = new Map<string, { product_id: string }>();
   for (const sc of selectedChoices) {
     const option = optionByKey.get(`${sc.choice_group_id}::${sc.product_id}`);
     if (!option) {
@@ -239,21 +252,41 @@ export function validateComboChoices(
         error: "Una de las opciones elegidas no es válida para este menú.",
       };
     }
-    if (blocksBySelectedGroup.has(sc.choice_group_id)) {
+    if (elegidoPorGrupo.has(sc.choice_group_id)) {
       return {
         ok: false,
         error: "Hay dos opciones elegidas para el mismo grupo.",
       };
     }
-    blocksBySelectedGroup.set(
-      sc.choice_group_id,
-      option.blocks_choice_group_ids ?? [],
-    );
+    elegidoPorGrupo.set(sc.choice_group_id, { product_id: sc.product_id });
   }
 
-  const activeGroupIds = resolveActiveGroupIds(
-    orderedChoiceGroupIds(components),
-    blocksBySelectedGroup,
+  const condicionPorGrupo = new Map(
+    (groups ?? []).map((g) => [g.id, g] as const),
+  );
+  const armados: ChoiceGroupLike[] = orderedChoiceGroupIds(components).map(
+    (groupId) => {
+      const condicion = condicionPorGrupo.get(groupId);
+      return {
+        choice_group_id: groupId,
+        options: components
+          .filter((c) => c.kind === "choice" && c.choice_group_id === groupId)
+          .map((c) => ({
+            product_id: c.product_id,
+            blocks_choice_group_ids: c.blocks_choice_group_ids ?? [],
+          })),
+        ...(condicion
+          ? {
+              applies_when_group_id: condicion.applies_when_group_id,
+              applies_when_product_ids: condicion.applies_when_product_ids,
+            }
+          : {}),
+      };
+    },
+  );
+
+  const activeGroupIds = activeChoiceGroups(armados, elegidoPorGrupo).map(
+    (g) => g.choice_group_id,
   );
   const activeSet = new Set(activeGroupIds);
 
@@ -270,7 +303,7 @@ export function validateComboChoices(
 
   // (3) grupos activos sin elegir.
   for (const groupId of activeGroupIds) {
-    if (!blocksBySelectedGroup.has(groupId)) {
+    if (!elegidoPorGrupo.has(groupId)) {
       return { ok: false, error: "Falta elegir una opción del menú." };
     }
   }

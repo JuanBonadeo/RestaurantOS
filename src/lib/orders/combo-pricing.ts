@@ -11,6 +11,7 @@
  */
 
 import {
+  type ComboChoiceGroupCondition,
   validateComboChoices,
   type ComboChoiceComponent,
   type SelectedChoiceRef,
@@ -40,8 +41,10 @@ export type ComboUpchargeResult =
 export function resolveComboUpcharge(
   components: ComboChoiceComponent[],
   selectedChoices: SelectedChoiceRef[],
+  /** Los grupos con su condición (spec 087); se propagan al validador. */
+  groups?: ComboChoiceGroupCondition[],
 ): ComboUpchargeResult {
-  const valid = validateComboChoices(components, selectedChoices);
+  const valid = validateComboChoices(components, selectedChoices, groups);
   if (!valid.ok) return { ok: false, error: valid.error };
 
   let deltaCents = 0;

@@ -80,7 +80,7 @@ export async function getDailyMenusForToday(
       // Los `modifier_groups` del producto de cada opción (spec 083) son los
       // mismos que ve el mozo al cargar el producto suelto: el asistente los
       // pregunta en un paso propio y el server re-deriva de ahí el adicional.
-      "id, name, description, price_cents, image_url, sort_order, daily_menu_choice_groups(id, name, sort_order, applies_when_group_id, applies_when_product_ids), daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, extra_price_cents, blocks_choice_group_ids, products(id, name, image_url, modifier_groups(id, name, is_required, min_selection, max_selection, sort_order, modifiers(id, name, price_delta_cents, is_available, sort_order))))",
+      "id, name, description, price_cents, image_url, sort_order, daily_menu_choice_groups(id, name, sort_order, applies_when_group_id, applies_when_product_ids), daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, extra_price_cents, products(id, name, image_url, modifier_groups(id, name, is_required, min_selection, max_selection, sort_order, modifiers(id, name, price_delta_cents, is_available, sort_order))))",
     )
     .eq("business_id", businessId)
     .eq("is_active", true)

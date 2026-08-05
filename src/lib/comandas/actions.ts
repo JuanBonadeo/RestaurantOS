@@ -558,7 +558,7 @@ export async function enviarComanda(
         // `products.modifier_groups` es la fuente de verdad del adicional de
         // los modificadores del combo (spec 083): el payload dice qué se
         // eligió, el precio sale de acá.
-        "id, name, price_cents, image_url, business_id, is_active, is_available, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, extra_price_cents, blocks_choice_group_ids, products(id, name, modifier_groups(id, name, is_required, min_selection, max_selection, sort_order, modifiers(id, name, price_delta_cents, is_available, sort_order))))",
+        "id, name, price_cents, image_url, business_id, is_active, is_available, daily_menu_choice_groups(id, applies_when_group_id, applies_when_product_ids), daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, extra_price_cents, products(id, name, modifier_groups(id, name, is_required, min_selection, max_selection, sort_order, modifiers(id, name, price_delta_cents, is_available, sort_order))))",
       )
       .eq("id", menuItem.daily_menu_id)
       .maybeSingle();
@@ -590,6 +590,14 @@ export async function enviarComanda(
       (menuItem.selected_choices ?? []).map((sc) => ({
         choice_group_id: sc.choice_group_id,
         product_id: sc.product_id,
+      })),
+      // La condición de cada grupo (spec 087): el server resuelve qué grupos
+      // aplican con lo mismo que la UI, no con el `blocks` de la opción.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ((menu.daily_menu_choice_groups ?? []) as any[]).map((g) => ({
+        id: g.id,
+        applies_when_group_id: g.applies_when_group_id ?? null,
+        applies_when_product_ids: g.applies_when_product_ids ?? [],
       })),
     );
     if (!upcharge.ok) return actionError(upcharge.error);

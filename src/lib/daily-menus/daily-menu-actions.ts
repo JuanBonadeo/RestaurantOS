@@ -11,7 +11,7 @@ import {
   type DailyMenuChoiceGroupInput,
   type DailyMenuComponentInput,
 } from "./schemas";
-import { deriveBlocks, deriveChoiceGroups } from "./choice-groups";
+import { deriveChoiceGroups } from "./choice-groups";
 
 /**
  * Sincroniza los componentes de un menú comparando los incoming contra los
@@ -30,21 +30,6 @@ async function syncComponents(
   choiceGroups?: DailyMenuChoiceGroupInput[],
 ): Promise<string | null> {
   const supabase = await createSupabaseServerClient();
-
-  // `blocks_choice_group_ids` ya no la escribe el editor: se deriva de la
-  // condición del grupo. Se sigue guardando mientras la columna exista, porque
-  // el validador del server todavía la lee y porque deja un rollback de código
-  // sin menús rotos.
-  const blocksPorOpcion = choiceGroups
-    ? deriveBlocks(
-        choiceGroups.map((g) => ({
-          id: g.id,
-          applies_when_group_id: g.applies_when_group_id ?? null,
-          applies_when_product_ids: g.applies_when_product_ids ?? [],
-        })),
-        components,
-      )
-    : null;
 
   // Grupos que realmente existen en lo que se está guardando. Se usa para
   // limpiar referencias a grupos borrados en `blocks_choice_group_ids` (spec
@@ -83,24 +68,9 @@ async function syncComponents(
       kind: component.kind ?? "text",
       product_id: component.product_id ?? null,
       choice_group_id: component.choice_group_id ?? null,
-      choice_group_label: component.choice_group_label ?? null,
       // Adicional sólo para `choice` (spec 29); los demás kinds van en 0.
       extra_price_cents:
         component.kind === "choice" ? (component.extra_price_cents ?? 0) : 0,
-      // Grupos condicionados (spec 074), sólo para `choice` y sólo los que
-      // siguen existiendo. Un componente que deja de ser `choice` pierde sus
-      // condiciones, igual que pierde el adicional.
-      blocks_choice_group_ids:
-        component.kind === "choice"
-          ? (blocksPorOpcion
-              ? (blocksPorOpcion.get(
-                  `${component.choice_group_id}::${component.product_id}`,
-                ) ?? [])
-              : (component.blocks_choice_group_ids ?? [])
-            ).filter(
-              (id) => id !== component.choice_group_id && existingGroupIds.has(id),
-            )
-          : [],
     };
     if (component.id) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

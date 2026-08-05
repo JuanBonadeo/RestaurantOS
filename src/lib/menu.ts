@@ -161,7 +161,7 @@ export const getMenu = cache(
       supabase
         .from("daily_menus")
         .select(
-          "id, name, description, price_cents, image_url, available_days, is_suggestion, daily_menu_choice_groups(id, name, sort_order, applies_when_group_id, applies_when_product_ids), daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, extra_price_cents, blocks_choice_group_ids, products(id, name, image_url))",
+          "id, name, description, price_cents, image_url, available_days, is_suggestion, daily_menu_choice_groups(id, name, sort_order, applies_when_group_id, applies_when_product_ids), daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, extra_price_cents, products(id, name, image_url))",
         )
         .eq("business_id", businessId)
         .eq("is_active", true)

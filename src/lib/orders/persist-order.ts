@@ -229,7 +229,7 @@ export async function persistOrder(
     const { data: menus } = await supabase
       .from("daily_menus")
       .select(
-        "id, name, price_cents, image_url, available_days, is_active, is_available, business_id, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, extra_price_cents, blocks_choice_group_ids)",
+        "id, name, price_cents, image_url, available_days, is_active, is_available, business_id, daily_menu_choice_groups(id, applies_when_group_id, applies_when_product_ids), daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, extra_price_cents)",
       )
       .in("id", menuIds);
     if (!menus || menus.length !== menuIds.length) {
@@ -334,6 +334,13 @@ export async function persistOrder(
         (inputItem.selected_choices ?? []).map((sc) => ({
           choice_group_id: sc.choice_group_id,
           product_id: sc.product_id,
+        })),
+        // La condición de cada grupo (spec 087): el server resuelve igual que la UI.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ((menu as any).daily_menu_choice_groups ?? []).map((g: any) => ({
+          id: g.id,
+          applies_when_group_id: g.applies_when_group_id ?? null,
+          applies_when_product_ids: g.applies_when_product_ids ?? [],
         })),
       );
       if (!upcharge.ok) return actionError(upcharge.error);
