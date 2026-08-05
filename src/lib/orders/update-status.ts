@@ -6,6 +6,9 @@ import { z } from "zod";
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { notifyDeliveryStatusChange } from "@/lib/notifications/delivery-notify";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseServiceClient } from "@/lib/supabase/service";
+
+import { cancelDownstream } from "./cancel-order";
 
 import {
   ORDER_STATUSES,
@@ -61,18 +64,46 @@ export async function updateOrderStatus(
     return actionError('Usá "Confirmar" para mandar el pedido a cocina.');
   }
 
+  const isCancel = next_status === "cancelled";
+  const nowIso = new Date().toISOString();
+
   const { error: updateErr } = await supabase
     .from("orders")
     .update({
       status: next_status,
-      cancelled_reason:
-        next_status === "cancelled" ? (cancelled_reason ?? null) : null,
-      cancelled_by: next_status === "cancelled" ? (user?.id ?? null) : null,
+      // spec 090 — al cancelar se escriben los **dos** ejes. Este camino movía
+      // sólo `status` y dejaba `lifecycle_status='open'`: en el cloud quedaron
+      // 4 pedidos cancelados con la cuenta abierta, que el cobro seguía
+      // considerando cobrables porque guarda por `lifecycle_status`.
+      lifecycle_status: isCancel ? "cancelled" : undefined,
+      // Y `cancelled_at`, que no lo escribía nadie del canal online: es el campo
+      // por el que filtra el bloque de anulaciones del resumen de turno, así que
+      // el encargado cancelaba deliveries con su motivo tipeado y el resumen del
+      // dueño no decía una palabra.
+      cancelled_at: isCancel ? nowIso : null,
+      cancelled_reason: isCancel ? (cancelled_reason ?? null) : null,
+      cancelled_by: isCancel ? (user?.id ?? null) : null,
     })
     .eq("id", order_id);
   if (updateErr) {
     console.error("updateOrderStatus", updateErr);
     return actionError("No pudimos actualizar el estado.");
+  }
+
+  // La cascada (ítems, comandas + ticket «ANULADA», totales) va con el service
+  // client: el UPDATE de arriba ya corrió bajo RLS, así que probó que este
+  // usuario podía tocar la orden. Sin esto, cancelar un delivery ya marchado
+  // dejaba la comanda viva en cocina — el cocinero terminaba el plato y nadie
+  // lo venía a buscar — y si seguía `pendiente`, la comandera la imprimía
+  // después de cancelada y sin cartel de ANULADA.
+  if (isCancel) {
+    const service = createSupabaseServiceClient();
+    await cancelDownstream(service, {
+      orderId: order_id,
+      motivo: cancelled_reason?.trim() || "Cancelado",
+      actorUserId: user?.id ?? null,
+      nowIso,
+    });
   }
 
   // Aviso de WhatsApp al cliente por el nuevo estado de delivery. Best-effort:

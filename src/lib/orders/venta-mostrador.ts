@@ -13,6 +13,7 @@ import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
 import { persistOrder } from "./persist-order";
+import { cancelarOrden } from "./cancel-order";
 import { routeOrderToCocina } from "./route-to-cocina";
 import { VentaMostradorInput } from "./schema";
 
@@ -185,16 +186,18 @@ export async function venderMostrador(
   if (!pago.ok) {
     // FR-007: sin este rescate quedaría una orden `dine_in` abierta y sin mesa
     // — invisible en board, plano y salón — inflando la analítica en silencio.
-    await service
-      .from("orders")
-      .update({
-        lifecycle_status: "cancelled",
-        cancelled_at: new Date().toISOString(),
-        cancelled_by: ctx.userId,
-        cancelled_reason: "Venta de mostrador no cobrada",
-      })
-      .eq("id", orderId)
-      .eq("business_id", business.id);
+    //
+    // spec 090 — el comentario de arriba decía exactamente lo que el rescate NO
+    // lograba: escribía `lifecycle_status` y dejaba `status='pending'`, que es
+    // justo el eje que la analítica lee. Además los `order_items` ya estaban
+    // insertados (con el stock descontado) y nadie los marcaba. Ahora el helper
+    // escribe los cinco ejes, y la reversión de stock de la 089 cae de rebote.
+    await cancelarOrden(service, {
+      orderId,
+      businessId: business.id,
+      motivo: "Venta de mostrador no cobrada",
+      actorUserId: ctx.userId,
+    });
     return actionError(pago.error);
   }
 

@@ -18,6 +18,7 @@ import {
   canTransitionMesa,
 } from "@/lib/permissions/can";
 import { createNotification } from "@/lib/notifications/create";
+import { cancelarOrden } from "@/lib/orders/cancel-order";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
@@ -208,18 +209,26 @@ export async function updateTableOperationalStatus(
   // Al liberar: no dejar órdenes abiertas ni reservas seated huérfanas — eso
   // produce el estado imposible "mesa Libre con orden abierta".
   if (status === "libre" && from !== "libre") {
-    const { error: cancelErr } = await service
+    // spec 090 — esto era un `anularMesa` degradado: cancelaba la cuenta y
+    // dejaba las comandas **vivas y accionables** en el kanban (el botón sólo
+    // se apaga con `cancelled_at`, que acá nunca se escribía), los ítems sin
+    // marcar y el total sin recalcular. Ahora usa el mismo helper que anular.
+    const { data: abiertas } = await service
       .from("orders")
-      .update({
-        lifecycle_status: "cancelled",
-        cancelled_at: new Date().toISOString(),
-        cancelled_reason: "Mesa liberada",
-        cancelled_by: ctx.userId, // spec 34 — responsable de la anulación
-      })
+      .select("id")
       .eq("table_id", tableId)
       .eq("business_id", business.id)
       .eq("lifecycle_status", "open");
-    if (cancelErr) console.error("liberar: cancelar órdenes abiertas", cancelErr);
+    const nowIso = new Date().toISOString();
+    for (const o of (abiertas ?? []) as { id: string }[]) {
+      await cancelarOrden(service, {
+        orderId: o.id,
+        businessId: business.id,
+        motivo: "Mesa liberada",
+        actorUserId: ctx.userId, // spec 34 — responsable de la anulación
+        nowIso,
+      });
+    }
     await closeSeatedReservations(service, tableId, business.id, "completed");
   }
 
@@ -440,76 +449,26 @@ export async function anularMesa(
   // queda con el campo vacío, pero al encargado no se le pide nada.
   const reason = motivoDado || MOTIVO_MESA_SIN_CONSUMO;
 
-  // Cancelar orders abiertas de esta mesa. `.select("id")` devuelve las que
-  // recién cancelamos → las usamos abajo para anular sus comandas.
+  // Cancelar las orders abiertas de esta mesa. Cada una pasa por
+  // `cancelarOrden` (spec 090), que escribe los **cinco** ejes: los dos de
+  // `orders`, todos los `order_items` vivos, las comandas activas con su ticket
+  // «ANULADA», y el recompute de totales.
+  //
+  // Antes esto vivía inline acá y tenía dos agujeros: sólo escribía
+  // `lifecycle_status` —el eje del que no cuelga ni la analítica ni la reversión
+  // de stock— y derivaba los ítems a cancelar **desde las comandas activas**,
+  // así que las bebidas (`station_id` null, nunca entran a `comanda_items`) y lo
+  // cargado-sin-enviar quedaban vivos. En el cloud: 29 ítems por $606.200.
   const nowIso = new Date().toISOString();
-  const { data: cancelledOrders, error: ordersErr } = await service
-    .from("orders")
-    .update({
-      lifecycle_status: "cancelled",
-      cancelled_at: nowIso,
-      cancelled_reason: reason,
-      cancelled_by: ctx.userId, // spec 34 — responsable de la anulación
-    })
-    .eq("table_id", tableId)
-    .eq("business_id", business.id)
-    .eq("lifecycle_status", "open")
-    .select("id");
-  if (ordersErr) {
-    console.error("anularMesa orders", ordersErr);
-    return actionError("No pudimos cancelar las órdenes abiertas.");
-  }
-
-  // Anular las comandas ACTIVAS (pendiente / en_preparacion) de esas órdenes:
-  // cancelar sus ítems vivos + marcar la comanda anulada + encolar la
-  // reimpresión del ticket "ANULADA" (spec 049/35) para que cocina se entere.
-  // Las ENTREGADAS se respetan (la comida ya salió; la orden cancelada ya
-  // garantiza que no se cobra). Mismo criterio que `cancelarComanda`.
-  const cancelledOrderIds = ((cancelledOrders ?? []) as { id: string }[]).map(
-    (o) => o.id,
-  );
-  if (cancelledOrderIds.length > 0) {
-    const { data: comandaRows } = await service
-      .from("comandas")
-      .select("id")
-      .in("order_id", cancelledOrderIds)
-      .in("status", ["pendiente", "en_preparacion"])
-      .is("cancelled_at", null);
-    const comandaIds = ((comandaRows ?? []) as { id: string }[]).map((c) => c.id);
-    if (comandaIds.length > 0) {
-      const { data: links } = await service
-        .from("comanda_items")
-        .select("order_item_id")
-        .in("comanda_id", comandaIds);
-      const itemIds = [
-        ...new Set(
-          ((links ?? []) as { order_item_id: string }[]).map(
-            (l) => l.order_item_id,
-          ),
-        ),
-      ];
-      if (itemIds.length > 0) {
-        await service
-          .from("order_items")
-          .update({
-            cancelled_at: nowIso,
-            cancelled_reason: reason,
-            cancelled_by: ctx.userId,
-          })
-          .in("id", itemIds)
-          .is("cancelled_at", null);
-      }
-      await service
-        .from("comandas")
-        .update({
-          cancelled_at: nowIso,
-          cancelled_reason: reason,
-          cancelled_by: ctx.userId,
-          reprint_requested_at: nowIso, // encola el ticket "ANULADA"
-          print_failed_at: null,
-        })
-        .in("id", comandaIds);
-    }
+  const openOrderIds = ((openOrders ?? []) as { id: string }[]).map((o) => o.id);
+  for (const orderId of openOrderIds) {
+    await cancelarOrden(service, {
+      orderId,
+      businessId: business.id,
+      motivo: reason,
+      actorUserId: ctx.userId, // spec 34 — responsable de la anulación
+      nowIso,
+    });
   }
 
   // mozo_id se preserva: la asignación es fija hasta que el encargado la

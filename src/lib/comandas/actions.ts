@@ -15,6 +15,7 @@ import { requireMozoActionContext } from "@/lib/mozo/auth";
 import { getMozosByBusiness, type MozoMember } from "@/lib/mozo/queries";
 import { createNotification } from "@/lib/notifications/create";
 import { notifyItemCancelled } from "@/lib/notifications/events";
+import { recomputeOrderTotals } from "@/lib/orders/totals-recompute";
 import {
   canCancelItem,
   canModifyPostEnvio,
@@ -1277,46 +1278,6 @@ export async function solicitarReimpresion(
 
   revalidatePath(`/${slug}/admin/operacion`);
   return actionOk(undefined);
-}
-
-/**
- * Recalcula `orders.subtotal_cents` (suma de ítems vivos) y `total_cents`
- * (subtotal + tip + fee − discount, sin bajar de 0). Mismo criterio que
- * `cancelarItem` — extraído para reusar en las acciones del spec 049.
- */
-async function recomputeOrderTotals(
-  service: GenericClient,
-  orderId: string,
-): Promise<void> {
-  const { data: items } = await service
-    .from("order_items")
-    .select("subtotal_cents, cancelled_at")
-    .eq("order_id", orderId);
-  const subtotal = (
-    (items ?? []) as { subtotal_cents: number; cancelled_at: string | null }[]
-  )
-    .filter((it) => !it.cancelled_at)
-    .reduce((a, it) => a + Number(it.subtotal_cents), 0);
-
-  const { data: orderRow } = await service
-    .from("orders")
-    .select("tip_cents, discount_cents, delivery_fee_cents")
-    .eq("id", orderId)
-    .single();
-  const tip = Number((orderRow as { tip_cents: number } | null)?.tip_cents ?? 0);
-  const discount = Number(
-    (orderRow as { discount_cents: number } | null)?.discount_cents ?? 0,
-  );
-  const fee = Number(
-    (orderRow as { delivery_fee_cents: number } | null)?.delivery_fee_cents ?? 0,
-  );
-  const total = Math.max(0, subtotal + tip + fee - discount);
-
-  await service
-    .from("orders")
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .update({ subtotal_cents: subtotal, total_cents: total } as any)
-    .eq("id", orderId);
 }
 
 /**

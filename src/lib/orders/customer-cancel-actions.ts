@@ -9,6 +9,8 @@ import { refundPayment } from "@/lib/payments/mercadopago";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
+import { cancelDownstream } from "./cancel-order";
+
 const CancelInput = z.object({
   order_id: z.string().uuid(),
   business_slug: z.string().min(1),
@@ -95,14 +97,23 @@ export async function cancelOrderByCustomer(
     }
   }
 
+  const MOTIVO = "Cancelado por el cliente";
+  const nowIso = new Date().toISOString();
   const update: {
     status: string;
+    lifecycle_status: string;
+    cancelled_at: string;
     cancelled_reason: string;
     cancelled_by: string;
     payment_status?: string;
   } = {
     status: "cancelled",
-    cancelled_reason: "Cancelado por el cliente",
+    // spec 090 — los dos ejes y el timestamp. Antes se escribía sólo `status`,
+    // así que el pedido quedaba con la cuenta `open` y fuera del bloque de
+    // anulaciones del resumen de turno (que filtra por `cancelled_at`).
+    lifecycle_status: "cancelled",
+    cancelled_at: nowIso,
+    cancelled_reason: MOTIVO,
     // spec 34 — quién anuló. Acá el actor es el propio cliente (auth.users).
     cancelled_by: user.id,
   };
@@ -118,6 +129,16 @@ export async function cancelOrderByCustomer(
     console.error("cancelOrderByCustomer", error);
     return actionError("No pudimos cancelar el pedido.");
   }
+
+  // Ítems, comandas (con su ticket «ANULADA») y totales. Un pedido que el
+  // cliente cancela desde el celular puede estar ya marchado: sin esto la
+  // comanda seguía viva en cocina.
+  await cancelDownstream(service, {
+    orderId: order_id,
+    motivo: MOTIVO,
+    actorUserId: user.id,
+    nowIso,
+  });
 
   // spec 27 — avisar al encargado que el cliente canceló su pedido.
   await createNotification({
