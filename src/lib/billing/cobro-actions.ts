@@ -883,6 +883,13 @@ export async function anularCobro(
         .update({
           operational_status: "pidio_cuenta",
           opened_at: new Date().toISOString(),
+          // spec 096 · H-33 — el puntero. El cobro lo nulea y la reapertura
+          // escribía `operational_status` y `opened_at` pero nunca esto, y
+          // `imprimirCuenta` resuelve la orden **exclusivamente** por acá: el
+          // mozo tocaba «Imprimir cuenta» para llevar el papel corregido y le
+          // salía «La mesa no tiene una cuenta abierta». Se "arreglaba solo" si
+          // mandaba algo más a cocina, que es lo que reescribe el puntero.
+          current_order_id: orderId,
         })
         .eq("id", order.table_id);
       await service

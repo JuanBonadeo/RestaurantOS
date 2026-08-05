@@ -808,22 +808,22 @@ export async function enviarComanda(
 
   // Recalculamos totales de la orden (suma de todos los items, no solo
   // los nuevos — la orden puede tener items previos de tandas anteriores).
-  const { data: allItems } = await service
-    .from("order_items")
-    .select("subtotal_cents, cancelled_at")
-    .eq("order_id", orderId);
-  const newSubtotal = ((allItems ?? []) as { subtotal_cents: number; cancelled_at: string | null }[])
-    .filter((it) => !it.cancelled_at)
-    .reduce((a, it) => a + Number(it.subtotal_cents), 0);
-
-  await service
-    .from("orders")
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .update({
-      subtotal_cents: newSubtotal,
-      total_cents: newSubtotal,
-    } as any)
-    .eq("id", orderId);
+  //
+  // spec 096 · H-11 — esto escribía `total_cents = newSubtotal`, o sea el
+  // subtotal pelado: **borraba el descuento y la propina del total** pero no de
+  // sus columnas, dejando la orden internamente contradictoria.
+  //
+  // Lo que se veía en el local: mesa con 10% de descuento, el cliente pide un
+  // café, y al enviarlo el total vuelve al precio de lista. El mozo cobra lo
+  // que muestra la pantalla (con descuento), la RPC compara contra el total
+  // inflado, **nunca da `fully_paid`, la orden no cierra y la mesa queda
+  // ocupada aunque esté pagada**. Si se factura, ARCA recibe de más. Con
+  // propina cargada antes es al revés: se cobra de menos.
+  //
+  // `recomputeOrderTotals` (subtotal + tip + fee − discount) es la función que
+  // ya usaban `cancelarItem` y `editarItemComanda`; vivía 500 líneas más abajo
+  // en este mismo archivo hasta que la spec 090 la mudó a un módulo común.
+  await recomputeOrderTotals(service, orderId);
 
   // Mesa queda `ocupada` al enviar comanda. Si estaba libre, fijamos
   // opened_at. Si estaba pidio_cuenta y vuelven a pedir, pasa a ocupada
