@@ -12,15 +12,15 @@ import { getBusiness } from "@/lib/tenant";
 
 import { calculateAmounts } from "./calculate-amounts";
 import { esCondicionValidaPara } from "./condicion-iva";
-import { createGatewayClient } from "./gateway";
 import type { AFIPProviderClient } from "./provider";
+import { selectProvider } from "./provider-config";
 import {
-  type ProviderSelection,
-  selectProvider,
-} from "./provider-config";
-import { createSandboxClient } from "./sandbox";
+  applyGatewayStatus,
+  buildProvider,
+  loadAFIPConfig,
+  terminalPatch,
+} from "./reconcile";
 import type {
-  AFIPConfig,
   CondicionIvaReceptor,
   Invoice,
   ProviderResult,
@@ -59,82 +59,6 @@ const CONDICION_IVA_VALIDA: readonly CondicionIvaReceptor[] = [1, 4, 5, 6];
 type EmitResult = {
   invoice: Invoice;
 };
-
-/** Construye el cliente del provider a partir de la selección por modo fiscal. */
-function buildProvider(
-  selection: Exclude<ProviderSelection, { kind: "error" }>,
-  businessId: string,
-): AFIPProviderClient {
-  if (selection.kind === "sandbox") return createSandboxClient(businessId);
-  return createGatewayClient(selection.credentials);
-}
-
-async function loadAFIPConfig(
-  service: GenericClient,
-  businessId: string,
-): Promise<AFIPConfig | null> {
-  const { data } = await service
-    .from("businesses")
-    .select(
-      "afip_cuit, afip_punto_venta, afip_provider, afip_default_tipo, afip_mode, afip_enabled",
-    )
-    .eq("id", businessId)
-    .single();
-  if (!data) return null;
-  const row = data as {
-    afip_cuit: string | null;
-    afip_punto_venta: number | null;
-    afip_provider: string | null;
-    afip_default_tipo: string | null;
-    afip_mode: string | null;
-    afip_enabled: boolean | null;
-  };
-  if (!row.afip_cuit || !row.afip_punto_venta) return null;
-
-  // La credencial del gateway vive en tabla aparte (service-role-only).
-  const { data: credData } = await service
-    .from("afip_gateway_credentials")
-    .select("api_key, tenant_slug, base_url")
-    .eq("business_id", businessId)
-    .maybeSingle();
-  const cred = credData as {
-    api_key: string | null;
-    tenant_slug: string | null;
-    base_url: string | null;
-  } | null;
-
-  const hasCreds = Boolean(cred?.api_key && cred?.tenant_slug);
-
-  return {
-    cuit: row.afip_cuit,
-    puntoVenta: row.afip_punto_venta,
-    provider: (row.afip_provider ?? "gateway") as AFIPConfig["provider"],
-    defaultTipo: (row.afip_default_tipo ?? "factura_b") as TipoComprobante,
-    mode: row.afip_mode === "produccion" ? "produccion" : "sandbox",
-    enabled: Boolean(row.afip_enabled),
-    credentials: hasCreds
-      ? {
-          apiKey: cred!.api_key!,
-          tenantSlug: cred!.tenant_slug!,
-          baseUrl: cred!.base_url ?? "https://arca-gpsf-gateway.vercel.app",
-        }
-      : null,
-  };
-}
-
-/** Campos de la fila `invoices` derivados de un resultado terminal del provider. */
-function terminalPatch(result: ProviderResult): Record<string, unknown> {
-  return {
-    status: result.state === "authorized" ? "authorized" : "failed",
-    numero: result.numero ?? null,
-    cae: result.cae ?? null,
-    cae_vencimiento: result.caeVencimiento ?? null,
-    qr_url: result.qrUrl ?? null,
-    provider_job_id: result.jobId ?? null,
-    error_message: result.error ?? null,
-    provider_response: result.rawResponse ?? null,
-  };
-}
 
 export async function emitInvoice(
   input: EmitInput,
@@ -318,6 +242,13 @@ export async function emitInvoice(
         condicionIvaReceptor: input.condicionIvaReceptor,
         totalCents: facturableCents,
         concepto: "productos",
+        // El gateway la devuelve en el webhook (spec 088, fase 2): correlacionar
+        // por acá es más robusto que depender sólo del `job_id`.
+        metadata: {
+          invoice_id: reserved.id,
+          business_id: business.id,
+          slug: input.slug,
+        },
       },
       idempotencyKey,
     );
@@ -410,49 +341,12 @@ export async function pollInvoiceStatus(
   if (selection.kind === "error") return actionError(selection.message);
   const provider = buildProvider(selection, business.id);
 
-  let result: ProviderResult;
-  try {
-    result = await provider.getStatus(inv.provider_job_id);
-  } catch {
-    // Error transitorio consultando: sigue pending.
-    return actionOk({ invoice: inv });
-  }
-
-  // Todavía en proceso: no tocamos la fila.
-  if (result.state === "pending") return actionOk({ invoice: inv });
-
-  // Persistir el desenlace, sólo si sigue pending (evita pisar una carrera).
-  const { data: updated } = await service
-    .from("invoices")
-    .update({
-      status: result.state === "authorized" ? "authorized" : "failed",
-      numero: result.numero ?? inv.numero,
-      cae: result.cae ?? inv.cae,
-      cae_vencimiento: result.caeVencimiento ?? inv.cae_vencimiento,
-      qr_url: result.qrUrl ?? inv.qr_url,
-      error_message: result.error ?? null,
-      provider_response: result.rawResponse ?? inv.provider_response,
-    })
-    .eq("id", invoiceId)
-    .eq("status", "pending")
-    .select()
-    .maybeSingle();
-
-  if (updated) {
-    // spec 45 — al resolverse el CAE async, avisar el comprobante (idempotente).
-    if ((updated as Invoice).status === "authorized") {
-      await notifyInvoiceIssued({ invoiceId: (updated as Invoice).id });
-    }
-    return actionOk({ invoice: updated as Invoice });
-  }
-
-  // Otra llamada ganó la carrera: devolver la fila fresca.
-  const { data: fresh } = await service
-    .from("invoices")
-    .select("*")
-    .eq("id", invoiceId)
-    .single();
-  return actionOk({ invoice: fresh as Invoice });
+  // La consulta y la persistencia son las MISMAS que usa el cron de
+  // reconciliación (spec 088): acá sólo agregamos el gate de usuario. Si cada
+  // camino tuviera su copia, la factura se cerraría distinto según quién llegue
+  // primero.
+  const { invoice } = await applyGatewayStatus(service, inv, provider);
+  return actionOk({ invoice });
 }
 
 /** Pollea inline (server-side) un job del provider hasta estado terminal. */

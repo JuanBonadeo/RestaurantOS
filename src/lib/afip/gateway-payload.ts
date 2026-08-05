@@ -114,5 +114,11 @@ export function buildGatewayInvoiceBody(
     }));
   }
 
+  // El gateway guarda `metadata` tal cual y la devuelve en el webhook. Mandarla
+  // hoy no cuesta nada y deja la correlación lista para la fase 2 (spec 088).
+  if (req.metadata && Object.keys(req.metadata).length > 0) {
+    body.metadata = req.metadata;
+  }
+
   return body;
 }

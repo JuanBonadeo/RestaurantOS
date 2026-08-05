@@ -24,6 +24,7 @@ import {
 import {
   formatInvoiceNumber,
   INVOICE_STATUS_META,
+  isDemorada,
   tipoLabel,
 } from "@/lib/afip/format";
 import type { InvoiceKPIs } from "@/lib/afip/queries";
@@ -271,7 +272,13 @@ export function FacturacionClient({
                       meta.color,
                     )}
                   >
-                    {meta.label}
+                    {/* Una `pending` con rato encima no está "por salir": el
+                        gateway reintenta con backoff hasta 60 min. Decirlo
+                        evita que alguien la re-emita creyendo que se colgó
+                        (spec 088). */}
+                    {inv.status === "pending" && isDemorada(inv.created_at)
+                      ? "Demorada"
+                      : meta.label}
                   </span>
 
                   <ChevronRight className="size-4 shrink-0 text-zinc-300" />

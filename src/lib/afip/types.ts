@@ -64,6 +64,12 @@ export type InvoiceRequest = {
   concepto: "productos" | "servicios" | "productos_y_servicios";
   /** NC/ND: comprobante(s) que ajusta. Requerido por el gateway para notas de crédito. */
   comprobantesAsociados?: ComprobanteAsociado[];
+  /**
+   * Datos nuestros que el gateway persiste tal cual y devuelve en el webhook
+   * (spec 088). Hoy no se leen: dejan la correlación lista para cuando el
+   * webhook reemplace al polling, sin depender sólo del `job_id`.
+   */
+  metadata?: Record<string, string>;
 };
 
 /** Estado normalizado de un job del provider (mapea los estados del gateway). */

@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-04
 
-**Status**: 📋 Especificada
+**Status**: ✅ Implementada
 
 **Input**: Juan, 2026-08-04, probando ARCA en golf-jcr: *"el tema es que se queda esperando hasta que emitan la factura, pero generalmente se encola y puede demorar"*.
 
@@ -64,6 +64,8 @@ Como sistema, quiero que el cron y el poller de la pantalla no escriban dos vece
 - **FR-003** El barrido agrupa por `business_id` y resuelve credencial + provider **una vez por negocio**; saltea sandbox y negocios sin credencial **sin llamar al gateway**.
 - **FR-004** Lotes acotados (frescas + viejas) y `maxDuration = 60`: lo que no entra en un tick entra en el siguiente.
 - **FR-005** Un 401/5xx del gateway **no** marca la factura `failed` — sigue `pending` y se cuenta. Sólo el desenlace real del gateway (`emitted` / `error`) es terminal.
+- **FR-005b** Un **404 tampoco cierra la factura**, aunque `gateway.ts` lo mapee a `failed`. Ese mapeo se escribió para la pantalla, donde se pollea un job creado segundos antes con la misma credencial: ahí un 404 sí significa "job inexistente". El barrido consulta jobs de días atrás, cada 2 minutos y sin nadie mirando, así que un `base_url`/`tenant_slug` desactualizado —que devuelve 404 en **toda** ruta— daría por fallido un backlog entero de facturas que ARCA quizá autorizó. Y una `failed` habilita «Reintentar», que reemite con clave nueva: **comprobante duplicado**. Se cuentan como `unknownJob`; si ese contador sube, hay que mirar la config del negocio.
+- **FR-005c** El barrido se limita a `provider = 'gateway'`: una fila de otro provider no tiene job que consultar en este gateway.
 - **FR-006** La migración incluye `revoke execute from anon, authenticated` sobre la función del cron. Sin eso, al ser `SECURITY DEFINER` y ejecutable por PostgREST, cualquiera con la publishable key la dispara con el Bearer ya puesto por la propia función (agujero que la migración `0017` tuvo que tapar para los tres crons anteriores).
 - **FR-007** La emisión deja de bloquear la pantalla; el copy cambia y en Facturación una `pending` de más de ~10 min se marca como demorada.
 - **FR-008** Se manda `metadata: { invoice_id, business_id, slug }` al encolar. El gateway ya la persiste tal cual: cero costo hoy, correlación lista para la fase 2.
@@ -87,3 +89,19 @@ Como sistema, quiero que el cron y el poller de la pantalla no escriban dos vece
 | Cross-tenant | negocio sandbox o sin credencial → skip sin fetch; el negocio A nunca escribe filas del B |
 | Endpoint abierto | 503 sin `CRON_SECRET`, 401 con Bearer malo, 200 con Bearer bueno |
 | Bypass por PostgREST | assert de `has_function_privilege('anon', …)` = false |
+| **404 → duplicado fiscal** | un `not_found` del gateway deja la fila `pending` y suma `unknownJob`, sin escribir |
+
+## Notas de implementación
+
+**Estado: ✅ implementada** (2026-08-04). Un review adversarial del diff (32 agentes) encontró **un defecto real**, confirmado por dos verificadores independientes y corregido antes de commitear:
+
+> El barrido cerraba como `failed` cualquier job que el gateway respondiera con **404**. El mapeo `404 → failed` de `gateway.ts` es preexistente, pero hasta ahora sólo se alcanzaba durante los 120 s en que un operador miraba la pantalla polleando un job recién creado — donde el 404 es casi imposible. El cron lo convertía en un camino **automático, permanente y desatendido** sobre todo el histórico de pendientes: un `base_url` apuntando a un deploy muerto (404 en toda ruta) flipeaba el backlog entero a `failed` en dos minutos, y `retryInvoice` acepta `failed` → reemite con clave nueva → **comprobante fiscal duplicado**. Además violaba el FR-005 que esta misma spec había escrito.
+
+Verificado también (y refutado por el review, no son problemas): el UPDATE condicional es idéntico al preexistente; `notifyInvoiceIssued` no se dispara dos veces; el `setEmitting(false)` adelantado no habilita doble emisión (el guard del server y el índice único siguen mandando); el `cron.schedule` es idempotente por jobname.
+
+## Verify
+
+- `pnpm typecheck` ✅ · `pnpm build` ✅ · `pnpm test` ✅ (los 16 archivos `*.integration` fallan por falta de stack local, igual que antes) · `eslint` limpio en lo tocado.
+- Tests nuevos: `reconcile.test.ts` (14), `api/cron/reconcile-invoices/route.test.ts` (4), `format.test.ts` (3).
+- Migración `0037` aplicada al cloud `tjfufswzsxfujcpoxapx` y verificada: job `invoices-reconcile` activo `*/2 * * * *`, `has_function_privilege('anon'|'authenticated', …) = false`, índice creado.
+- **Pendiente de verificación en vivo**: que el cron cierre una factura real. Hoy golf-jcr no puede emitir — el certificado no tiene `wsfe` autorizado en ARCA —, así que lo primero que se va a ver es el camino `failed`, que es justamente el que hoy quedaba invisible.

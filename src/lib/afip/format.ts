@@ -38,6 +38,23 @@ export type StatusMeta = {
   dotClass: string;
 };
 
+/**
+ * Minutos a partir de los cuales una factura `pending` deja de leerse como
+ * "está saliendo" y pasa a "demorada" (spec 088).
+ *
+ * El gateway reintenta con backoff 1→5→15→60 min y sobre los jobs reales tardó
+ * ~28 min en promedio hasta el desenlace. A los 10 minutos ya no es normal,
+ * pero tampoco está perdida: decirlo evita que alguien la re-emita creyendo
+ * que se colgó y termine con dos comprobantes.
+ */
+export const INVOICE_DEMORADA_MIN = 10;
+
+export function isDemorada(createdAt: string, now: number = Date.now()): boolean {
+  const t = new Date(createdAt).getTime();
+  if (Number.isNaN(t)) return false;
+  return now - t > INVOICE_DEMORADA_MIN * 60_000;
+}
+
 export const INVOICE_STATUS_META: Record<InvoiceStatus, StatusMeta> = {
   authorized: { label: "Autorizada", color: "text-emerald-700", bg: "bg-emerald-50 ring-emerald-200/60", dotClass: "bg-emerald-500" },
   failed: { label: "Fallida", color: "text-rose-700", bg: "bg-rose-50 ring-rose-200/60", dotClass: "bg-rose-500" },

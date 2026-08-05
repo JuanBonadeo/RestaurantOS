@@ -120,6 +120,12 @@ export function FacturacionSection({
 
   // El gateway es asíncrono: `emit`/`retry` devuelven la factura `pending` y acá
   // la polleamos hasta el CAE (o el rechazo). El sandbox ya viene `authorized`.
+  //
+  // El polling es CORTESÍA, no el contrato (spec 088): si el CAE sale en
+  // segundos el operador lo ve sin moverse, pero puede irse cuando quiera —
+  // el cron de reconciliación cierra la factura igual. Antes esto era la única
+  // forma de que una `pending` llegara a terminal, y encima cortaba a los 120s,
+  // así que ni quedándose se garantizaba ver el desenlace.
   const resolveInvoice = async (initial: Invoice) => {
     setInvoice(initial);
     if (initial.status !== "pending") {
@@ -127,12 +133,16 @@ export function FacturacionSection({
       if (initial.status === "authorized") toast.success("Factura emitida");
       return;
     }
+    // La emisión ya quedó registrada: liberamos la UI acá, no cuando ARCA
+    // conteste. La caja no se traba esperando al gateway.
+    setEmitting(false);
     const terminal = await waitForInvoiceTerminal(initial.id, slug, {
       onUpdate: setInvoice,
     });
-    setEmitting(false);
     if (!terminal || terminal.status === "pending") {
-      toast.message("La factura sigue en proceso en ARCA. Reintentá en unos segundos.");
+      toast.message(
+        "ARCA la está procesando. Podés seguir: el comprobante queda en Facturación.",
+      );
     } else if (terminal.status === "authorized") {
       toast.success("Factura emitida");
     } else {
@@ -154,7 +164,7 @@ export function FacturacionSection({
               Emitiendo comprobante…
             </p>
             <p className="text-xs text-zinc-500">
-              ARCA está autorizando la factura. No cierres esta pantalla.
+              ARCA la está procesando. Podés cerrar: queda en Facturación.
             </p>
           </div>
         </div>
