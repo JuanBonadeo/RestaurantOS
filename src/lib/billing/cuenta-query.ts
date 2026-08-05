@@ -36,7 +36,7 @@ export async function getCuentaForTable(
   const { data: orderRow } = await service
     .from("orders")
     .select(
-      "id, business_id, order_number, table_id, tip_cents, discount_cents, discount_reason, lifecycle_status, total_cents, closed_at, total_paid_cents",
+      "id, business_id, order_number, table_id, tip_cents, discount_cents, discount_reason, lifecycle_status, status, total_cents, closed_at, total_paid_cents",
     )
     .eq("table_id", tableId)
     .eq("business_id", businessId)

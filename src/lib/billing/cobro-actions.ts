@@ -34,6 +34,7 @@ type LoadedOrder = {
   order_number: number;
   table_id: string | null;
   lifecycle_status: "open" | "closed" | "cancelled";
+  status: string;
   total_cents: number;
   total_paid_cents: number;
   tip_cents: number;
@@ -48,7 +49,7 @@ async function loadOrder(
   const { data } = await service
     .from("orders")
     .select(
-      "id, business_id, order_number, table_id, lifecycle_status, total_cents, total_paid_cents, tip_cents, discount_cents",
+      "id, business_id, order_number, table_id, lifecycle_status, status, total_cents, total_paid_cents, tip_cents, discount_cents",
     )
     .eq("id", orderId)
     .maybeSingle();
@@ -286,6 +287,15 @@ export async function iniciarCobro(
 
   const order = await loadOrder(service, orderId, business.id);
   if (!order) return actionError("Orden no encontrada.");
+  // spec 092 · H-41 — el módulo de cobro guardaba SÓLO por `lifecycle_status`
+  // y ni siquiera traía `status`. Como los pedidos online quedaban `open`
+  // eternamente (H-40), esa guarda no protegía nada en ese canal: el encargado
+  // tenía abierto «Cobrar pedido #312» para pasar el efectivo del cadete, el
+  // cliente cancelaba desde la app en ese momento, y el pago entraba a la caja
+  // con factura fiscal contra un pedido cancelado.
+  if (order.status === "cancelled") {
+    return actionError("El pedido está cancelado — no se puede cobrar.");
+  }
   if (order.lifecycle_status !== "open") {
     return actionError("La orden ya está cerrada.");
   }
@@ -374,6 +384,15 @@ export async function registrarPago(
   // Cross-tenant: order, split (si hay), caja.
   const order = await loadOrder(service, input.orderId, business.id);
   if (!order) return actionError("Orden no encontrada.");
+  // spec 092 · H-41 — el módulo de cobro guardaba SÓLO por `lifecycle_status`
+  // y ni siquiera traía `status`. Como los pedidos online quedaban `open`
+  // eternamente (H-40), esa guarda no protegía nada en ese canal: el encargado
+  // tenía abierto «Cobrar pedido #312» para pasar el efectivo del cadete, el
+  // cliente cancelaba desde la app en ese momento, y el pago entraba a la caja
+  // con factura fiscal contra un pedido cancelado.
+  if (order.status === "cancelled") {
+    return actionError("El pedido está cancelado — no se puede cobrar.");
+  }
   if (order.lifecycle_status !== "open") {
     return actionError("La orden ya está cerrada.");
   }
@@ -522,6 +541,15 @@ export async function iniciarPagoMp(
 
   const order = await loadOrder(service, input.orderId, business.id);
   if (!order) return actionError("Orden no encontrada.");
+  // spec 092 · H-41 — el módulo de cobro guardaba SÓLO por `lifecycle_status`
+  // y ni siquiera traía `status`. Como los pedidos online quedaban `open`
+  // eternamente (H-40), esa guarda no protegía nada en ese canal: el encargado
+  // tenía abierto «Cobrar pedido #312» para pasar el efectivo del cadete, el
+  // cliente cancelaba desde la app en ese momento, y el pago entraba a la caja
+  // con factura fiscal contra un pedido cancelado.
+  if (order.status === "cancelled") {
+    return actionError("El pedido está cancelado — no se puede cobrar.");
+  }
   if (order.lifecycle_status !== "open") {
     return actionError("La orden ya está cerrada.");
   }
@@ -774,6 +802,41 @@ export async function anularCobro(
   const order = await loadOrder(service, orderId, business.id);
   if (!order) return actionError("Orden no encontrada.");
 
+  // spec 092 · H-08 — **reabrir primero, refundar después.**
+  //
+  // El orden estaba al revés: se refundaban los pagos, se borraban los
+  // pendientes, se reseteaban los splits, y recién al final se reabría la orden
+  // — sin `.select()` y **sin capturar el error**. Si alguien había sentado
+  // gente nueva en esa mesa, ese UPDATE violaba el índice único parcial
+  // `orders_one_open_per_table` y no hacía nada, pero la action devolvía
+  // `actionOk` igual. Resultado: «Cobro anulado», la cuenta seguía cerrada **y
+  // paga**, con todos sus pagos reembolsados. La plata desaparecía del arqueo y
+  // ya no se podía re-cobrar (`iniciarCobro` → «La orden ya está cerrada»).
+  //
+  // Reabriendo primero, si la reapertura falla no se toca un solo peso.
+  if (order.lifecycle_status === "closed") {
+    const { data: reopened, error: reopenErr } = await service
+      .from("orders")
+      .update({
+        lifecycle_status: "open",
+        closed_at: null,
+        total_paid_cents: 0,
+        // La contracara de `closeOrderIfFullyPaid`: si la orden vuelve a estar
+        // abierta, no está paga.
+        payment_status: "pending",
+        // spec 091 — y vuelve al eje de producción que tenía antes de cobrarse.
+        status: "preparing",
+      })
+      .eq("id", orderId)
+      .select("id");
+    if (reopenErr || ((reopened ?? []) as { id: string }[]).length === 0) {
+      console.error("anularCobro · reapertura", reopenErr);
+      return actionError(
+        "No pudimos reabrir la cuenta: la mesa ya tiene otra cuenta abierta. Anulá esa primero.",
+      );
+    }
+  }
+
   // Marcar payments paid como refunded (no borrar para auditoría).
   await service
     .from("payments")
@@ -802,20 +865,7 @@ export async function anularCobro(
     .eq("order_id", orderId)
     .neq("status", "cancelled");
 
-  // Si la order ya estaba cerrada, reabrirla.
-  if (order.lifecycle_status === "closed") {
-    await service
-      .from("orders")
-      .update({
-        lifecycle_status: "open",
-        closed_at: null,
-        total_paid_cents: 0,
-        // La contracara de `closeOrderIfFullyPaid`: si la orden vuelve a estar
-        // abierta, no está paga.
-        payment_status: "pending",
-      })
-      .eq("id", orderId);
-  }
+  // (La reapertura de la orden se movió arriba — ver H-08.)
 
   // Volver mesa a `pidio_cuenta` si estaba `libre` tras el cobro (queremos
   // que el flow vuelva al estado pre-cobro). También reabrimos la order y

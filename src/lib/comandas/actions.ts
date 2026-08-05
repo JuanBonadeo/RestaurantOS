@@ -1153,16 +1153,30 @@ export async function cancelarItem(
 
   const { data: item } = await service
     .from("order_items")
-    .select("id, cancelled_at, orders!inner(id, business_id)")
+    .select("id, cancelled_at, orders!inner(id, business_id, lifecycle_status)")
     .eq("id", orderItemId)
     .maybeSingle();
-  const itemBusinessId =
-    (item as { orders?: { business_id: string } } | null)?.orders?.business_id;
-  if (!item || itemBusinessId !== business.id) {
+  const itemOrder = (
+    item as {
+      orders?: { business_id: string; lifecycle_status: string };
+    } | null
+  )?.orders;
+  if (!item || itemOrder?.business_id !== business.id) {
     return actionError("Item no encontrado.");
   }
   if ((item as { cancelled_at: string | null }).cancelled_at) {
     return actionError("El item ya estaba cancelado.");
+  }
+  // spec 092 · H-48 — este `cancelarItem` (el del kanban) no validaba el estado
+  // de la cuenta; su gemelo de la pantalla de cuenta sí. Y el kanban muestra
+  // comandas filtrando sólo por `comandas.status`, así que la comanda del
+  // postre de una mesa **ya cobrada** sigue en pantalla: el encargado la
+  // limpiaba con «86 · se acabó» y la orden bajaba a $18.000 cuando en caja
+  // habían entrado $22.000 y la factura decía $22.000. Tres números distintos.
+  if (itemOrder.lifecycle_status !== "open") {
+    return actionError(
+      "La cuenta ya está cerrada — no se puede cancelar un ítem.",
+    );
   }
 
   const { error } = await service

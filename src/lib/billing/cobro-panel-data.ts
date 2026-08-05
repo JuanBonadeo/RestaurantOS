@@ -160,6 +160,7 @@ export async function loadCobroForTable(
       order_number: cuenta.order.order_number,
       table_id: cuenta.order.table_id,
       lifecycle_status: cuenta.order.lifecycle_status,
+      status: cuenta.order.status,
       total_cents: cuenta.order.total_cents,
       total_paid_cents: cuenta.order.total_paid_cents,
       tip_cents: cuenta.order.tip_cents,

@@ -18,6 +18,7 @@ import {
   canTransitionMesa,
 } from "@/lib/permissions/can";
 import { createNotification } from "@/lib/notifications/create";
+import { bloqueoPorPlata } from "@/lib/orders/cancel-guards";
 import { cancelarOrden } from "@/lib/orders/cancel-order";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
@@ -182,6 +183,25 @@ export async function updateTableOperationalStatus(
     }
   }
 
+  // spec 092 — liberar **cancela la cuenta abierta**, así que por encima de
+  // plata cobrada o de una factura emitida hace exactamente el mismo daño que
+  // anular. La guarda va acá, antes de tocar `tables`: más abajo la mesa ya
+  // quedó libre y auditada, y devolver un error ahí dejaría la mesa liberada
+  // con su orden viva — el estado imposible que este bloque existe para evitar.
+  if (status === "libre" && from !== "libre") {
+    const { data: abiertasPrev } = await service
+      .from("orders")
+      .select("id")
+      .eq("table_id", tableId)
+      .eq("business_id", business.id)
+      .eq("lifecycle_status", "open");
+    const bloqueo = await bloqueoPorPlata(
+      service,
+      ((abiertasPrev ?? []) as { id: string }[]).map((o) => o.id),
+    );
+    if (bloqueo) return actionError(bloqueo);
+  }
+
   const patch: Record<string, unknown> = { operational_status: status };
   patch.opened_at = nextOpenedAt(from, status, table.opened_at);
   if (status === "libre") {
@@ -219,6 +239,7 @@ export async function updateTableOperationalStatus(
       .eq("table_id", tableId)
       .eq("business_id", business.id)
       .eq("lifecycle_status", "open");
+
     const nowIso = new Date().toISOString();
     for (const o of (abiertas ?? []) as { id: string }[]) {
       await cancelarOrden(service, {
@@ -445,6 +466,13 @@ export async function anularMesa(
   if (conConsumo && !motivoDado) {
     return actionError("El motivo de anulación es obligatorio.");
   }
+
+  // spec 092 — no se anula por encima de plata ya movida.
+  const openOrderIdsPrev = ((openOrders ?? []) as { id: string }[]).map(
+    (o) => o.id,
+  );
+  const bloqueo = await bloqueoPorPlata(service, openOrderIdsPrev);
+  if (bloqueo) return actionError(bloqueo);
   // Sin consumo y sin motivo: se registra uno del sistema. La auditoría nunca
   // queda con el campo vacío, pero al encargado no se le pide nada.
   const reason = motivoDado || MOTIVO_MESA_SIN_CONSUMO;
@@ -460,7 +488,7 @@ export async function anularMesa(
   // así que las bebidas (`station_id` null, nunca entran a `comanda_items`) y lo
   // cargado-sin-enviar quedaban vivos. En el cloud: 29 ítems por $606.200.
   const nowIso = new Date().toISOString();
-  const openOrderIds = ((openOrders ?? []) as { id: string }[]).map((o) => o.id);
+  const openOrderIds = openOrderIdsPrev;
   for (const orderId of openOrderIds) {
     await cancelarOrden(service, {
       orderId,

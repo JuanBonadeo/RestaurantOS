@@ -132,6 +132,30 @@ export type ApplyOutcome =
  * el desenlace real del gateway (`emitted` / `error`) es terminal. Si no, una
  * credencial rota convertiría facturas vivas en `failed`.
  */
+/**
+ * ¿La orden de esta factura está anulada? (spec 092)
+ *
+ * Mira los dos ejes: hasta el backfill de la spec 091 una mesa anulada sólo lo
+ * decía por `lifecycle_status`, y `status` se quedaba en `pending`.
+ */
+async function ordenAnulada(
+  service: GenericClient,
+  orderId: string | null,
+): Promise<boolean> {
+  if (!orderId) return false;
+  const { data } = await service
+    .from("orders")
+    .select("status, lifecycle_status")
+    .eq("id", orderId)
+    .maybeSingle();
+  const row = data as {
+    status: string;
+    lifecycle_status: string;
+  } | null;
+  if (!row) return false;
+  return row.status === "cancelled" || row.lifecycle_status === "cancelled";
+}
+
 export async function applyGatewayStatus(
   service: GenericClient,
   invoice: Invoice,
@@ -184,9 +208,26 @@ export async function applyGatewayStatus(
   if (updated) {
     const row = updated as Invoice;
     if (row.status === "authorized") {
-      // spec 45 — aviso del comprobante al cliente. Best-effort e idempotente
-      // por `customer_message_log`, así que es seguro desde los dos caminos.
-      await notifyInvoiceIssued({ invoiceId: row.id });
+      // spec 092 · H-05 — el CAE es un hecho consumado ante ARCA, así que la
+      // factura **se cierra igual**; lo que no corresponde es avisarle al
+      // cliente. La ventana es real: el gateway tarda ~28 min de promedio (85
+      // en el peor caso) y en el medio la mesa puede haberse anulado. Sin esto,
+      // el encargado anulaba la mesa y media hora después al cliente le llegaba
+      // por mail la factura de una venta que no ocurrió.
+      //
+      // `reconcile` no leía la orden en ningún punto — grep de `orders` en este
+      // archivo daba cero.
+      const anulada = await ordenAnulada(service, row.order_id);
+      if (anulada) {
+        console.warn(
+          "reconcile · factura autorizada sobre orden anulada, hay que emitir NC",
+          { invoiceId: row.id, orderId: row.order_id },
+        );
+      } else {
+        // spec 45 — aviso del comprobante al cliente. Best-effort e idempotente
+        // por `customer_message_log`, así que es seguro desde los dos caminos.
+        await notifyInvoiceIssued({ invoiceId: row.id });
+      }
     }
     return {
       invoice: row,

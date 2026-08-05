@@ -88,6 +88,8 @@ export type CuentaState = {
     discount_cents: number;
     discount_reason: string | null;
     lifecycle_status: "open" | "closed" | "cancelled";
+    /** spec 092 — el eje de producción; el cobro también lo mira. */
+    status: string;
     total_cents: number;
     closed_at: string | null;
     total_paid_cents: number;

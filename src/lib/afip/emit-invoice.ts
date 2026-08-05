@@ -82,7 +82,9 @@ export async function emitInvoice(
   // Validar order.
   const { data: orderRow } = await service
     .from("orders")
-    .select("id, business_id, total_cents, tip_cents, total_paid_cents, lifecycle_status")
+    .select(
+      "id, business_id, total_cents, tip_cents, total_paid_cents, lifecycle_status, status",
+    )
     .eq("id", input.orderId)
     .maybeSingle();
   if (
@@ -95,7 +97,27 @@ export async function emitInvoice(
     id: string;
     total_cents: number;
     tip_cents: number;
+    lifecycle_status: string;
+    status: string;
   };
+
+  // spec 092 — no se factura una venta que no ocurrió.
+  //
+  // `lifecycle_status` se venía trayendo en el select desde siempre y **el cast
+  // de acá lo tiraba**: la columna aparecía una sola vez en todo el archivo. El
+  // camino real era el botón «Re-facturar» del detalle de un comprobante
+  // fallido, que dispara con el `orderId` que viene del cliente: el encargado
+  // anulaba la mesa 12 y minutos después salía una factura B **con CAE** por
+  // los $80.000 completos de una mesa que nunca se cobró. Eso sólo se saca con
+  // una nota de crédito.
+  //
+  // Se chequean los dos ejes (spec 091): hasta el backfill había 23 órdenes
+  // anuladas que sólo lo decían por `lifecycle_status`.
+  if (order.lifecycle_status === "cancelled" || order.status === "cancelled") {
+    return actionError(
+      "Esta orden está anulada — no se puede emitir un comprobante.",
+    );
+  }
   // Base facturable ARCA = subtotal − descuento (SIN propina). `total_cents` ya
   // suma la propina (billing/totals.ts:18) y la propina no integra la base
   // imponible en AR. `total_cents` queda intacto para el cobro/posnet; solo el
