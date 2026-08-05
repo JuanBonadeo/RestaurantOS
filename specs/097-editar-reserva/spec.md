@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-05
 
-**Status**: 📝 Spec — lista para implementar.
+**Status**: ✅ Implementada (`240f396`) — falta verificar en vivo con el rol real.
 
 **Input**: Juan, 2026-08-05: *"hay que agregar la funcionalidad de poder modificar reservas, cambiar la mesa la cantidad de personas y el horario"*.
 
@@ -124,6 +124,15 @@ Como club, mover o agrandar una reserva no puede ser la puerta de atrás que esq
 
 ## Verify
 
-- `pnpm typecheck` + `pnpm test` en verde.
-- Tests unitarios de la lógica pura nueva (resolución de fecha de servicio, ventana resultante por modo).
-- Verificación en vivo con el **rol real** (encargado de `golf-jcr`), no service_role.
+- `pnpm typecheck` ✅ · `pnpm test` ✅ **1642 tests, 0 rojos** (stack local) · `pnpm build` ✅ · eslint limpio en lo tocado.
+- **12 tests de integración nuevos** (`edit-reservation.integration.test.ts`) contra Postgres de verdad, con un negocio estricto y uno flexible: mover el horario, no pisarse a sí misma, rechazo por mesa tomada (y que no escriba nada), mesa obligatoria en estricto, party > asientos, genérica sin mesa, cierre = cierre del servicio, hora fuera de ventana, mesa comprometida en el servicio, asignar y liberar mesa, fila vieja sin `service`, y reserva ya `seated`.
+- **Unitarios de la ventana pura**: `edit-window.test.ts` (13) + `serviceDateForStart` en `flexible-availability.test.ts` (4), incluido el servicio que cruza la medianoche.
+- ⚠️ **Nada verificado en vivo con el rol real todavía.** El panel está detrás del login del negocio.
+
+## Hallazgo lateral
+
+En `golf-jcr` hay reservas con `service: null` — filas creadas por canales que todavía no son mode-aware (el chatbot, [#120](https://github.com/gachetponzellini/RestaurantOS-app/issues/120)). El editor las trata por el camino estricto para no dejarlas fuera, pero el agujero de fondo sigue abierto en #120.
+
+## Siguiente paso natural (no incluido)
+
+**Avisarle al cliente que le modificaron la reserva.** Hoy se le manda mail/WhatsApp al confirmar (spec 45) y al cancelar, pero si el encargado le mueve el horario el cliente no se entera. Es una spec aparte: toca `notifications/` y las plantillas.
