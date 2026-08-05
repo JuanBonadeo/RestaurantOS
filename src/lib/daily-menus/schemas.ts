@@ -49,6 +49,21 @@ export type DailyMenuComponentInput = z.infer<typeof DailyMenuComponentInput>;
 export const DisplayContext = z.enum(["delivery", "salon", "both"]);
 export type DisplayContext = z.infer<typeof DisplayContext>;
 
+/**
+ * Un grupo de opciones (spec 087). Antes no existía como dato: el nombre se
+ * repetía en cada opción y la condición vivía en la opción, en negativo. Ahora
+ * el grupo se manda entero y una sola vez.
+ */
+export const DailyMenuChoiceGroupInput = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1, "Poné un nombre al grupo.").max(80),
+  /** NULL = el grupo aplica siempre. */
+  applies_when_group_id: z.string().uuid().nullable().optional(),
+  /** Las opciones (por producto) del grupo fuente que habilitan a éste. */
+  applies_when_product_ids: z.array(z.string().uuid()).optional(),
+});
+export type DailyMenuChoiceGroupInput = z.infer<typeof DailyMenuChoiceGroupInput>;
+
 export const DailyMenuInput = z.object({
   name: z.string().min(1, "Requerido.").max(80),
   slug: z
@@ -70,45 +85,45 @@ export const DailyMenuInput = z.object({
   components: z
     .array(DailyMenuComponentInput)
     .min(1, "Agregá al menos un componente."),
+  /** Los grupos de opciones del menú (spec 087). */
+  choice_groups: z.array(DailyMenuChoiceGroupInput).optional(),
 }).superRefine((data, ctx) => {
-  // FR-002 (spec 074) — una opción sólo puede condicionar un grupo POSTERIOR.
-  // El `sort_order` que se persiste es la posición en el array (ver
-  // `syncComponents`), así que el orden del array ES el orden de los grupos.
-  // Si «Guarnición» va antes que «Principal», el mozo ya la eligió cuando
-  // llegaría la regla: no hay forma de aplicarla.
-  const groupPosition = new Map<string, number>();
-  const groupLabel = new Map<string, string>();
+  // Un grupo sólo puede condicionarse desde un grupo ANTERIOR: si «Guarnición»
+  // se decide antes que «Principal», el mozo ya la eligió cuando llegaría la
+  // regla. Sobrevive de D-GCM-3, pero ahora es UNA condición por grupo en vez
+  // de N por opción, y el editor sólo ofrece grupos anteriores — esto es la red.
+  const posicion = new Map<string, number>();
   data.components.forEach((c, idx) => {
     if (c.kind !== "choice" || !c.choice_group_id) return;
-    if (!groupPosition.has(c.choice_group_id)) {
-      groupPosition.set(c.choice_group_id, idx);
-      groupLabel.set(c.choice_group_id, c.choice_group_label || "Ese grupo");
-    }
+    if (!posicion.has(c.choice_group_id)) posicion.set(c.choice_group_id, idx);
   });
 
-  data.components.forEach((c, idx) => {
-    if (c.kind !== "choice" || !c.choice_group_id) return;
-    const ownPosition = groupPosition.get(c.choice_group_id) ?? idx;
-    for (const blockedId of c.blocks_choice_group_ids ?? []) {
-      if (blockedId === c.choice_group_id) {
-        ctx.addIssue({
-          code: "custom",
-          message: "Un grupo no puede condicionarse a sí mismo.",
-          path: ["components", idx, "blocks_choice_group_ids"],
-        });
-        continue;
-      }
-      const blockedPosition = groupPosition.get(blockedId);
-      // Un grupo que ya no existe (lo borraron) no es un error del encargado:
-      // `syncComponents` limpia esas referencias al guardar.
-      if (blockedPosition === undefined) continue;
-      if (blockedPosition < ownPosition) {
-        ctx.addIssue({
-          code: "custom",
-          message: `"${groupLabel.get(blockedId)}" se decide antes que "${groupLabel.get(c.choice_group_id)}" — movelo después para poder condicionarlo.`,
-          path: ["components", idx, "blocks_choice_group_ids"],
-        });
-      }
+  const nombre = new Map(
+    (data.choice_groups ?? []).map((g) => [g.id, g.name] as const),
+  );
+
+  (data.choice_groups ?? []).forEach((g, idx) => {
+    const fuente = g.applies_when_group_id;
+    if (!fuente) return;
+    if (fuente === g.id) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Un grupo no puede depender de sí mismo.",
+        path: ["choice_groups", idx, "applies_when_group_id"],
+      });
+      return;
+    }
+    const propia = posicion.get(g.id);
+    const suya = posicion.get(fuente);
+    // Un grupo que ya no existe no es un error del encargado: la action limpia
+    // esas referencias al guardar.
+    if (propia === undefined || suya === undefined) return;
+    if (suya > propia) {
+      ctx.addIssue({
+        code: "custom",
+        message: `"${nombre.get(fuente) ?? "Ese grupo"}" se decide después que "${g.name}" — movelo antes para poder condicionar con él.`,
+        path: ["choice_groups", idx, "applies_when_group_id"],
+      });
     }
   });
 });

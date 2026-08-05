@@ -110,6 +110,14 @@ export function DailyMenuForm({
               blocks_choice_group_ids: c.blocks_choice_group_ids ?? [],
             })),
           ),
+          // El nombre y la condición del grupo salen de su fila, no de las
+          // opciones (spec 087).
+          choice_groups: menu.choice_groups.map((g) => ({
+            id: g.id,
+            name: g.name,
+            applies_when_group_id: g.applies_when_group_id,
+            applies_when_product_ids: g.applies_when_product_ids,
+          })),
         }
       : {
           name: "",
@@ -122,6 +130,7 @@ export function DailyMenuForm({
           display_context: "both" as const,
           is_suggestion: false,
           components: [{ label: "", kind: "text" as const }],
+          choice_groups: [],
         },
   });
 
@@ -423,12 +432,56 @@ function ComponentsEditor({
     flatIndex += card.kind === "single" ? 1 : card.options.length;
   }
 
-  // Grupos en el orden en que se van a decidir (spec 074).
+  // Grupos en el orden en que se van a decidir, con sus opciones: es lo que
+  // necesita el selector de condición de cada grupo (spec 087).
   const orderedGroups = cards.flatMap((card, cardIndex) =>
     card.kind === "group"
-      ? [{ id: card.groupId, label: card.label, cardIndex }]
+      ? [
+          {
+            id: card.groupId,
+            label: card.label,
+            cardIndex,
+            options: card.options.flatMap((o) =>
+              o.product_id ? [{ product_id: o.product_id, label: o.label }] : [],
+            ),
+          },
+        ]
       : [],
   );
+
+  const choiceGroups = watch("choice_groups") ?? [];
+  const conditionOf = (groupId: string) => {
+    const g = choiceGroups.find((x) => x.id === groupId);
+    return {
+      applies_when_group_id: g?.applies_when_group_id ?? null,
+      applies_when_product_ids: g?.applies_when_product_ids ?? [],
+    };
+  };
+
+  /** El nombre y la condición del grupo viven en `choice_groups`, una sola vez. */
+  const setGroup = (
+    groupId: string,
+    patch: Partial<{
+      name: string;
+      applies_when_group_id: string | null;
+      applies_when_product_ids: string[];
+    }>,
+  ) => {
+    const actual = choiceGroups.find((g) => g.id === groupId);
+    const siguiente = actual
+      ? choiceGroups.map((g) => (g.id === groupId ? { ...g, ...patch } : g))
+      : [
+          ...choiceGroups,
+          {
+            id: groupId,
+            name: "",
+            applies_when_group_id: null,
+            applies_when_product_ids: [],
+            ...patch,
+          },
+        ];
+    setValue("choice_groups", siguiente, { shouldDirty: true });
+  };
 
   // Después de mover, el foco vuelve al botón equivalente de la nueva posición
   // (FR-007): bajar dos lugares es Enter, Enter. Se pide por id porque el
@@ -609,14 +662,19 @@ function ComponentsEditor({
                 groupLabel={card.label}
                 indices={indices}
                 moveButtons={move}
-                // Sólo los grupos POSTERIORES se pueden condicionar (FR-002):
-                // uno anterior ya está decidido cuando llegaría la regla.
-                laterGroups={orderedGroups.filter(
-                  (g) => g.cardIndex > cardIndex,
+                // Un grupo sólo se puede condicionar desde uno ANTERIOR: uno
+                // posterior todavía no se decidió cuando llegaría la regla.
+                earlierGroups={orderedGroups.filter(
+                  (g) => g.cardIndex < cardIndex,
                 )}
+                condition={conditionOf(card.groupId)}
+                onConditionChange={(next) => setGroup(card.groupId, next)}
                 control={control}
                 productNames={productNames}
                 onLabelChange={(label) => {
+                  setGroup(card.groupId, { name: label });
+                  // Se sigue escribiendo en las opciones mientras la columna
+                  // exista; la fuente de verdad ya es `choice_groups`.
                   for (const i of indices) {
                     setValue(`components.${i}.choice_group_label`, label);
                   }
@@ -833,7 +891,9 @@ function ChoiceGroupCard({
   groupId,
   groupLabel,
   indices,
-  laterGroups,
+  earlierGroups,
+  condition,
+  onConditionChange,
   control,
   productNames,
   moveButtons,
@@ -847,8 +907,20 @@ function ChoiceGroupCard({
   groupId: string;
   groupLabel: string;
   indices: number[];
-  /** Grupos que se deciden DESPUÉS de éste: los únicos condicionables (FR-002). */
-  laterGroups: { id: string; label: string }[];
+  /** Grupos que se deciden ANTES: los únicos que pueden condicionar a éste. */
+  earlierGroups: {
+    id: string;
+    label: string;
+    options: { product_id: string; label: string }[];
+  }[];
+  condition: {
+    applies_when_group_id: string | null;
+    applies_when_product_ids: string[];
+  };
+  onConditionChange: (next: {
+    applies_when_group_id: string | null;
+    applies_when_product_ids: string[];
+  }) => void;
   control: ReturnType<typeof useFormContext<DailyMenuInput>>["control"];
   productNames: Map<string, string>;
   moveButtons: React.ReactNode;
@@ -860,27 +932,6 @@ function ChoiceGroupCard({
   onDeleteGroup: () => void;
 }) {
   const { watch, setValue } = useFormContext<DailyMenuInput>();
-
-  /** Tildado = ese grupo aplica. Destildar lo agrega a los bloqueados. */
-  const toggleBlocked = (idx: number, blockedId: string, lleva: boolean) => {
-    const current = watch(`components.${idx}.blocks_choice_group_ids`) ?? [];
-    setValue(
-      `components.${idx}.blocks_choice_group_ids`,
-      lleva
-        ? current.filter((id) => id !== blockedId)
-        : [...current, blockedId],
-      { shouldDirty: true },
-    );
-  };
-
-  // T9 · un grupo que TODAS las opciones de éste condicionan nunca va a
-  // aparecer. No es un dato inválido —puede ser transitorio mientras se carga—
-  // así que se avisa, no se bloquea. Mismo criterio que `warnGarnishModifierGroups`.
-  const alwaysBlocked = laterGroups.filter((g) =>
-    indices.every((idx) =>
-      (watch(`components.${idx}.blocks_choice_group_ids`) ?? []).includes(g.id),
-    ),
-  );
 
   return (
     <div className="bg-card space-y-3 rounded-xl border-2 border-dashed border-amber-300 p-3">
@@ -909,7 +960,6 @@ function ChoiceGroupCard({
       <div className="space-y-2 pl-3">
         {indices.map((idx, optIndex) => {
           const productId = watch(`components.${idx}.product_id`);
-          const blocked = watch(`components.${idx}.blocks_choice_group_ids`) ?? [];
           return (
             <div key={idx} className="space-y-1.5">
             <div className="flex items-center gap-2">
@@ -980,30 +1030,6 @@ function ChoiceGroupCard({
               )}
             </div>
 
-            {/* Qué OTROS grupos habilita esta opción (spec 074). El rótulo sale
-                del nombre que puso el encargado: acá no hay ninguna palabra de
-                dominio hardcodeada, sirve igual para «Guarnición» que para
-                «Postre» o «Bebida». */}
-            {laterGroups.length > 0 && (
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pl-6">
-                {laterGroups.map((g) => (
-                  <label
-                    key={g.id}
-                    className="text-muted-foreground flex items-center gap-1.5 text-xs"
-                  >
-                    <input
-                      type="checkbox"
-                      className="size-3.5"
-                      checked={!blocked.includes(g.id)}
-                      onChange={(e) =>
-                        toggleBlocked(idx, g.id, e.target.checked)
-                      }
-                    />
-                    <span>Lleva {g.label || "(grupo sin nombre)"}</span>
-                  </label>
-                ))}
-              </div>
-            )}
             </div>
           );
         })}
@@ -1025,21 +1051,148 @@ function ChoiceGroupCard({
         cliente la elige.
       </p>
 
-      {laterGroups.length > 0 && (
-        <p className="text-muted-foreground ml-3 text-xs">
-          Destildá un grupo en una opción si esa opción <strong>no</strong> lo
-          lleva — ej. los ravioles no llevan guarnición. Al elegirla, ese paso
-          se saltea y no se cobra su adicional. Sólo se pueden condicionar los
-          grupos que van más abajo: los de arriba ya están decididos.
-        </p>
+      {/* Cuándo aparece este grupo (spec 087). Una regla, en el grupo, en
+          positivo — antes eran N casillas «Lleva X» repartidas por opción. */}
+      <GroupCondition
+        groupId={groupId}
+        groupLabel={groupLabel}
+        earlierGroups={earlierGroups}
+        condition={condition}
+        onChange={onConditionChange}
+      />
+    </div>
+  );
+}
+
+/**
+ * «¿Cuándo aparece este paso?» — la condición del grupo (spec 087).
+ *
+ * Reemplaza a la grilla de casillas «Lleva X» que vivía en cada opción. La
+ * diferencia no es de tamaño sino de dirección: la regla se lee y se edita
+ * donde se pregunta, y se escribe en positivo («aplica si eligieron…») en vez
+ * de por doble negación («destildá lo que NO lleva»).
+ *
+ * Sólo se ofrecen grupos ANTERIORES: uno posterior todavía no se decidió cuando
+ * llegaría la regla. Antes eso era una restricción a explicar en un párrafo;
+ * ahora es simplemente lo que hay en el desplegable.
+ */
+function GroupCondition({
+  groupId,
+  groupLabel,
+  earlierGroups,
+  condition,
+  onChange,
+}: {
+  groupId: string;
+  groupLabel: string;
+  earlierGroups: { id: string; label: string; options: { product_id: string; label: string }[] }[];
+  condition: { applies_when_group_id: string | null; applies_when_product_ids: string[] };
+  onChange: (next: {
+    applies_when_group_id: string | null;
+    applies_when_product_ids: string[];
+  }) => void;
+}) {
+  if (earlierGroups.length === 0) return null;
+
+  const fuente = earlierGroups.find(
+    (g) => g.id === condition.applies_when_group_id,
+  );
+  const condicionado = !!fuente;
+
+  return (
+    <div className="ml-3 space-y-2 border-t pt-3">
+      <p className="text-xs font-medium">¿Cuándo aparece este grupo?</p>
+
+      <label className="flex items-center gap-2 text-xs">
+        <input
+          type="radio"
+          name={`cond-${groupId}`}
+          className="size-3.5"
+          checked={!condicionado}
+          onChange={() =>
+            onChange({ applies_when_group_id: null, applies_when_product_ids: [] })
+          }
+        />
+        <span>Siempre</span>
+      </label>
+
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <label className="flex items-center gap-2">
+          <input
+            type="radio"
+            name={`cond-${groupId}`}
+            className="size-3.5"
+            checked={condicionado}
+            onChange={() => {
+              const primero = earlierGroups[0];
+              onChange({
+                applies_when_group_id: primero.id,
+                // Arranca con todas tildadas: el encargado destilda las pocas
+                // que no lo llevan, que es como piensa el caso real.
+                applies_when_product_ids: primero.options.map((o) => o.product_id),
+              });
+            }}
+          />
+          <span>Sólo si en</span>
+        </label>
+        <select
+          value={condition.applies_when_group_id ?? ""}
+          disabled={!condicionado}
+          onChange={(e) => {
+            const elegido = earlierGroups.find((g) => g.id === e.target.value);
+            if (!elegido) return;
+            onChange({
+              applies_when_group_id: elegido.id,
+              applies_when_product_ids: elegido.options.map((o) => o.product_id),
+            });
+          }}
+          className="border-input bg-background h-8 rounded-md border px-2 text-xs disabled:opacity-50"
+          aria-label={`Grupo del que depende ${groupLabel || "este grupo"}`}
+        >
+          {earlierGroups.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.label || "(grupo sin nombre)"}
+            </option>
+          ))}
+        </select>
+        <span className={condicionado ? "" : "text-muted-foreground"}>
+          eligieron:
+        </span>
+      </div>
+
+      {condicionado && fuente && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pl-6">
+          {fuente.options.map((o) => (
+            <label key={o.product_id} className="flex items-center gap-1.5 text-xs">
+              <input
+                type="checkbox"
+                className="size-3.5"
+                checked={condition.applies_when_product_ids.includes(o.product_id)}
+                onChange={(e) =>
+                  onChange({
+                    applies_when_group_id: fuente.id,
+                    applies_when_product_ids: e.target.checked
+                      ? [...condition.applies_when_product_ids, o.product_id]
+                      : condition.applies_when_product_ids.filter(
+                          (id) => id !== o.product_id,
+                        ),
+                  })
+                }
+              />
+              <span>{o.label || "(sin producto)"}</span>
+            </label>
+          ))}
+          {fuente.options.length === 0 && (
+            <span className="text-muted-foreground">
+              Ese grupo todavía no tiene opciones con producto.
+            </span>
+          )}
+        </div>
       )}
 
-      {alwaysBlocked.length > 0 && (
-        <p className="ml-3 text-xs text-amber-700">
-          Ojo: <strong>{alwaysBlocked.map((g) => g.label || "sin nombre").join(", ")}</strong>{" "}
-          {alwaysBlocked.length === 1 ? "quedó destildado" : "quedaron destildados"} en
-          todas las opciones de este grupo, así que{" "}
-          {alwaysBlocked.length === 1 ? "nunca va" : "nunca van"} a aparecer.
+      {condicionado && condition.applies_when_product_ids.length === 0 && (
+        <p className="text-xs text-amber-700">
+          Sin ninguna tildada, este grupo no va a aparecer nunca.
         </p>
       )}
     </div>

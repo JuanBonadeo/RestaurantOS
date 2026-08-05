@@ -80,6 +80,7 @@ function menuCon(components: AdminDailyMenuComponent[]): AdminDailyMenu {
     display_context: "both",
     is_suggestion: false,
     components,
+    choice_groups: [],
   };
 }
 
@@ -313,35 +314,61 @@ describe("editor del menú del día · borrar un grupo (spec 076)", () => {
   });
 });
 
-describe("editor del menú del día · reglas «lleva X» (specs 074 / 076)", () => {
-  const CON_REGLA = menuCon([
+describe("editor del menú del día · la condición vive en el grupo (spec 087)", () => {
+  /**
+   * Antes esto era una grilla de casillas «Lleva X» repartidas por opción: para
+   * decir «los ravioles no llevan guarnición» había que destildar una casilla
+   * en cada plato. Ahora es una regla, en el grupo, y en positivo.
+   */
+  const CON_GRUPOS = menuCon([
     option(GRUPO.principal, "Principal", "Milanesa"),
-    // Los ravioles no llevan guarnición.
-    option(GRUPO.principal, "Principal", "Ravioles", [GRUPO.postre]),
+    option(GRUPO.principal, "Principal", "Ravioles"),
     option(GRUPO.postre, "Guarnición", "Papas"),
   ]);
 
-  it("el check se muestra para cada grupo posterior", () => {
-    renderForm(CON_REGLA);
-    expect(screen.getAllByLabelText("Lleva Guarnición")).toHaveLength(2);
+  it("ya no hay casillas «Lleva X» en las opciones", () => {
+    renderForm(CON_GRUPOS);
+    expect(screen.queryAllByLabelText(/^Lleva /)).toHaveLength(0);
   });
 
-  it("mover el grupo condicionado arriba descarta la regla en vez de dejarla invisible", () => {
-    renderForm(CON_REGLA);
-    // La regla está puesta: uno de los dos checks arranca destildado.
-    const checks = screen.getAllByLabelText("Lleva Guarnición");
-    expect(checks.filter((c) => !(c as HTMLInputElement).checked)).toHaveLength(1);
+  it("el primer grupo no tiene de quién depender, así que no pregunta nada", () => {
+    renderForm(CON_GRUPOS);
+    // Un solo bloque de condición: el de Guarnición, que sí tiene uno anterior.
+    expect(screen.getAllByText("¿Cuándo aparece este grupo?")).toHaveLength(1);
+  });
 
-    fireEvent.click(btn("Subir el grupo Guarnición"));
+  it("un grupo posterior puede depender del anterior, eligiendo qué opciones lo habilitan", () => {
+    renderForm(CON_GRUPOS);
+    expect(screen.getByRole("radio", { name: "Siempre" })).toBeChecked();
 
-    // Guarnición quedó primero ⇒ ya no se puede condicionar, y el check que la
-    // nombraba desaparece. Lo que queda es el de Principal, tildado: si la regla
-    // vieja hubiera sobrevivido, quedaría escondida y el menú no se podría
-    // guardar (FR-004).
-    expect(cardOrder()).toEqual(["grupo Guarnición", "grupo Principal"]);
-    expect(screen.queryAllByLabelText("Lleva Guarnición")).toHaveLength(0);
-    for (const c of screen.getAllByLabelText("Lleva Principal")) {
-      expect(c).toBeChecked();
-    }
+    fireEvent.click(screen.getByRole("radio", { name: "Sólo si en" }));
+
+    // Arranca con todas tildadas: el encargado destilda las pocas que no lo
+    // llevan, que es como piensa el caso real.
+    expect(screen.getByRole("checkbox", { name: "Milanesa" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Ravioles" })).toBeChecked();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Ravioles" }));
+    expect(screen.getByRole("checkbox", { name: "Ravioles" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Milanesa" })).toBeChecked();
+  });
+
+  it("el selector sólo ofrece grupos anteriores", () => {
+    renderForm(CON_GRUPOS);
+    fireEvent.click(screen.getByRole("radio", { name: "Sólo si en" }));
+    const select = screen.getByRole("combobox", {
+      name: /Grupo del que depende/,
+    });
+    expect(
+      Array.from(select.querySelectorAll("option")).map((o) => o.textContent),
+    ).toEqual(["Principal"]);
+  });
+
+  it("avisa si la condición deja al grupo sin ninguna opción que lo habilite", () => {
+    renderForm(CON_GRUPOS);
+    fireEvent.click(screen.getByRole("radio", { name: "Sólo si en" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Milanesa" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Ravioles" }));
+    expect(screen.getByText(/no va a aparecer nunca/)).toBeTruthy();
   });
 });

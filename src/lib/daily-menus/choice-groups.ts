@@ -43,6 +43,41 @@ const NOMBRE_POR_DEFECTO = "Elegí una opción";
  * falta un AND que este modelo no expresa, y hacia atrás la regla ya era
  * inaplicable en runtime.
  */
+/**
+ * La inversa: de la condición positiva del grupo al `blocks_choice_group_ids`
+ * de cada opción (spec 087).
+ *
+ * Se sigue escribiendo la columna vieja mientras exista, para que un rollback
+ * de código deje los menús funcionando y para que el validador del server —que
+ * todavía la lee— siga viendo lo mismo que la UI. Devuelve, por opción (clave
+ * `grupo::producto`), qué grupos bloquea.
+ */
+export function deriveBlocks(
+  groups: Pick<
+    DerivedChoiceGroup,
+    "id" | "applies_when_group_id" | "applies_when_product_ids"
+  >[],
+  components: DailyMenuComponentInput[],
+): Map<string, string[]> {
+  const blocks = new Map<string, string[]>();
+  for (const grupo of groups) {
+    const fuente = grupo.applies_when_group_id;
+    if (!fuente) continue;
+    const habilitan = new Set(grupo.applies_when_product_ids);
+    for (const c of components) {
+      if (c.kind !== "choice" || c.choice_group_id !== fuente || !c.product_id) {
+        continue;
+      }
+      // Las opciones de la fuente que NO habilitan a este grupo son,
+      // exactamente, las que lo bloqueaban en el modelo viejo.
+      if (habilitan.has(c.product_id)) continue;
+      const key = `${fuente}::${c.product_id}`;
+      blocks.set(key, [...(blocks.get(key) ?? []), grupo.id]);
+    }
+  }
+  return blocks;
+}
+
 export function deriveChoiceGroups(
   components: DailyMenuComponentInput[],
 ): DerivedChoiceGroup[] {

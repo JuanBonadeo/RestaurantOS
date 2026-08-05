@@ -6,8 +6,12 @@ import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 import { requireCatalogManager } from "@/lib/catalog/require-catalog-manager";
-import { DailyMenuInput, type DailyMenuComponentInput } from "./schemas";
-import { deriveChoiceGroups } from "./choice-groups";
+import {
+  DailyMenuInput,
+  type DailyMenuChoiceGroupInput,
+  type DailyMenuComponentInput,
+} from "./schemas";
+import { deriveBlocks, deriveChoiceGroups } from "./choice-groups";
 
 /**
  * Sincroniza los componentes de un menú comparando los incoming contra los
@@ -18,8 +22,29 @@ import { deriveChoiceGroups } from "./choice-groups";
 async function syncComponents(
   menuId: string,
   components: DailyMenuComponentInput[],
+  /**
+   * Los grupos tal como los mandó el editor (spec 087). Si no vienen —un caller
+   * viejo— se derivan de los componentes, que es como funcionó durante la
+   * transición.
+   */
+  choiceGroups?: DailyMenuChoiceGroupInput[],
 ): Promise<string | null> {
   const supabase = await createSupabaseServerClient();
+
+  // `blocks_choice_group_ids` ya no la escribe el editor: se deriva de la
+  // condición del grupo. Se sigue guardando mientras la columna exista, porque
+  // el validador del server todavía la lee y porque deja un rollback de código
+  // sin menús rotos.
+  const blocksPorOpcion = choiceGroups
+    ? deriveBlocks(
+        choiceGroups.map((g) => ({
+          id: g.id,
+          applies_when_group_id: g.applies_when_group_id ?? null,
+          applies_when_product_ids: g.applies_when_product_ids ?? [],
+        })),
+        components,
+      )
+    : null;
 
   // Grupos que realmente existen en lo que se está guardando. Se usa para
   // limpiar referencias a grupos borrados en `blocks_choice_group_ids` (spec
@@ -67,7 +92,12 @@ async function syncComponents(
       // condiciones, igual que pierde el adicional.
       blocks_choice_group_ids:
         component.kind === "choice"
-          ? (component.blocks_choice_group_ids ?? []).filter(
+          ? (blocksPorOpcion
+              ? (blocksPorOpcion.get(
+                  `${component.choice_group_id}::${component.product_id}`,
+                ) ?? [])
+              : (component.blocks_choice_group_ids ?? [])
+            ).filter(
               (id) => id !== component.choice_group_id && existingGroupIds.has(id),
             )
           : [],
@@ -88,7 +118,7 @@ async function syncComponents(
     }
   }
 
-  return syncChoiceGroups(menuId, components);
+  return syncChoiceGroups(menuId, components, choiceGroups);
 }
 
 /**
@@ -107,9 +137,37 @@ async function syncComponents(
 async function syncChoiceGroups(
   menuId: string,
   components: DailyMenuComponentInput[],
+  choiceGroups?: DailyMenuChoiceGroupInput[],
 ): Promise<string | null> {
   const supabase = await createSupabaseServerClient();
-  const grupos = deriveChoiceGroups(components);
+
+  // Con el editor nuevo mandan los grupos; el `sort_order` sigue saliendo de la
+  // posición de su primera opción, que es lo que ordena los pasos del mozo.
+  const posicion = new Map<string, number>();
+  components.forEach((c, idx) => {
+    if (c.kind !== "choice" || !c.choice_group_id) return;
+    if (!posicion.has(c.choice_group_id)) posicion.set(c.choice_group_id, idx);
+  });
+  const vivosEnComponentes = new Set(posicion.keys());
+
+  const grupos = choiceGroups
+    ? choiceGroups
+        // Un grupo sin opciones no existe: el editor no lo deja, y si llegara
+        // sería un paso sin salida.
+        .filter((g) => vivosEnComponentes.has(g.id))
+        .map((g) => ({
+          id: g.id,
+          name: g.name,
+          sort_order: posicion.get(g.id) ?? 0,
+          applies_when_group_id:
+            g.applies_when_group_id && vivosEnComponentes.has(g.applies_when_group_id)
+              ? g.applies_when_group_id
+              : null,
+          applies_when_product_ids: g.applies_when_group_id
+            ? (g.applies_when_product_ids ?? [])
+            : [],
+        }))
+    : deriveChoiceGroups(components);
 
   const { data: existentes } = await supabase
     .from("daily_menu_choice_groups")
@@ -173,7 +231,7 @@ export async function createDailyMenu(
   const businessId = guard.data.businessId;
 
   const supabase = await createSupabaseServerClient();
-  const { components, ...menuData } = parsed.data;
+  const { components, choice_groups, ...menuData } = parsed.data;
   const { data, error } = await supabase
     .from("daily_menus")
     .insert({ ...menuData, business_id: businessId })
@@ -187,7 +245,7 @@ export async function createDailyMenu(
         : "No pudimos crear el menú.",
     );
   }
-  const err = await syncComponents(data.id, components);
+  const err = await syncComponents(data.id, components, choice_groups);
   if (err) return actionError(err);
   revalidatePath(`/${businessSlug}/admin/menu-del-dia`);
   revalidatePath(`/${businessSlug}/menu`);
@@ -207,7 +265,7 @@ export async function updateDailyMenu(
   const businessId = guard.data.businessId;
 
   const supabase = await createSupabaseServerClient();
-  const { components, ...menuData } = parsed.data;
+  const { components, choice_groups, ...menuData } = parsed.data;
   const { error } = await supabase
     .from("daily_menus")
     .update(menuData)
@@ -221,7 +279,7 @@ export async function updateDailyMenu(
         : "No pudimos actualizar el menú.",
     );
   }
-  const err = await syncComponents(id, components);
+  const err = await syncComponents(id, components, choice_groups);
   if (err) return actionError(err);
   revalidatePath(`/${businessSlug}/admin/menu-del-dia`);
   revalidatePath(`/${businessSlug}/menu`);

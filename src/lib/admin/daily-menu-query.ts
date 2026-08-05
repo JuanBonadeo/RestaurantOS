@@ -33,10 +33,17 @@ export type AdminDailyMenu = {
   display_context: "delivery" | "salon" | "both";
   is_suggestion: boolean;
   components: AdminDailyMenuComponent[];
+  /** Los grupos de opciones con su nombre y su condición (spec 087). */
+  choice_groups: {
+    id: string;
+    name: string;
+    applies_when_group_id: string | null;
+    applies_when_product_ids: string[];
+  }[];
 };
 
 const SELECT =
-  "id, name, slug, description, price_cents, image_url, available_days, is_active, is_available, sort_order, display_context, is_suggestion, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, extra_price_cents, blocks_choice_group_ids, products(id, name, image_url))";
+  "id, name, slug, description, price_cents, image_url, available_days, is_active, is_available, sort_order, display_context, is_suggestion, daily_menu_choice_groups(id, name, sort_order, applies_when_group_id, applies_when_product_ids), daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, extra_price_cents, blocks_choice_group_ids, products(id, name, image_url))";
 
 function mapRow(
   row: {
@@ -67,9 +74,27 @@ function mapRow(
           products?: { id: string; name: string; image_url: string | null } | null;
         }[]
       | null;
+    daily_menu_choice_groups?:
+      | {
+          id: string;
+          name: string;
+          sort_order: number;
+          applies_when_group_id: string | null;
+          applies_when_product_ids: string[] | null;
+        }[]
+      | null;
   },
 ): AdminDailyMenu {
   return {
+    choice_groups: (row.daily_menu_choice_groups ?? [])
+      .slice()
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((g) => ({
+        id: g.id,
+        name: g.name,
+        applies_when_group_id: g.applies_when_group_id,
+        applies_when_product_ids: g.applies_when_product_ids ?? [],
+      })),
     id: row.id,
     name: row.name,
     slug: row.slug,
