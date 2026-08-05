@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-04
 
-**Status**: 🚧 En implementación. Issue [#138](https://github.com/gachetponzellini/RestaurantOS-app/issues/138). Milestone: Post-demo · Growth & hardening. **T0 y T1 hechos.**
+**Status**: ✅ Implementada (2026-08-04). Issue [#138](https://github.com/gachetponzellini/RestaurantOS-app/issues/138). Milestone: Post-demo · Growth & hardening. Queda un `DROP COLUMN` sin aplicar (ver T5) y el verify en vivo con sesión real.
 
 **Input**: Pedido de Juan 2026-08-04 — *"claramente la lógica de los menús quedó muy fea, repensémosla toda, por lo menos para cargarlos; yo creo que tendría que haber grupo de opciones que sean condicionales, es decir que dependiendo qué producto se agarra te deje o no, algo mejor planeado, más prolijo"*.
 
@@ -45,7 +45,7 @@ Se conserva D-GCM-3, pero como **constraint del editor** (el selector sólo ofre
 
 ### FR-004 — El editor deja de ser una grilla de casillas
 
-Cada grupo es una tarjeta con `useFieldArray` anidado (patrón: `modifier-groups-editor.tsx`): nombre con `FormLabel` + `FormMessage`, sus opciones adentro, y una sola línea de regla:
+Cada grupo muestra, debajo de sus opciones, una sola línea de regla:
 
 ```
 Aplica:  ( ) siempre
@@ -53,7 +53,7 @@ Aplica:  ( ) siempre
              ☑ Milanesa   ☑ Suprema   ☐ Ñoquis   ☐ Ravioles   ☑ Merluza
 ```
 
-Mueren las 15 casillas «Lleva X», los ▲/▼ de dos niveles, la normalización de contigüidad y los tres párrafos de ayuda que explicaban la doble negación.
+Mueren las 15 casillas «Lleva X» y los párrafos de ayuda que explicaban la doble negación. El selector sólo ofrece grupos anteriores, así que la regla de «sólo hacia adelante» dejó de ser algo para explicar.
 
 ### FR-005 — Los menús cargados se comportan igual
 
@@ -65,10 +65,14 @@ Cada uno queda verde y desplegable solo; la migración va siempre antes que el c
 
 - **T0 · Auditoría** ✅ — 8 menús, 11 grupos, 54 opciones. **Una sola regla condicional en todo el sistema**: «Guarnición» del Menu Ejecutivo de golf-jcr, bloqueada por 4 de los 9 principales. Sin ≥2 fuentes, sin encadenados, sin huérfanos, sin bloqueos hacia atrás, sin grupos muertos, sin `choice` sin grupo ⇒ **la migración es automática**. Un hallazgo: «Agua Mineral» está **duplicada** en el grupo Bebida del Menu Ejecutivo (mismo producto dos veces) — bloquea el unique parcial planeado para T4.
 - **T1 · Migración `0036` + backfill** ✅ — tabla, RLS, y traducción de la condición. La regla de Guarnición quedó como `applies_when = Plato Principal ∈ {Arrollado Casero, Merluza Romana, Milanesa, Omelette, Suprema}`, exactamente el complemento. Sin FK todavía: el editor actual genera el uuid sin crear grupo.
-- **T2 · Doble escritura** — `syncComponents` se parte en `syncChoiceGroups` + `syncComponents`; `DailyMenuInput` gana `choice_groups[]`; se sigue escribiendo `choice_group_label` y se **deriva** `blocks_choice_group_ids` invirtiendo la condición (rollback sólo-código).
-- **T3 · Lectores y lógica pura** — los 5 selects traen la tabla; `activeChoiceGroups` evalúa la condición del grupo. La **forma** de `DailyMenuChoiceGroup` no cambia ⇒ el asistente del mozo, el sheet público y `buildMenuSteps` no se tocan.
-- **T4 · Editor nuevo + FK** — la pantalla de FR-004. Migración `0037`: FK compuesto `(menu_id, choice_group_id)` `not valid` + `validate` aparte, y unique parcial `(choice_group_id, product_id)` (requiere resolver antes el duplicado de T0).
-- **T5 · Contracción** — migración `0038`: `drop column blocks_choice_group_ids`, `drop column choice_group_label`. Se borra `component-order.ts` entero (+ sus 21 tests), `orderedChoiceGroupIds` y el `superRefine` de «sólo hacia adelante» (40 líneas → 5).
+- **T2 · La action sincroniza los grupos** ✅ — en vez de esperar al editor, `syncChoiceGroups` **deriva** los grupos de los componentes en cada guardado, con la misma traducción que el backfill (`choice-groups.ts`, 13 tests). Eso es lo que permitió que los lectores pasaran a la tabla sin coordinar un deploy: guarde quien guarde, con el editor que sea, la tabla queda consistente.
+- **T3 · Lectores y lógica pura** ✅ — los 5 selects traen la tabla; `activeChoiceGroups` evalúa la condición del grupo y cae al modelo viejo si no viene. **Test de paridad**: sobre un menú con la forma del real, las 200 combinaciones de elecciones dan el mismo conjunto activo por los dos caminos.
+- **T4 · Editor nuevo + FK** ✅ — la pantalla de FR-004; el `superRefine` pasa de 40 líneas a validar una condición por grupo. Migración `0037` con el FK compuesto `(menu_id, choice_group_id)` (`not valid` + `validate`) y el unique parcial `(choice_group_id, product_id)`. Antes hubo que borrar el duplicado que encontró T0.
+- **T5 · Contracción** ⚠️ parcial — `validateComboChoices` resuelve por la condición del grupo y los dos caminos de persistencia se la pasan, así que **nadie lee ni escribe ya** `blocks_choice_group_ids` ni `choice_group_label`: salieron de los 5 selects y del payload de la action. La migración `0038` que las dropea **quedó escrita y sin aplicar**: es un DROP irreversible sobre datos de producción. El código anda igual con o sin las columnas, así que se puede aplicar cuando se quiera.
+
+### Desviación del plan
+
+`component-order.ts` **no se borró**. El plan lo daba por muerto porque asumía que el editor pasaría a `useFieldArray` anidado; se mantuvo la lista plana con tarjetas (menos invasivo, y el objetivo —que la regla se edite en un lugar— se logra igual), así que `toCards` / `moveCard` / `normalize` siguen en uso. Lo que sí quedó obsoleto es `pruneBlocks`: la condición ya no puede quedar mirando hacia atrás, porque el selector sólo ofrece grupos anteriores.
 
 ## Fuera de alcance
 
