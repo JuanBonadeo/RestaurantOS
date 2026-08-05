@@ -328,7 +328,17 @@ export async function POST(req: Request) {
   if (nextPaymentStatus === "paid") {
     const scheduledAt = (order as { scheduled_at?: string | null })
       .scheduled_at;
-    if (isScheduledForLater(scheduledAt)) {
+    if (order.status === "cancelled") {
+      // spec 093 · H-21. El pago se acredita igual (la plata entró y tiene que
+      // estar en la caja), pero un pedido cancelado NO se cocina. La ventana es
+      // real con los medios offline de MP —efectivo, Rapipago— que se aprueban
+      // horas después de generado el link: para entonces el cliente ya pudo
+      // cancelar desde la app. `order.status` se seleccionaba arriba y no se
+      // usaba en ningún lado.
+      console.warn("MP webhook: pago aprobado sobre pedido cancelado", {
+        orderId: order.id,
+      });
+    } else if (isScheduledForLater(scheduledAt)) {
       await notifyScheduledConfirmed({ orderId: order.id });
     } else {
       try {

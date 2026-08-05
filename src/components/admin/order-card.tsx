@@ -87,8 +87,15 @@ export function OrderCard({
   // Caso 2 · pending + dine-in → SIN botón en este UI (lo gestiona el mozo).
   // Caso 3 · pickup + ready → "Entregar" (saltea on_the_way).
   // Caso 4 · resto → siguiente estado vía updateOrderStatus.
+  // spec 093 · un online en `confirmed` (programado aceptado que ya venció y
+  // cayó de «Próximos» a «Nuevos») también tiene que pasar por `confirmarPedido`.
+  // Antes caía al botón «Preparar» genérico → `updateOrderStatus`, que lo movía
+  // a `preparing` SIN comandas y lo dejaba irrecuperable. El verbo cambia porque
+  // el gesto es otro: sobre un programado, `confirmarPedido` es «Marchar ahora».
   const isPendingOnline =
-    order.status === "pending" && order.delivery_type !== "dine_in";
+    order.delivery_type !== "dine_in" &&
+    (order.status === "pending" || order.status === "confirmed");
+  const confirmLabel = order.status === "confirmed" ? "Marchar" : "Confirmar";
   const isPendingDineIn =
     order.status === "pending" && order.delivery_type === "dine_in";
 
@@ -225,7 +232,7 @@ export function OrderCard({
                 onConfirm(order);
               }}
             >
-              Confirmar
+              {confirmLabel}
             </Button>
           ) : (
             advanceLabel &&

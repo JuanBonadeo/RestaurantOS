@@ -66,9 +66,31 @@ describe("isOnlinePendingAdvance", () => {
     expect(isOnlinePendingAdvance("pending", "dine_in", "confirmed")).toBe(false);
   });
 
-  it("does not apply once past pending", () => {
-    expect(isOnlinePendingAdvance("confirmed", "pickup", "preparing")).toBe(false);
+  // spec 093 — la guarda se extiende a `confirmed`. Un programado aceptado que
+  // vence cae de «Próximos» a «Nuevos» con un botón «Preparar»; como
+  // `confirmed → preparing` es FORWARD válido, el avance pasaba y dejaba el
+  // pedido en `preparing` SIN comandas: descartado por el cron e inaceptable
+  // para «Marchar ahora», o sea irrecuperable. El botón obvio rompía el pedido.
+  it("tampoco deja avanzar un online desde confirmed (spec 093)", () => {
+    expect(isOnlinePendingAdvance("confirmed", "pickup", "preparing")).toBe(true);
+    expect(isOnlinePendingAdvance("confirmed", "delivery", "preparing")).toBe(true);
+  });
+
+  it("cancelar desde confirmed sigue permitido", () => {
+    expect(isOnlinePendingAdvance("confirmed", "pickup", "cancelled")).toBe(false);
+  });
+
+  it("dine-in sigue afuera también en confirmed", () => {
+    expect(isOnlinePendingAdvance("confirmed", "dine_in", "preparing")).toBe(false);
+  });
+
+  it("does not apply once past confirmed", () => {
+    // De `preparing` en adelante el pedido ya pasó por `routeOrderToCocina`:
+    // tiene comandas y el avance por columna es exactamente lo que corresponde.
     expect(isOnlinePendingAdvance("preparing", "pickup", "ready")).toBe(false);
     expect(isOnlinePendingAdvance("ready", "delivery", "on_the_way")).toBe(false);
+    expect(isOnlinePendingAdvance("on_the_way", "delivery", "delivered")).toBe(
+      false,
+    );
   });
 });

@@ -62,7 +62,17 @@ export async function confirmarPedido(
       "Los pedidos en mesa no se confirman acá — los carga el mozo desde el salón.",
     );
   }
-  if (orderRow.status !== "pending" && orderRow.status !== "confirmed") {
+  // `preparing` se acepta para poder **rescatar** un pedido roto (spec 093):
+  // los que H-18 (botón «Preparar» sobre un programado vencido) y H-22 (ningún
+  // ítem resolvió sector) dejaron en `preparing` sin una sola comanda no tenían
+  // salida — el cron ya no los mira y este mismo techo los rechazaba. El filtro
+  // fino lo hace `routeOrderToCocina`, que corta por idempotencia si la orden ya
+  // tiene comandas: un pedido sano en `preparing` sigue devolviendo no-op.
+  if (
+    orderRow.status !== "pending" &&
+    orderRow.status !== "confirmed" &&
+    orderRow.status !== "preparing"
+  ) {
     return actionError(`El pedido ya está en estado "${orderRow.status}".`);
   }
 

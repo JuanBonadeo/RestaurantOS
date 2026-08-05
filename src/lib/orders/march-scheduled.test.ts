@@ -182,6 +182,14 @@ describe("marchDueScheduledOrders", () => {
       row({ id: "no-entra", scheduled_at: "2026-06-26T23:00:00-03:00" }),
     ];
     const res = await marchDueScheduledOrders(NOW);
-    expect(res).toEqual({ considered: 1, marched: 1, failed: 0 });
+    expect(res).toEqual({
+      considered: 1,
+      marched: 1,
+      failed: 0,
+      // spec 093 — el cron deja de descartar estos dos: un pedido que "marchó"
+      // sin que saliera un papel en cocina era indistinguible de uno sano.
+      withoutComanda: 0,
+      controlFailed: 0,
+    });
   });
 });

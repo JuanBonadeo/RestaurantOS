@@ -6,25 +6,44 @@ import { emitControlTicket } from "./control-ticket-emit";
  * Spec 063 — emisión del control de pedido. Lo que importa: sale para lo que
  * se lleva del local, NO sale para mesa, y no se duplica por más veces que se
  * marche el mismo pedido.
+ *
+ * ⚠️ **Este archivo no puede probar que el insert ande.** Su fake nunca toca
+ * Postgres, y por eso no detectó que el `upsert({ onConflict: "order_id" })`
+ * anterior devolvía `42P10` contra el índice **parcial** — el control no se
+ * emitió durante días sin que nada se pusiera rojo. La prueba de que la
+ * sentencia entra en la base vive en `control-ticket-emit.integration.test.ts`.
+ * Acá se prueban las **ramas de negocio**: a quién le corresponde papel y qué
+ * se considera fallo.
  */
 
 type OrderRow = { business_id: string; delivery_type: string } | null;
 
 let orderRow: OrderRow;
-let upserts: { row: Record<string, unknown>; opts: unknown }[];
-let upsertError: { message: string } | null;
+let existingCount: number;
+let inserts: Record<string, unknown>[];
+let insertError: { message: string; code?: string } | null;
 
-/** Fake del service client: solo `orders.select` y `control_tickets.upsert`. */
+/** Fake del service client: `orders.select`, el conteo previo y el insert. */
 function fakeService() {
   return {
     from(table: string) {
       return {
-        select: () => ({
-          eq: () => ({ maybeSingle: async () => ({ data: orderRow }) }),
-        }),
-        upsert: async (row: Record<string, unknown>, opts: unknown) => {
-          if (table === "print_jobs") upserts.push({ row, opts });
-          return { error: upsertError };
+        select: (_cols: string, opts?: { count?: string; head?: boolean }) => {
+          // `print_jobs`: el pre-chequeo de "¿ya existe el control?".
+          if (table === "print_jobs" && opts?.head) {
+            return {
+              eq: () => ({
+                eq: async () => ({ count: existingCount }),
+              }),
+            };
+          }
+          return {
+            eq: () => ({ maybeSingle: async () => ({ data: orderRow }) }),
+          };
+        },
+        insert: async (row: Record<string, unknown>) => {
+          if (table === "print_jobs") inserts.push(row);
+          return { error: insertError };
         },
       };
     },
@@ -34,17 +53,18 @@ function fakeService() {
 
 beforeEach(() => {
   orderRow = { business_id: "biz1", delivery_type: "delivery" };
-  upserts = [];
-  upsertError = null;
+  existingCount = 0;
+  inserts = [];
+  insertError = null;
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
 describe("emitControlTicket", () => {
   it("emite para delivery", async () => {
     const res = await emitControlTicket(fakeService(), "o1", "biz1");
-    expect(res).toEqual({ emitted: true });
-    expect(upserts).toHaveLength(1);
-    expect(upserts[0].row).toEqual({
+    expect(res).toEqual({ emitted: true, failed: false });
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0]).toEqual({
       order_id: "o1",
       business_id: "biz1",
       kind: "control",
@@ -55,48 +75,66 @@ describe("emitControlTicket", () => {
     orderRow = { business_id: "biz1", delivery_type: "pickup" };
     expect(await emitControlTicket(fakeService(), "o1", "biz1")).toEqual({
       emitted: true,
+      failed: false,
     });
   });
 
-  it("NO emite para un pedido de mesa / venta de mostrador", async () => {
+  it("NO emite para un pedido de mesa / venta de mostrador, y eso no es un fallo", async () => {
     orderRow = { business_id: "biz1", delivery_type: "dine_in" };
     const res = await emitControlTicket(fakeService(), "o1", "biz1");
-    expect(res).toEqual({ emitted: false });
-    expect(upserts).toEqual([]);
+    expect(res).toEqual({ emitted: false, failed: false });
+    expect(inserts).toEqual([]);
   });
 
-  it("es idempotente: el upsert va con ignoreDuplicates sobre order_id", async () => {
-    // La unicidad la garantiza el índice parcial `print_jobs_control_uniq`; lo que
-    // se prueba acá es que el insert no explote ni duplique cuando se marcha
-    // dos veces (reintento del cron, "marchar ahora" sobre algo ya tomado).
-    await emitControlTicket(fakeService(), "o1", "biz1");
-    await emitControlTicket(fakeService(), "o1", "biz1");
-    expect(upserts).toHaveLength(2);
-    for (const u of upserts) {
-      expect(u.opts).toEqual({ onConflict: "order_id", ignoreDuplicates: true });
-    }
+  it("si el control ya existe no inserta de nuevo, y tampoco es un fallo", async () => {
+    // El camino normal de la re-marcha: reintento del cron, ticks solapados,
+    // «Marchar ahora» sobre algo que el cron ya tomó.
+    existingCount = 1;
+    expect(await emitControlTicket(fakeService(), "o1", "biz1")).toEqual({
+      emitted: false,
+      failed: false,
+    });
+    expect(inserts).toEqual([]);
   });
 
-  it("no emite si el pedido no existe", async () => {
+  it("una carrera contra el índice único (23505) tampoco es un fallo", async () => {
+    // El pre-chequeo dijo que no existía, pero entre medio otro lo creó. El
+    // desenlace es el correcto —hay un control y sólo uno—, así que no se
+    // reporta como error ni se ensucia el log.
+    insertError = { message: "duplicate key", code: "23505" };
+    expect(await emitControlTicket(fakeService(), "o1", "biz1")).toEqual({
+      emitted: false,
+      failed: false,
+    });
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
+  it("no emite si el pedido no existe, y lo marca como fallo", async () => {
     orderRow = null;
     expect(await emitControlTicket(fakeService(), "o1", "biz1")).toEqual({
       emitted: false,
+      failed: true,
     });
-    expect(upserts).toEqual([]);
+    expect(inserts).toEqual([]);
   });
 
   it("no emite si el pedido es de otro negocio (defensa cross-tenant)", async () => {
     orderRow = { business_id: "biz2", delivery_type: "delivery" };
     expect(await emitControlTicket(fakeService(), "o1", "biz1")).toEqual({
       emitted: false,
+      failed: true,
     });
-    expect(upserts).toEqual([]);
+    expect(inserts).toEqual([]);
   });
 
-  it("un error de la DB se reporta como no-emitido, sin tirar", async () => {
-    upsertError = { message: "boom" };
+  it("un error real de la DB se reporta como fallo, sin tirar", async () => {
+    // Es la señal que viaja hasta `control_failed` y llega al board: acá SÍ
+    // falta el papel y hay que ir a buscarlo.
+    insertError = { message: "boom", code: "42P10" };
     expect(await emitControlTicket(fakeService(), "o1", "biz1")).toEqual({
       emitted: false,
+      failed: true,
     });
+    expect(console.error).toHaveBeenCalled();
   });
 });

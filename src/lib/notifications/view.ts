@@ -197,6 +197,19 @@ export function viewForNotification(n: Notification): NotiView {
     };
   }
 
+  // ── spec 093 ──────────────────────────────────────────────────────
+  if (n.type === "pedido.sin_comanda") {
+    const orderNumber = p.orderNumber as number | undefined;
+    const sinSector = (p.itemsWithoutStation as number | undefined) ?? 0;
+    const origen = orderNumber ? `Pedido #${orderNumber}` : "Pedido";
+    return {
+      tone: "warning",
+      icon: PackageX,
+      title: `Marchó sin comanda · ${origen}`,
+      body: `${sinSector} ${sinSector === 1 ? "ítem" : "ítems"} sin sector — no salió papel en cocina`,
+    };
+  }
+
   return {
     tone: "info",
     icon: AlertTriangle,

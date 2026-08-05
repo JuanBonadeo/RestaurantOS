@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-05
 
-**Status**: 📝 Especificada
+**Status**: 🟡 Implementada · falta verificación en vivo
 
 **Input**: Juan, 2026-08-05: *"hay que evaluar como se manejan los estados de los pedidos en todos los casos"*. La auditoría que salió de esa pregunta encontró, de arrastre, que el ticket que se lleva el repartidor **no se emite desde el 2026-08-04**.
 
@@ -70,7 +70,7 @@ El test existente no lo detectó porque su fake devuelve `{ error: upsertError }
 |---|---|
 | ¿El control sigue siendo best-effort? | **Sí**, pero deja de ser mudo. Perder el papel no puede abortar la marcha (la comida tiene que entrar a cocina igual), pero el fallo tiene que dejar rastro. |
 | ¿Cómo se arregla el 42P10 — índice nuevo o insert guardado? | **Insert guardado**, no índice nuevo. El índice parcial es correcto y expresa la regla real ("un control por orden, las cuentas no"). Se usa el mismo patrón que ya está en el repo para `client_line_key` (`comandas/actions.ts:515`): pre-chequeo + aceptar el `23505` del parcial como duplicado benigno. |
-| ¿Un pedido que marcha sin ninguna comanda avanza igual? | **No.** Si `comanda_ids` viene vacío y hubo ítems sin estación, no se avanza a `preparing`: se devuelve error accionable y el pedido queda en Próximos. Hoy avanzar lo vuelve **irrecuperable**, que es peor que no marchar. |
+| ¿Un pedido que marcha sin ninguna comanda avanza igual? | **Sí, pero avisando** *(decisión corregida al implementar — ver Notas)*. La spec decía «no avanza», hasta que apareció que `venderMostrador` **modela** el caso: una gaseosa y un alfajor legítimamente no generan comanda (spec 08). Bloquear habría roto una venta de mostrador real. El problema de H-22 no era avanzar sino que nadie se enteraba y después no había vuelta atrás: lo primero lo arregla el aviso, lo segundo FR-008. |
 | ¿Estación por defecto del negocio? | **Fuera de alcance.** Es una decisión de catálogo con su propia UI; acá alcanza con no romper. Se anota como candidato. |
 | ¿Se centraliza todo cambio de `orders.status` en un helper? | **No en esta spec.** Es lo correcto, pero es el trabajo de la [`090`](#142). Acá se agrega la guarda en el write que ya existe y se notifica desde `routeOrderToCocina`. |
 | ¿Se toca el test que fija el bug de H-18? | **Sí.** `update-status.test.ts:69-71` congela `confirmed→preparing` como válido para online; se reescribe para fijar el comportamiento correcto. |
@@ -99,7 +99,7 @@ Como cliente, quiero que si cancelo el pedido no me lo preparen igual.
 
 Como encargado, quiero enterarme cuando un pedido no pudo salir a cocina, y poder reintentarlo.
 
-**Independent Test**: pedido cuyos productos no tienen `station_id` ni en producto ni en categoría. La marcha (manual o por cron) devuelve error accionable, el pedido queda en Próximos con su estado anterior, y «Marchar ahora» lo vuelve a aceptar. Hoy queda en `preparing` sin comandas y no hay botón que lo rescate.
+**Independent Test**: pedido cuyos productos no tienen `station_id` ni en producto ni en categoría. La marcha avanza igual (un pedido de sólo kiosco es legítimo) pero **le llega un aviso «Marchó sin comanda» al encargado** y el cron lo cuenta en `withoutComanda`. Y si el pedido quedó roto, «Marchar ahora» lo vuelve a aceptar (FR-008). Hoy queda en `preparing` sin comandas, sin aviso y sin botón que lo rescate.
 
 ### User Story 5 - El programado vencido se manda a cocina de verdad (Priority: P2)
 
@@ -116,12 +116,12 @@ Como cliente, quiero recibir el aviso «Estamos preparando tu pedido» cuando en
 ## Requisitos
 
 - **FR-001** `emitControlTicket` deja de usar `upsert` con `onConflict`. Pasa a insert guardado: pre-chequeo por `(order_id, kind='control')` —que tiene índice (`print_jobs_order_kind_idx`)— y, ante `23505`, tratarlo como duplicado benigno (`{ emitted: false }` sin `console.error`). Cualquier otro error sí se loguea.
-- **FR-002** El fallo del control deja de ser invisible: `routeOrderToCocina` incluye el resultado en su `actionOk` (`control_emitted: boolean`) y el board lo muestra cuando es `false`. **No** aborta la marcha.
+- **FR-002** El fallo del control deja de ser invisible: `routeOrderToCocina` incluye el resultado en su `actionOk` (`control_failed: boolean`). **No** aborta la marcha.
 - **FR-003** Test de integración **real contra Postgres** para `emitControlTicket` (`*.integration.test.ts`), que ejercite el índice parcial. El test unitario con fake se conserva para las ramas de negocio (`dine_in` → no emite, cross-tenant → no emite), pero **deja de ser la única cobertura del upsert**.
 - **FR-004** El UPDATE de `routeOrderToCocina` lleva guarda optimista de estado: `.update({status:'preparing'}).eq('id',orderId).in('status',['pending','confirmed']).select('id')`. Si no devuelve fila, se aborta **antes** de crear comandas y se devuelve error explícito (`ORDER_NOT_MARCHABLE`).
 - **FR-004b** Como el orden actual crea comandas **antes** del UPDATE, el chequeo de estado se hace **al principio** de `routeOrderToCocina` (SELECT) **y** en el UPDATE (guarda optimista contra la carrera). El SELECT solo no alcanza; el UPDATE solo llegaría tarde.
 - **FR-005** El webhook de MP corta temprano si `order.status === 'cancelled'`: no rutea, no crea comandas, no imprime. La columna ya se selecciona en `webhook/route.ts:231` y hoy no se usa. **El pago sí se registra** — la plata entró y tiene que estar en la caja; lo que no puede pasar es que se cocine.
-- **FR-006** `routeOrderToCocina` no avanza a `preparing` si `comanda_ids.length === 0 && withoutStation > 0`. Devuelve error accionable con la lista de productos sin estación. El pedido conserva su estado anterior, así que el cron y «Marchar ahora» lo vuelven a tomar.
+- **FR-006** *(corregido en implementación — ver Notas)* Cuando `comanda_ids.length === 0 && withoutStation > 0`, `routeOrderToCocina` **avanza igual** pero **avisa al encargado** (`pedido.sin_comanda`) y el cron lo **cuenta** (`withoutComanda`) en vez de descartarlo. La recuperabilidad la aporta FR-008.
 - **FR-007** `isOnlinePendingAdvance` se extiende a `from ∈ ('pending','confirmed')` para `delivery_type !== 'dine_in'`. En la UI, el botón de un `confirmed` online llama `confirmarPedido`, no `updateOrderStatus`.
 - **FR-008** `confirmarPedido` acepta rescatar un `preparing` **sin comandas** (hoy tiene techo en `confirmed`), para que los pedidos ya rotos por H-18/H-22 se puedan recuperar sin tocar la DB a mano.
 - **FR-009** `routeOrderToCocina` dispara `notifyDeliveryStatusChange(preparing)` best-effort al final, para los tres caminos. Se protege contra doble aviso si el pedido ya estaba en `preparing`.
@@ -160,11 +160,27 @@ Como cliente, quiero recibir el aviso «Estamos preparando tu pedido» cuando en
 
 **Migración:** ninguna. El índice `print_jobs_control_uniq` está bien; lo que está mal es el `ON CONFLICT` que no lo puede inferir. Verificado en el cloud con `pg_indexes`.
 
+### Desviaciones de la spec, decididas al implementar
+
+**1. FR-006 pasó de bloquear a avisar.** La spec pedía no avanzar a `preparing` cuando no salía ninguna comanda. Al implementarlo apareció el choque: `venderMostrador` **modela** ese caso a propósito —«el alfajor y la gaseosa no generan comanda, el tostado sale a sanguchería», `venta-mostrador.ts:222-224`, que cae del modelado del producto de spec 08— y `station_id` es nullable en producto **y** en categoría. O sea que "cero comandas" no distingue un producto mal configurado de un pedido de sólo kiosco, y el bloqueo habría roto una venta de mostrador legítima de una gaseosa.
+
+Se invierte: se avanza igual, pero **el silencio se rompe** (aviso al encargado + contador del cron) y **la recuperabilidad la da FR-008**. El problema real de H-22 no era avanzar, era que nadie se enteraba y después no había vuelta atrás; las dos mitades quedan cubiertas sin romper lo modelado.
+
+**2. `control_emitted` → `control_failed`.** Con un booleano de "se emitió" no se distingue el duplicado benigno (la re-marcha idempotente, que es el camino normal del cron) del fallo real. El board habría gritado en cada reintento. `emitControlTicket` ahora devuelve `{ emitted, failed }` y sólo `failed` viaja hacia arriba: no-aplica y duplicado son caminos esperados, no fallos.
+
+**3. `MARCHABLE` incluye `preparing`.** Es lo que hace que el rescate de FR-008 funcione de punta a punta: `confirmarPedido` acepta un `preparing`, pero `routeOrderToCocina` lo habría rechazado con su propia guarda. Es seguro porque el chequeo de idempotencia corta antes cuando la orden ya tiene comandas: a esa línea sólo llega un `preparing` **sin una sola comanda**, que es exactamente el pedido roto que se quiere rescatar.
+
 ## Verify
 
-Pendiente de implementación. Checklist mínimo antes de cerrar #145:
+**Estado: 🟡 implementada, verificación en vivo pendiente.**
 
-- `pnpm typecheck` · `pnpm build` · `pnpm test` en verde.
-- Test de integración real de `emitControlTicket` corriendo contra Postgres (no fake).
-- Verificación **en vivo con el rol real** (encargado, nunca `service_role`): pedido de delivery de punta a punta con el print-agent del local — que el papel salga físicamente.
-- Contra el cloud: que aparezca la primera fila `print_jobs kind='control'` con `emitted_at` posterior a este fix. Hoy las únicas 2 son anteriores a la 0034.
+- `pnpm typecheck` ✅ · `eslint` limpio en lo tocado ✅ · `pnpm test` ✅ **1452 unit tests en verde**. Los 17 archivos `*.integration` fallan por falta de stack local (Docker apagado en esta máquina), igual que antes del cambio.
+- Tests nuevos: `route-to-cocina.test.ts` (14, no existía), `control-ticket-emit.integration.test.ts` (4). Reescritos: `control-ticket-emit.test.ts` (8), `update-status.test.ts` (+3 casos de `confirmed`), `march-scheduled.test.ts` (shape del resultado).
+- **La semántica SQL del fix se validó contra el cloud** dentro de un `DO` con rollback, ya que el stack local no se pudo levantar: el insert pelado entra (donde el upsert daba `42P10`), el segundo insert levanta `23505` contra el índice parcial —que es lo que el código captura como duplicado benigno— y **dos `kind='cuenta'` de la misma orden siguen permitidas**, o sea que el índice parcial quedó intacto.
+
+**Lo que NO está verificado:**
+
+- **El test de integración no se corrió.** Está escrito y sigue el patrón del repo (`.env.test` → stack local), pero acá Docker no estaba levantado. Es el test que habría atajado este bug, así que **hay que correrlo antes de cerrar #145**.
+- **FR-005 no tiene test propio**: no existe harness para el webhook de MP (firma + fetch a la API). La defensa real es FR-004, que sí está testeada — el corte del webhook es redundancia. Queda anotado como deuda.
+- **Nada se probó en vivo con el rol real** ni con el print-agent del local: que el papel salga físicamente de la comandera sigue pendiente.
+- **Contra el cloud**: la señal de que esto anda en producción es la primera fila `print_jobs kind='control'` con `emitted_at` posterior al deploy. Hoy las únicas 2 son anteriores a la 0034.

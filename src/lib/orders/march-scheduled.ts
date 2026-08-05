@@ -13,6 +13,16 @@ export type MarchDueResult = {
   considered: number;
   marched: number;
   failed: number;
+  /**
+   * Marchados sin una sola comanda porque ningún ítem resolvió sector (spec 093
+   * · H-22). El cron descartaba `items_without_station` del resultado, así que
+   * un pedido que "marchaba" sin que saliera un papel en cocina era
+   * indistinguible de uno sano. El aviso al encargado lo emite
+   * `routeOrderToCocina`; esto es el contador para el log del cron.
+   */
+  withoutComanda: number;
+  /** Marchados a los que no se les pudo emitir el control de pedido. */
+  controlFailed: number;
 };
 
 type DueRow = {
@@ -85,16 +95,32 @@ export async function marchDueScheduledOrders(
 
   let marched = 0;
   let failed = 0;
+  let withoutComanda = 0;
+  let controlFailed = 0;
   for (const o of inWindow) {
     try {
       const res = await routeOrderToCocina(o.id, o.business_id);
-      if (res.ok) marched += 1;
-      else failed += 1;
+      if (res.ok) {
+        marched += 1;
+        if (
+          res.data.comanda_ids.length === 0 &&
+          res.data.items_without_station > 0
+        ) {
+          withoutComanda += 1;
+        }
+        if (res.data.control_failed) controlFailed += 1;
+      } else failed += 1;
     } catch (e) {
       console.error("marchDueScheduledOrders · routeOrderToCocina", o.id, e);
       failed += 1;
     }
   }
 
-  return { considered: inWindow.length, marched, failed };
+  return {
+    considered: inWindow.length,
+    marched,
+    failed,
+    withoutComanda,
+    controlFailed,
+  };
 }
