@@ -3,6 +3,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { config } from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 
+import { customerPhoneKey } from "@/lib/phone";
+
 config({ path: ".env.local" });
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -217,11 +219,16 @@ describe.skipIf(!dbAvailable)("walk-in (integration)", () => {
   it("phone existente → reusa customer (no duplica)", async () => {
     const sharedPhone = `+5491133${Math.floor(Math.random() * 1e6)}`;
     // Pre-seed customer
+    // El cliente se siembra con la clave **normalizada**, que es lo único que
+    // la app escribe: los tres caminos de alta (checkout, walk-in y reserva)
+    // pasan por `customerPhoneKey`, que es digits-only y se come el `+` (#114).
+    // Sembrarlo crudo creaba un dato que producción nunca genera, el lookup no
+    // matcheaba y el test se caía culpando al código en vez de a su fixture.
     const { data: existing } = await supabase
       .from("customers")
       .insert({
         business_id: businessId,
-        phone: sharedPhone,
+        phone: customerPhoneKey(sharedPhone),
         name: "Original",
       })
       .select("id")
@@ -251,7 +258,7 @@ describe.skipIf(!dbAvailable)("walk-in (integration)", () => {
       .from("customers")
       .select("id", { count: "exact", head: true })
       .eq("business_id", businessId)
-      .eq("phone", sharedPhone);
+      .eq("phone", customerPhoneKey(sharedPhone));
     expect(count).toBe(1);
   });
 
