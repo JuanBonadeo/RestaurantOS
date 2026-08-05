@@ -36,7 +36,8 @@ export async function getProfitMetrics(
       .eq("orders.business_id", businessId)
       .gte("orders.created_at", startIso)
       .lt("orders.created_at", endIso)
-      .neq("orders.status", "cancelled"),
+      .neq("orders.status", "cancelled")
+      .neq("orders.lifecycle_status", "cancelled"),
     supabase
       .from("ingredient_consumptions")
       .select("cost_cents_snapshot, kind")
@@ -145,7 +146,8 @@ export async function getMenuEngineering(
       .eq("orders.business_id", businessId)
       .gte("orders.created_at", startIso)
       .lt("orders.created_at", endIso)
-      .neq("orders.status", "cancelled"),
+      .neq("orders.status", "cancelled")
+      .neq("orders.lifecycle_status", "cancelled"),
     getCosteoOverview(businessId),
   ]);
 

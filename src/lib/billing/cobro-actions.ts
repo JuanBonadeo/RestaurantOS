@@ -192,6 +192,12 @@ export async function closeOrderIfFullyPaid(
       closed_at: new Date().toISOString(),
       total_paid_cents: total_paid,
       payment_status: "paid",
+      // spec 091 — el eje de producción también llega a su estado terminal.
+      // Ninguna orden de salón lo tocaba nunca: nacían `pending` y se cobraban
+      // `pending`, así que el dashboard las contaba como «pedidos activos» —el
+      // dueño abría el panel un martes a las 4 con el local vacío y leía 47— y
+      // en el historial cada mesa cobrada aparecía con badge «Pendiente».
+      status: "delivered",
     })
     .eq("id", orderId);
 

@@ -2,6 +2,7 @@ import "server-only";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getProfitMetrics, type ProfitMetrics } from "@/lib/admin/profit-query";
+import { isOrderAlive, isOrderDead } from "@/lib/orders/predicates";
 
 export type DashboardOverview = {
   today: {
@@ -82,17 +83,20 @@ export async function getDashboardOverview(
   const [ordersRes, todayItemsRes, customersRes] = await Promise.all([
     supabase
       .from("orders")
-      .select("created_at, total_cents, tip_cents, status, delivery_type")
+      .select("created_at, total_cents, tip_cents, status, lifecycle_status, delivery_type")
       .eq("business_id", businessId)
       .gte("created_at", startMonth.toISOString()),
     supabase
       .from("order_items")
       .select(
-        "product_name, quantity, subtotal_cents, orders!inner(business_id, created_at, status)",
+        "product_name, quantity, subtotal_cents, orders!inner(business_id, created_at, status, lifecycle_status)",
       )
       .eq("orders.business_id", businessId)
       .gte("orders.created_at", startToday.toISOString())
-      .neq("orders.status", "cancelled"),
+      // spec 091 — los dos ejes. Con uno solo, Top productos seguía mostrando
+      // las 6 cervezas de una mesa anulada al día siguiente.
+      .neq("orders.status", "cancelled")
+      .neq("orders.lifecycle_status", "cancelled"),
     supabase
       .from("customers")
       .select("created_at")
@@ -104,12 +108,14 @@ export async function getDashboardOverview(
     created_at: string;
     total_cents: number;
     status: string;
+    lifecycle_status: string;
     delivery_type: string;
   };
   const orders: OrderRow[] = (ordersRes.data ?? []).map((r) => ({
     created_at: r.created_at,
     total_cents: Number(r.total_cents) - (Number(r.tip_cents) || 0),
     status: r.status as string,
+    lifecycle_status: (r.lifecycle_status as string) ?? "open",
     delivery_type: (r.delivery_type as string) ?? "delivery",
   }));
 
@@ -123,14 +129,12 @@ export async function getDashboardOverview(
     inRange(r, startYesterday, startToday),
   );
 
-  const todayNotCancelled = todayRows.filter((r) => r.status !== "cancelled");
+  const todayNotCancelled = todayRows.filter(isOrderAlive);
   const todayRevenue = todayNotCancelled.reduce(
     (s, r) => s + r.total_cents,
     0,
   );
-  const todayCancelled = todayRows.filter(
-    (r) => r.status === "cancelled",
-  ).length;
+  const todayCancelled = todayRows.filter(isOrderDead).length;
   const activeStatuses = new Set([
     "pending",
     "confirmed",
@@ -138,19 +142,21 @@ export async function getDashboardOverview(
     "ready",
     "on_the_way",
   ]);
-  const activeOrderCount = todayRows.filter((r) =>
-    activeStatuses.has(r.status),
+  // spec 091 — «Pedidos activos» miraba un solo eje, así que contaba las mesas
+  // **cobradas** (que quedan en `pending` porque ningún flujo de salón escribe
+  // `orders.status`) y las anuladas. El dueño abría el panel un martes a las 4
+  // con el local vacío y leía «Pedidos activos: 47».
+  const activeOrderCount = todayRows.filter(
+    (r) => isOrderAlive(r) && r.lifecycle_status !== "closed" && activeStatuses.has(r.status),
   ).length;
 
-  const yesterdayNotCancelled = yesterdayRows.filter(
-    (r) => r.status !== "cancelled",
-  );
+  const yesterdayNotCancelled = yesterdayRows.filter(isOrderAlive);
   const yesterdayRevenue = yesterdayNotCancelled.reduce(
     (s, r) => s + r.total_cents,
     0,
   );
 
-  const monthNotCancelled = orders.filter((r) => r.status !== "cancelled");
+  const monthNotCancelled = orders.filter(isOrderAlive);
   const monthRevenue = monthNotCancelled.reduce(
     (s, r) => s + r.total_cents,
     0,
@@ -284,6 +290,7 @@ export async function getHourlyHeatmap(
     .select("created_at, total_cents, status")
     .eq("business_id", businessId)
     .neq("status", "cancelled")
+    .neq("lifecycle_status", "cancelled")
     .gte("created_at", start.toISOString());
 
   const grid = new Map<string, HourlyHeatmapCell>();

@@ -33,6 +33,10 @@ export async function getFiscalSummary(
       .select("total_cents, tip_cents")
       .eq("business_id", businessId)
       .neq("status", "cancelled")
+      // spec 091 — sin el segundo eje el denominador incluía las mesas anuladas
+      // (que quedan en `pending` y conservan su `total_cents`): «Facturaste el
+      // 68% de tus ventas» cuando el real era 82%.
+      .neq("lifecycle_status", "cancelled")
       .gte("created_at", startIso)
       .lt("created_at", endIso),
   ]);
@@ -102,6 +106,10 @@ export async function getMarketingSummary(
       .select("discount_cents, total_cents, tip_cents, promo_code_id")
       .eq("business_id", businessId)
       .neq("status", "cancelled")
+      // spec 091 — sin el segundo eje el denominador incluía las mesas anuladas
+      // (que quedan en `pending` y conservan su `total_cents`): «Facturaste el
+      // 68% de tus ventas» cuando el real era 82%.
+      .neq("lifecycle_status", "cancelled")
       .gte("created_at", startIso)
       .lt("created_at", endIso),
     supabase

@@ -227,7 +227,13 @@ export async function venderMostrador(
   let itemsSinSector = 0;
   let ruteoError: string | null = null;
   try {
-    const ruteo = await routeOrderToCocina(orderId, business.id);
+    // `skipStatusAdvance`: la orden ya está cobrada y cerrada unas líneas más
+    // arriba (spec 091 le pone `status='delivered'` al cerrar). Mandarla a
+    // `preparing` acá la haría figurar como pedido activo para siempre — es la
+    // única fila `closed`+`preparing` que quedó en el cloud.
+    const ruteo = await routeOrderToCocina(orderId, business.id, {
+      skipStatusAdvance: true,
+    });
     if (ruteo.ok) {
       comandasCreadas = ruteo.data.comanda_ids.length;
       itemsSinSector = ruteo.data.items_without_station;

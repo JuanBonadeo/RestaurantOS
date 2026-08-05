@@ -1,5 +1,6 @@
 import "server-only";
 
+import { isOrderDead } from "@/lib/orders/predicates";
 import {
   getReportData,
   getSalonStats,
@@ -66,7 +67,7 @@ export async function getPlatformOverview(): Promise<PlatformOverview> {
       .order("created_at", { ascending: false }),
     service
       .from("orders")
-      .select("business_id, total_cents, status")
+      .select("business_id, total_cents, status, lifecycle_status")
       .gte("created_at", sinceIso),
   ]);
 
@@ -78,7 +79,7 @@ export async function getPlatformOverview(): Promise<PlatformOverview> {
     { orders_30d: number; revenue_30d_cents: number }
   >();
   for (const o of orders) {
-    if (o.status === "cancelled") continue;
+    if (isOrderDead(o)) continue;
     const cur = statsByBiz.get(o.business_id) ?? {
       orders_30d: 0,
       revenue_30d_cents: 0,
@@ -226,6 +227,7 @@ async function getSharedCustomers(
     )
     .in("business_id", businessIds)
     .neq("status", "cancelled")
+    .neq("lifecycle_status", "cancelled")
     .not("customer_id", "is", null)
     .gte("created_at", startIso)
     .lt("created_at", endIso);

@@ -53,6 +53,17 @@ const MARCHABLE = ["pending", "confirmed", "preparing"] as const;
 export async function routeOrderToCocina(
   orderId: string,
   businessId: string,
+  opts: {
+    /**
+     * Crear las comandas **sin** mover `orders.status` (spec 091).
+     *
+     * Lo usa la venta de mostrador, que cobra y cierra la orden **antes** de
+     * rutear: para cuando llega acá el pedido ya está `delivered` —se pagó y se
+     * entregó en el mismo gesto— y avanzarlo a `preparing` sería mentir. El
+     * papel de cocina sí tiene que salir: el tostado hay que hacerlo.
+     */
+    skipStatusAdvance?: boolean;
+  } = {},
 ): Promise<ActionResult<RouteOrderResult>> {
   const service = createSupabaseServiceClient() as unknown as GenericClient;
 
@@ -91,7 +102,10 @@ export async function routeOrderToCocina(
     delivery_type: string;
   } | null;
   if (!order) return actionError("Pedido no encontrado.");
-  if (!(MARCHABLE as readonly string[]).includes(order.status)) {
+  if (
+    !opts.skipStatusAdvance &&
+    !(MARCHABLE as readonly string[]).includes(order.status)
+  ) {
     return actionError(
       `El pedido está en "${order.status}" — no se puede mandar a cocina.`,
     );
@@ -166,20 +180,22 @@ export async function routeOrderToCocina(
   // Guarda de estado #2 (ver docblock): optimista, cierra la ventana entre el
   // SELECT de arriba y este UPDATE. Si el pedido se canceló mientras tanto, no
   // matchea ninguna fila y se corta acá.
-  const { data: advanced, error: orderErr } = await service
-    .from("orders")
-    .update({ status: "preparing" })
-    .eq("id", orderId)
-    .in("status", MARCHABLE)
-    .select("id");
-  if (orderErr) {
-    console.error("routeOrderToCocina · order update", orderErr);
-    return actionError("No pudimos avanzar el pedido.");
-  }
-  if (((advanced ?? []) as { id: string }[]).length === 0) {
-    return actionError(
-      "El pedido cambió de estado mientras se mandaba a cocina.",
-    );
+  if (!opts.skipStatusAdvance) {
+    const { data: advanced, error: orderErr } = await service
+      .from("orders")
+      .update({ status: "preparing" })
+      .eq("id", orderId)
+      .in("status", MARCHABLE)
+      .select("id");
+    if (orderErr) {
+      console.error("routeOrderToCocina · order update", orderErr);
+      return actionError("No pudimos avanzar el pedido.");
+    }
+    if (((advanced ?? []) as { id: string }[]).length === 0) {
+      return actionError(
+        "El pedido cambió de estado mientras se mandaba a cocina.",
+      );
+    }
   }
 
   // Control de pedido (spec 063): el papel del repartidor sale junto con las

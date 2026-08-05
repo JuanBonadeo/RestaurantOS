@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { formatInTimeZone, toZonedTime } from "date-fns-tz";
 
+import { isOrderDead } from "@/lib/orders/predicates";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 type GenericClient = SupabaseClient;
@@ -213,7 +214,7 @@ export async function getReportData(
 
   // 1. Pedidos del rango (con items para top y categorías)
   const ordersSel =
-    "id, created_at, total_cents, tip_cents, status, delivery_type, customer_id, customer_name, customer_phone, order_items(product_id, product_name, quantity, subtotal_cents)";
+    "id, created_at, total_cents, tip_cents, status, lifecycle_status, delivery_type, customer_id, customer_name, customer_phone, order_items(product_id, product_name, quantity, subtotal_cents)";
 
   const [
     ordersRes,
@@ -233,7 +234,7 @@ export async function getReportData(
       .lt("created_at", end.toISOString()),
     supabase
       .from("orders")
-      .select("id, total_cents, tip_cents, status")
+      .select("id, total_cents, tip_cents, status, lifecycle_status")
       .eq("business_id", businessId)
       .gte("created_at", prev.start.toISOString())
       .lt("created_at", prev.end.toISOString()),
@@ -265,12 +266,14 @@ export async function getReportData(
       .select("customer_id, created_at")
       .eq("business_id", businessId)
       .neq("status", "cancelled")
+      .neq("lifecycle_status", "cancelled")
       .not("customer_id", "is", null),
     supabase
       .from("orders")
       .select("customer_id, total_cents, tip_cents, created_at")
       .eq("business_id", businessId)
       .neq("status", "cancelled")
+      .neq("lifecycle_status", "cancelled")
       .gte("created_at", start.toISOString())
       .lt("created_at", end.toISOString())
       .not("customer_id", "is", null),
@@ -296,7 +299,9 @@ export async function getReportData(
   }
 
   for (const o of orders) {
-    if (o.status === "cancelled") {
+    // spec 091 — los dos ejes: una mesa anulada queda en `pending` porque
+    // ningún flujo de salón escribe `orders.status`.
+    if (isOrderDead(o)) {
       cancelledCount++;
       continue;
     }
@@ -345,7 +350,7 @@ export async function getReportData(
   let prevRevenue = 0;
   let prevCancelled = 0;
   for (const o of prevOrders) {
-    if (o.status === "cancelled") {
+    if (isOrderDead(o)) {
       prevCancelled++;
       continue;
     }
@@ -382,7 +387,7 @@ export async function getReportData(
     { quantity: number; revenueCents: number; products: Set<string> }
   >();
   for (const o of orders) {
-    if (o.status === "cancelled") continue;
+    if (isOrderDead(o)) continue;
     for (const item of o.order_items ?? []) {
       const catId = item.product_id
         ? productToCategory.get(item.product_id) ?? null
@@ -664,7 +669,8 @@ export async function getSalonStats(
       .select("id, total_cents, tip_cents, delivery_type, status, table_id, created_at")
       .eq("business_id", businessId)
       .gte("created_at", todayStart.toISOString())
-      .neq("status", "cancelled"),
+      .neq("status", "cancelled")
+      .neq("lifecycle_status", "cancelled"),
   ]);
 
   const tables = (tablesRes.data ?? []) as Array<{
