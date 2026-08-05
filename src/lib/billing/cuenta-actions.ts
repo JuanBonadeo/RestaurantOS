@@ -95,12 +95,60 @@ async function recalcOrderTotals(
   return { total_cents: totals.total_cents };
 }
 
+/**
+ * Limpia los splits de una orden **sin perder los que ya tienen pagos** (spec
+ * 094 · H-10).
+ *
+ * Antes esto era un `DELETE` liso de todos los splits. El FK de `payments` es
+ * `ON DELETE SET NULL`, así que no fallaba: **los pagos sobrevivían sin
+ * vínculo**. Combinado con H-07 (`total_paid_cents` en 0), no quedaba ningún
+ * registro consultable de que alguien ya había pagado.
+ *
+ * Lo que se veía: mesa de 4 dividida en $10.000; uno paga y se va; después
+ * piden sacar un plato. Al anular el ítem se borraban los 4 splits, incluido el
+ * cobrado, y la pantalla volvía a mostrar la cuenta entera pendiente → **el que
+ * ya pagó paga dos veces**.
+ *
+ * El propio código sabía del peligro: `limpiarDivision` marcaba `cancelled` los
+ * splits con pagos en vez de borrarlos. Esto es esa lógica, extraída, para que
+ * la usen los tres callers y no sólo uno.
+ */
 async function deleteSplitsAndItems(
   service: GenericClient,
   orderId: string,
 ): Promise<void> {
-  // ON DELETE CASCADE en order_split_items vía FK a splits.
-  await service.from("order_splits").delete().eq("order_id", orderId);
+  const { data: paySplits } = await service
+    .from("payments")
+    .select("split_id")
+    .eq("order_id", orderId);
+  const conPagos = [
+    ...new Set(
+      (paySplits ?? [])
+        .map((p) => (p as { split_id: string | null }).split_id)
+        .filter((s): s is string => s !== null),
+    ),
+  ];
+
+  if (conPagos.length === 0) {
+    // ON DELETE CASCADE en order_split_items vía FK a splits.
+    await service.from("order_splits").delete().eq("order_id", orderId);
+    return;
+  }
+
+  // Los que tienen plata asentada se conservan como `cancelled`: la fila es el
+  // único rastro de a qué se imputó ese pago.
+  await service
+    .from("order_splits")
+    .update({ status: "cancelled" })
+    .eq("order_id", orderId)
+    .in("id", conPagos);
+
+  // El resto sí se borra.
+  await service
+    .from("order_splits")
+    .delete()
+    .eq("order_id", orderId)
+    .not("id", "in", `(${conPagos.map((id) => `"${id}"`).join(",")})`);
 }
 
 // ── Propina + descuento ───────────────────────────────────────
@@ -584,31 +632,9 @@ export async function limpiarDivision(
 
   // Si hay payments asociados a algún split → no permitir borrado físico,
   // marcar como cancelled. Sino, delete físico.
-  const { data: paySplits } = await service
-    .from("payments")
-    .select("split_id")
-    .eq("order_id", orderId);
-  const splitIdsConPagos = new Set(
-    (paySplits ?? [])
-      .map((p) => (p as { split_id: string | null }).split_id)
-      .filter((s): s is string => s !== null),
-  );
-
-  if (splitIdsConPagos.size > 0) {
-    await service
-      .from("order_splits")
-      .update({ status: "cancelled" })
-      .eq("order_id", orderId)
-      .in("id", Array.from(splitIdsConPagos));
-    // Splits sin pagos asociados: delete físico para limpiar.
-    await service
-      .from("order_splits")
-      .delete()
-      .eq("order_id", orderId)
-      .not("id", "in", `(${Array.from(splitIdsConPagos).map((id) => `"${id}"`).join(",")})`);
-  } else {
-    await deleteSplitsAndItems(service, orderId);
-  }
+  // spec 094 — esta lógica vivía sólo acá y ahora es la de
+  // `deleteSplitsAndItems`, así que la usan los tres callers.
+  await deleteSplitsAndItems(service, orderId);
 
   revalidatePath(`/${businessSlug}/mozo`);
   return actionOk(undefined);
