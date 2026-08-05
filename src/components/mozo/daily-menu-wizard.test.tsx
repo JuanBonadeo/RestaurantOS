@@ -76,8 +76,8 @@ const MENU: DailyMenuForMozo = {
     ...principales,
   ],
   choice_groups: [
-    { choice_group_id: "g1", label: "Entrada", options: entradas },
-    { choice_group_id: "g2", label: "Principal", options: principales },
+    { choice_group_id: "g1", label: "Entrada", options: entradas, applies_when_group_id: null, applies_when_product_ids: [] },
+    { choice_group_id: "g2", label: "Principal", options: principales, applies_when_group_id: null, applies_when_product_ids: [] },
   ],
   has_choices: true,
 };
@@ -244,9 +244,9 @@ describe("asistente del menú del día · grupos condicionados (spec 074)", () =
       image_url: null,
       components: [...principales, ...guarniciones, ...postres],
       choice_groups: [
-        { choice_group_id: "gp", label: "Principal", options: principales },
-        { choice_group_id: "gg", label: "Guarnición", options: guarniciones },
-        { choice_group_id: "gd", label: "Postre", options: postres },
+        { choice_group_id: "gp", label: "Principal", options: principales, applies_when_group_id: null, applies_when_product_ids: [] },
+        { choice_group_id: "gg", label: "Guarnición", options: guarniciones, applies_when_group_id: null, applies_when_product_ids: [] },
+        { choice_group_id: "gd", label: "Postre", options: postres, applies_when_group_id: null, applies_when_product_ids: [] },
       ],
       has_choices: true,
     };
@@ -343,7 +343,7 @@ describe("asistente del menú del día · modificadores del producto (spec 083)"
       ...MENU,
       price_cents: 2400000,
       components: [noquis, mila],
-      choice_groups: [{ choice_group_id: "gp", label: "Plato Principal", options: [noquis, mila] }],
+      choice_groups: [{ choice_group_id: "gp", label: "Plato Principal", options: [noquis, mila], applies_when_group_id: null, applies_when_product_ids: [] }],
       has_choices: true,
     };
   }

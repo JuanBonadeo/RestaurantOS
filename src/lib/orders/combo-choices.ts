@@ -94,6 +94,15 @@ export type ChoiceOptionLike = {
 export type ChoiceGroupLike = {
   choice_group_id: string;
   options: ChoiceOptionLike[];
+  /**
+   * Condición del grupo (spec 087): NULL = aplica siempre; si no, el grupo del
+   * que depende. `undefined` = el menú no la trae (dato viejo o un caller que
+   * todavía no la lee) y se resuelve con el modelo anterior, el `blocks` de la
+   * opción.
+   */
+  applies_when_group_id?: string | null;
+  /** Las opciones (por producto) del grupo fuente que habilitan a éste. */
+  applies_when_product_ids?: string[];
 };
 
 /**
@@ -112,6 +121,10 @@ export function activeChoiceGroups<G extends ChoiceGroupLike>(
 ): G[] {
   const withOptions = groups.filter((g) => g.options.length > 0);
 
+  // Los que traen la condición del grupo (spec 087) se resuelven con ella; los
+  // que no, con el `blocks` de la opción. Conviven mientras dure la transición:
+  // la traducción entre las dos formas es exacta, así que un menú da lo mismo
+  // por cualquiera de los dos caminos.
   const blocksBySelectedGroup = new Map<string, string[]>();
   for (const group of withOptions) {
     const chosen = chosenByGroup.get(group.choice_group_id);
@@ -127,13 +140,40 @@ export function activeChoiceGroups<G extends ChoiceGroupLike>(
     }
   }
 
-  const activeIds = new Set(
-    resolveActiveGroupIds(
-      withOptions.map((g) => g.choice_group_id),
-      blocksBySelectedGroup,
-    ),
-  );
-  return withOptions.filter((g) => activeIds.has(g.choice_group_id));
+  // Una sola pasada hacia adelante, igual que antes: cuando llegamos a un grupo
+  // ya sabemos si su fuente quedó activa y qué se eligió en ella.
+  const activos: G[] = [];
+  const activeIds = new Set<string>();
+  const bloqueadosPorOpcion = new Set<string>();
+
+  for (const group of withOptions) {
+    const condicionado = group.applies_when_group_id != null;
+
+    if (condicionado) {
+      const fuente = group.applies_when_group_id as string;
+      // Fuente que no aplica ⇒ nunca se va a elegir nada ahí, así que la
+      // condición no se puede satisfacer.
+      if (!activeIds.has(fuente)) continue;
+      const elegido = chosenByGroup.get(fuente);
+      // Todavía sin elegir en la fuente: el grupo sigue en pie. Es lo que hace
+      // que al abrir el asistente se vean todos los pasos, como siempre.
+      if (elegido && !(group.applies_when_product_ids ?? []).includes(elegido.product_id)) {
+        continue;
+      }
+    } else if (bloqueadosPorOpcion.has(group.choice_group_id)) {
+      continue;
+    }
+
+    activos.push(group);
+    activeIds.add(group.choice_group_id);
+    for (const target of blocksBySelectedGroup.get(group.choice_group_id) ?? []) {
+      // Un grupo no puede bloquearse a sí mismo: sería un paso que se borra al
+      // resolverlo, sin salida.
+      if (target !== group.choice_group_id) bloqueadosPorOpcion.add(target);
+    }
+  }
+
+  return activos;
 }
 
 /**

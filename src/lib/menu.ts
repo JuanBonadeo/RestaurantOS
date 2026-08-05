@@ -69,6 +69,9 @@ export type MenuDailyMenuChoiceGroup = {
   choice_group_id: string;
   label: string;
   options: MenuDailyMenuComponent[];
+  /** Condición del grupo (spec 087). NULL = aplica siempre. */
+  applies_when_group_id: string | null;
+  applies_when_product_ids: string[];
 };
 
 export type MenuDailyMenu = {
@@ -158,7 +161,7 @@ export const getMenu = cache(
       supabase
         .from("daily_menus")
         .select(
-          "id, name, description, price_cents, image_url, available_days, is_suggestion, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, extra_price_cents, blocks_choice_group_ids, products(id, name, image_url))",
+          "id, name, description, price_cents, image_url, available_days, is_suggestion, daily_menu_choice_groups(id, name, sort_order, applies_when_group_id, applies_when_product_ids), daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, extra_price_cents, blocks_choice_group_ids, products(id, name, image_url))",
         )
         .eq("business_id", businessId)
         .eq("is_active", true)
@@ -255,15 +258,25 @@ export const getMenu = cache(
         sort_order: Number(c.sort_order ?? 0),
       }));
 
+    // Nombre, orden y condición salen de `daily_menu_choice_groups` (spec 087);
+    // el scan de componentes queda de fallback para un menú sin grupos en la
+    // tabla (p. ej. clonado con `cloneBusiness`, que no los copia).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const filasGrupo: any[] = m.daily_menu_choice_groups ?? [];
+    const grupoPorId = new Map(filasGrupo.map((g) => [g.id as string, g]));
+
     const groupMap = new Map<string, MenuDailyMenuChoiceGroup>();
     for (const c of components) {
       if (c.kind === "choice" && c.choice_group_id) {
         let group = groupMap.get(c.choice_group_id);
         if (!group) {
+          const fila = grupoPorId.get(c.choice_group_id);
           group = {
             choice_group_id: c.choice_group_id,
-            label: c.choice_group_label ?? "Elegí una opción",
+            label: fila?.name ?? c.choice_group_label ?? "Elegí una opción",
             options: [],
+            applies_when_group_id: fila?.applies_when_group_id ?? null,
+            applies_when_product_ids: fila?.applies_when_product_ids ?? [],
           };
           groupMap.set(c.choice_group_id, group);
         }

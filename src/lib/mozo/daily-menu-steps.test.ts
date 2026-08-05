@@ -23,6 +23,8 @@ function group(
   return {
     choice_group_id: id,
     label,
+    applies_when_group_id: null,
+    applies_when_product_ids: [],
     options: Array.from({ length: n }, (_, i) => ({
       id: `${id}-opt-${i}`,
       label: `Opción ${i}`,

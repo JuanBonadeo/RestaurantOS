@@ -36,6 +36,14 @@ export type DailyMenuChoiceGroup = {
   choice_group_id: string;
   label: string;
   options: DailyMenuComponent[];
+  /**
+   * Condición del grupo (spec 087): NULL = aplica siempre; si no, el grupo del
+   * que depende. Sale de `daily_menu_choice_groups`, que desde la migración
+   * `0036` es la fuente de verdad — antes el grupo no era una entidad.
+   */
+  applies_when_group_id: string | null;
+  /** Las opciones (por producto) del grupo fuente que habilitan a éste. */
+  applies_when_product_ids: string[];
 };
 
 export type DailyMenuForMozo = {
@@ -72,7 +80,7 @@ export async function getDailyMenusForToday(
       // Los `modifier_groups` del producto de cada opción (spec 083) son los
       // mismos que ve el mozo al cargar el producto suelto: el asistente los
       // pregunta en un paso propio y el server re-deriva de ahí el adicional.
-      "id, name, description, price_cents, image_url, sort_order, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, extra_price_cents, blocks_choice_group_ids, products(id, name, image_url, modifier_groups(id, name, is_required, min_selection, max_selection, sort_order, modifiers(id, name, price_delta_cents, is_available, sort_order))))",
+      "id, name, description, price_cents, image_url, sort_order, daily_menu_choice_groups(id, name, sort_order, applies_when_group_id, applies_when_product_ids), daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, extra_price_cents, blocks_choice_group_ids, products(id, name, image_url, modifier_groups(id, name, is_required, min_selection, max_selection, sort_order, modifiers(id, name, price_delta_cents, is_available, sort_order))))",
     )
     .eq("business_id", businessId)
     .eq("is_active", true)
@@ -120,15 +128,26 @@ export async function getDailyMenusForToday(
         })),
       }));
 
+    // Los grupos salen de `daily_menu_choice_groups` (spec 087): ahí viven el
+    // nombre, el orden y la condición. Se cae al scan de componentes sólo si el
+    // menú todavía no tiene grupos en la tabla — un clon hecho con
+    // `cloneBusiness`, que copia los componentes y no los grupos.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const filas: any[] = m.daily_menu_choice_groups ?? [];
+    const porId = new Map(filas.map((g) => [g.id as string, g]));
+
     const groupMap = new Map<string, DailyMenuChoiceGroup>();
     for (const c of components) {
       if (c.kind === "choice" && c.choice_group_id) {
         let group = groupMap.get(c.choice_group_id);
         if (!group) {
+          const fila = porId.get(c.choice_group_id);
           group = {
             choice_group_id: c.choice_group_id,
-            label: c.choice_group_label ?? "Elegí una opción",
+            label: fila?.name ?? c.choice_group_label ?? "Elegí una opción",
             options: [],
+            applies_when_group_id: fila?.applies_when_group_id ?? null,
+            applies_when_product_ids: fila?.applies_when_product_ids ?? [],
           };
           groupMap.set(c.choice_group_id, group);
         }
