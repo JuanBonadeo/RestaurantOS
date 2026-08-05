@@ -23,7 +23,6 @@ import {
   canModifyPostEnvio,
   canReimprimirComanda,
 } from "@/lib/permissions/can";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
@@ -191,11 +190,22 @@ export async function enviarComanda(
   const business = await getBusiness(input.slug);
   if (!business) return actionError("Negocio no encontrado.");
 
-  const auth = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await auth.auth.getUser();
-  if (!user) return actionError("Sin sesión.");
+  // spec 096 · H-13 — gate de membresía **de entrada**.
+  //
+  // Ésta era la única action del módulo que no lo tenía: hacía sólo
+  // `auth.getUser()` y después usaba el service client, que bypassea RLS. Las
+  // otras siete gatean con `requireMozoActionContext` desde la primera línea.
+  // El gate existía, pero recién adentro del `if (anyOverride)` — o sea que sólo
+  // corría cuando alguien pisaba un precio.
+  //
+  // Consecuencias: un mozo dado de baja (`disabled_at`) seguía pudiendo cargar
+  // consumo en cualquier mesa y disparar impresión en cocina — bloqueado en toda
+  // la app **menos** en la acción que mueve plata e imprime papel. Y cualquier
+  // usuario logueado (un cliente que entró con Google desde la carta) podía
+  // llamarla con un `tableId` real.
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  const ctx = ctxResult.data;
 
   const service = createSupabaseServiceClient() as unknown as GenericClient;
 
@@ -249,11 +259,8 @@ export async function enviarComanda(
       );
     }
 
-    const ctxResult = await requireMozoActionContext(business.id);
-    if (!ctxResult.ok) return ctxResult;
-
     for (const [idx, item] of productItems.entries()) {
-      const validation = validatePriceOverride(item, ctxResult.data.role);
+      const validation = validatePriceOverride(item, ctx.role);
       if (!validation.ok) return actionError(validation.error);
       priceOverrideByLine.set(idx, validation.override);
     }
@@ -385,7 +392,7 @@ export async function enviarComanda(
         customer_phone: "-",
         delivery_type: "dine_in",
         table_id: input.tableId,
-        mozo_id: user.id,
+        mozo_id: ctx.userId,
         lifecycle_status: "open",
         subtotal_cents: 0,
         delivery_fee_cents: 0,
@@ -475,7 +482,7 @@ export async function enviarComanda(
     const resolvedPrice = applyPriceOverride(
       Number(product.price_cents),
       priceOverrideByLine.get(idx) ?? null,
-      user.id,
+      ctx.userId,
     );
     const subtotal = lineSubtotalCents(
       resolvedPrice.unit_price_cents,
@@ -505,7 +512,7 @@ export async function enviarComanda(
         notes: inputItem.notes ?? null,
         subtotal_cents: subtotal,
         station_id: isStockItem ? null : stationId,
-        loaded_by: user.id,
+        loaded_by: ctx.userId,
         kitchen_status: isStockItem ? "delivered" : "pending",
         seat_number: seatNum,
         client_line_key: inputItem.client_line_key ?? null,
@@ -684,7 +691,7 @@ export async function enviarComanda(
         quantity: menuItem.quantity,
         notes: menuItem.notes ?? null,
         subtotal_cents: menuSubtotal,
-        loaded_by: user.id,
+        loaded_by: ctx.userId,
         kitchen_status: "pending",
         client_line_key: menuItem.client_line_key ?? null,
       } as any)
@@ -754,7 +761,7 @@ export async function enviarComanda(
             parent_order_item_id: parentId,
             is_combo_component: true,
             station_id: childStation,
-            loaded_by: user.id,
+            loaded_by: ctx.userId,
             kitchen_status: "pending",
           } as any)
           .select("id")
