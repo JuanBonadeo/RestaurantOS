@@ -2,7 +2,8 @@ import { notFound, redirect } from "next/navigation";
 
 import { FacturacionClient } from "@/components/admin/facturacion/facturacion-client";
 import { PageHeader, PageShell } from "@/components/admin/shell/page-shell";
-import { canManageBusiness, ensureAdminAccess } from "@/lib/admin/context";
+import { ensureAdminAccess } from "@/lib/admin/context";
+import { canSee } from "@/lib/permissions/sections";
 import { getInvoiceKPIs, listInvoices } from "@/lib/afip/queries";
 import type { InvoiceStatus, TipoComprobante } from "@/lib/afip/types";
 import { getBusiness } from "@/lib/tenant";
@@ -38,7 +39,11 @@ export default async function FacturacionPage({
   if (!business) notFound();
 
   const ctx = await ensureAdminAccess(business.id, business_slug);
-  if (!canManageBusiness(ctx)) redirect(`/${business_slug}/admin`);
+  // Gate por sección, no por `canManageBusiness` (#139): el encargado entra —
+  // es quien cobra y quien tiene que reintentar o anular un comprobante. La
+  // config AFIP no vive acá, vive en `configuracion` (admin-only).
+  if (!canSee("facturacion", ctx.role, { isPlatformAdmin: ctx.isPlatformAdmin }))
+    redirect(`/${business_slug}/admin`);
 
   const sp = await searchParams;
   const range = (["today", "7d", "30d", "all"].includes(sp.range as string)

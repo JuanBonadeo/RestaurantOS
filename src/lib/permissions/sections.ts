@@ -43,8 +43,14 @@ export type SectionAccess = "full" | "limited" | "none";
 // estas secciones de administración:
 //   - cortes/sangría → se hacen en Operación (`operacion?tab=caja`), no en la
 //     sección Cajas (que es config de caja, admin). Por eso `cajas` = none p/ encargado.
-//   - emitir factura → en el flujo de cobro (mozo/encargado), no en la sección
-//     Facturación (config AFIP, admin). Por eso `facturacion` = none p/ encargado.
+//   - emitir factura → también en el flujo de cobro (mozo/encargado). Pero eso
+//     NO alcanzaba: la sección Facturación es el único lugar donde se ve el
+//     comprobante después (reintentar una fallida, anular con nota de crédito,
+//     buscar la de una mesa que ya se fue), y el encargado la tenía en `none`.
+//     Se le abrió el 2026-08-04 (#139). Ojo: la config AFIP (CUIT, punto de
+//     venta, credencial del gateway) NO vive acá sino en `configuracion`, que
+//     sigue siendo admin-only — por eso abrir esta sección no le da al
+//     encargado ninguna llave del negocio.
 //   - reservas del día → también viven como tab dentro de Operación
 //     (`operacion?tab=reservas`); la sección sigue disponible para el encargado.
 const MATRIX: Record<AdminSection, Record<BusinessRole, SectionAccess>> = {
@@ -71,7 +77,7 @@ const MATRIX: Record<AdminSection, Record<BusinessRole, SectionAccess>> = {
   conversaciones: { admin: "full", encargado: "full", mozo: "none", personal: "none" },
   reportes: { admin: "full", encargado: "none", mozo: "none", personal: "none" },
   proveedores: { admin: "full", encargado: "full", mozo: "none", personal: "none" },
-  facturacion: { admin: "full", encargado: "none", mozo: "none", personal: "none" },
+  facturacion: { admin: "full", encargado: "full", mozo: "none", personal: "none" },
   // RRHH: admin-only (decisión 2026-06-15, confirmada por Juan). El encargado ya
   // no gestiona fichajes/equipo desde el panel admin.
   rrhh: { admin: "full", encargado: "none", mozo: "none", personal: "none" },

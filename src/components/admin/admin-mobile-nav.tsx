@@ -20,8 +20,12 @@ import type { NavGroup, NavItem } from "@/components/admin/admin-sidebar";
 
 // En mobile el panel es para MONITOREAR, no para editar/configurar. Solo estas
 // secciones aparecen en el drawer; el resto (catálogo, salones, promociones,
-// campañas, chatbot, proveedores, facturación, RRHH, configuración) se esconde
-// y se opera desde la PC. El acceso por URL directa sigue disponible.
+// campañas, chatbot, proveedores, RRHH, configuración) se esconde y se opera
+// desde la PC. El acceso por URL directa sigue disponible.
+//
+// `facturacion` se sumó el 2026-08-04 (#139): dejó de ser config y pasó a ser
+// operación de piso — el encargado reintenta una factura fallida o la anula
+// mientras el cliente sigue en la mesa, y no siempre está frente a la PC.
 const MOBILE_SECTIONS = new Set<AdminSection>([
   "dashboard",
   "operacion",
@@ -31,6 +35,7 @@ const MOBILE_SECTIONS = new Set<AdminSection>([
   "clientes",
   "conversaciones",
   "reportes",
+  "facturacion",
 ]);
 
 function badgeFor(

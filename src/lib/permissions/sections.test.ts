@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { canAnularFactura, canCrearPedidoFlash } from "./can";
 import { canSee, sectionAccess, type AdminSection } from "./sections";
 
 describe("sectionAccess / canSee", () => {
@@ -45,9 +46,21 @@ describe("sectionAccess / canSee", () => {
       expect(canSee("reservas", "encargado")).toBe(true);
     });
 
-    it("NO ve las secciones admin de Cajas ni Facturación (sus acciones viven en Operación/cobro)", () => {
+    it("NO ve la sección admin de Cajas (sus cortes viven en Operación)", () => {
       expect(canSee("cajas", "encargado")).toBe(false);
-      expect(canSee("facturacion", "encargado")).toBe(false);
+    });
+
+    // #139 — antes era `none` porque se asumía que el encargado emitía "en el
+    // flujo de cobro". Emitir sí, pero DESPUÉS no tenía dónde: reintentar una
+    // fallida, anular con nota de crédito o buscar la factura de una mesa que
+    // ya se fue sólo se puede acá. La config AFIP sigue siendo admin-only,
+    // pero vive en `configuracion`, no en esta sección.
+    it("SÍ ve Facturación: cobra, y reintentar/anular un comprobante es suyo", () => {
+      expect(sectionAccess("facturacion", "encargado")).toBe("full");
+      expect(canAnularFactura("encargado")).toBe(true);
+      expect(canCrearPedidoFlash("encargado")).toBe(true);
+      // La llave del negocio no se abre: la config AFIP no está en esta sección.
+      expect(canSee("configuracion", "encargado")).toBe(false);
     });
 
     it("ve el Chatbot pero solo en versión recortada (on/off)", () => {
