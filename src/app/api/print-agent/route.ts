@@ -587,7 +587,7 @@ export async function POST(req: Request) {
   const { data: row } = await service
     .from("comandas")
     .select(
-      "id, status, print_failed_at, reprint_requested_at, orders!inner(business_id)",
+      "id, status, cancelled_at, print_failed_at, reprint_requested_at, orders!inner(business_id)",
     )
     .eq("id", comandaId)
     .maybeSingle();
@@ -638,6 +638,21 @@ export async function POST(req: Request) {
   // ── Confirmación OK: pendiente → en_preparacion + limpia flags laterales ──
   // Una comanda ya avanzada (reimpresión, spec 35) se confirma sin regresar el
   // estado: solo se limpian `reprint_requested_at` + `print_failed_at`.
+  // spec 095 · H-28 — una comanda **anulada** no avanza. El handler ni siquiera
+  // seleccionaba `cancelled_at`, así que el acuse de que se imprimió el ticket
+  // «ANULADA» era, literalmente, lo que movía la comanda de `pendiente` a
+  // `en_preparacion`. En el cloud había 6 comandas con `cancelled_at` y 5 de
+  // ellas en `en_preparacion`. Se limpian sólo los flags laterales.
+  if (row.cancelled_at) {
+    if (row.print_failed_at || row.reprint_requested_at) {
+      await service
+        .from("comandas")
+        .update({ print_failed_at: null, reprint_requested_at: null })
+        .eq("id", comandaId);
+    }
+    return NextResponse.json({ status: row.status, changed: false });
+  }
+
   if (row.status !== "pendiente") {
     if (row.print_failed_at || row.reprint_requested_at) {
       await service
@@ -806,6 +821,12 @@ async function buildPrintableCuentaTickets(
     .eq("business_id", businessId)
     .eq("kind", "cuenta")
     .eq("status", "pendiente")
+    // spec 095 · H-37 — `imprimirCuenta` exige `lifecycle='open'` **al encolar**,
+    // pero el armador del GET no lo repetía y ningún write-site cancela filas de
+    // `print_jobs` (el CHECK sólo admite `pendiente|impreso`). Reponían el papel
+    // media hora después y salía la cuenta de una mesa ya anulada, con el total
+    // viejo, y alguien se la llevaba a los que estaban sentados ahí ahora.
+    .eq("orders.lifecycle_status", "open")
     .order("emitted_at", { ascending: true });
 
   if (error) {
@@ -957,6 +978,11 @@ async function buildPrintableFacturaTickets(
       .eq("business_id", businessId)
       .eq("kind", "factura")
       .eq("status", "pendiente")
+      // spec 095 · H-54 — el guard `authorized` estaba sólo al encolar y
+      // `anularFactura` no toca `print_jobs`: se anulaba la factura, se emitía
+      // la NC, y media hora después alguien enchufaba la comandera fiscal y
+      // salía el ticket de la anulada —con CAE y QR— y se lo daban al cliente.
+      .eq("invoices.status", "authorized")
       .order("emitted_at", { ascending: true }),
     service
       .from("cajas")

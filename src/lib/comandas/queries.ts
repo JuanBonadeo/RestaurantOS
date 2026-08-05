@@ -254,7 +254,7 @@ export async function getComandasByOrder(
   const { data, error } = await service
     .from("comandas")
     .select(`
-      id, order_id, station_id, batch, status, emitted_at, delivered_at,
+      id, order_id, station_id, batch, status, emitted_at, delivered_at, cancelled_at,
       comanda_items (
         order_items (
           id, product_id, product_name, quantity, notes, station_id,

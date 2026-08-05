@@ -16,6 +16,8 @@ import { getMozosByBusiness, type MozoMember } from "@/lib/mozo/queries";
 import { createNotification } from "@/lib/notifications/create";
 import { notifyItemCancelled } from "@/lib/notifications/events";
 import { recomputeOrderTotals } from "@/lib/orders/totals-recompute";
+
+import { encolarReimpresionDeItem } from "./reprint";
 import {
   canCancelItem,
   canModifyPostEnvio,
@@ -874,13 +876,21 @@ export async function marcarComandaEntregada(
 
   const { data: row } = await service
     .from("comandas")
-    .select("id, status, orders!inner(business_id)")
+    .select("id, status, cancelled_at, orders!inner(business_id)")
     .eq("id", comandaId)
     .maybeSingle();
   const ownerBusinessId = (row as { orders?: { business_id: string } } | null)
     ?.orders?.business_id;
   if (!row || ownerBusinessId !== business.id) {
     return actionError("Comanda no encontrada.");
+  }
+  // spec 095 · H-14 — una comanda anulada no se «entrega». `getComandasByOrder`
+  // ni siquiera traía `cancelled_at`, así que en la app del mozo la tanda
+  // anulada seguía mostrando el botón verde sin ningún cartel: el mozo lo
+  // tocaba y la comanda aparecía en «Entregadas». En el cloud ya existía el
+  // estado imposible (`cancelled_at` + `status='entregado'` + `delivered_at`).
+  if ((row as { cancelled_at: string | null }).cancelled_at) {
+    return actionError("Esta comanda está anulada.");
   }
   const current = (row as { status: ComandaStatus }).status;
   if (current === "entregado") return actionOk(undefined);
@@ -911,7 +921,12 @@ export async function marcarComandaEntregada(
     await service
       .from("order_items")
       .update({ kitchen_status: "delivered" })
-      .in("id", itemIds);
+      .in("id", itemIds)
+      // spec 095 · H-50 — el mismo archivo aplicaba dos criterios:
+      // `advanceItemKitchenStatus` sí excluye los cancelados. Sin esto, en el
+      // kanban un ítem aparece tachado con motivo **y** entregado, y cualquier
+      // métrica de tiempos por sector se contamina.
+      .is("cancelled_at", null);
   }
 
   // Notify the mozo that the comanda is ready to serve.
@@ -1129,6 +1144,8 @@ export async function advanceItemKitchenStatus(
   return actionOk({ kitchen_status: next });
 }
 
+
+
 /**
  * Cancela un item (flow de "86" / rotura). Marca cancelled_at + reason; la
  * comanda no se mueve por sí sola, pero la cocina ve el flag.
@@ -1218,6 +1235,15 @@ export async function cancelarItem(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     .update({ subtotal_cents: newSubtotal, total_cents: newTotal } as any)
     .eq("id", orderId);
+
+  // spec 095 · H-36 — avisarle a la comandera. Encolar la reimpresión era un
+  // gesto de **UI**: sólo el modal «Editar comanda» del kanban encadenaba
+  // `solicitarReimpresion` después de cancelar. Desde la app del mozo o desde
+  // la pantalla de cuenta no se tocaba `reprint_requested_at`, así que cocina
+  // se quedaba con el papel colgado, preparaba el plato y lo mandaba: plato
+  // regalado, merma real y discusión sobre quién avisó qué. `cancelarComanda`
+  // sí lo encolaba desde la action — esto lo empareja.
+  await encolarReimpresionDeItem(service, orderItemId);
 
   // spec 27 — avisar al mozo de la mesa que se anuló un ítem (el actor
   // encargado/admin no se autoavisa; resuelve mesa + destinatario en el helper).

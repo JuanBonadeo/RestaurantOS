@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
+import { encolarReimpresionDeItem } from "@/lib/comandas/reprint";
 import { requireMozoActionContext } from "@/lib/mozo/auth";
 import { notifyItemCancelled } from "@/lib/notifications/events";
 import { canApplyDiscount, canCancelItem } from "@/lib/permissions/can";
@@ -270,6 +271,11 @@ export async function cancelarItemEnCuenta(
       cancelled_by: ctx.userId, // spec 34 — responsable de la anulación
     })
     .eq("id", orderItemId);
+
+  // spec 095 · H-36 — avisarle a la comandera. Este camino (sacar un plato
+  // desde la pantalla de cuenta) tampoco encolaba la reimpresión: cocina se
+  // quedaba con el papel colgado y mandaba el plato igual.
+  await encolarReimpresionDeItem(service, orderItemId);
 
   // Splits previos quedan inválidos.
   await deleteSplitsAndItems(service, orderId);

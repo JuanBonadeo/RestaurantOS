@@ -121,6 +121,13 @@ export async function getActiveComandas(
       .select(select)
       .eq("orders.business_id", businessId)
       .in("status", ["pendiente", "en_preparacion"])
+      // spec 095 · H-32 — la columna de activas no tenía cutoff temporal (a
+      // diferencia de la de entregadas) y el cobro no cierra comandas, así que
+      // acumulaba tickets de mesas que pagaron hace días: en una semana «En
+      // preparación» tenía 40 comandas fantasma y el cocinero dejaba de mirar la
+      // pantalla. Y H-28: las anuladas no tienen nada que hacer en cocina.
+      .eq("orders.lifecycle_status", "open")
+      .is("cancelled_at", null)
       // FIFO: la comanda más vieja arriba. La cocina atiende por orden de
       // llegada; las recién marchadas caen al fondo de la columna.
       .order("emitted_at", { ascending: true }),
