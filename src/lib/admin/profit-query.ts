@@ -43,7 +43,12 @@ export async function getProfitMetrics(
       .eq("business_id", businessId)
       .gte("created_at", startIso)
       .lt("created_at", endIso)
-      .in("kind", ["venta", "merma"]),
+      // spec 089 — `reversion` entra al conjunto. Antes se filtraba afuera y la
+      // fila venía con `cost_cents_snapshot = 0` literal, así que el costo de una
+      // orden cancelada se quedaba en el food cost mientras su venta **sí** se
+      // excluía del numerador: el margen salía 4-5 puntos peor de lo real en
+      // cualquier noche con anulaciones.
+      .in("kind", ["venta", "merma", "reversion"]),
   ]);
 
   let netSalesCents = 0;
@@ -58,7 +63,15 @@ export async function getProfitMetrics(
     const cost = Math.abs(Number(row.cost_cents_snapshot) || 0);
     if (row.kind === "venta") foodCostCents += cost;
     else if (row.kind === "merma") mermaCents += cost;
+    // La reversión se guarda en positivo (magnitud del movimiento, igual que
+    // 'venta'); el signo lo pone quien lee. Acá resta: el insumo volvió a la
+    // heladera, no se consumió.
+    else if (row.kind === "reversion") foodCostCents -= cost;
   }
+  // Piso en cero: una reversión puede caer en el rango de fechas y su venta
+  // quedar afuera (se cargó ayer, se anuló hoy). Sin el piso, el food cost del
+  // día se iría a negativo y el margen daría más de 100%.
+  foodCostCents = Math.max(0, foodCostCents);
 
   const hasCostData = foodCostCents > 0;
   const grossMarginCents = netSalesCents - foodCostCents;
