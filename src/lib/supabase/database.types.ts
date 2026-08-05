@@ -1317,6 +1317,54 @@ export type Database = {
           },
         ]
       }
+      daily_menu_choice_groups: {
+        Row: {
+          applies_when_group_id: string | null
+          applies_when_product_ids: string[]
+          created_at: string
+          id: string
+          menu_id: string
+          name: string
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          applies_when_group_id?: string | null
+          applies_when_product_ids?: string[]
+          created_at?: string
+          id: string
+          menu_id: string
+          name: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          applies_when_group_id?: string | null
+          applies_when_product_ids?: string[]
+          created_at?: string
+          id?: string
+          menu_id?: string
+          name?: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "daily_menu_choice_groups_applies_when_group_id_fkey"
+            columns: ["applies_when_group_id"]
+            isOneToOne: false
+            referencedRelation: "daily_menu_choice_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_menu_choice_groups_menu_id_fkey"
+            columns: ["menu_id"]
+            isOneToOne: false
+            referencedRelation: "daily_menus"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       daily_menus: {
         Row: {
           available_days: number[]

@@ -7,6 +7,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 import { requireCatalogManager } from "@/lib/catalog/require-catalog-manager";
 import { DailyMenuInput, type DailyMenuComponentInput } from "./schemas";
+import { deriveChoiceGroups } from "./choice-groups";
 
 /**
  * Sincroniza los componentes de un menú comparando los incoming contra los
@@ -86,6 +87,77 @@ async function syncComponents(
       if (error) return "No pudimos crear un componente.";
     }
   }
+
+  return syncChoiceGroups(menuId, components);
+}
+
+/**
+ * Mantiene `daily_menu_choice_groups` al día (spec 087).
+ *
+ * Mientras el editor siga hablando el modelo viejo —una lista plana con el
+ * nombre del grupo denormalizado y la condición en la opción— los grupos se
+ * **derivan** de los componentes en cada guardado, con la misma traducción que
+ * hizo el backfill de la migración `0036`.
+ *
+ * Esto es lo que permite que los lectores pasen a la tabla nueva sin coordinar
+ * un deploy: guarde quien guarde, con el editor que sea, la tabla queda
+ * consistente. Cuando el editor mande los grupos explícitos, esta derivación se
+ * reemplaza por lo que venga del form.
+ */
+async function syncChoiceGroups(
+  menuId: string,
+  components: DailyMenuComponentInput[],
+): Promise<string | null> {
+  const supabase = await createSupabaseServerClient();
+  const grupos = deriveChoiceGroups(components);
+
+  const { data: existentes } = await supabase
+    .from("daily_menu_choice_groups")
+    .select("id")
+    .eq("menu_id", menuId);
+
+  const vivos = new Set(grupos.map((g) => g.id));
+  const aBorrar = ((existentes ?? []) as { id: string }[])
+    .map((g) => g.id)
+    .filter((id) => !vivos.has(id));
+  if (aBorrar.length > 0) {
+    const { error } = await supabase
+      .from("daily_menu_choice_groups")
+      .delete()
+      .in("id", aBorrar);
+    if (error) return "No pudimos borrar grupos de opciones viejos.";
+  }
+
+  if (grupos.length === 0) return null;
+
+  // Dos pasadas: primero sin condición, después con ella. La condición apunta a
+  // otro grupo del mismo menú y en el alta todavía puede no existir.
+  const { error: upsertErr } = await supabase
+    .from("daily_menu_choice_groups")
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .upsert(
+      grupos.map((g) => ({
+        id: g.id,
+        menu_id: menuId,
+        name: g.name,
+        sort_order: g.sort_order,
+      })) as any,
+      { onConflict: "id" },
+    );
+  if (upsertErr) return "No pudimos guardar los grupos de opciones.";
+
+  for (const g of grupos) {
+    const { error } = await supabase
+      .from("daily_menu_choice_groups")
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .update({
+        applies_when_group_id: g.applies_when_group_id,
+        applies_when_product_ids: g.applies_when_product_ids,
+      } as any)
+      .eq("id", g.id);
+    if (error) return "No pudimos guardar la condición de un grupo.";
+  }
+
   return null;
 }
 
