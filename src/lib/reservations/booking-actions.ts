@@ -799,11 +799,13 @@ export async function updateReservationDetails(
   let serviceName = reservation.service;
   let serviceDate: string | null = null;
 
-  if (isFlexible) {
-    const targetService = parsed.data.service ?? reservation.service;
-    if (!targetService) {
-      return actionError("La reserva no tiene un servicio asignado.");
-    }
+  // Una reserva SIN servicio en un negocio flexible es una fila vieja (creada
+  // antes de la 059, o por un canal que todavía no es mode-aware). Se edita por
+  // el camino estricto en vez de rebotar: si no, dejaba de ser editable.
+  const targetService = parsed.data.service ?? reservation.service;
+  const useFlexible = isFlexible && Boolean(targetService);
+
+  if (useFlexible && targetService) {
     const serviceChanged = targetService !== reservation.service;
 
     // La jornada se ancla en el servicio ACTUAL (el que la reserva tiene hoy),
@@ -862,7 +864,7 @@ export async function updateReservationDetails(
   }
 
   // ── Solape y cupo ─────────────────────────────────────────────────────────
-  if (isFlexible && serviceName && serviceDate) {
+  if (useFlexible && serviceName && serviceDate) {
     // Una sola consulta resuelve las dos preguntas del modo flexible: si la
     // mesa está libre ESE servicio y si el cupo (cubiertos + mesas) alcanza.
     // Excluyendo la reserva editada, que si no se pisa a sí misma.

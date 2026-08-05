@@ -131,6 +131,18 @@ export type ReservationService = {
 };
 
 /**
+ * Spec 097 — un servicio elegible de un día concreto, como lo consume el editor
+ * de reservas del admin. Vive en types (y no en queries) porque lo lee un client
+ * component.
+ */
+export type DayServiceOption = {
+  name: string;
+  /** "HH:MM" local (TZ del negocio). */
+  opens_at: string;
+  closes_at: string;
+};
+
+/**
  * "Live" statuses: occupy the table and count against availability. Matches
  * the SQL exclusion constraint filter on reservations_no_overlap.
  */

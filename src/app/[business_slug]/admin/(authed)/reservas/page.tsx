@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { AdminDayList, type AdminRow } from "@/components/reservations/admin-day-list";
 import { PageHeader, PageShell } from "@/components/admin/shell/page-shell";
 import { ensureAdminAccess } from "@/lib/admin/context";
+import { getReservationEditContext } from "@/lib/reservations/queries";
 import type { FloorTable } from "@/lib/reservations/types";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
@@ -71,6 +72,12 @@ export default async function AdminReservasPage({
     activeTables = (tablesData ?? []) as FloorTable[];
   }
 
+  // Spec 097 — el editor de la fila cambia según el modo (en flexible el
+  // horario se elige por servicio + hora de llegada).
+  const { mode, services } = await getReservationEditContext(business.id, date, {
+    useService: true,
+  });
+
   return (
     <PageShell width="wide" className="space-y-6">
       <PageHeader
@@ -85,6 +92,8 @@ export default async function AdminReservasPage({
         timezone={business.timezone}
         floorPlans={floorPlans}
         activeTables={activeTables}
+        mode={mode}
+        services={services}
       />
     </PageShell>
   );

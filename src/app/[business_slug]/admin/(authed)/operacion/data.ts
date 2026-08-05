@@ -31,10 +31,15 @@ import { getMozosByBusiness } from "@/lib/mozo/queries";
 import type { MozoMember } from "@/lib/mozo/queries";
 import { orderSlotsForDay } from "@/lib/orders/scheduled";
 import {
+  getReservationEditContext,
   getReservationServices,
   getReservationSettings,
 } from "@/lib/reservations/queries";
-import type { FloorTable } from "@/lib/reservations/types";
+import type {
+  DayServiceOption,
+  FloorTable,
+  ReservationMode,
+} from "@/lib/reservations/types";
 import { getCurrentPresent } from "@/lib/rrhh/clock-actions";
 import type { PresentEmployee } from "@/lib/rrhh/clock-actions";
 import { getTodaySummary } from "@/lib/rrhh/clock-queries";
@@ -112,6 +117,9 @@ export type ReservasData = {
   rows: AdminRow[];
   floorPlans: Array<{ id: string; name: string }>;
   activeTables: FloorTable[];
+  /** Spec 097 — modo + servicios del día para el editor de la fila. */
+  mode: ReservationMode;
+  services: DayServiceOption[];
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -359,11 +367,21 @@ export async function loadReservas(
     activeTables = (data ?? []) as FloorTable[];
   }
 
+  // Spec 097 — el editor de la fila cambia según el modo (en flexible el
+  // horario se elige por servicio + hora de llegada).
+  const { mode, services } = await getReservationEditContext(
+    businessId,
+    window.date,
+    { useService: true },
+  );
+
   return {
     date: window.date,
     rows: (rowsRes.data ?? []) as AdminRow[],
     floorPlans,
     activeTables,
+    mode,
+    services,
   };
 }
 

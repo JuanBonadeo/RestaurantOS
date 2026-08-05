@@ -313,7 +313,7 @@ function ReservasPanel({
   timezone: string;
   salonIds: string[];
 }) {
-  const { date, rows, floorPlans, activeTables } = use(promise);
+  const { date, rows, floorPlans, activeTables, mode, services } = use(promise);
   return (
     <AdminDayList
       slug={slug}
@@ -322,6 +322,8 @@ function ReservasPanel({
       timezone={timezone}
       floorPlans={floorPlans}
       activeTables={activeTables}
+      mode={mode}
+      services={services}
       salonIds={salonIds}
       // Embebida en el operativo: el navegador de fechas se queda acá
       // (`?tab=reservas&date=…`) en vez de saltar a /admin/reservas.

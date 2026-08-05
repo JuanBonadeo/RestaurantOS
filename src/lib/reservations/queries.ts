@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { BusinessRole } from "@/lib/admin/context";
 
 import type {
+  DayServiceOption,
   FloorTable,
   Reservation,
   ReservationMode,
@@ -284,14 +285,6 @@ export async function getReservationServices(
     .order("opens_at", { ascending: true });
   return (data ?? []) as ReservationService[];
 }
-
-/** Spec 097 — un servicio elegible del día, como lo consume el editor. */
-export type DayServiceOption = {
-  name: string;
-  /** "HH:MM" local. */
-  opens_at: string;
-  closes_at: string;
-};
 
 /**
  * Spec 097 — lo que el editor de reservas del admin necesita saber del negocio

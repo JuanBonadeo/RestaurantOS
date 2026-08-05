@@ -17,6 +17,7 @@ import {
 import { arrivalSlots } from "@/lib/reservations/flexible-availability";
 import { OVERBOOK_HINT } from "@/lib/reservations/edit-window";
 import type {
+  DayServiceOption,
   FloorTable,
   Reservation,
   ReservationMode,
@@ -169,6 +170,8 @@ export function AdminDayList({
   timezone,
   floorPlans,
   activeTables,
+  mode = "estricto",
+  services = [],
   salonIds = [],
   datePath,
 }: {
@@ -178,6 +181,10 @@ export function AdminDayList({
   timezone: string;
   floorPlans: Array<{ id: string; name: string }>;
   activeTables: FloorTable[];
+  /** Spec 097 — el editor de reservas cambia según el modo del negocio. */
+  mode?: ReservationMode;
+  /** Servicios elegibles de `date` (sólo modo flexible). */
+  services?: DayServiceOption[];
   /**
    * Spec 065: salones elegidos en `/admin/operacion`. Vacío = sin filtro (es lo
    * que usa la página `/admin/reservas`, que no tiene selector propio).
@@ -255,22 +262,27 @@ export function AdminDayList({
 
   function handleUpdateDetails(
     reservationId: string,
-    tableId: string,
-    partySize: number,
+    patch: EditPatch,
+    callbacks: EditCallbacks,
   ) {
     start(async () => {
       const result = await updateReservationDetails({
         business_slug: slug,
         reservation_id: reservationId,
-        table_id: tableId,
-        party_size: partySize,
+        ...patch,
       });
       if (result.ok) {
         toast.success("Reserva actualizada.");
+        callbacks.onDone();
         router.refresh();
-      } else {
-        toast.error(result.error);
+        return;
       }
+      // Sobrecupo: no es un "no", es un "confirmá" (spec 077).
+      if (result.error.endsWith(OVERBOOK_HINT)) {
+        callbacks.onOverbook(result.error);
+        return;
+      }
+      toast.error(result.error);
     });
   }
 
@@ -540,6 +552,8 @@ export function AdminDayList({
               multiSalon={multiSalon}
               activeTables={activeTables}
               floorPlans={floorPlans}
+              mode={mode}
+              services={services}
               onSentar={() => handleSentar(r.id)}
               onComplete={() => handleChangeStatus(r.id, "completed")}
               onNoShow={() =>
@@ -556,8 +570,8 @@ export function AdminDayList({
                   customerName: r.customer_name,
                 })
               }
-              onUpdateDetails={(tableId, partySize) =>
-                handleUpdateDetails(r.id, tableId, partySize)
+              onUpdateDetails={(patch, callbacks) =>
+                handleUpdateDetails(r.id, patch, callbacks)
               }
             />
           ))}
@@ -941,19 +955,90 @@ function ReservationRow({
               className="h-9 w-16 rounded-xl border-0 bg-white px-2 text-center text-sm font-semibold tabular-nums text-zinc-900 ring-1 ring-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-300"
             />
           </div>
+          {/* Spec 097 — servicio (sólo flexible: es donde "el horario" se
+              elige por servicio y no por slot de grilla). */}
+          {isFlexible && services.length > 0 && (
+            <div>
+              <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                Servicio
+              </label>
+              <select
+                value={editService}
+                onChange={(e) => {
+                  setEditService(e.target.value);
+                  setOverbookAsk(null);
+                }}
+                className="h-9 rounded-xl border-0 bg-white px-2.5 text-sm font-medium text-zinc-900 ring-1 ring-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-300"
+              >
+                {!services.some((s) => s.name === editService) && (
+                  <option value={editService}>{editService || "—"}</option>
+                )}
+                {services.map((s) => (
+                  <option key={s.name} value={s.name}>
+                    {s.name} ({s.opens_at}–{s.closes_at})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div>
+            <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+              {isFlexible ? "Llegada" : "Hora"}
+            </label>
+            {isFlexible && serviceSlots.length > 0 ? (
+              <select
+                value={serviceSlots.includes(editTime) ? editTime : ""}
+                onChange={(e) => {
+                  setEditTime(e.target.value);
+                  setOverbookAsk(null);
+                }}
+                className="h-9 rounded-xl border-0 bg-white px-2.5 text-sm font-semibold tabular-nums text-zinc-900 ring-1 ring-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-300"
+              >
+                {!serviceSlots.includes(editTime) && (
+                  <option value="" disabled>
+                    Elegir hora…
+                  </option>
+                )}
+                {serviceSlots.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="time"
+                value={editTime}
+                onChange={(e) => {
+                  setEditTime(e.target.value);
+                  setOverbookAsk(null);
+                }}
+                className="h-9 rounded-xl border-0 bg-white px-2 text-sm font-semibold tabular-nums text-zinc-900 ring-1 ring-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-300"
+              />
+            )}
+          </div>
           <div className="min-w-0 flex-1">
             <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
               Mesa
             </label>
             <select
               value={editTableId}
-              onChange={(e) => setEditTableId(e.target.value)}
+              onChange={(e) => {
+                setEditTableId(e.target.value);
+                setOverbookAsk(null);
+              }}
               className="h-9 w-full max-w-[240px] rounded-xl border-0 bg-white px-2.5 text-sm font-medium text-zinc-900 ring-1 ring-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-300"
             >
-              {!editTableId && (
-                <option value="" disabled>
-                  Elegir mesa…
-                </option>
+              {/* Flexible: la mesa se puede decidir al llegar (spec 059), así que
+                  "sin mesa" es un estado válido y no un formulario incompleto. */}
+              {isFlexible ? (
+                <option value="">Sin mesa (se define al llegar)</option>
+              ) : (
+                !editTableId && (
+                  <option value="" disabled>
+                    Elegir mesa…
+                  </option>
+                )
               )}
               {activeTables.map((t) => (
                 <option key={t.id} value={t.id}>
@@ -968,8 +1053,8 @@ function ReservationRow({
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={handleSave}
-              disabled={pending || !editTableId}
+              onClick={() => save(false)}
+              disabled={pending || (!isFlexible && !editTableId)}
               className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-zinc-900 px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-zinc-800 active:scale-[0.97] disabled:opacity-50"
             >
               <Check className="h-3.5 w-3.5" />
@@ -977,13 +1062,30 @@ function ReservationRow({
             </button>
             <button
               type="button"
-              onClick={() => setEditing(false)}
+              onClick={() => {
+                setEditing(false);
+                setOverbookAsk(null);
+              }}
               disabled={pending}
               className="inline-flex h-9 items-center rounded-xl bg-white px-3 text-xs font-semibold text-zinc-600 ring-1 ring-zinc-200 transition hover:bg-zinc-100 active:scale-[0.97] disabled:opacity-50"
             >
               Cancelar
             </button>
           </div>
+          {overbookAsk && (
+            <div className="w-full rounded-xl bg-amber-50 p-2.5 ring-1 ring-amber-200">
+              <p className="text-xs font-medium text-amber-900">{overbookAsk}</p>
+              <button
+                type="button"
+                onClick={() => save(true)}
+                disabled={pending}
+                className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-lg bg-amber-600 px-3 text-xs font-semibold text-white transition hover:bg-amber-700 active:scale-[0.97] disabled:opacity-50"
+              >
+                <Check className="h-3.5 w-3.5" />
+                Guardar igual
+              </button>
+            </div>
+          )}
         </div>
       )}
     </li>
