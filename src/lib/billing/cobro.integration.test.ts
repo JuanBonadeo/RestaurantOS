@@ -283,7 +283,7 @@ describe.skipIf(!dbAvailable)("billing/cobro (integration)", () => {
     expect(ord!.lifecycle_status).toBe("closed");
   });
 
-  it("anularCobro: order cerrada vuelve a open + mesa pidio_cuenta", { timeout: 30_000 }, async () => {
+  it("anularCobro: la mesa vuelve al plano OCUPADA con su cuenta (spec 100)", { timeout: 30_000 }, async () => {
     const { tableId: tid, orderId } = await newOrder("E");
     CURRENT_USER_ID = mozoId;
     await registrarPago({
@@ -302,24 +302,127 @@ describe.skipIf(!dbAvailable)("billing/cobro (integration)", () => {
 
     const { data: ord } = await supabase
       .from("orders")
-      .select("lifecycle_status, total_paid_cents")
+      .select("lifecycle_status, total_paid_cents, created_at, bill_requested_at")
       .eq("id", orderId)
       .single();
     expect(ord!.lifecycle_status).toBe("open");
     expect(ord!.total_paid_cents).toBe(0);
+    // No se inventa un pedido de cuenta que nunca ocurrió.
+    expect(ord!.bill_requested_at).toBeNull();
 
     const { data: tbl } = await supabase
       .from("tables")
-      .select("operational_status")
+      .select("operational_status, current_order_id, opened_at")
       .eq("id", tid)
       .single();
-    expect(tbl!.operational_status).toBe("pidio_cuenta");
+    // Esta cuenta nunca pidió la cuenta: la cobraron por error.
+    expect(tbl!.operational_status).toBe("ocupada");
+    // El puntero es lo que la pone de vuelta en el plano con sus ítems.
+    expect(tbl!.current_order_id).toBe(orderId);
+    // Y el reloj de la mesa es el de la cuenta, no el de la anulación.
+    expect(new Date(tbl!.opened_at as string).getTime()).toBe(
+      new Date(ord!.created_at as string).getTime(),
+    );
 
     const { data: payments } = await supabase
       .from("payments")
       .select("payment_status")
       .eq("order_id", orderId);
     expect(payments!.every((p) => p.payment_status === "refunded")).toBe(true);
+  });
+
+  it("anularCobro: si la cuenta ya se había pedido, vuelve a pidio_cuenta", { timeout: 30_000 }, async () => {
+    const { tableId: tid, orderId } = await newOrder("E2");
+    const pedidaAt = new Date(Date.now() - 20 * 60_000).toISOString();
+    await supabase
+      .from("orders")
+      .update({ bill_requested_at: pedidaAt })
+      .eq("id", orderId);
+
+    CURRENT_USER_ID = mozoId;
+    await registrarPago({
+      orderId,
+      splitId: null,
+      method: "cash",
+      amount_cents: 10_000,
+      tip_cents: 0,
+      caja_id: cajaId,
+      slug: businessSlug,
+    });
+
+    CURRENT_USER_ID = encargadoId;
+    expect((await anularCobro(orderId, "error de caja", businessSlug)).ok).toBe(
+      true,
+    );
+
+    const { data: tbl } = await supabase
+      .from("tables")
+      .select("operational_status, current_order_id")
+      .eq("id", tid)
+      .single();
+    expect(tbl!.operational_status).toBe("pidio_cuenta");
+    expect(tbl!.current_order_id).toBe(orderId);
+
+    // El pedido de cuenta original se conserva; no se pisa con `now()`.
+    const { data: ord } = await supabase
+      .from("orders")
+      .select("bill_requested_at")
+      .eq("id", orderId)
+      .single();
+    expect(new Date(ord!.bill_requested_at as string).getTime()).toBe(
+      new Date(pedidaAt).getTime(),
+    );
+  });
+
+  it("anularCobro: con factura autorizada se rechaza y NO devuelve un peso (spec 100)", { timeout: 30_000 }, async () => {
+    const { orderId } = await newOrder("E3");
+    CURRENT_USER_ID = mozoId;
+    await registrarPago({
+      orderId,
+      splitId: null,
+      method: "cash",
+      amount_cents: 10_000,
+      tip_cents: 0,
+      caja_id: cajaId,
+      slug: businessSlug,
+    });
+
+    await supabase.from("invoices").insert({
+      business_id: businessId,
+      order_id: orderId,
+      tipo_comprobante: "factura_b",
+      punto_venta: 3,
+      numero: 1234,
+      cae: "75000000000001",
+      total_cents: 10_000,
+      neto_cents: 8_264,
+      iva_cents: 1_736,
+      status: "authorized",
+      provider: "sandbox",
+    });
+
+    CURRENT_USER_ID = encargadoId;
+    const r = await anularCobro(orderId, "cliente reclamó", businessSlug);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error).toContain("0003-00001234");
+      expect(r.error).toContain("nota de crédito");
+    }
+
+    // Nada se movió: ni la orden, ni la plata.
+    const { data: ord } = await supabase
+      .from("orders")
+      .select("lifecycle_status, total_paid_cents")
+      .eq("id", orderId)
+      .single();
+    expect(ord!.lifecycle_status).toBe("closed");
+    expect(ord!.total_paid_cents).toBe(10_000);
+
+    const { data: payments } = await supabase
+      .from("payments")
+      .select("payment_status")
+      .eq("order_id", orderId);
+    expect(payments!.every((p) => p.payment_status === "paid")).toBe(true);
   });
 
   it("cancelarSplit sin pagos: status=cancelled + redistribución", { timeout: 30_000 }, async () => {

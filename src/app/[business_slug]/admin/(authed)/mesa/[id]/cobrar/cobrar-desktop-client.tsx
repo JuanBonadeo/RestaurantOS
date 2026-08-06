@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { BusinessRole } from "@/lib/admin/context";
+import { formatInvoiceNumber, tipoLabel } from "@/lib/afip/format";
 import type { Invoice } from "@/lib/afip/types";
 import {
   anularCobro,
@@ -253,6 +254,7 @@ export function CobrarDesktopClient({
               orderId={cuenta.order.id}
               slug={slug}
               onDone={goHome}
+              existingInvoice={existingInvoice}
             />
           )}
 
@@ -633,14 +635,27 @@ function AnularCobroSection({
   orderId,
   slug,
   onDone,
+  existingInvoice = null,
 }: {
   orderId: string;
   slug: string;
   onDone: () => void;
+  /** Comprobante vigente de la cuenta: con uno arriba, primero va la NC. */
+  existingInvoice?: Invoice | null;
 }) {
   const [, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
   const [motivo, setMotivo] = useState("");
+
+  // spec 100 — la guarda de verdad está en el server (`anularCobro` corta si
+  // hay factura autorizada). Acá se adelanta el motivo para que el encargado
+  // no llegue a escribir el motivo y se coma el rechazo recién al confirmar.
+  const facturada =
+    existingInvoice?.status === "authorized" &&
+    (existingInvoice.tipo_comprobante === "factura_a" ||
+      existingInvoice.tipo_comprobante === "factura_b")
+      ? existingInvoice
+      : null;
 
   return (
     <>
@@ -657,10 +672,22 @@ function AnularCobroSection({
           <DialogHeader>
             <DialogTitle>Anular cobro</DialogTitle>
           </DialogHeader>
-          <p className="-mt-2 text-sm text-zinc-600">
-            Los pagos cobrados se marcan como reembolsados (auditoría) y la
-            mesa vuelve a esperando cuenta.
-          </p>
+          {facturada ? (
+            <p className="-mt-2 rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
+              Esta cuenta tiene la{" "}
+              <strong>
+                {tipoLabel(facturada.tipo_comprobante)}{" "}
+                {formatInvoiceNumber(facturada.punto_venta, facturada.numero)}
+              </strong>{" "}
+              autorizada. Anulá el comprobante desde Facturación —se emite la
+              nota de crédito— y después volvé a anular el cobro.
+            </p>
+          ) : (
+            <p className="-mt-2 text-sm text-zinc-600">
+              Los pagos cobrados se marcan como reembolsados (auditoría) y la
+              mesa vuelve al plano como estaba, con todos sus ítems.
+            </p>
+          )}
           <div className="grid gap-1.5">
             <Label>
               Motivo<span className="ml-1 text-rose-600">*</span>
@@ -669,6 +696,7 @@ function AnularCobroSection({
               value={motivo}
               onChange={(e) => setMotivo(e.target.value)}
               rows={2}
+              disabled={facturada != null}
               placeholder="Ej: cliente reclamó, pago doble, error de carga…"
               autoFocus
             />
@@ -679,7 +707,7 @@ function AnularCobroSection({
             </Button>
             <Button
               variant="destructive"
-              disabled={motivo.trim() === ""}
+              disabled={motivo.trim() === "" || facturada != null}
               onClick={() =>
                 startTransition(async () => {
                   const r = await anularCobro(orderId, motivo, slug);

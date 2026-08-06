@@ -14,10 +14,21 @@ import { formatCurrency } from "@/lib/currency";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
+import { formatInvoiceNumber, tipoLabel } from "@/lib/afip/format";
+import type { TipoComprobante } from "@/lib/afip/types";
+
+import { restitucionMesa, type OperationalStatus } from "./restitucion-mesa";
 import { isCashShortPayment, sumActiveItems } from "./totals";
 import type { OrderSplit, Payment } from "./types";
 
 type GenericClient = SupabaseClient;
+
+/** Lo mínimo de un comprobante para nombrarlo en un mensaje de error. */
+type InvoiceRef = {
+  tipo_comprobante: TipoComprobante;
+  punto_venta: number;
+  numero: number | null;
+};
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -42,20 +53,33 @@ type LoadedOrder = {
   discount_cents: number;
 };
 
+/**
+ * Lo que `loadOrder` trae de más y sólo usa la anulación (spec 100). Va aparte
+ * porque `LoadedOrder` es el contrato público de `IniciarCobroResult`, que
+ * `cobro-panel-data.ts` arma a mano desde la cuenta ya cargada.
+ */
+type LoadedOrderFull = LoadedOrder & {
+  /** La mesa se restituye con estos dos, no con `now()`. */
+  created_at: string;
+  bill_requested_at: string | null;
+  /** Momento del cobro que se anula: ancla para encontrar la reserva. */
+  closed_at: string | null;
+};
+
 async function loadOrder(
   service: GenericClient,
   orderId: string,
   businessId: string,
-): Promise<LoadedOrder | null> {
+): Promise<LoadedOrderFull | null> {
   const { data } = await service
     .from("orders")
     .select(
-      "id, business_id, order_number, table_id, lifecycle_status, status, total_cents, total_paid_cents, tip_cents, discount_cents",
+      "id, business_id, order_number, table_id, lifecycle_status, status, total_cents, total_paid_cents, tip_cents, discount_cents, created_at, bill_requested_at, closed_at",
     )
     .eq("id", orderId)
     .maybeSingle();
   if (!data) return null;
-  const row = data as LoadedOrder;
+  const row = data as LoadedOrderFull;
   if (row.business_id !== businessId) return null;
   return row;
 }
@@ -813,6 +837,33 @@ export async function anularCobro(
   const cerrado = await bloqueoPorPeriodoCerrado(service, business.id, orderId);
   if (cerrado) return actionError(cerrado);
 
+  // spec 100 — no se devuelve plata que ya tiene CAE.
+  //
+  // Esta action reembolsaba los pagos sin mirar `invoices` una sola vez: la
+  // factura quedaba `authorized`, con su CAE vivo, por una venta que ya no
+  // existía. Plata devuelta en caja e IVA declarado ante ARCA. En AR un
+  // comprobante autorizado no se borra: se anula emitiendo la nota de crédito
+  // (`anularFactura`), y recién ahí se toca la caja.
+  //
+  // Bloquear en vez de encadenar la NC: la NC puede fallar en ARCA, y no
+  // querés haber devuelto la plata antes de saberlo.
+  const { data: facturasVivas } = await service
+    .from("invoices")
+    .select("tipo_comprobante, punto_venta, numero")
+    .eq("business_id", business.id)
+    .eq("order_id", orderId)
+    .eq("status", "authorized")
+    .in("tipo_comprobante", ["factura_a", "factura_b"]);
+  const factura = ((facturasVivas ?? []) as InvoiceRef[])[0];
+  if (factura) {
+    return actionError(
+      `Esta cuenta tiene la ${tipoLabel(factura.tipo_comprobante)} ${formatInvoiceNumber(
+        factura.punto_venta,
+        factura.numero,
+      )} autorizada. Anulá el comprobante primero (se emite la nota de crédito) y después anulá el cobro.`,
+    );
+  }
+
   // spec 092 · H-08 — **reabrir primero, refundar después.**
   //
   // El orden estaba al revés: se refundaban los pagos, se borraban los
@@ -908,44 +959,97 @@ export async function anularCobro(
 
   // (La reapertura de la orden se movió arriba — ver H-08.)
 
-  // Volver mesa a `pidio_cuenta` si estaba `libre` tras el cobro (queremos
-  // que el flow vuelva al estado pre-cobro). También reabrimos la order y
-  // re-marcamos `bill_requested_at`.
+  // spec 100 — la mesa vuelve al plano tal como estaba, con sus ítems.
+  //
+  // El caso real: el mozo cobró la mesa equivocada. La gente sigue sentada y
+  // su mesa desapareció del plano. Los `order_items` nunca se tocaron —lo que
+  // faltaba era el puntero y un estado que no mintiera—. Antes esto corría
+  // sólo `if (fromStatus === 'libre')`, volvía siempre a `pidio_cuenta` y
+  // reescribía `opened_at`/`bill_requested_at` con `now()`. Las tres
+  // decisiones viven ahora en `restitucion-mesa.ts`.
+  //
+  // `order.table_id` sigue al traslado (spec 048 lo reescribe), así que es la
+  // mesa correcta incluso si la cuenta se movió antes de cobrarse.
   if (order.table_id) {
     const { data: tableRow } = await service
       .from("tables")
-      .select("id, operational_status")
+      .select("id, operational_status, current_order_id")
       .eq("id", order.table_id)
       .single();
-    const fromStatus = tableRow?.operational_status as string;
-    if (fromStatus === "libre") {
-      await service
-        .from("tables")
-        .update({
-          operational_status: "pidio_cuenta",
-          opened_at: new Date().toISOString(),
-          // spec 096 · H-33 — el puntero. El cobro lo nulea y la reapertura
-          // escribía `operational_status` y `opened_at` pero nunca esto, y
-          // `imprimirCuenta` resuelve la orden **exclusivamente** por acá: el
-          // mozo tocaba «Imprimir cuenta» para llevar el papel corregido y le
-          // salía «La mesa no tiene una cuenta abierta». Se "arreglaba solo" si
-          // mandaba algo más a cocina, que es lo que reescribe el puntero.
-          current_order_id: orderId,
-        })
-        .eq("id", order.table_id);
-      await service
-        .from("orders")
-        .update({ bill_requested_at: new Date().toISOString() })
-        .eq("id", orderId);
-      await service.from("tables_audit_log").insert({
-        table_id: order.table_id,
-        business_id: business.id,
-        kind: "status",
-        from_value: fromStatus,
-        to_value: "pidio_cuenta",
-        by_user_id: ctx.userId,
-        reason: `anular cobro: ${motivo.trim()}`,
-      });
+    const mesa = tableRow as {
+      operational_status: OperationalStatus;
+      current_order_id: string | null;
+    } | null;
+
+    if (mesa) {
+      const restitucion = restitucionMesa(
+        {
+          operationalStatus: mesa.operational_status,
+          currentOrderId: mesa.current_order_id,
+        },
+        {
+          id: orderId,
+          createdAt: order.created_at,
+          billRequestedAt: order.bill_requested_at,
+        },
+      );
+
+      if (restitucion.kind === "patch") {
+        await service
+          .from("tables")
+          .update({
+            operational_status: restitucion.operationalStatus,
+            opened_at: restitucion.openedAt,
+            // spec 096 · H-33 — el puntero. El cobro lo nulea y la reapertura
+            // escribía `operational_status` y `opened_at` pero nunca esto, y
+            // `imprimirCuenta` resuelve la orden **exclusivamente** por acá: el
+            // mozo tocaba «Imprimir cuenta» para llevar el papel corregido y le
+            // salía «La mesa no tiene una cuenta abierta». Se "arreglaba solo" si
+            // mandaba algo más a cocina, que es lo que reescribe el puntero.
+            current_order_id: restitucion.currentOrderId,
+          })
+          .eq("id", order.table_id);
+
+        if (mesa.operational_status !== restitucion.operationalStatus) {
+          await service.from("tables_audit_log").insert({
+            table_id: order.table_id,
+            business_id: business.id,
+            kind: "status",
+            from_value: mesa.operational_status,
+            to_value: restitucion.operationalStatus,
+            by_user_id: ctx.userId,
+            reason: `anular cobro: ${motivo.trim()}`,
+          });
+        }
+
+        // La reserva que el cobro dio por `completed` vuelve a `seated`: si la
+        // cuenta se reabre, esa gente sigue en la mesa. Se ancla al momento del
+        // cobro y sólo mira ese servicio (la reserva empezó antes de cobrar y
+        // no más de 12 h atrás), así no resucita el turno del mediodía cuando
+        // se anula un cobro de la noche.
+        if (order.closed_at) {
+          const cobro = new Date(order.closed_at);
+          const desde = new Date(cobro.getTime() - 12 * 60 * 60 * 1000);
+          const { data: reservas } = await service
+            .from("reservations")
+            .select("id")
+            .eq("business_id", business.id)
+            .eq("table_id", order.table_id)
+            .eq("status", "completed")
+            .gte("starts_at", desde.toISOString())
+            .lte("starts_at", cobro.toISOString())
+            .order("starts_at", { ascending: false })
+            .limit(1);
+          const reserva = ((reservas ?? []) as { id: string }[])[0];
+          if (reserva) {
+            const { error: resErr } = await service
+              .from("reservations")
+              .update({ status: "seated" })
+              .eq("id", reserva.id);
+            if (resErr) console.error("anularCobro · reabrir reserva", resErr);
+          }
+        }
+      }
     }
   }
 

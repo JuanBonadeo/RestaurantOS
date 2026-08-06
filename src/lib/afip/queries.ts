@@ -125,6 +125,17 @@ export async function getInvoiceById(
   return (data as Invoice) ?? null;
 }
 
+/**
+ * La factura **vigente** de una orden: la que la pantalla de cobro muestra en
+ * vez del formulario.
+ *
+ * spec 100 — antes traía cualquier comprobante `authorized` con `maybeSingle()`,
+ * y una orden anulada y re-facturada tiene dos (la NC de la anulación + la
+ * factura nueva). `maybeSingle()` con dos filas devuelve error y `data: null`:
+ * la UI concluía "no hay comprobante" y volvía a ofrecer emitir, justo en la
+ * orden que más comprobantes tenía. Una NC además nunca fue "la factura de la
+ * orden".
+ */
 export async function getInvoiceForOrder(
   businessId: string,
   orderId: string,
@@ -136,6 +147,8 @@ export async function getInvoiceForOrder(
     .eq("business_id", businessId)
     .eq("order_id", orderId)
     .eq("status", "authorized")
-    .maybeSingle();
-  return (data as Invoice) ?? null;
+    .in("tipo_comprobante", ["factura_a", "factura_b"])
+    .order("created_at", { ascending: false })
+    .limit(1);
+  return ((data ?? []) as Invoice[])[0] ?? null;
 }

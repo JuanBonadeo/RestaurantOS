@@ -12,6 +12,7 @@ import { getBusiness } from "@/lib/tenant";
 
 import { calculateAmounts } from "./calculate-amounts";
 import { esCondicionValidaPara } from "./condicion-iva";
+import { formatInvoiceNumber, tipoLabel } from "./format";
 import type { AFIPProviderClient } from "./provider";
 import { selectProvider } from "./provider-config";
 import {
@@ -28,6 +29,13 @@ import type {
 } from "./types";
 
 type GenericClient = SupabaseClient;
+
+/** Lo mínimo de un comprobante para nombrarlo en un mensaje de error. */
+type InvoiceRef = {
+  tipo_comprobante: TipoComprobante;
+  punto_venta: number;
+  numero: number | null;
+};
 
 const UNIQUE_VIOLATION = "23505";
 
@@ -176,18 +184,38 @@ export async function emitInvoice(
     }
   }
 
-  // Guard (spec 09): la orden ya tiene una factura autorizada VIGENTE de este
-  // tipo. Sólo bloquea `status = 'authorized'`: si la factura previa quedó
-  // `cancelled` (anulada con su nota de crédito), la orden se puede re-facturar.
+  // Guard (spec 09): la orden ya tiene una factura autorizada VIGENTE. Sólo
+  // bloquea `status = 'authorized'`: si la factura previa quedó `cancelled`
+  // (anulada con su nota de crédito), la orden se puede re-facturar.
+  //
+  // spec 100 — el filtro era `.eq("tipo_comprobante", tipo)`, y el índice único
+  // parcial también lleva el tipo: **una Factura A entraba limpia sobre una B
+  // viva**. El caso llega solo — el cliente pide la A después de que le
+  // hicimos la B— y terminaba con las dos autorizadas por el mismo consumo. Lo
+  // único que lo tapaba era que la UI le pasa `existingInvoice` al cliente
+  // (cobrar-desktop-client), o sea un blindaje de pantalla, no de servidor.
+  // Para cambiar de tipo hay que anular la anterior (NC) y recién ahí emitir.
+  //
+  // Las NC quedan fuera del filtro a propósito: son comprobantes de la misma
+  // orden y `authorized`, pero no son "la factura vigente" de nadie.
   const { data: existingAuth } = await service
     .from("invoices")
-    .select("*")
+    .select("tipo_comprobante, punto_venta, numero")
     .eq("order_id", input.orderId)
-    .eq("tipo_comprobante", tipo)
+    .in("tipo_comprobante", ["factura_a", "factura_b"])
     .eq("status", "authorized")
-    .maybeSingle();
-  if (existingAuth) {
-    return actionError("Esta orden ya tiene una factura autorizada.");
+    .limit(1);
+  const vigente = ((existingAuth ?? []) as InvoiceRef[])[0];
+  if (vigente) {
+    const mismoTipo = vigente.tipo_comprobante === tipo;
+    return actionError(
+      mismoTipo
+        ? "Esta orden ya tiene una factura autorizada."
+        : `Esta orden ya tiene la ${tipoLabel(vigente.tipo_comprobante)} ${formatInvoiceNumber(
+            vigente.punto_venta,
+            vigente.numero,
+          )} autorizada. Anulala (se emite la nota de crédito) antes de emitir otro tipo de comprobante.`,
+    );
   }
 
   // Selección de provider según modo fiscal. En producción sin credencial,

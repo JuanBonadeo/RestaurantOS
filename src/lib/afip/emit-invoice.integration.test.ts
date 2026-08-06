@@ -185,6 +185,51 @@ describe.skipIf(!dbAvailable)("afip/emitInvoice idempotencia (integration)", () 
     if (!again.ok) expect(again.error).toMatch(/ya tiene una factura autorizada/i);
   });
 
+  it("Factura A sobre una B viva → rechazo (spec 100), y sale sola después de anular", { timeout: 40_000 }, async () => {
+    // El caso llega solo: le hicimos la B y después pide la A. El guard era por
+    // TIPO —igual que el índice único—, así que la A entraba limpia y la orden
+    // quedaba con las dos autorizadas por el mismo consumo.
+    const orderId = await newOrder();
+    const b = await emitInvoice({ orderId, slug: businessSlug });
+    expect(b.ok).toBe(true);
+    if (!b.ok) return;
+
+    const a = await emitInvoice({
+      orderId,
+      slug: businessSlug,
+      tipoComprobante: "factura_a",
+      cuitReceptor: "20307123459",
+      condicionIvaReceptor: 1,
+    });
+    expect(a.ok).toBe(false);
+    if (!a.ok) expect(a.error).toMatch(/Factura B .* autorizada/i);
+
+    const { count } = await supabase
+      .from("invoices")
+      .select("id", { count: "exact", head: true })
+      .eq("order_id", orderId)
+      .eq("tipo_comprobante", "factura_a");
+    expect(count).toBe(0);
+
+    // El camino correcto: NC de la B y recién ahí la A.
+    const anulada = await anularFactura({
+      invoiceId: b.data.invoice.id,
+      motivo: "el cliente pidió Factura A",
+      slug: businessSlug,
+    });
+    expect(anulada.ok).toBe(true);
+
+    const aOk = await emitInvoice({
+      orderId,
+      slug: businessSlug,
+      tipoComprobante: "factura_a",
+      cuitReceptor: "20307123459",
+      condicionIvaReceptor: 1,
+    });
+    expect(aOk.ok).toBe(true);
+    if (aOk.ok) expect(aOk.data.invoice.status).toBe("authorized");
+  });
+
   it("anular → emite NC y deja la original cancelled con motivo", { timeout: 30_000 }, async () => {
     const orderId = await newOrder();
     const emitted = await emitInvoice({ orderId, slug: businessSlug });
