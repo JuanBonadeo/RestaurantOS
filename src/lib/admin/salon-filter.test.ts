@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { matchesSalon, reservaSalonId } from "./salon-filter";
+import { matchesSalon, matchesSalonReserva, reservaSalonId } from "./salon-filter";
 
 describe("matchesSalon", () => {
   it("la selección vacía deja pasar todo, incluso lo que no tiene salón", () => {
@@ -51,5 +51,30 @@ describe("reservaSalonId", () => {
     expect(
       reservaSalonId({ tables: { floor_plans: null }, floor_plan_id: "quincho" }),
     ).toBe("quincho");
+  });
+});
+
+describe("matchesSalonReserva", () => {
+  const enTerraza = { tables: { floor_plans: { id: "terraza" } } };
+  const zonaComedor = { tables: null, floor_plan_id: "comedor" };
+  const sinSalon = { tables: null, floor_plan_id: null };
+
+  it("con salón asignado filtra igual que matchesSalon", () => {
+    expect(matchesSalonReserva(["terraza"], enTerraza)).toBe(true);
+    expect(matchesSalonReserva(["terraza"], zonaComedor)).toBe(false);
+    expect(matchesSalonReserva(["terraza", "comedor"], zonaComedor)).toBe(true);
+  });
+
+  it("la reserva sin salón pasa cualquier filtro (#155)", () => {
+    expect(matchesSalonReserva([], sinSalon)).toBe(true);
+    expect(matchesSalonReserva(["terraza"], sinSalon)).toBe(true);
+    expect(matchesSalonReserva(["terraza", "comedor"], sinSalon)).toBe(true);
+    expect(matchesSalonReserva([], {})).toBe(true);
+    expect(matchesSalonReserva(["terraza"], {})).toBe(true);
+  });
+
+  it("la selección vacía sigue dejando pasar todo", () => {
+    expect(matchesSalonReserva([], enTerraza)).toBe(true);
+    expect(matchesSalonReserva([], zonaComedor)).toBe(true);
   });
 });

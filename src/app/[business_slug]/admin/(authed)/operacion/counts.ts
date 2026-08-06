@@ -1,6 +1,6 @@
 import type { AdminOrder } from "@/lib/admin/orders-query";
 import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
-import { matchesSalon, reservaSalonId } from "@/lib/admin/salon-filter";
+import { matchesSalon, matchesSalonReserva } from "@/lib/admin/salon-filter";
 import type { CajaConEstado, RendicionMozoPendiente } from "@/lib/caja/types";
 import type { ReservationStatus } from "@/lib/reservations/types";
 import type { PresentEmployee } from "@/lib/rrhh/clock-actions";
@@ -67,7 +67,7 @@ export function countReservasPorSentar(
   salones: readonly string[] = [],
 ): number {
   return rows.filter(
-    (r) => r.status === "confirmed" && matchesSalon(salones, reservaSalonId(r)),
+    (r) => r.status === "confirmed" && matchesSalonReserva(salones, r),
   ).length;
 }
 

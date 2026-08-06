@@ -113,7 +113,7 @@ describe("operacion/counts — filtro por salón (spec 065)", () => {
     expect(countSalonOcupadas(floorPlans, ["comedor"])).toBe(2);
   });
 
-  it("countReservasPorSentar: con un salón puntual sólo las de ese salón", () => {
+  it("countReservasPorSentar: con un salón puntual, las de ese salón + las sin asignar", () => {
     const rows = [
       reservaEn("confirmed", "terraza"),
       reservaEn("confirmed", "comedor"),
@@ -121,7 +121,9 @@ describe("operacion/counts — filtro por salón (spec 065)", () => {
       reservaEn("confirmed", null), // sin mesa ni zona
     ];
     expect(countReservasPorSentar(rows, [])).toBe(3);
-    expect(countReservasPorSentar(rows, ["terraza"])).toBe(1);
+    // #155: la sin asignar se cuenta en cualquier salón — es la que hay que
+    // sentar, y el contador tiene que coincidir con lo que muestra la lista.
+    expect(countReservasPorSentar(rows, ["terraza"])).toBe(2);
   });
 
   it("un salón sin nada da 0, no el total sin filtrar", () => {

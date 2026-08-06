@@ -41,3 +41,27 @@ export function reservaSalonId(r: {
 }): string | null {
   return r.tables?.floor_plans?.id ?? r.floor_plan_id ?? null;
 }
+
+/**
+ * ¿Esta reserva entra en la selección de salones? (#155)
+ *
+ * Igual que `matchesSalon`, **salvo** para la reserva sin salón: esa pasa
+ * cualquier filtro. Es la diferencia con una comanda — el delivery no es de
+ * ningún salón y nunca lo va a ser, pero la reserva sin mesa ni zona (el
+ * default del modo flexible cuando se carga rápido y se asigna mesa después)
+ * todavía **no** pertenece a uno: es trabajo pendiente. Esconderla del turno
+ * que la tiene que sentar es peor que mostrarla de más.
+ *
+ * Recibe la reserva entera, no su salón ya resuelto, para que el call site no
+ * pueda olvidarse del caso `null` — que es justamente el bug que arregla.
+ */
+export function matchesSalonReserva(
+  selected: readonly string[],
+  r: {
+    tables?: { floor_plans?: { id: string } | null } | null;
+    floor_plan_id?: string | null;
+  },
+): boolean {
+  const salonId = reservaSalonId(r);
+  return salonId === null || matchesSalon(selected, salonId);
+}

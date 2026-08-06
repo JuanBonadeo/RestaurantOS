@@ -8,7 +8,7 @@ import { CalendarPlus, Check, Clock, Pencil, Search, UserPlus, X } from "lucide-
 import { toast } from "sonner";
 
 import { NewReservationModal } from "@/components/admin/local/new-reservation-modal";
-import { matchesSalon, reservaSalonId } from "@/lib/admin/salon-filter";
+import { matchesSalonReserva } from "@/lib/admin/salon-filter";
 import {
   sentarReserva,
   updateReservationDetails,
@@ -215,8 +215,10 @@ export function AdminDayList({
   // Spec 065: el filtro por salón se aplica una sola vez, arriba de todo. De
   // acá para abajo `rows` YA es lo del salón elegido, así que los totales de la
   // cabecera, los chips de estado y la lista no pueden discrepar entre sí.
+  // #155: la reserva sin mesa ni zona pasa cualquier filtro — todavía no es de
+  // ningún salón, y es justo la que hay que sentar.
   const rows = useMemo(
-    () => allRows.filter((r) => matchesSalon(salonIds, reservaSalonId(r))),
+    () => allRows.filter((r) => matchesSalonReserva(salonIds, r)),
     [allRows, salonIds],
   );
 
