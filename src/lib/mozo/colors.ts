@@ -100,7 +100,7 @@ export function mozoPalette(userId: string): MozoPalette {
 }
 
 /**
- * Back-compat: consumidores SVG (floor-plan-viewer, asignar-mozos-overlay)
+ * Back-compat: consumidores SVG (floor-plan-viewer, asignar-mozos-panel)
  * pasan colores como strings inline. Devolvemos el `solid` del palette
  * para que automáticamente migren a la paleta curada.
  */

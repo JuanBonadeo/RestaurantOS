@@ -450,7 +450,11 @@ function CajaCard({
               toast.error(r.error);
               return;
             }
-            toast.success("Corte registrado");
+            toast.success(
+              r.data.mesasLiberadas > 0
+                ? `Corte registrado — ${r.data.mesasLiberadas} mesas liberadas.`
+                : "Corte registrado",
+            );
             setCorteOpen(false);
             router.refresh();
           })

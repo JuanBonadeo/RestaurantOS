@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { requireMozoActionContext } from "@/lib/mozo/auth";
+import { clearAssignmentsForBusiness } from "@/lib/mozo/clear-assignments";
 import { MOTIVO_MESA_SIN_CONSUMO, tieneConsumo } from "@/lib/mozo/consumo";
 import {
   canTransition,
@@ -672,65 +673,17 @@ export async function clearMozoAssignments(
 
   const service = createSupabaseServiceClient() as unknown as GenericClient;
 
-  // Cross-tenant defense: mismo camino que loadTableForBusiness — tables no
-  // tiene business_id, se llega por floor_plans.
-  const { data: plansData, error: plansError } = await service
-    .from("floor_plans")
-    .select("id")
-    .eq("business_id", business.id);
-  if (plansError) {
-    console.error("clearMozoAssignments floor_plans", plansError);
-    return actionError("No pudimos limpiar la distribución.");
-  }
-  const planIds = ((plansData as { id: string }[] | null) ?? []).map(
-    (p) => p.id,
+  const cleared = await clearAssignmentsForBusiness(
+    service,
+    business.id,
+    ctx.userId,
+    "Limpiar distribución",
   );
-  if (planIds.length === 0) return actionOk({ cleared: 0 });
-
-  const { data: rowsData, error: rowsError } = await service
-    .from("tables")
-    .select("id, mozo_id")
-    .in("floor_plan_id", planIds)
-    .not("mozo_id", "is", null);
-  if (rowsError) {
-    console.error("clearMozoAssignments select", rowsError);
-    return actionError("No pudimos limpiar la distribución.");
-  }
-  const assigned = (rowsData as { id: string; mozo_id: string }[] | null) ?? [];
-  if (assigned.length === 0) return actionOk({ cleared: 0 });
-
-  const { error } = await service
-    .from("tables")
-    .update({ mozo_id: null })
-    .in(
-      "id",
-      assigned.map((t) => t.id),
-    );
-  if (error) {
-    console.error("clearMozoAssignments update", error);
-    return actionError("No pudimos limpiar la distribución.");
-  }
-
-  // Audit en bloque: una fila por mesa, igual que insertAudit pero en un
-  // solo round-trip (un salón grande son 40+ mesas).
-  const { error: auditError } = await service.from("tables_audit_log").insert(
-    assigned.map((t) => ({
-      table_id: t.id,
-      business_id: business.id,
-      kind: "assignment" as const,
-      from_value: t.mozo_id,
-      to_value: null,
-      by_user_id: ctx.userId,
-      reason: "Limpiar distribución",
-    })),
-  );
-  if (auditError) {
-    console.error("tables_audit_log insert (clear)", auditError);
-  }
+  if (cleared === null) return actionError("No pudimos limpiar la distribución.");
 
   revalidatePath(`/${businessSlug}/mozo`);
   revalidatePath(`/${businessSlug}/admin/operacion`);
-  return actionOk({ cleared: assigned.length });
+  return actionOk({ cleared });
 }
 
 export async function transferTable(

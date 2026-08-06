@@ -6,6 +6,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { assignMozoToTable } from "@/lib/mozo/actions";
 import { requireMozoActionContext } from "@/lib/mozo/auth";
+import { clearAssignmentsForBusiness } from "@/lib/mozo/clear-assignments";
 import {
   canAcceptCajaDifference,
   canAssignMozo,
@@ -28,16 +29,21 @@ async function loadCajaForBusiness(
   service: GenericClient,
   cajaId: string,
   businessId: string,
-): Promise<{ id: string; is_active: boolean } | null> {
+): Promise<{ id: string; is_active: boolean; is_default: boolean } | null> {
   const { data } = await service
     .from("cajas")
-    .select("id, business_id, is_active")
+    .select("id, business_id, is_active, is_default")
     .eq("id", cajaId)
     .maybeSingle();
   if (!data) return null;
-  const row = data as { id: string; business_id: string; is_active: boolean };
+  const row = data as {
+    id: string;
+    business_id: string;
+    is_active: boolean;
+    is_default: boolean;
+  };
   if (row.business_id !== businessId) return null;
-  return { id: row.id, is_active: row.is_active };
+  return { id: row.id, is_active: row.is_active, is_default: row.is_default };
 }
 
 // ── CRUD de cajas físicas ──────────────────────────────────────
@@ -226,7 +232,7 @@ export async function hacerCorte(
   closing_notes: string | null,
   denomination_count: Record<string, number> | null,
   businessSlug: string,
-): Promise<ActionResult<{ corte: CajaCorte }>> {
+): Promise<ActionResult<{ corte: CajaCorte; mesasLiberadas: number }>> {
   const business = await getBusiness(businessSlug);
   if (!business) return actionError("Negocio no encontrado.");
 
@@ -282,8 +288,31 @@ export async function hacerCorte(
 
   if (error) return actionError(`No se pudo registrar el corte: ${error.message}`);
 
+  // Cerrar la caja principal = cerró el día: la distribución de mozos queda
+  // libre para el turno que viene (si no, la asignación es fija y arranca
+  // pegada la de ayer). Solo la principal — el corte del bar puede pasar en
+  // plena cena y no tiene por qué barrer el salón.
+  //
+  // No aborta el corte si falla: la plata ya se registró y es lo que importa;
+  // el encargado siempre puede limpiar a mano desde "Distribuir mozos".
+  let mesasLiberadas = 0;
+  if (caja.is_default) {
+    const cleared = await clearAssignmentsForBusiness(
+      service,
+      business.id,
+      ctx.userId,
+      "Corte de caja",
+    );
+    if (cleared === null) {
+      console.error("hacerCorte: no se pudo limpiar la distribución", cajaId);
+    } else {
+      mesasLiberadas = cleared;
+    }
+    revalidatePath(`/${businessSlug}/mozo`);
+  }
+
   revalidatePath(`/${businessSlug}/admin/operacion`);
-  return actionOk({ corte: inserted as CajaCorte });
+  return actionOk({ corte: inserted as CajaCorte, mesasLiberadas });
 }
 
 // ── Movimientos manuales ───────────────────────────────────────

@@ -232,4 +232,61 @@ describe.skipIf(!dbAvailable)("caja continua (integration)", () => {
     if (!r.ok) return;
     expect(r.data.count).toBe(2);
   });
+
+  // El corte de la caja principal cierra el día → libera la distribución de
+  // mozos. El de una caja secundaria (el bar) puede pasar en plena cena, así
+  // que no la toca.
+  it("corte de caja NO principal deja la distribución intacta", async () => {
+    CURRENT_USER_ID = encargadoId;
+    // table1/table2 quedaron con mozoA del test anterior.
+    const stats = await getCajaLiveStats(cajaA, businessId);
+    const r = await hacerCorte(
+      cajaA,
+      stats!.expected_cash_cents,
+      null,
+      null,
+      businessSlug,
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.mesasLiberadas).toBe(0);
+
+    const { data: rows } = await supabase
+      .from("tables")
+      .select("mozo_id")
+      .in("id", [table1, table2]);
+    expect(rows!.every((t) => t.mozo_id === mozoAId)).toBe(true);
+  });
+
+  it("corte de la caja principal libera la distribución de mozos", async () => {
+    CURRENT_USER_ID = encargadoId;
+    await supabase.from("cajas").update({ is_default: true }).eq("id", cajaA);
+
+    const stats = await getCajaLiveStats(cajaA, businessId);
+    const r = await hacerCorte(
+      cajaA,
+      stats!.expected_cash_cents,
+      null,
+      null,
+      businessSlug,
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.mesasLiberadas).toBe(2);
+
+    const { data: rows } = await supabase
+      .from("tables")
+      .select("mozo_id")
+      .in("id", [table1, table2]);
+    expect(rows!.every((t) => t.mozo_id === null)).toBe(true);
+
+    const { data: audit } = await supabase
+      .from("tables_audit_log")
+      .select("kind, to_value, reason")
+      .eq("business_id", businessId)
+      .eq("reason", "Corte de caja");
+    expect(audit).toHaveLength(2);
+    expect(audit!.every((a) => a.kind === "assignment")).toBe(true);
+    expect(audit!.every((a) => a.to_value === null)).toBe(true);
+  });
 });

@@ -36,7 +36,9 @@ vi.mock("next/cache", () => ({
   revalidateTag: vi.fn(),
 }));
 
-const { assignMozoToTable, transferTable } = await import("./actions");
+const { assignMozoToTable, clearMozoAssignments, transferTable } = await import(
+  "./actions"
+);
 const { getMyTables } = await import("./queries");
 
 describe.skipIf(!dbAvailable)("asignación y transferencia (integration)", () => {
@@ -306,5 +308,61 @@ describe.skipIf(!dbAvailable)("asignación y transferencia (integration)", () =>
       .eq("table_id", tableActiva)
       .eq("kind", "assignment");
     expect(after?.length ?? 0).toBe(beforeCount);
+  });
+
+  it("mozo no puede limpiar la distribución", async () => {
+    CURRENT_USER_ID = mozoCId;
+    const result = await clearMozoAssignments(businessSlug);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toMatch(/encargado|admin/i);
+    }
+  });
+
+  it("encargado limpia la distribución → todas las mesas libres, audit por mesa, otro negocio intacto", async () => {
+    CURRENT_USER_ID = encargadoId;
+    // Estado de partida: las dos mesas del negocio con mozo, y una mesa del
+    // otro negocio también asignada (la limpieza no puede tocarla).
+    await supabase
+      .from("tables")
+      .update({ mozo_id: mozoAId })
+      .in("id", [tableActiva, tableLibre]);
+    await supabase
+      .from("tables")
+      .update({ mozo_id: mozoAId })
+      .eq("id", otherTableId);
+
+    const result = await clearMozoAssignments(businessSlug);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.cleared).toBe(2);
+
+    const { data: rows } = await supabase
+      .from("tables")
+      .select("id, mozo_id")
+      .in("id", [tableActiva, tableLibre]);
+    expect(rows!.every((r) => r.mozo_id === null)).toBe(true);
+
+    const { data: otherRow } = await supabase
+      .from("tables")
+      .select("mozo_id")
+      .eq("id", otherTableId)
+      .single();
+    expect(otherRow!.mozo_id).toBe(mozoAId);
+
+    const { data: audit } = await supabase
+      .from("tables_audit_log")
+      .select("table_id, kind, from_value, to_value, reason")
+      .eq("business_id", businessId)
+      .eq("reason", "Limpiar distribución");
+    expect(audit).toHaveLength(2);
+    expect(audit!.every((a) => a.kind === "assignment")).toBe(true);
+    expect(audit!.every((a) => a.to_value === null)).toBe(true);
+    expect(audit!.every((a) => a.from_value === mozoAId)).toBe(true);
+
+    // Idempotente: sin nada asignado, no rompe ni suma audit.
+    const again = await clearMozoAssignments(businessSlug);
+    expect(again.ok).toBe(true);
+    if (again.ok) expect(again.data.cleared).toBe(0);
   });
 });
