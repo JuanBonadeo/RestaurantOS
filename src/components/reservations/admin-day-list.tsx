@@ -9,6 +9,7 @@ import { toast } from "sonner";
 
 import { NewReservationModal } from "@/components/admin/local/new-reservation-modal";
 import { matchesSalonReserva } from "@/lib/admin/salon-filter";
+import { proximaReserva, reservationDayStats } from "@/lib/reservations/day-stats";
 import {
   sentarReserva,
   updateReservationDetails,
@@ -296,33 +297,16 @@ export function AdminDayList({
 
   // ── Computed ──
 
+  // #156: `total` y `guests` salen del MISMO conjunto (ni canceladas ni
+  // no-shows) — antes el primero contaba todo y el segundo sólo las vivas, y
+  // los dos KPI grandes se contradecían. Cálculo puro en `day-stats.ts`.
   const stats = useMemo(() => {
-    const now = Date.now();
-    const total = rows.length;
-    const confirmed = rows.filter((r) => r.status === "confirmed").length;
-    const guests = rows.reduce(
-      (s, r) =>
-        s +
-        (r.status === "confirmed" || r.status === "seated"
-          ? r.party_size
-          : 0),
-      0,
-    );
-    const seated = rows.filter((r) => r.status === "seated").length;
-    const noShow = rows.filter((r) => r.status === "no_show").length;
-    const cancelled = rows.filter((r) => r.status === "cancelled").length;
-    const completed = rows.filter((r) => r.status === "completed").length;
-    const upcoming = rows
-      .filter(
-        (r) =>
-          r.status === "confirmed" &&
-          new Date(r.starts_at).getTime() > now,
-      )
-      .sort((a, b) => +new Date(a.starts_at) - +new Date(b.starts_at))[0];
+    const counts = reservationDayStats(rows);
+    const upcoming = proximaReserva(rows, Date.now());
     const nextLabel = upcoming
       ? formatInTimeZone(new Date(upcoming.starts_at), timezone, "HH:mm")
       : "—";
-    return { total, confirmed, guests, seated, noShow, cancelled, completed, nextLabel };
+    return { ...counts, nextLabel };
   }, [rows, timezone]);
 
   const filteredRows = useMemo(() => {
