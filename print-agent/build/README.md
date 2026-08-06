@@ -35,9 +35,23 @@ debe imprimir el banner y consultar) **antes** de publicarlo.
 ../installer/armar-zip.sh dist/print-agent.exe print-agent.zip
 ```
 
-Junta el `.exe` con `../installer/{instalar.bat,iniciar-agente.bat,LEEME.txt}`
+Junta el `.exe` con
+`../installer/{instalar.bat,iniciar-agente.bat,registrar-tarea.ps1,LEEME.txt}`
 (convertidos a CRLF). El `config.json` **no** va adentro: lo baja la card por
 negocio y el usuario lo deja en la carpeta antes de correr `instalar.bat`.
+
+### Atajo: cambios que sólo tocan el instalador
+
+Si no cambió `agent.mjs`, **no recompiles el exe**: bajá el ZIP publicado y
+reempaquetalo con los scripts del repo.
+
+```bash
+../installer/reempaquetar-zip.sh print-agent-actual.zip print-agent.zip
+```
+
+Evita el build cross-platform, que es el que mete el bytecode que el V8 de
+Windows rechaza (ver el aviso de arriba). Si el agente no cambió, tampoco hay
+nada que probar del lado del `.exe`.
 
 ## 3) Publicar en el bucket
 

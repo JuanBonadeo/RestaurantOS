@@ -16,17 +16,33 @@ Pasos:
      al lado de print-agent.exe e instalar.bat.
 
   3) Doble clic en  instalar.bat
+     Windows va a pedir permisos de administrador: dale que si.
+     (Los necesita una sola vez, para registrar el arranque automatico.)
 
 Eso:
-  - Copia todo a  %LOCALAPPDATA%\RestaurantOS-PrintAgent
-  - Registra el arranque automatico (al iniciar sesion de Windows)
+  - Copia todo a  C:\ProgramData\RestaurantOS-PrintAgent
+  - Registra el arranque automatico AL ENCENDER LA PC
   - Deja el agente corriendo ya mismo
 
-Comandos utiles (opcional, en una consola cmd):
+Como queda funcionando:
+
+  - Arranca solo al prender la computadora, SIN que nadie inicie sesion.
+    (Si se corta la luz de noche, a la mañana ya esta imprimiendo.)
+  - Corre en segundo plano: no abre ninguna ventana y no molesta.
+  - Si se cae, se levanta solo.
+
+Si algo no imprime, mira el log:
+  C:\ProgramData\RestaurantOS-PrintAgent\agente.log
+
+Comandos utiles (opcional, en una consola cmd como administrador):
   - Ver estado:  schtasks /query /tn "RestaurantOS PrintAgent"
   - Frenar:      schtasks /end   /tn "RestaurantOS PrintAgent"
+  - Arrancar:    schtasks /run   /tn "RestaurantOS PrintAgent"
 
 Importante:
   - Instalalo en UNA SOLA PC del local. En dos, se duplican los tickets.
   - Las impresoras se configuran desde el panel (Configuracion > Comanderas),
     no aca.
+  - Si ya tenias una version vieja instalada, el instalador la frena y la
+    reemplaza. Despues podes borrar la carpeta vieja:
+    C:\Users\<tu usuario>\AppData\Local\RestaurantOS-PrintAgent

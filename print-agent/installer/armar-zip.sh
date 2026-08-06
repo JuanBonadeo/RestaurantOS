@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Arma print-agent.zip = relay print-agent.exe + instalador (bats/LEEME en CRLF).
+# Arma print-agent.zip = relay print-agent.exe + instalador (bats/ps1/LEEME en CRLF).
 # El .exe se compila aparte (pkg, node22-win-x64) y NO vive en el repo.
 #
 # Uso:  ./armar-zip.sh <ruta-al-print-agent.exe> [salida.zip]
@@ -19,10 +19,10 @@ trap 'rm -rf "$TMP"' EXIT
 
 cp "$EXE" "$TMP/print-agent.exe"
 # Windows espera CRLF en los .bat; el repo los guarda en LF.
-for f in instalar.bat iniciar-agente.bat LEEME.txt; do
+for f in instalar.bat iniciar-agente.bat registrar-tarea.ps1 LEEME.txt; do
   sed 's/$/\r/' "$HERE/$f" > "$TMP/$f"
 done
 
 rm -f "$OUT"
-( cd "$TMP" && zip -q -X "$OUT" print-agent.exe instalar.bat iniciar-agente.bat LEEME.txt )
+( cd "$TMP" && zip -q -X "$OUT" print-agent.exe instalar.bat iniciar-agente.bat registrar-tarea.ps1 LEEME.txt )
 echo "✓ $OUT ($(du -h "$OUT" | cut -f1))"
