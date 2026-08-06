@@ -57,7 +57,7 @@ export function ProductRow({
             )}
             {!product.is_available && product.is_active && (
               <span className="bg-amber-50 text-amber-800 inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[0.6rem] font-semibold uppercase tracking-wider">
-                Sin stock
+                No disponible
               </span>
             )}
           </div>

@@ -140,7 +140,7 @@ function ProductRow({ product }: { product: MenuProduct }) {
             letterSpacing: 0.4,
           }}
         >
-          Sin stock
+          No disponible
         </span>
       )}
     </li>

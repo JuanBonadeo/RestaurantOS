@@ -42,7 +42,7 @@ describe("<ProductCard />", () => {
         onSelect={onSelect}
       />,
     );
-    expect(screen.getByText("Sin stock")).toBeInTheDocument();
+    expect(screen.getByText("No disponible")).toBeInTheDocument();
     await userEvent.click(screen.getByText("Pizza Muzzarella"));
     expect(onSelect).not.toHaveBeenCalled();
   });

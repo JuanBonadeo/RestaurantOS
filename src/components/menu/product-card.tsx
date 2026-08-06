@@ -79,7 +79,7 @@ export function ProductCard({
                 letterSpacing: 0.3,
               }}
             >
-              Sin stock
+              No disponible
             </span>
           )}
         </div>

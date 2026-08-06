@@ -226,7 +226,9 @@ describe.skipIf(!dbAvailable)("stock de bebidas (integration)", () => {
     await supabase.from("orders").delete().eq("id", order!.id);
   });
 
-  it("auto-desactivación cuando llega a 0", async () => {
+  // Spec 099: vender más de lo que el sistema cree que hay deja el inventario
+  // en negativo (el faltante es el dato) y NO saca el producto de la carta.
+  it("vender más de lo que hay: stock negativo y el producto sigue disponible", async () => {
     CURRENT_USER_ID = adminId;
     await setStockLevels(productId, 1, 0, businessSlug);
 
@@ -255,8 +257,8 @@ describe.skipIf(!dbAvailable)("stock de bebidas (integration)", () => {
       product_id: productId,
       product_name: "Cerveza Test",
       unit_price_cents: 500000,
-      quantity: 1,
-      subtotal_cents: 500000,
+      quantity: 3,
+      subtotal_cents: 1500000,
     });
 
     await new Promise((r) => setTimeout(r, 500));
@@ -266,13 +268,74 @@ describe.skipIf(!dbAvailable)("stock de bebidas (integration)", () => {
       .select("is_available")
       .eq("id", productId)
       .single();
-    expect(prod!.is_available).toBe(false);
+    expect(prod!.is_available).toBe(true);
+
+    const { data: si } = await supabase
+      .from("stock_items")
+      .select("current_qty")
+      .eq("product_id", productId)
+      .single();
+    expect(si!.current_qty).toBe(-2);
+
+    // Y el ingreso siguiente arranca desde el faltante, no desde cero.
+    CURRENT_USER_ID = encargadoId;
+    const ing = await ingresarStock(productId, 12, businessSlug, "Reposición");
+    expect(ing.ok).toBe(true);
+
+    const overview = await getStockOverview(businessId);
+    expect(overview.find((i) => i.productId === productId)!.currentQty).toBe(10);
 
     // Cleanup
     await supabase.from("order_items").delete().eq("order_id", order!.id);
     await supabase.from("orders").delete().eq("id", order!.id);
-    // Restore for future tests
+    CURRENT_USER_ID = adminId;
+    await setStockLevels(productId, 10, 3, businessSlug);
+  });
+
+  // El espejo del anterior: si el encargado apagó el producto a mano, cargar
+  // mercadería no puede volver a prenderlo.
+  it("el ingreso no reenciende un producto apagado a mano", async () => {
+    CURRENT_USER_ID = encargadoId;
+    await supabase.from("products").update({ is_available: false }).eq("id", productId);
+
+    const r = await ingresarStock(productId, 6, businessSlug, "Proveedor");
+    expect(r.ok).toBe(true);
+
+    const { data: prod } = await supabase
+      .from("products")
+      .select("is_available")
+      .eq("id", productId)
+      .single();
+    expect(prod!.is_available).toBe(false);
+
+    // Restore
     await supabase.from("products").update({ is_available: true }).eq("id", productId);
+    CURRENT_USER_ID = adminId;
+    await setStockLevels(productId, 10, 3, businessSlug);
+  });
+
+  // El ajuste tampoco decide sobre la carta: baja el inventario a negativo y
+  // deja el producto donde estaba.
+  it("el ajuste puede dejar el stock en negativo sin tocar la disponibilidad", async () => {
+    CURRENT_USER_ID = encargadoId;
+    await setStockLevels(productId, 2, 1, businessSlug);
+
+    const r = await ajustarStock(productId, -5, "Conteo físico", businessSlug);
+    expect(r.ok).toBe(true);
+
+    const overview = await getStockOverview(businessId);
+    const item = overview.find((i) => i.productId === productId);
+    expect(item!.currentQty).toBe(-3);
+    expect(item!.isLow).toBe(true);
+
+    const { data: prod } = await supabase
+      .from("products")
+      .select("is_available")
+      .eq("id", productId)
+      .single();
+    expect(prod!.is_available).toBe(true);
+
+    // Restore
     await setStockLevels(productId, 10, 3, businessSlug);
   });
 

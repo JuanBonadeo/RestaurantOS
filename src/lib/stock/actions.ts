@@ -189,7 +189,9 @@ export async function setStockLevels(
     return actionError("Solo admin o encargado pueden gestionar stock.");
   }
 
-  if (currentQty < 0) return actionError("La cantidad no puede ser negativa.");
+  // `currentQty` puede ser negativo a propósito (spec 099): el faltante es un
+  // dato, no un error — el próximo ingreso lo cancela. El mínimo sí es un umbral
+  // que el negocio define, y un umbral negativo no significa nada.
   if (minQty < 0) return actionError("El mínimo no puede ser negativo.");
 
   const service = createSupabaseServiceClient();
@@ -263,7 +265,7 @@ export async function ingresarStock(
     .maybeSingle();
   if (!stockItem) return actionError("El producto no tiene stock trackeado.");
 
-  const newQty = await adjustStockItemQty(service, stockItem.id, qty);
+  await adjustStockItemQty(service, stockItem.id, qty);
 
   await service.from("stock_movimientos").insert({
     stock_item_id: stockItem.id,
@@ -274,13 +276,9 @@ export async function ingresarStock(
     created_by: ctx.userId,
   });
 
-  // Re-enable product if it was disabled due to 0 stock
-  if (newQty > 0) {
-    await service
-      .from("products")
-      .update({ is_available: true })
-      .eq("id", productId);
-  }
+  // Spec 099: el ingreso NO reenciende el producto. Nadie lo apaga por stock, y
+  // el "no disponible" que puso el encargado tiene que sobrevivir a la entrega
+  // del proveedor.
 
   revalidatePath(`/${slug}/admin/catalogo`);
   return actionOk(undefined);
@@ -314,13 +312,13 @@ export async function ajustarStock(
 
   const { data: stockItem } = await service
     .from("stock_items")
-    .select("id, business_id, current_qty")
+    .select("id, business_id")
     .eq("product_id", productId)
     .eq("business_id", business.id)
     .maybeSingle();
   if (!stockItem) return actionError("El producto no tiene stock trackeado.");
 
-  const newQty = await adjustStockItemQty(service, stockItem.id, qty);
+  await adjustStockItemQty(service, stockItem.id, qty);
 
   await service.from("stock_movimientos").insert({
     stock_item_id: stockItem.id,
@@ -331,17 +329,9 @@ export async function ajustarStock(
     created_by: ctx.userId,
   });
 
-  if (newQty <= 0) {
-    await service
-      .from("products")
-      .update({ is_available: false })
-      .eq("id", productId);
-  } else {
-    await service
-      .from("products")
-      .update({ is_available: true })
-      .eq("id", productId);
-  }
+  // Spec 099: el ajuste mueve el inventario y nada más. Puede dejarlo en
+  // negativo (una merma de 5 sobre 3 en sistema son -2 reales), y la carta la
+  // decide el negocio con el toggle de disponible.
 
   revalidatePath(`/${slug}/admin/catalogo`);
   return actionOk(undefined);
