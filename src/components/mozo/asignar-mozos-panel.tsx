@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
-import { Check, UserMinus, X } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Check, Eraser, UserMinus, X } from "lucide-react";
 
 import { initialsFromName, mozoColor } from "@/lib/mozo/colors";
 import type { MozoMember } from "@/lib/mozo/queries";
@@ -28,6 +28,7 @@ export function AsignarMozosPanel({
   countByMozo,
   totalSinAsignar,
   onDone,
+  onClearAll,
 }: {
   mozos: MozoMember[];
   /** Mozo seleccionado para "pintar" mesas. null = próximo tap desasigna. */
@@ -36,10 +37,20 @@ export function AsignarMozosPanel({
   countByMozo: Record<string, number>;
   totalSinAsignar: number;
   onDone: () => void;
+  /** Desasigna todas las mesas de una (reset de arranque de turno). */
+  onClearAll: () => void;
 }) {
   const targetMozos = useMemo(
     () => mozos.filter((m) => m.role === "mozo"),
     [mozos],
+  );
+
+  // Limpiar borra el trabajo de distribuir entero: confirmación en dos pasos,
+  // igual que los borrados del catálogo.
+  const [confirmClear, setConfirmClear] = useState(false);
+  const totalAsignadas = useMemo(
+    () => Object.values(countByMozo).reduce((acc, n) => acc + n, 0),
+    [countByMozo],
   );
 
   return (
@@ -164,6 +175,41 @@ export function AsignarMozosPanel({
 
       {/* Footer — CTA primario igual que TableDetail. */}
       <div className="border-border/60 space-y-2 border-t p-3">
+        {confirmClear ? (
+          <div className="flex items-center gap-2 rounded-2xl bg-rose-50 p-2 ring-1 ring-rose-200">
+            <p className="min-w-0 flex-1 px-1 text-xs font-medium text-rose-900">
+              ¿Desasignar las {totalAsignadas} mesas?
+            </p>
+            <button
+              type="button"
+              onClick={() => setConfirmClear(false)}
+              className="rounded-xl px-3 py-2 text-xs font-semibold text-zinc-600 transition hover:bg-white"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setConfirmClear(false);
+                onClearAll();
+              }}
+              className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-rose-700 active:scale-[0.98]"
+            >
+              Limpiar
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setConfirmClear(true)}
+            disabled={totalAsignadas === 0}
+            className="flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-zinc-100 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-200 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40"
+          >
+            <Eraser className="h-4 w-4" />
+            Limpiar distribución
+          </button>
+        )}
+
         <button
           type="button"
           onClick={onDone}

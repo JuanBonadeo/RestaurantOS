@@ -71,7 +71,11 @@ import {
   tableDelay,
   type TableDelay,
 } from "@/lib/comandas/mesa-demora";
-import { anularMesa, assignMozoToTable } from "@/lib/mozo/actions";
+import {
+  anularMesa,
+  assignMozoToTable,
+  clearMozoAssignments,
+} from "@/lib/mozo/actions";
 import { tieneConsumo } from "@/lib/mozo/consumo";
 import {
   groupTablesForSidebar,
@@ -900,6 +904,31 @@ export function SalonDesktop({
     [localAssign, paintMozoId, slug],
   );
 
+  /**
+   * Reset de la distribución entera (arranque de turno). Optimista como el
+   * pintado: si el server rechaza, vuelve el mapa anterior.
+   */
+  const handleClearDistribucion = useCallback(() => {
+    const prev = localAssign;
+    setLocalAssign((cur) =>
+      Object.fromEntries(Object.keys(cur).map((id) => [id, null])),
+    );
+    startTransition(async () => {
+      const r = await clearMozoAssignments(slug);
+      if (!r.ok) {
+        toast.error(r.error);
+        setLocalAssign(prev);
+        return;
+      }
+      toast.success(
+        r.data.cleared > 0
+          ? `Distribución limpia — ${r.data.cleared} mesas liberadas.`
+          : "No había mesas asignadas.",
+      );
+      router.refresh();
+    });
+  }, [localAssign, slug, router]);
+
   const closeNuevaReserva = useCallback(() => {
     setShowNewReservation(false);
     setPickingForNueva(false);
@@ -1372,6 +1401,7 @@ export function SalonDesktop({
               countByMozo={countByMozo}
               totalSinAsignar={totalSinAsignar}
               onDone={closeDistribuir}
+              onClearAll={handleClearDistribucion}
             />
           ) : cobroTable ? (
             cobroData?.kind === "ok" ? (

@@ -648,6 +648,91 @@ export async function assignMozoToTable(
   return actionOk(undefined);
 }
 
+/**
+ * Limpia la distribución entera: desasigna el mozo de todas las mesas del
+ * negocio. Es el reset de arranque de turno — el encargado que llega con la
+ * distribución de ayer pegada prefiere partir de cero antes que ir mesa por
+ * mesa desasignando (la asignación es fija, ver `assignMozoToTable`).
+ *
+ * Devuelve cuántas mesas quedaron liberadas.
+ */
+export async function clearMozoAssignments(
+  businessSlug: string,
+): Promise<ActionResult<{ cleared: number }>> {
+  const business = await getBusiness(businessSlug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  const ctx = ctxResult.data;
+
+  if (!canAssignMozo(ctx.role)) {
+    return actionError("Solo encargado o admin pueden asignar mozos.");
+  }
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+
+  // Cross-tenant defense: mismo camino que loadTableForBusiness — tables no
+  // tiene business_id, se llega por floor_plans.
+  const { data: plansData, error: plansError } = await service
+    .from("floor_plans")
+    .select("id")
+    .eq("business_id", business.id);
+  if (plansError) {
+    console.error("clearMozoAssignments floor_plans", plansError);
+    return actionError("No pudimos limpiar la distribución.");
+  }
+  const planIds = ((plansData as { id: string }[] | null) ?? []).map(
+    (p) => p.id,
+  );
+  if (planIds.length === 0) return actionOk({ cleared: 0 });
+
+  const { data: rowsData, error: rowsError } = await service
+    .from("tables")
+    .select("id, mozo_id")
+    .in("floor_plan_id", planIds)
+    .not("mozo_id", "is", null);
+  if (rowsError) {
+    console.error("clearMozoAssignments select", rowsError);
+    return actionError("No pudimos limpiar la distribución.");
+  }
+  const assigned = (rowsData as { id: string; mozo_id: string }[] | null) ?? [];
+  if (assigned.length === 0) return actionOk({ cleared: 0 });
+
+  const { error } = await service
+    .from("tables")
+    .update({ mozo_id: null })
+    .in(
+      "id",
+      assigned.map((t) => t.id),
+    );
+  if (error) {
+    console.error("clearMozoAssignments update", error);
+    return actionError("No pudimos limpiar la distribución.");
+  }
+
+  // Audit en bloque: una fila por mesa, igual que insertAudit pero en un
+  // solo round-trip (un salón grande son 40+ mesas).
+  const { error: auditError } = await service.from("tables_audit_log").insert(
+    assigned.map((t) => ({
+      table_id: t.id,
+      business_id: business.id,
+      kind: "assignment" as const,
+      from_value: t.mozo_id,
+      to_value: null,
+      by_user_id: ctx.userId,
+      reason: "Limpiar distribución",
+    })),
+  );
+  if (auditError) {
+    console.error("tables_audit_log insert (clear)", auditError);
+  }
+
+  revalidatePath(`/${businessSlug}/mozo`);
+  revalidatePath(`/${businessSlug}/admin/operacion`);
+  return actionOk({ cleared: assigned.length });
+}
+
 export async function transferTable(
   tableId: string,
   toMozoId: string,
