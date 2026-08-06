@@ -204,6 +204,8 @@ export function AdminDayList({
 
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
+  /** #158 — las canceladas arrancan ocultas; el toggle vive al pie de la lista. */
+  const [showCancelled, setShowCancelled] = useState(false);
   const [showNewReservation, setShowNewReservation] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{
     id: string;
@@ -309,7 +311,9 @@ export function AdminDayList({
     return { ...counts, nextLabel };
   }, [rows, timezone]);
 
-  const filteredRows = useMemo(() => {
+  // Filas que pasan tab + búsqueda, canceladas incluidas. De acá salen las dos
+  // cosas que hacen falta: lo que se muestra y cuántas canceladas se ocultaron.
+  const matchingRows = useMemo(() => {
     const now = Date.now();
     let filtered = rows.filter((r) => {
       switch (filter) {
@@ -336,6 +340,23 @@ export function AdminDayList({
     }
     return filtered;
   }, [rows, filter, search]);
+
+  // #158: la cancelada se esconde por defecto — en una noche con varias, el
+  // encargado las saltea una por una para leer lo que le importa (quién falta
+  // sentar). Los `no_show` siguen a la vista: que alguien no haya venido es
+  // información operativa, no ruido.
+  const filteredRows = useMemo(
+    () =>
+      showCancelled
+        ? matchingRows
+        : matchingRows.filter((r) => r.status !== "cancelled"),
+    [matchingRows, showCancelled],
+  );
+  const hiddenCancelled = matchingRows.length - filteredRows.length;
+  /** Cuántas canceladas hay para mostrar/ocultar con el toggle. */
+  const cancelledInView = showCancelled
+    ? matchingRows.filter((r) => r.status === "cancelled").length
+    : hiddenCancelled;
 
   const dateStrip = buildDateStrip(date);
 
@@ -495,7 +516,12 @@ export function AdminDayList({
           >
             {(
               [
-                { v: "all", l: `Todas (${rows.length})` },
+                // #158: cuenta lo que se ve — con las canceladas ocultas, un
+                // "Todas (12)" sobre una lista de 8 filas es una contradicción.
+                {
+                  v: "all",
+                  l: `Todas (${showCancelled ? rows.length : rows.filter((r) => r.status !== "cancelled").length})`,
+                },
                 { v: "upcoming", l: "Próximas" },
                 { v: "seated", l: "En mesa" },
                 { v: "past", l: "Pasadas" },
@@ -562,6 +588,25 @@ export function AdminDayList({
             />
           ))}
         </ul>
+      )}
+
+      {/* #158 — toggle de canceladas, al pie. Fuera del condicional de la lista
+          a propósito: un día enteramente cancelado tiene que poder abrirse, y si
+          el botón viviera adentro se vería como un día sin reservas. */}
+      {cancelledInView > 0 && (
+        <div className="flex justify-center pt-1">
+          <button
+            type="button"
+            onClick={() => setShowCancelled((v) => !v)}
+            aria-expanded={showCancelled}
+            className="inline-flex h-8 items-center gap-1.5 rounded-full px-3.5 text-xs font-medium text-zinc-500 ring-1 ring-zinc-200 transition hover:bg-zinc-50 hover:text-zinc-900"
+          >
+            <X className="h-3 w-3 text-rose-500" />
+            {showCancelled
+              ? "Ocultar canceladas"
+              : `Mostrar ${cancelledInView} cancelada${cancelledInView > 1 ? "s" : ""}`}
+          </button>
+        </div>
       )}
 
       {/* ── Modales ──────────────────────────────────────────────────────── */}
