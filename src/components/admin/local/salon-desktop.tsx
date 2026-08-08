@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeftRight,
@@ -105,7 +104,9 @@ import {
   canTransitionMesa,
 } from "@/lib/permissions/can";
 import type { FloorTable } from "@/lib/reservations/types";
+import { useOnActivate } from "@/lib/ui/use-tab-param";
 import { cn } from "@/lib/utils";
+import { getSalonTabData } from "@/app/[business_slug]/admin/(authed)/operacion/actions";
 
 // ─── Types compartidos con la page (server) ────────────────────────────────
 
@@ -209,16 +210,19 @@ function formatTime(iso: string): string {
 export function SalonDesktop({
   slug,
   businessId,
-  floorPlans,
-  dineInOrders,
-  reservations,
-  mozos,
+  floorPlans: initialFloorPlans,
+  dineInOrders: initialDineInOrders,
+  reservations: initialReservations,
+  mozos: initialMozos,
   currentUserId,
   role,
   visiblePlanIds = [],
   distribuirOpen = false,
   onDistribuirOpen,
   onDistribuirClose,
+  tabActive = true,
+  onServerData,
+  onReservationsChanged,
 }: {
   slug: string;
   businessId: string;
@@ -228,6 +232,21 @@ export function SalonDesktop({
   mozos: MozoMember[];
   currentUserId: string;
   role: BusinessRole;
+  /** Spec 101: `false` mientras la tab Mesas está oculta (sigue montada). */
+  tabActive?: boolean;
+  /**
+   * Spec 102: aviso de que cambió una reserva (realtime o acción propia). El
+   * salón se re-sincroniza solo; esto es para el shell, porque la tab Reservas
+   * no tiene suscripción propia — la única de la app vive acá.
+   */
+  onReservationsChanged?: () => void;
+  /** Spec 102: cada snapshot nuevo del refetch, para el badge de la tab. */
+  onServerData?: (d: {
+    floorPlans: FloorPlanWithTables[];
+    dineInOrders: SalonOrderRef[];
+    reservations: SalonReservationRef[];
+    mozos: MozoMember[];
+  }) => void;
   /** Spec 065: salones elegidos en el filtro del operativo. Con uno solo, el
    *  plano queda fijado ahí y el selector propio se esconde (un solo control
    *  para lo mismo). Con dos o más, el selector queda pero sólo con esos.
@@ -239,19 +258,72 @@ export function SalonDesktop({
   onDistribuirOpen?: () => void;
   onDistribuirClose?: () => void;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
 
+  // Snapshot del server de TODA la tab Mesas, seedeado una vez de los props y
+  // actualizado SÓLO por `refetchSalon` (spec 102). Antes cada acción del plano
+  // y cada evento de realtime hacían `router.refresh()`, que re-ejecutaba
+  // `operacion/page.tsx` entera —las 7 promesas de tab, ~30 queries— y
+  // remandaba el árbol RSC completo para mover una mesa. Un solo escritor → sin
+  // carrera contra un re-sync de los props.
+  const [serverData, setServerData] = useState({
+    floorPlans: initialFloorPlans,
+    dineInOrders: initialDineInOrders,
+    reservations: initialReservations,
+    mozos: initialMozos,
+  });
+  const { floorPlans, dineInOrders, reservations, mozos } = serverData;
+
+  // Refetch de la tab. Guard de carrera por secuencia: ante ráfagas (o
+  // respuestas fuera de orden) sólo se aplica la más nueva. Nunca lanza: en
+  // error mantiene lo que hay — es un refresh de fondo, y un plano vacío en
+  // medio del servicio es peor que uno de hace dos segundos.
+  const refetchSeq = useRef(0);
+  const onServerDataRef = useRef(onServerData);
+  onServerDataRef.current = onServerData;
+  const refetchSalon = useCallback(async () => {
+    const seq = ++refetchSeq.current;
+    try {
+      const res = await getSalonTabData(slug);
+      if (seq !== refetchSeq.current) return;
+      if (res.ok) {
+        setServerData(res.data);
+        onServerDataRef.current?.(res.data);
+      }
+    } catch {
+      // swallow: refresh de fondo, sin toast ni rollback.
+    }
+  }, [slug]);
+
   // Realtime via Supabase publication (DT-011 cerrada, migración 0040).
-  // Cualquier UPDATE/INSERT en tables visibles invalida la página.
+  // Cualquier UPDATE/INSERT en tables visibles refetchea la tab (ya no la ruta).
   useTablesRealtime({
     businessId,
     floorPlanIds: floorPlans.map((fp) => fp.plan.id),
+    onChange: refetchSalon,
   });
 
   // Reservas en vivo (spec 059, migración 0023): una reserva nueva (web,
-  // chatbot u otro encargado) aparece sola, sin recargar.
-  useReservationsRealtime({ businessId });
+  // chatbot u otro encargado) aparece sola, sin recargar. Ésta es la ÚNICA
+  // suscripción a `reservations` de la app, así que además de re-sincronizar el
+  // plano hay que avisarle al shell: la tab Reservas no tiene realtime propio y
+  // antes se enteraba de rebote, por el `router.refresh()` que este cambio
+  // saca. Ver `onReservationsChanged`.
+  const onReservationsChangedRef = useRef(onReservationsChanged);
+  onReservationsChangedRef.current = onReservationsChanged;
+  useReservationsRealtime({
+    businessId,
+    onChange: useCallback(() => {
+      void refetchSalon();
+      onReservationsChangedRef.current?.();
+    }, [refetchSalon]),
+  });
+
+  // Volver a la tab Mesas re-sincroniza. Hace falta porque `dineInOrders` no
+  // tiene realtime propio —los ítems y totales de una cuenta abierta cambian
+  // desde el teléfono del mozo, sin tocar `tables`— y desde la spec 101 el
+  // panel ya no se remonta al cambiar de tab.
+  useOnActivate(tabActive, refetchSalon);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [walkInTableId, setWalkInTableId] = useState<string | null>(null);
@@ -787,10 +859,10 @@ export function SalonDesktop({
           return;
         }
         toast.success("Mesa anulada.");
-        router.refresh();
+        void refetchSalon();
       });
     },
-    [slug, router],
+    [slug, refetchSalon],
   );
 
   const handleAnular = useCallback(() => {
@@ -845,10 +917,10 @@ export function SalonDesktop({
         }
         toast.success("Mesa abierta con reserva.");
         setSelectedId(null);
-        router.refresh();
+        void refetchSalon();
       });
     },
-    [slug, router],
+    [slug, refetchSalon],
   );
 
   // ── Selección ──
@@ -925,9 +997,9 @@ export function SalonDesktop({
           ? `Distribución limpia — ${r.data.cleared} mesas liberadas.`
           : "No había mesas asignadas.",
       );
-      router.refresh();
+      void refetchSalon();
     });
-  }, [localAssign, slug, router]);
+  }, [localAssign, slug, refetchSalon]);
 
   const closeNuevaReserva = useCallback(() => {
     setShowNewReservation(false);
@@ -975,10 +1047,10 @@ export function SalonDesktop({
             : `Mesa ${table.label} asignada a ${res.customer_name}.`,
         );
         setAsignarReservaFor(null);
-        router.refresh();
+        void refetchSalon();
       });
     },
-    [asignarReservaFor, slug, router],
+    [asignarReservaFor, slug, refetchSalon],
   );
 
   const countByMozo = useMemo(() => {
@@ -996,8 +1068,8 @@ export function SalonDesktop({
 
   const closeDistribuir = useCallback(() => {
     onDistribuirClose?.();
-    router.refresh();
-  }, [onDistribuirClose, router]);
+    void refetchSalon();
+  }, [onDistribuirClose, refetchSalon]);
 
   // ── Teclado del panel lateral (spec 075) ──────────────────────────────────
   //
@@ -1419,7 +1491,7 @@ export function SalonDesktop({
                 onClosed={() => {
                   closeCobro();
                   setSelectedId(null);
-                  router.refresh();
+                  void refetchSalon();
                 }}
                 onReload={reloadCobro}
               />
@@ -1495,7 +1567,7 @@ export function SalonDesktop({
                     },
                   }));
                   closePedir();
-                  router.refresh();
+                  void refetchSalon();
                 }}
               />
             ) : (
@@ -1524,7 +1596,7 @@ export function SalonDesktop({
                   },
                 }));
                 setWalkInTableId(null);
-                router.refresh();
+                void refetchSalon();
               }}
             />
           ) : ventaRapidaOpen ? (
@@ -1548,6 +1620,7 @@ export function SalonDesktop({
               currentUserId={currentUserId}
               slug={slug}
               pending={pending}
+              onChanged={() => void refetchSalon()}
               onCargarPedido={() => openPedir(selected)}
               onPedirCuenta={() => openCuenta(selected)}
               onClose={() => {
@@ -1598,6 +1671,7 @@ export function SalonDesktop({
                 slug={slug}
                 tableLabelById={tableLabelById}
                 rowProps={listaRowProps}
+                onChanged={() => void refetchSalon()}
                 pickingForId={asignarReservaFor?.reservation.id ?? null}
                 onAsignarMesa={(r, intent) => {
                   setSelectedId(null);
@@ -1663,7 +1737,7 @@ export function SalonDesktop({
               }));
             }
             setTransferTableId(null);
-            router.refresh();
+            void refetchSalon();
           }}
         />
       )}
@@ -1690,7 +1764,7 @@ export function SalonDesktop({
           onSuccess={() => {
             setTrasladarTableId(null);
             setSelectedId(null);
-            router.refresh();
+            void refetchSalon();
           }}
         />
       )}
@@ -2417,6 +2491,7 @@ function TableDetail({
   onTransfer,
   onTrasladar,
   onAnular,
+  onChanged,
 }: {
   table: FloorTable;
   order: SalonOrderRef | undefined;
@@ -2427,6 +2502,8 @@ function TableDetail({
   currentUserId: string;
   slug: string;
   pending: boolean;
+  /** Re-sincroniza el salón tras entregar o anular una comanda (spec 102). */
+  onChanged: () => void;
   /** Abre "Cargar pedido" embebido en el panel (no navega a otra ruta). */
   onCargarPedido: () => void;
   /** Abre "Pedir cuenta" (propina/descuento/dividir → cobro) embebido. */
@@ -2605,6 +2682,7 @@ function TableDetail({
             hideComandasIfAllDelivered={status === "pidio_cuenta"}
             canAnular={canCancelItem(role)}
             tableLabel={table.label}
+            onChanged={onChanged}
           />
         )}
 

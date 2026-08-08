@@ -63,6 +63,7 @@ export function OrderSummaryCard({
   hideComandasIfAllDelivered = false,
   canAnular = false,
   tableLabel,
+  onChanged,
 }: {
   order: OrderSummaryData;
   slug: string;
@@ -71,6 +72,15 @@ export function OrderSummaryCard({
   canAnular?: boolean;
   /** De qué mesa es, para que el modal diga qué se está anulando. */
   tableLabel?: string | null;
+  /**
+   * Cómo se re-sincroniza el que me renderiza después de entregar o anular una
+   * comanda (spec 102). Sin esto se cae al `router.refresh()` de siempre, que
+   * es lo que sigue usando la app del mozo. En el salón hace falta: desde que
+   * `SalonDesktop` guarda el snapshot del server en estado propio, el payload
+   * que trae un refresh de ruta se descarta — la fila quedaba «Activa» con el
+   * botón Entregar puesto, y la mesa marcada demorada, después de entregar.
+   */
+  onChanged?: () => void;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -84,6 +94,7 @@ export function OrderSummaryCard({
     startTransition(async () => {
       const r = await marcarComandaEntregada(comandaId, slug);
       if (!r.ok) toast.error(r.error);
+      else if (onChanged) onChanged();
       else router.refresh();
     });
   };
@@ -200,7 +211,8 @@ export function OrderSummaryCard({
           onClose={() => setAnularTarget(null)}
           onDone={() => {
             setAnularTarget(null);
-            router.refresh();
+            if (onChanged) onChanged();
+            else router.refresh();
           }}
         />
       )}

@@ -40,10 +40,17 @@ export function ReservationsPanel({
   pickingForId = null,
   onAsignarMesa,
   onNewReservation,
+  onChanged,
 }: {
   reservations: SalonReservationRef[];
   slug: string;
   tableLabelById: Record<string, string>;
+  /**
+   * Cómo se re-sincroniza el que me renderiza (spec 102). Sin esto se cae al
+   * `router.refresh()` histórico, que en el operativo re-corre las 7 promesas
+   * de tab para mover una reserva — y encima el salón ya no lee esos props.
+   */
+  onChanged?: () => void;
   /** Props de teclado de la fila (spec 075): las reservas son un tramo de la
    *  zona única del panel, entre las demoras y las mesas. */
   rowProps: SalonRowProps;
@@ -59,6 +66,7 @@ export function ReservationsPanel({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const resincronizar = () => (onChanged ? onChanged() : router.refresh());
   const confirmed = reservations.filter((r) => r.status === "confirmed");
   // Un ref por fila para poder abrir su menú desde el teclado sin controlar el
   // `open` del DropdownMenu a mano.
@@ -77,7 +85,7 @@ export function ReservationsPanel({
         return;
       }
       toast.success("Reserva sentada.");
-      router.refresh();
+      resincronizar();
     });
   };
 
@@ -93,7 +101,7 @@ export function ReservationsPanel({
         return;
       }
       toast.success("Marcada como no vino.");
-      router.refresh();
+      resincronizar();
     });
   };
 
@@ -109,7 +117,7 @@ export function ReservationsPanel({
         return;
       }
       toast.success("Reserva cancelada.");
-      router.refresh();
+      resincronizar();
     });
   };
 

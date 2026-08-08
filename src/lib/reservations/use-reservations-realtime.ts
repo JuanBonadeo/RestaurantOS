@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -8,15 +8,25 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 /**
  * Reservas en vivo (spec 059). Suscripción realtime a `reservations` de un
  * negocio: cualquier alta/cambio (reserva nueva desde la web, el chatbot u otro
- * encargado; sentar, cancelar, asignar mesa) invalida la página vía
- * `router.refresh()`.
+ * encargado; sentar, cancelar, asignar mesa) avisa al caller.
  *
- * Mismo patrón que `useTablesRealtime`, pero acá sí filtramos server-side por
- * `business_id` (la tabla lo tiene). Migración `0023` sumó `reservations` a la
- * publicación `supabase_realtime`.
+ * Igual que `useTablesRealtime`: con `onChange` el caller decide qué recargar
+ * (un refetch de su tab); sin `onChange` cae al `router.refresh()` histórico,
+ * que en `/admin/operacion` re-ejecuta las 7 promesas de tab. Acá sí filtramos
+ * server-side por `business_id` (la tabla lo tiene). Migración `0023` sumó
+ * `reservations` a la publicación `supabase_realtime`.
  */
-export function useReservationsRealtime({ businessId }: { businessId: string }) {
+export function useReservationsRealtime({
+  businessId,
+  onChange,
+}: {
+  businessId: string;
+  /** Sin esto se refresca la ruta entera (comportamiento histórico). */
+  onChange?: () => void;
+}) {
   const router = useRouter();
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   useEffect(() => {
     const supabase = createSupabaseBrowserClient();
@@ -29,7 +39,10 @@ export function useReservationsRealtime({ businessId }: { businessId: string }) 
     const scheduleRefresh = () => {
       if (pendingRefresh) clearTimeout(pendingRefresh);
       pendingRefresh = setTimeout(() => {
-        if (!cancelled) router.refresh();
+        if (!cancelled) {
+          if (onChangeRef.current) onChangeRef.current();
+          else router.refresh();
+        }
         pendingRefresh = null;
       }, 200);
     };

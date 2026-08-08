@@ -108,10 +108,19 @@ function CountValue<T>({
 function Pill<T>({
   promise,
   compute,
+  override,
 }: {
   promise: Promise<T>;
   compute: (d: T) => number;
+  /**
+   * Dato ya resuelto que le gana a la promesa. Lo usa Mesas desde la spec 102:
+   * el plano se actualiza por refetch de tab, y sin esto el badge se quedaría
+   * con el conteo del page-load — contradiciendo, en la misma barra, a lo que
+   * muestra el panel de al lado.
+   */
+  override?: T | null;
 }) {
+  if (override != null) return <>{compute(override)}</>;
   return (
     <ErrorBoundary fallback={<CountFallback />}>
       <Suspense fallback={<CountFallback />}>
@@ -161,6 +170,9 @@ function SalonPanel({
   distribuirOpen,
   onDistribuirOpen,
   onDistribuirClose,
+  active,
+  onServerData,
+  onReservationsChanged,
 }: {
   promise: Promise<SalonData>;
   slug: string;
@@ -171,6 +183,9 @@ function SalonPanel({
   distribuirOpen: boolean;
   onDistribuirOpen: () => void;
   onDistribuirClose: () => void;
+  active: boolean;
+  onServerData: (d: SalonData) => void;
+  onReservationsChanged: () => void;
 }) {
   const { floorPlans, dineInOrders, reservations, mozos } = use(promise);
   return (
@@ -187,6 +202,9 @@ function SalonPanel({
       distribuirOpen={distribuirOpen}
       onDistribuirOpen={onDistribuirOpen}
       onDistribuirClose={onDistribuirClose}
+      tabActive={active}
+      onServerData={onServerData}
+      onReservationsChanged={onReservationsChanged}
     />
   );
 }
@@ -520,6 +538,17 @@ function TabsInner({
   // no dispara nada, que es lo correcto: el server acaba de renderizarla.
   const router = useRouter();
   const refrescarRuta = () => router.refresh();
+
+  // La única suscripción a `reservations` de la app vive en SalonDesktop
+  // (spec 102). Si el encargado está justo mirando el libro del día, una
+  // reserva nueva de la web o del chatbot tiene que aparecerle sin tocar nada:
+  // sólo ahí vale re-correr la ruta. Si está en otra tab no hace falta — al
+  // entrar a Reservas ya se revalida por el puente de abajo.
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const onReservasCambiaron = () => {
+    if (activeRef.current === "reservas") router.refresh();
+  };
   useOnActivate(active === "reservas", refrescarRuta);
   useOnActivate(active === "rendicion", refrescarRuta);
   useOnActivate(active === "fichaje", refrescarRuta);
@@ -532,6 +561,10 @@ function TabsInner({
   // Modo "Distribuir mozos": vive en el shell para que el botón quede alineado
   // con las tabs en el header (en vez de dentro del SalonDesktop).
   const [distribuirOpen, setDistribuirOpen] = useState(false);
+
+  // Último snapshot que trajo el refetch de la tab Mesas (spec 102), para que
+  // su badge no quede contando lo del page-load.
+  const [salonData, setSalonData] = useState<SalonData | null>(null);
 
   // ── Filtro por salón (spec 065) ──
   // Preferencia por máquina + negocio, multi-selección (vacío = todos).
@@ -560,7 +593,13 @@ function TabsInner({
       <TabButton
         active={active === "salon"}
         onClick={() => setTab("salon")}
-        count={<Pill promise={salon} compute={(d) => countSalonOcupadas(d.floorPlans, salonFilter)} />}
+        count={
+          <Pill
+            promise={salon}
+            override={salonData}
+            compute={(d) => countSalonOcupadas(d.floorPlans, salonFilter)}
+          />
+        }
       >
         Mesas
       </TabButton>
@@ -643,6 +682,9 @@ function TabsInner({
                   distribuirOpen={distribuirOpen}
                   onDistribuirOpen={() => setDistribuirOpen(true)}
                   onDistribuirClose={() => setDistribuirOpen(false)}
+                  active={active === "salon"}
+                  onServerData={setSalonData}
+                  onReservationsChanged={onReservasCambiaron}
                 />
               </Suspense>
             </ErrorBoundary>
