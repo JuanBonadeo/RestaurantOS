@@ -54,9 +54,11 @@ import { cn } from "@/lib/utils";
 type Props = {
   slug: string;
   cajas: CajaConEstado[];
+  /** Spec 101: `false` mientras la tab está oculta (el panel sigue montado). */
+  active?: boolean;
 };
 
-export function CajaAdminBoard({ slug, cajas }: Props) {
+export function CajaAdminBoard({ slug, cajas, active = true }: Props) {
   const router = useRouter();
   const [statsByCaja, setStatsByCaja] = useState<
     Record<string, CajaLiveStats | null>
@@ -74,7 +76,14 @@ export function CajaAdminBoard({ slug, cajas }: Props) {
   // acá y al cobrar. Ver `use-caja-preferida.ts`.
   const [activeCajaId, selectCaja] = useCajaPreferida(slug, cajas);
 
+  // Poll de stats por caja. Depende de `active` (spec 101): con el keep-alive el
+  // panel queda montado al cambiar de tab, y sin esta guarda seguiría golpeando
+  // `/api/caja/stats` × N cajas cada 30 s desde cada tablet del local, para
+  // siempre, sin que nadie lo mire. Volver a la tab re-corre el effect → `load()`
+  // inmediato: la tab de plata nunca pinta el snapshot viejo mientras espera el
+  // primer tick.
   useEffect(() => {
+    if (!active) return;
     let cancelled = false;
     const load = async () => {
       const entries = await Promise.all(
@@ -111,7 +120,7 @@ export function CajaAdminBoard({ slug, cajas }: Props) {
       cancelled = true;
       clearInterval(i);
     };
-  }, [cajas, refreshKey]);
+  }, [cajas, refreshKey, active]);
 
   if (cajas.length === 0) {
     return (

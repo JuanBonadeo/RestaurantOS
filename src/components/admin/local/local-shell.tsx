@@ -9,7 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { Check, ChevronDown, MapPin } from "lucide-react";
 
 import { CajaAdminBoard } from "@/components/admin/local/caja-admin-board";
@@ -45,16 +45,20 @@ import type { BusinessRole } from "@/lib/admin/context";
 import type { SalonOption } from "@/lib/admin/floor-plan/queries";
 import { salonFilterStorageKey } from "@/lib/admin/salon-filter";
 import { useStickyMultiFilter } from "@/lib/ui/use-sticky-filter";
+import { useOnActivate, useTabParam } from "@/lib/ui/use-tab-param";
 import { cn } from "@/lib/utils";
 
-type Tab =
-  | "pedidos"
-  | "comandas"
-  | "salon"
-  | "reservas"
-  | "caja"
-  | "rendicion"
-  | "fichaje";
+const TABS = [
+  "salon",
+  "reservas",
+  "comandas",
+  "pedidos",
+  "caja",
+  "rendicion",
+  "fichaje",
+] as const;
+
+type Tab = (typeof TABS)[number];
 
 /**
  * Tabs a las que aplica el filtro por salón (spec 065, FR-002).
@@ -64,18 +68,6 @@ type Tab =
  * como si estuviera recortado por salón.
  */
 const SALON_FILTERABLE: Tab[] = ["salon", "comandas", "reservas"];
-
-function isTab(v: string | null | undefined): v is Tab {
-  return (
-    v === "pedidos" ||
-    v === "comandas" ||
-    v === "salon" ||
-    v === "reservas" ||
-    v === "caja" ||
-    v === "rendicion" ||
-    v === "fichaje"
-  );
-}
 
 type ShellProps = {
   slug: string;
@@ -235,12 +227,14 @@ function ComandasPanel({
   businessId,
   salonIds,
   salonLabel,
+  active,
 }: {
   promise: Promise<ComandasData>;
   slug: string;
   businessId: string;
   salonIds: string[];
   salonLabel: string | null;
+  active: boolean;
 }) {
   const { initialComandas, stations, mozos, printAgentLastSeenAt } =
     use(promise);
@@ -254,6 +248,7 @@ function ComandasPanel({
       printAgentLastSeenAt={printAgentLastSeenAt}
       salonIds={salonIds}
       salonLabel={salonLabel}
+      active={active}
     />
   );
 }
@@ -261,12 +256,14 @@ function ComandasPanel({
 function CajaPanel({
   promise,
   slug,
+  active,
 }: {
   promise: Promise<CajaData>;
   slug: string;
+  active: boolean;
 }) {
   const { cajas } = use(promise);
-  return <CajaAdminBoard slug={slug} cajas={cajas} />;
+  return <CajaAdminBoard slug={slug} cajas={cajas} active={active} />;
 }
 
 function RendicionPanel({
@@ -335,9 +332,11 @@ function ReservasPanel({
 function FichajePanel({
   promise,
   slug,
+  active,
 }: {
   promise: Promise<FichajeData>;
   slug: string;
+  active: boolean;
 }) {
   const { initialPresent, todaySummary } = use(promise);
   return (
@@ -345,6 +344,7 @@ function FichajePanel({
       slug={slug}
       initialPresent={initialPresent}
       todaySummary={todaySummary}
+      active={active}
     />
   );
 }
@@ -482,19 +482,47 @@ function TabsInner({
   fichaje,
   reservas,
 }: ShellProps) {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const raw = searchParams.get("tab");
   // Default = "salon" porque es la pantalla principal del operativo en local.
-  const active: Tab = isTab(raw) ? raw : "salon";
+  // La tab es estado de CLIENTE y la URL se escribe con la History API: cambiar
+  // de tab no dispara ningún request (spec 101). Antes era `router.replace`, o
+  // sea una navegación soft que re-ejecutaba la page entera — las 7 promesas,
+  // ~30 queries — para pintar una sola tab.
+  const [active, setTab] = useTabParam<Tab>("tab", "salon", TABS);
 
-  const setTab = (next: Tab) => {
-    const params = new URLSearchParams(searchParams.toString());
-    if (next === "salon") params.delete("tab");
-    else params.set("tab", next);
-    const qs = params.toString();
-    router.replace(qs ? `?${qs}` : `?`, { scroll: false });
-  };
+  // Keep-alive: una tab se monta la PRIMERA vez que se entra y de ahí en más se
+  // esconde con CSS en vez de desmontarse (es lo que ya hacía Pedidos para no
+  // tirar su realtime, generalizado a todas). Sin esto, cortar la navegación
+  // haría que cada vuelta a una tab remonte `SalonDesktop` / `ComandasKanban`,
+  // re-suscriba sus channels (`getSession()` + `setAuth()` cada vez) y pierda
+  // scroll y filtros. Se monta lazy —no las 7 de una— para que el primer
+  // pintado siga siendo el de Mesas.
+  const visited = useRef<Set<Tab>>(new Set<Tab>([active]));
+  visited.current.add(active);
+  const mounted = (t: Tab) => visited.current.has(t);
+  // `h-full` en la activa: los paneles que lo usan (Mesas, Fichaje) colgaban de
+  // un contenedor con altura definida y este wrapper queda en el medio.
+  const paneClass = (t: Tab) => (active === t ? "h-full" : "hidden");
+
+  // ── Guarda de frescura de las tabs SIN refetch propio ──────────────────────
+  // Cortar la navegación deja la promesa RSC congelada al page-load, así que
+  // una tab que no sabe recargarse sola mostraría el estado de hace horas.
+  // Reservas, Rendición y Fichaje están en ese caso: no tienen action de tab ni
+  // realtime propio (el de reservas vive DENTRO de SalonDesktop, que puede no
+  // haber montado nunca si la sesión arrancó en otra tab).
+  //
+  // El puente es `router.refresh()`: cuesta lo mismo que costaba ANTES cada
+  // click de tab, pero ahora sólo al entrar a estas tres — y jamás muestra
+  // plata vieja. Las specs 102/103 lo reemplazan por un refetch por tab.
+  //
+  // Van acá y no en cada panel a propósito: el shell NO monta lazy (lo lazy es
+  // el panel), así que `active === "x"` transiciona false→true también en la
+  // PRIMERA entrada. Y al abrir directo en una de estas tabs (`?tab=rendicion`)
+  // no dispara nada, que es lo correcto: el server acaba de renderizarla.
+  const router = useRouter();
+  const refrescarRuta = () => router.refresh();
+  useOnActivate(active === "reservas", refrescarRuta);
+  useOnActivate(active === "rendicion", refrescarRuta);
+  useOnActivate(active === "fichaje", refrescarRuta);
 
   // Como todo /admin/operacion es fullscreen, colapsamos el sidebar al entrar.
   useEffect(() => {
@@ -601,26 +629,28 @@ function TabsInner({
         )}
       </div>
       <div className="flex-1 overflow-auto p-4">
-        {active === "salon" && (
-          <ErrorBoundary fallback={<TabLoadError />}>
-            <Suspense fallback={<SalonBoardSkeleton />}>
-              <SalonPanel
-                promise={salon}
-                slug={slug}
-                businessId={businessId}
-                currentUserId={currentUserId}
-                role={role}
-                visiblePlanIds={salonFilter}
-                distribuirOpen={distribuirOpen}
-                onDistribuirOpen={() => setDistribuirOpen(true)}
-                onDistribuirClose={() => setDistribuirOpen(false)}
-              />
-            </Suspense>
-          </ErrorBoundary>
+        {mounted("salon") && (
+          <div className={paneClass("salon")}>
+            <ErrorBoundary fallback={<TabLoadError />}>
+              <Suspense fallback={<SalonBoardSkeleton />}>
+                <SalonPanel
+                  promise={salon}
+                  slug={slug}
+                  businessId={businessId}
+                  currentUserId={currentUserId}
+                  role={role}
+                  visiblePlanIds={salonFilter}
+                  distribuirOpen={distribuirOpen}
+                  onDistribuirOpen={() => setDistribuirOpen(true)}
+                  onDistribuirClose={() => setDistribuirOpen(false)}
+                />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
         )}
         {/* Pedidos online: SIEMPRE montado (oculto con CSS) para que su
             suscripción realtime no se caiga al cambiar de tab. */}
-        <div className={active === "pedidos" ? "" : "hidden"}>
+        <div className={paneClass("pedidos")}>
           <ErrorBoundary fallback={<TabLoadError />}>
             <Suspense fallback={<TabContentSkeleton />}>
               <PedidosPanel
@@ -632,56 +662,75 @@ function TabsInner({
             </Suspense>
           </ErrorBoundary>
         </div>
-        {active === "reservas" && (
-          <ErrorBoundary fallback={<TabLoadError />}>
-            <Suspense fallback={<TabContentSkeleton />}>
-              <ReservasPanel
-                promise={reservas}
-                slug={slug}
-                timezone={timezone}
-                salonIds={salonFilter}
-              />
-            </Suspense>
-          </ErrorBoundary>
+        {mounted("reservas") && (
+          <div className={paneClass("reservas")}>
+            <ErrorBoundary fallback={<TabLoadError />}>
+              <Suspense fallback={<TabContentSkeleton />}>
+                <ReservasPanel
+                  promise={reservas}
+                  slug={slug}
+                  timezone={timezone}
+                  salonIds={salonFilter}
+                />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
         )}
-        {active === "comandas" && (
-          <ErrorBoundary fallback={<TabLoadError />}>
-            <Suspense fallback={<TabContentSkeleton />}>
-              <ComandasPanel
-                promise={comandas}
-                slug={slug}
-                businessId={businessId}
-                salonIds={salonFilter}
-                salonLabel={salonLabel}
-              />
-            </Suspense>
-          </ErrorBoundary>
+        {mounted("comandas") && (
+          <div className={paneClass("comandas")}>
+            <ErrorBoundary fallback={<TabLoadError />}>
+              <Suspense fallback={<TabContentSkeleton />}>
+                <ComandasPanel
+                  promise={comandas}
+                  slug={slug}
+                  businessId={businessId}
+                  salonIds={salonFilter}
+                  salonLabel={salonLabel}
+                  active={active === "comandas"}
+                />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
         )}
-        {active === "caja" && (
-          <ErrorBoundary fallback={<TabLoadError money />}>
-            <Suspense fallback={<TabContentSkeleton />}>
-              <CajaPanel promise={caja} slug={slug} />
-            </Suspense>
-          </ErrorBoundary>
+        {mounted("caja") && (
+          <div className={paneClass("caja")}>
+            <ErrorBoundary fallback={<TabLoadError money />}>
+              <Suspense fallback={<TabContentSkeleton />}>
+                <CajaPanel
+                  promise={caja}
+                  slug={slug}
+                  active={active === "caja"}
+                />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
         )}
-        {active === "rendicion" && (
-          <ErrorBoundary fallback={<TabLoadError money />}>
-            <Suspense fallback={<TabContentSkeleton />}>
-              <RendicionPanel
-                rendicionPromise={rendicion}
-                cajaPromise={caja}
-                slug={slug}
-                role={role}
-              />
-            </Suspense>
-          </ErrorBoundary>
+        {mounted("rendicion") && (
+          <div className={paneClass("rendicion")}>
+            <ErrorBoundary fallback={<TabLoadError money />}>
+              <Suspense fallback={<TabContentSkeleton />}>
+                <RendicionPanel
+                  rendicionPromise={rendicion}
+                  cajaPromise={caja}
+                  slug={slug}
+                  role={role}
+                />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
         )}
-        {active === "fichaje" && (
-          <ErrorBoundary fallback={<TabLoadError />}>
-            <Suspense fallback={<TabContentSkeleton />}>
-              <FichajePanel promise={fichaje} slug={slug} />
-            </Suspense>
-          </ErrorBoundary>
+        {mounted("fichaje") && (
+          <div className={paneClass("fichaje")}>
+            <ErrorBoundary fallback={<TabLoadError />}>
+              <Suspense fallback={<TabContentSkeleton />}>
+                <FichajePanel
+                  promise={fichaje}
+                  slug={slug}
+                  active={active === "fichaje"}
+                />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
         )}
       </div>
     </div>

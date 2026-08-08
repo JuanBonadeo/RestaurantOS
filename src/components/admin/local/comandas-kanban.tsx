@@ -79,6 +79,7 @@ import { AnularComandaModal } from "@/components/shared/anular-comanda-modal";
  */
 const PRINT_AGENT_OFFLINE_THRESHOLD_MS = 60_000;
 import { useOptimisticAction } from "@/lib/ui/use-optimistic-action";
+import { useOnActivate } from "@/lib/ui/use-tab-param";
 import { mozoPalette } from "@/lib/mozo/colors";
 import type { MozoMember } from "@/lib/mozo/queries";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -238,6 +239,7 @@ export function ComandasKanban({
   printAgentLastSeenAt: initialPrintAgentLastSeenAt,
   salonIds = [],
   salonLabel = null,
+  active = true,
 }: {
   slug: string;
   businessId: string;
@@ -249,6 +251,8 @@ export function ComandasKanban({
   salonIds?: string[];
   /** Etiqueta de la selección, para los textos. `null` sin filtro. */
   salonLabel?: string | null;
+  /** Spec 101: `false` mientras la tab está oculta (el panel sigue montado). */
+  active?: boolean;
 }) {
   // Filtro "solo fallidas": lo activa la alerta de fallos de impresión (spec
   // 35) para ir directo a las comandas con `print_failed_at`.
@@ -291,16 +295,19 @@ export function ComandasKanban({
     }
   }, [slug]);
 
-  // Refetch al montar. La tab conmuta con `{active === "comandas" && …}` (montaje
-  // condicional), así que al volver a Comandas el panel se REMONTA y re-seedea
-  // `serverData` de la promesa RSC de `initialComandas`, que quedó CONGELADA al
-  // page-load (ya no hay `router.refresh()` que la revalide). Sin esto, un
-  // regreso a la tab tras un rato mostraría el snapshot viejo (comandas ya
-  // entregadas reapareciendo) hasta el próximo evento de realtime. El refetch de
-  // mount trae el estado actual; el guard de secuencia lo coordina con realtime.
+  // Refetch al montar. `serverData` se seedea de la promesa RSC de
+  // `initialComandas`, que quedó CONGELADA al page-load (ya no hay
+  // `router.refresh()` que la revalide). Sin esto, entrar a la tab tras un rato
+  // mostraría el snapshot viejo (comandas ya entregadas reapareciendo) hasta el
+  // próximo evento de realtime. El guard de secuencia lo coordina con realtime.
   useEffect(() => {
     void refetchComandas();
   }, [refetchComandas]);
+
+  // Y otra vez cada vez que se vuelve a la tab: desde la spec 101 el panel no se
+  // desmonta al cambiar de tab (keep-alive), así que el refetch de mount ya no
+  // alcanza para garantizar frescura al volver.
+  useOnActivate(active, refetchComandas);
 
   // Optimistic con rollback en error vía helper compartido (spec 21). El `base`
   // es `serverData.comandas` (snapshot del server + merge de realtime): el

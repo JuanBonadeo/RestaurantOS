@@ -29,25 +29,46 @@ export function FichajeTab({
   slug,
   initialPresent,
   todaySummary,
+  active = true,
 }: {
   slug: string;
   initialPresent: PresentEmployee[];
   todaySummary?: TodaySummary;
+  /** Spec 101: `false` mientras la tab está oculta (el panel sigue montado). */
+  active?: boolean;
 }) {
   const [present, setPresent] = useState(initialPresent);
-  const [finished] = useState(todaySummary?.finished ?? []);
-  const [absent] = useState(todaySummary?.absent ?? []);
+  // `finished` / `absent` (el resumen del día) se leen **derecho de los props**:
+  // no tienen ni setter, y en `useState` quedaban congelados al montar — con el
+  // keep-alive de la spec 101 el panel monta una sola vez, así que "Ya salieron"
+  // y "Sin fichar" se clavaban en el snapshot del page-load por todo el turno,
+  // aunque el server mandara datos nuevos.
+  const finished = todaySummary?.finished ?? [];
+  const absent = todaySummary?.absent ?? [];
   const [dialogOpen, setDialogOpen] = useState(false);
   const [pin, setPin] = useState("");
   const [feedback, setFeedback] = useState<FeedbackState>({ status: "idle" });
 
+  // Los presentes vuelven a seedearse cuando el server manda datos nuevos (el
+  // puente del shell revalida la ruta al entrar a la tab). Sin esto el panel se
+  // quedaba con lo del page-load: con keep-alive ya no hay re-montaje que lo
+  // re-seedee, y el badge de la tab —que lee la promesa— terminaba diciendo un
+  // número distinto al de las tarjetas.
   useEffect(() => {
+    setPresent(initialPresent);
+  }, [initialPresent]);
+
+  // El poll se detiene con la tab oculta (spec 101): con el keep-alive el panel
+  // queda montado al cambiar de tab y si no, seguiría preguntando quién está
+  // presente cada 60 s para siempre sin que nadie lo mire.
+  useEffect(() => {
+    if (!active) return;
     const interval = setInterval(async () => {
       const updated = await getCurrentPresent(slug);
       setPresent(updated);
     }, 60_000);
     return () => clearInterval(interval);
-  }, [slug]);
+  }, [slug, active]);
 
   const handleDigit = useCallback(
     (d: string) => {
