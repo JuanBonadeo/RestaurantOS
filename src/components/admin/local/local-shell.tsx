@@ -10,15 +10,44 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import dynamic from "next/dynamic";
 import { Check, ChevronDown, MapPin } from "lucide-react";
 
-import { CajaAdminBoard } from "@/components/admin/local/caja-admin-board";
-import { ComandasKanban } from "@/components/admin/local/comandas-kanban";
-import { FichajeTab } from "@/components/admin/local/fichaje-tab";
-import { RendicionMozosTab } from "@/components/admin/local/rendicion-mozos-tab";
-import { SalonDesktop } from "@/components/admin/local/salon-desktop";
-import { OrdersRealtimeBoard } from "@/components/admin/orders-realtime-board";
-import { AdminDayList } from "@/components/reservations/admin-day-list";
+// Las 7 tabs, cada una en su chunk (spec 108). Se montan lazy desde la spec 101
+// —una tab se monta la primera vez que se entra— pero su JS venía igual en el
+// bundle inicial: `/admin/operacion` arrancaba en 440 kB, la pantalla más pesada
+// del producto, para mostrar el plano del salón. Ahora son 119 kB.
+//
+// El SSR se mantiene (no va `ssr: false`), así que la tab de entrada sigue
+// llegando pintada del server. Ojo con la contabilidad: de las 7, dos bajan
+// igual en la carga inicial —Mesas, que es la tab default y se renderiza en el
+// server, y Pedidos online, que está montado siempre para no tirar su realtime—.
+// Las otras cinco son las que se difieren de verdad.
+const CajaAdminBoard = dynamic(() =>
+  import("@/components/admin/local/caja-admin-board").then((m) => m.CajaAdminBoard),
+);
+const ComandasKanban = dynamic(() =>
+  import("@/components/admin/local/comandas-kanban").then((m) => m.ComandasKanban),
+);
+const FichajeTab = dynamic(() =>
+  import("@/components/admin/local/fichaje-tab").then((m) => m.FichajeTab),
+);
+const RendicionMozosTab = dynamic(() =>
+  import("@/components/admin/local/rendicion-mozos-tab").then(
+    (m) => m.RendicionMozosTab,
+  ),
+);
+const SalonDesktop = dynamic(() =>
+  import("@/components/admin/local/salon-desktop").then((m) => m.SalonDesktop),
+);
+const OrdersRealtimeBoard = dynamic(() =>
+  import("@/components/admin/orders-realtime-board").then(
+    (m) => m.OrdersRealtimeBoard,
+  ),
+);
+const AdminDayList = dynamic(() =>
+  import("@/components/reservations/admin-day-list").then((m) => m.AdminDayList),
+);
 import { ErrorBoundary } from "@/components/shared/error-boundary";
 import {
   SalonBoardSkeleton,

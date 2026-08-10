@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  experimental: {
+    // Barrels pesados: sin esto se importa el paquete entero para usar tres
+    // símbolos (spec 108). `lucide-react` ya viene en la lista default de Next.
+    optimizePackageImports: ["recharts", "date-fns", "date-fns-tz"],
+  },
   eslint: {
     // El lint se corre aparte (npm run lint). No bloquea el build/deploy.
     ignoreDuringBuilds: true,

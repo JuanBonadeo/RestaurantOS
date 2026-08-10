@@ -12,18 +12,24 @@ import {
   Wallet,
 } from "lucide-react";
 
-import { ChannelDonut } from "@/components/admin/dashboard/channel-donut";
+
 import { DailyMenuPreview } from "@/components/admin/dashboard/daily-menu-preview";
 import { DashboardHeader } from "@/components/admin/dashboard/dashboard-header";
 import { HealthGauges } from "@/components/admin/dashboard/health-gauges";
 import { HourlyHeatmap } from "@/components/admin/dashboard/hourly-heatmap";
-import { PaymentMixDonut } from "@/components/admin/dashboard/payment-mix-donut";
+
 import { RecentOrders } from "@/components/admin/dashboard/recent-orders";
-import { RevenueChart } from "@/components/admin/dashboard/revenue-chart";
+
 import { SalonStatsSection } from "@/components/admin/dashboard/salon-stats";
 import { StatTile } from "@/components/admin/dashboard/stat-tile";
 import { TopProductsList } from "@/components/admin/dashboard/top-products-list";
+import {
+  ChannelDonut,
+  PaymentMixDonut,
+  RevenueChart,
+} from "@/components/admin/dashboard/lazy-charts";
 import { PageShell } from "@/components/admin/shell/page-shell";
+
 import { ensureAdminAccess } from "@/lib/admin/context";
 import { getAdminDailyMenus } from "@/lib/admin/daily-menu-query";
 import {

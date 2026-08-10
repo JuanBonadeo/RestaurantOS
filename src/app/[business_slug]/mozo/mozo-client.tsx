@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArmchairIcon,
@@ -34,6 +42,8 @@ import { tieneConsumo } from "@/lib/mozo/consumo";
 import type { MozoMember, MozoAttendance } from "@/lib/mozo/queries";
 import { type OperationalStatus } from "@/lib/mozo/state-machine";
 import { DELAY_COLORS, tableDelay } from "@/lib/comandas/mesa-demora";
+import { getMozoHomeData } from "@/lib/mozo/home-actions";
+import { cn } from "@/lib/utils";
 import { useTablesRealtime } from "@/lib/mozo/use-tables-realtime";
 import { NotificationsToastHost } from "@/components/notifications/notifications-toast-host";
 import { useNotificationsRealtime } from "@/components/notifications/use-notifications-realtime";
@@ -170,10 +180,10 @@ export function MozoClient({
   businessSlug,
   businessName,
   businessId,
-  floorPlans,
-  reservations,
-  activeOrders,
-  mozos,
+  floorPlans: initialFloorPlans,
+  reservations: initialReservations,
+  activeOrders: initialActiveOrders,
+  mozos: initialMozos,
   currentUserId,
   role,
   initialNotifications,
@@ -183,6 +193,33 @@ export function MozoClient({
 }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  // Snapshot del server del home, seedeado de los props y actualizado sólo por
+  // `refetchHome` (spec 107). Antes cada acción de mesa y cada evento de
+  // realtime hacían `router.refresh()`, que re-ejecutaba `mozo/page.tsx`
+  // entera: las 8 queries del `Promise.all`, incluidas notificaciones,
+  // propinas y fichaje, que ninguna acción de mesa toca.
+  const [serverData, setServerData] = useState({
+    floorPlans: initialFloorPlans,
+    reservations: initialReservations,
+    activeOrders: initialActiveOrders,
+    mozos: initialMozos,
+  });
+  const { floorPlans, reservations, activeOrders, mozos } = serverData;
+
+  // Guarda de carrera por secuencia y error tragado: es un refresh de fondo, y
+  // un plano vacío en medio del servicio es peor que uno de dos segundos atrás.
+  const refetchSeq = useRef(0);
+  const refetchHome = useCallback(async () => {
+    const seq = ++refetchSeq.current;
+    try {
+      const res = await getMozoHomeData(businessSlug);
+      if (seq !== refetchSeq.current) return;
+      if (res.ok) setServerData(res.data);
+    } catch {
+      // swallow: refresh de fondo, sin toast ni rollback.
+    }
+  }, [businessSlug]);
   // Default tab: "Mis mesas" para el mozo (su día a día). Encargado/admin
   // arrancan en "Salón" (vista global). Platform admin = admin acá.
   const [activeTab, setActiveTab] = useState<MozoTab>(
@@ -270,11 +307,13 @@ export function MozoClient({
   }, [searchParams, allTables]);
 
   // Realtime via Supabase publication (DT-011 cerrada en migración 0040).
-  // Cualquier UPDATE/INSERT en tables del business invalida la página.
-  // Reemplaza el polling de 10 s que tenía antes.
+  // Cualquier UPDATE/INSERT en tables del business re-sincroniza el home
+  // (spec 107: antes invalidaba la ruta entera, en cada evento de cualquier
+  // compañero). Reemplaza el polling de 10 s que tenía antes.
   useTablesRealtime({
     businessId,
     floorPlanIds: floorPlans.map((fp) => fp.plan.id),
+    onChange: refetchHome,
   });
 
   // ── Derived ──
@@ -362,9 +401,9 @@ export function MozoClient({
       setAnularPrompt(null);
       setAnularReason("");
       setSelected(null);
-      router.refresh();
+      void refetchHome();
     },
-    [businessSlug, router],
+    [businessSlug, refetchHome],
   );
 
   const handleAnular = useCallback(async () => {
@@ -411,21 +450,20 @@ export function MozoClient({
   const handleNotifClick = useCallback(
     async (n: Notification) => {
       if (n.read_at) return;
-      // Optimista: se ve leído al instante (igual que "marcar todos"). El
-      // server reconcilia con revalidatePath; si falla, el realtime/refresh
-      // vuelve a traer el estado real.
+      // Optimista: se ve leído al instante (igual que "marcar todos"). Si la
+      // action falla, el realtime de notificaciones trae el estado real. No se
+      // refresca la ruta (spec 107): marcar leído no cambia nada del salón, y
+      // re-correr `mozo/page.tsx` por un puntito azul era pagar 8 queries.
       markReadLocally(n.id);
-      const r = await markRead(n.id, businessSlug);
-      if (r.ok) router.refresh();
+      void markRead(n.id, businessSlug);
     },
-    [businessSlug, router, markReadLocally],
+    [businessSlug, markReadLocally],
   );
 
   const handleMarkAllRead = useCallback(async () => {
     markAllReadLocally();
-    const r = await markAllRead(businessSlug);
-    if (r.ok) router.refresh();
-  }, [businessSlug, router, markAllReadLocally]);
+    void markAllRead(businessSlug);
+  }, [businessSlug, markAllReadLocally]);
 
   const handleToastClick = useCallback((n: Notification) => {
     // Tocar el toast lleva al tab Avisos. La nav del mozo gestiona la
@@ -633,37 +671,43 @@ export function MozoClient({
                   estado donde el cliente lo pide (#92). Es el mismo criterio
                   que el drawer del encargado (`salon-desktop.tsx`), que ya lo
                   había revertido en spec 23. */}
+              {/* Los dos CTA del camino caliente van con `<Link>` y no con
+                  `router.push` (spec 107): el prefetch por default de Link es
+                  el PARCIAL, que corta en el `loading.tsx` de la ruta (spec
+                  039) y deja el skeleton listo. Ojo con la alternativa: un
+                  `router.prefetch(href)` imperativo usa el prefetch COMPLETO,
+                  que renderiza la page entera en el server y cachea su data
+                  dinámica como reusable por 5 minutos — en `cuenta`, que es
+                  plata, eso es servir un total viejo. */}
               {canShowCuentaButton &&
                 (selectedStatus === "pidio_cuenta" ||
                   (selectedStatus === "ocupada" && selectedHasItems)) && (
-                  <button
-                    disabled={loading}
-                    onClick={() =>
-                      router.push(
-                        `/${businessSlug}/mozo/mesa/${selectedSync.id}/cuenta`,
-                      )
-                    }
-                    className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 text-base font-semibold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-60"
+                  <Link
+                    href={`/${businessSlug}/mozo/mesa/${selectedSync.id}/cuenta`}
+                    aria-disabled={loading}
+                    className={cn(
+                      "flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 text-base font-semibold text-white shadow-sm transition active:scale-[0.98]",
+                      loading && "pointer-events-none opacity-60",
+                    )}
                   >
                     <Receipt className="h-5 w-5" />
                     Cobrar
-                  </button>
+                  </Link>
                 )}
               {selectedStatus === "ocupada" &&
                 !selectedHasItems &&
                 canShowPedirButton && (
-                  <button
-                    disabled={loading}
-                    onClick={() =>
-                      router.push(
-                        `/${businessSlug}/mozo/mesa/${selectedSync.id}/pedir`,
-                      )
-                    }
-                    className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 text-base font-semibold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-60"
+                  <Link
+                    href={`/${businessSlug}/mozo/mesa/${selectedSync.id}/pedir`}
+                    aria-disabled={loading}
+                    className={cn(
+                      "flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 text-base font-semibold text-white shadow-sm transition active:scale-[0.98]",
+                      loading && "pointer-events-none opacity-60",
+                    )}
                   >
                     <ClipboardList className="h-5 w-5" />
                     Cargar pedido
-                  </button>
+                  </Link>
                 )}
               {/* Acciones secundarias: tiles compactos en una fila adaptativa
                   (nunca huérfano a media columna). */}
@@ -830,6 +874,7 @@ export function MozoClient({
                 hideComandasIfAllDelivered={selectedStatus === "pidio_cuenta"}
                 canAnular={canCancelItem(role)}
                 tableLabel={selectedSync.label}
+                onChanged={refetchHome}
               />
             )}
 
@@ -869,7 +914,7 @@ export function MozoClient({
           onSuccess={() => {
             setWalkInTableId(null);
             setSelected(null);
-            router.refresh();
+            void refetchHome();
           }}
         />
       )}
@@ -889,7 +934,7 @@ export function MozoClient({
           onClose={() => setTransferTableId(null)}
           onSuccess={() => {
             setTransferTableId(null);
-            router.refresh();
+            void refetchHome();
           }}
         />
       )}
@@ -918,7 +963,7 @@ export function MozoClient({
           onSuccess={() => {
             setTrasladarTableId(null);
             setSelected(null);
-            router.refresh();
+            void refetchHome();
           }}
         />
       )}
@@ -1025,7 +1070,7 @@ export function MozoClient({
                   }
                   toast.success(`Mesa ${claimPrompt.label} es tuya.`);
                   setClaimPrompt(null);
-                  router.refresh();
+                  void refetchHome();
                 }}
               >
                 {loading ? "Tomando..." : "Tomar"}
