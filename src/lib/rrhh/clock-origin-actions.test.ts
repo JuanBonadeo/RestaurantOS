@@ -28,7 +28,7 @@ vi.mock("@/lib/admin/context", async (importActual) => {
   return {
     ...actual,
     ensureAdminAccess: async () => ({
-      user: { id: "u1" },
+      userId: "u1",
       userEmail: "a@b.com",
       isPlatformAdmin: isPlatform,
       role: currentRole,

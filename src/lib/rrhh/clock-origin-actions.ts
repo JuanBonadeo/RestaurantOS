@@ -54,7 +54,7 @@ export async function addClockOrigin(input: {
     business_id: business.id,
     cidr,
     label,
-    created_by: ctx.user.id,
+    created_by: ctx.userId,
   });
 
   if (error) {

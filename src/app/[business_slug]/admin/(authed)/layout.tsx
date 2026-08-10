@@ -53,15 +53,15 @@ export default async function AdminAuthedLayout({
     getPendingOrderCount(business.id, business.timezone),
     getLowStockCount(business.id),
     getLowKitchenStockCount(business.id),
-    getMyAdminBusinesses(ctx.user.id),
+    getMyAdminBusinesses(ctx.userId),
     listForUser({
-      userId: ctx.user.id,
+      userId: ctx.userId,
       businessId: business.id,
       role: notiRole,
       limit: 20,
     }),
     countUnread({
-      userId: ctx.user.id,
+      userId: ctx.userId,
       businessId: business.id,
       role: notiRole,
     }),
@@ -115,7 +115,7 @@ export default async function AdminAuthedLayout({
         unreadCount={unreadCount}
         businessSlug={business_slug}
         businessId={business.id}
-        userId={ctx.user.id}
+        userId={ctx.userId}
         role={notiRole}
         fixed
       />

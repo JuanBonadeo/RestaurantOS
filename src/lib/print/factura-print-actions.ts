@@ -81,7 +81,7 @@ export async function imprimirFactura(
       invoice_id: invoiceId,
       business_id: business.id,
       kind: "factura",
-      requested_by: ctx.user?.id ?? null,
+      requested_by: ctx.userId,
       reprint_requested_at: reprint ? new Date().toISOString() : null,
     })
     .select("id")

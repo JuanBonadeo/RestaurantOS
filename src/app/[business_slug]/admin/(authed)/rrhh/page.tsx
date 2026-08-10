@@ -81,7 +81,7 @@ export default async function RrhhPage({
               slug={business_slug}
               businessName={business.name}
               members={members}
-              currentUserId={ctx.user.id}
+              currentUserId={ctx.userId}
               includeDisabled={disabled === "1"}
               employeeClockData={monthly.perEmployee}
             />

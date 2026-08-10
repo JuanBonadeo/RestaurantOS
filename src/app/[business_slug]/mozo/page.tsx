@@ -73,13 +73,13 @@ export default async function MozoPage({
 
     getMozosByBusiness(business.id),
 
-    listForUser({ userId: ctx.user.id, businessId: business.id, role: ctx.role, limit: 10 }),
+    listForUser({ userId: ctx.userId, businessId: business.id, role: ctx.role, limit: 10 }),
 
-    countUnread({ userId: ctx.user.id, businessId: business.id, role: ctx.role }),
+    countUnread({ userId: ctx.userId, businessId: business.id, role: ctx.role }),
 
-    getTodayTips(business.id, ctx.user.id),
+    getTodayTips(business.id, ctx.userId),
 
-    getMozoAttendance(business.id, ctx.user.id),
+    getMozoAttendance(business.id, ctx.userId),
   ]);
 
   return (
@@ -175,7 +175,7 @@ export default async function MozoPage({
           };
         })}
         mozos={mozos}
-        currentUserId={ctx.user.id}
+        currentUserId={ctx.userId}
         role={ctx.role}
         initialNotifications={notifications}
         initialUnreadCount={unreadCount}

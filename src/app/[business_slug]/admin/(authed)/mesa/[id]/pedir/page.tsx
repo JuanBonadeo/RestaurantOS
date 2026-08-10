@@ -1,15 +1,11 @@
 import { notFound, redirect } from "next/navigation";
 
-import { MozoPedirClient } from "@/app/[business_slug]/mozo/mesa/[id]/pedir/pedir-client";
+import { MozoPedirScreen } from "@/app/[business_slug]/mozo/mesa/[id]/pedir/pedir-screen";
 import { ensureAdminAccess } from "@/lib/admin/context";
 import {
   getActiveOrderByTable,
   getComandasByOrder,
-  getStationsByBusiness,
 } from "@/lib/comandas/queries";
-import { getCatalogForMozo } from "@/lib/mozo/catalog-query";
-import { getDailyMenusForToday } from "@/lib/mozo/daily-menus-query";
-import { getTopProductIds } from "@/lib/mozo/top-products";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
@@ -67,38 +63,22 @@ export default async function AdminPedirPage({
 
   const activeOrder = await getActiveOrderByTable(tableId, business.id);
 
-  // Día de la semana en el server (mismo criterio que la page del mozo).
-  const todayDow = new Date().getDay();
-
-  const [catalog, stations, existingComandas, topProductIds, dailyMenus] =
-    await Promise.all([
-      getCatalogForMozo(business.id),
-      getStationsByBusiness(business.id),
-      activeOrder
-        ? getComandasByOrder(activeOrder.id, business.id)
-        : Promise.resolve([]),
-      getTopProductIds(business.id, { limit: 12 }),
-      getDailyMenusForToday(business.id, todayDow),
-    ]);
-
-  const stationNameById: Record<string, string> = {};
-  for (const s of stations) stationNameById[s.id] = s.name;
+  // Spec 105: el bundle business-level lo resuelve el cliente desde su cache
+  // (ver `pedir-screen`). Del server sólo baja lo de esta mesa.
+  const existingComandas = activeOrder
+    ? await getComandasByOrder(activeOrder.id, business.id)
+    : [];
 
   return (
-    <MozoPedirClient
+    <MozoPedirScreen
       slug={business_slug}
-      businessName={business.name}
       table={{
         id: table.id,
         label: table.label,
         operational_status: table.operational_status,
         opened_at: table.opened_at,
       }}
-      catalog={catalog}
-      stationNameById={stationNameById}
       existingComandas={existingComandas}
-      topProductIds={topProductIds}
-      dailyMenus={dailyMenus}
       role={ctx.isPlatformAdmin ? "admin" : (ctx.role ?? "admin")}
       homeHref={`/${business_slug}/admin/operacion`}
     />

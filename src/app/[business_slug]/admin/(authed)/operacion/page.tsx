@@ -94,7 +94,7 @@ export default async function LocalEnVivoPage({
       slug={business_slug}
       businessId={business.id}
       timezone={business.timezone}
-      currentUserId={ctx.user.id}
+      currentUserId={ctx.userId}
       role={ctx.isPlatformAdmin ? "admin" : (ctx.role ?? "admin")}
       salones={salones}
       salon={salon}

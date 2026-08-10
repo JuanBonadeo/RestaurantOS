@@ -2,6 +2,7 @@
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { ensureAdminAccess } from "@/lib/admin/context";
+import { requireMozoActionContext } from "@/lib/mozo/auth";
 import {
   getActiveOrderByTable,
   getComandasByOrder,
@@ -53,10 +54,26 @@ async function gateAdmin(slug: string) {
   return { ok: true as const, business };
 }
 
+/**
+ * Gate del catálogo: **membresía**, no admin (spec 105).
+ *
+ * El bundle es el menú del negocio —lo mismo que ve cualquiera en la carta
+ * pública— más los sectores y el top de productos, que el mozo necesita para
+ * cargar un pedido. Con el gate de admin, el mozo no podía pedirlo y el
+ * catálogo tenía que viajar en el payload RSC de cada apertura de mesa.
+ */
+async function gateMiembro(slug: string) {
+  const business = await getBusiness(slug);
+  if (!business) return { ok: false as const, error: "Negocio no encontrado." };
+  const ctx = await requireMozoActionContext(business.id);
+  if (!ctx.ok) return { ok: false as const, error: ctx.error };
+  return { ok: true as const, business };
+}
+
 export async function loadPedirCatalog(
   slug: string,
 ): Promise<ActionResult<PedirCatalogBundle>> {
-  const gate = await gateAdmin(slug);
+  const gate = await gateMiembro(slug);
   if (!gate.ok) return actionError(gate.error);
   const { business } = gate;
 
