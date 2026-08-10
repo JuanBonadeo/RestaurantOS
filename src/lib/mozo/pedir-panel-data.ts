@@ -1,6 +1,7 @@
 "use server";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
+import { currentDayOfWeek } from "@/lib/day-of-week";
 import { ensureAdminAccess } from "@/lib/admin/context";
 import { requireMozoActionContext } from "@/lib/mozo/auth";
 import {
@@ -77,7 +78,12 @@ export async function loadPedirCatalog(
   if (!gate.ok) return actionError(gate.error);
   const { business } = gate;
 
-  const todayDow = new Date().getDay();
+  // El día, en la TZ del **negocio** (spec 109). Con `new Date().getDay()` lo
+  // decidía la zona del server: un sábado a las 21:00 en Argentina ya es
+  // domingo en UTC, así que el mozo veía el menú del domingo. Y desde que
+  // `enviarComanda` valida el día contra la misma TZ, esa divergencia dejaría
+  // al mozo mirando un combo que el server le va a rechazar.
+  const todayDow = currentDayOfWeek(business.timezone);
   const [catalog, stations, topProductIds, dailyMenus] = await Promise.all([
     getCatalogForMozo(business.id),
     getStationsByBusiness(business.id),

@@ -1,19 +1,27 @@
-import { toZonedTime } from "date-fns-tz";
+import { formatInTimeZone } from "date-fns-tz";
 
 /**
  * Día de la semana (0=domingo, 6=sábado) en el timezone del negocio.
  *
- * Ojo: `date-fns-tz` v3 devuelve un `Date` cuyos **métodos UTC**
- * (`getUTCDay`, `getUTCHours`, ...) expresan la hora local del TZ pedido.
- * Los métodos locales (`getDay`, `getHours`) leen el TZ del runtime, así que
- * darían lectura incorrecta en cualquier máquina que no esté en UTC.
+ * Se lee con `formatInTimeZone`, que **no depende del TZ del proceso**. La
+ * versión anterior hacía `toZonedTime(now, tz).getUTCDay()`, y eso sólo acierta
+ * si el proceso corre en UTC: `toZonedTime` devuelve un `Date` pensado para
+ * leerse con los getters **locales**, así que en una máquina en UTC-3 un sábado
+ * 21:00 en Buenos Aires daba domingo. Medido:
  *
- * Ver también: el comentario en
- * `src/lib/chatbot/agent.ts` (tool `check_business_status`) donde tuvimos el
- * mismo tropezón en Windows (UTC-3 local).
+ * | proceso | sáb 21:00 AR | dom 01:00 AR | lun 00:30 AR |
+ * |---|---|---|---|
+ * | UTC | ok | ok | ok |
+ * | AR (UTC-3) | **domingo** | ok | ok |
+ * | Tokio (UTC+9) | ok | **sábado** | **domingo** |
+ *
+ * En producción no se notaba —las funciones de Vercel corren en UTC— pero sí en
+ * `pnpm dev` desde Argentina: el menú del día del sábado a la noche era el del
+ * domingo. El formato `i` es el día ISO (1=lunes … 7=domingo); el `% 7` lo pasa
+ * a la convención de `Date` (0=domingo).
  */
 export function currentDayOfWeek(timezone: string, now: Date = new Date()): number {
-  return toZonedTime(now, timezone).getUTCDay();
+  return Number(formatInTimeZone(now, timezone, "i")) % 7;
 }
 
 /**

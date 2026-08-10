@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
+import { menuDisponibleHoy } from "@/lib/daily-menus/disponible-hoy";
+import { currentDayOfWeek } from "@/lib/day-of-week";
 import {
   getActiveComandas,
   getPrintAgentHealth,
@@ -568,7 +570,7 @@ export async function enviarComanda(
         // `products.modifier_groups` es la fuente de verdad del adicional de
         // los modificadores del combo (spec 083): el payload dice qué se
         // eligió, el precio sale de acá.
-        "id, name, price_cents, image_url, business_id, is_active, is_available, daily_menu_choice_groups(id, name, applies_when_group_id, applies_when_product_ids), daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, extra_price_cents, products(id, name, modifier_groups(id, name, is_required, min_selection, max_selection, sort_order, modifiers(id, name, price_delta_cents, is_available, sort_order))))",
+        "id, name, price_cents, image_url, business_id, is_active, is_available, available_days, daily_menu_choice_groups(id, name, applies_when_group_id, applies_when_product_ids), daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, extra_price_cents, products(id, name, modifier_groups(id, name, is_required, min_selection, max_selection, sort_order, modifiers(id, name, price_delta_cents, is_available, sort_order))))",
       )
       .eq("id", menuItem.daily_menu_id)
       .maybeSingle();
@@ -579,6 +581,24 @@ export async function enviarComanda(
     }
     if (!menu.is_active || !menu.is_available) {
       return actionError(`"${menu.name}" no está disponible.`);
+    }
+    // El día habilitado se valida ACÁ, no sólo al listar (spec 109). El
+    // catálogo del mozo ya filtra por día, pero eso es la vista: una tablet que
+    // quedó abierta desde ayer —o cualquier payload armado a mano— mandaba el
+    // menú de otro día y el server lo aceptaba, cobrando el precio del combo en
+    // una jornada donde no se ofrece. El pedido online (`persist-order`) ya lo
+    // validaba; esto cierra la asimetría.
+    //
+    // El día se toma en la TZ del **negocio**: con el server en UTC, un sábado
+    // a las 21:00 en Argentina ya es domingo, y el menú del domingo entraría
+    // (o el del sábado quedaría rechazado) según dónde corra la función.
+    if (
+      !menuDisponibleHoy(
+        menu.available_days as number[] | null,
+        currentDayOfWeek(business.timezone),
+      )
+    ) {
+      return actionError(`"${menu.name}" no está disponible hoy.`);
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
+import { menuDisponibleHoy } from "@/lib/daily-menus/disponible-hoy";
 import { currentDayOfWeek } from "@/lib/day-of-week";
 import { formatCurrency } from "@/lib/currency";
 import { createNotification } from "@/lib/notifications/create";
@@ -254,7 +255,7 @@ export async function persistOrder(
       if (!m.is_active || !m.is_available) {
         return actionError(`"${m.name}" ya no está disponible.`);
       }
-      if (!m.available_days.includes(todayDow)) {
+      if (!menuDisponibleHoy(m.available_days, todayDow)) {
         return actionError(
           `"${m.name}" no está disponible hoy. Volvé otro día.`,
         );
