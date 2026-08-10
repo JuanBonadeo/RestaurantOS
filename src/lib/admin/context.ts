@@ -1,5 +1,6 @@
 import "server-only";
 
+import { cache } from "react";
 import { redirect } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 
@@ -20,8 +21,14 @@ export type AdminContext = {
  * Ensures the request has a session AND that the user can manage the given
  * business (either via business_users membership or platform admin flag).
  * Redirects to login otherwise. Returns the context for the caller.
+ *
+ * Envuelta en `cache()` de React (spec 104): el layout admin y la page la
+ * llaman por separado en el mismo render, y sin esto cada navegación pagaba
+ * **dos** veces el hop de red a Supabase Auth más las dos queries de membresía.
+ * Con el dedupe por request no cambia ni un caller y se ahorra la mitad. Mismo
+ * truco que ya usa `getBusiness` (`src/lib/tenant.ts`).
  */
-export async function ensureAdminAccess(
+export const ensureAdminAccess = cache(async function ensureAdminAccess(
   businessId: string,
   businessSlug: string,
 ): Promise<AdminContext> {
@@ -70,7 +77,7 @@ export async function ensureAdminAccess(
     isPlatformAdmin,
     role: (membership?.role as BusinessRole | undefined) ?? null,
   };
-}
+});
 
 /**
  * True when the user can administer the business: edit settings, manage team,

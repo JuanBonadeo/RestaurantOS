@@ -133,13 +133,24 @@ export type MiLocal = {
   logo_url: string | null;
 };
 
-/** Locales donde el usuario autenticado es `admin` (su grupo derivado). */
-export async function getMyAdminBusinesses(): Promise<MiLocal[]> {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return [];
+/**
+ * Locales donde el usuario es `admin` (su grupo derivado).
+ *
+ * `userId` opcional (spec 104): el layout admin ya resolvió al usuario con
+ * `ensureAdminAccess`, así que pasárselo evita un **segundo hop de red** a
+ * Supabase Auth por navegación sólo para volver a preguntar quién es. Sin
+ * argumento se comporta como siempre.
+ */
+export async function getMyAdminBusinesses(userId?: string): Promise<MiLocal[]> {
+  let uid = userId;
+  if (!uid) {
+    const supabase = await createSupabaseServerClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return [];
+    uid = user.id;
+  }
 
   const service = createSupabaseServiceClient();
   const { data } = await service
@@ -147,7 +158,7 @@ export async function getMyAdminBusinesses(): Promise<MiLocal[]> {
     .select(
       "role, businesses(id, slug, name, timezone, logo_url, is_active)",
     )
-    .eq("user_id", user.id)
+    .eq("user_id", uid)
     .eq("role", "admin");
 
   const list = (data ?? [])

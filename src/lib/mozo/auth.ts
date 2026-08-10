@@ -1,5 +1,7 @@
 import "server-only";
 
+import { cache } from "react";
+
 import { redirect } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 
@@ -22,8 +24,12 @@ export type MozoContext = {
  *
  * No es un superset del admin: existe por separado para que el día que admin
  * agregue restricciones de billing o setup, no rompa la operación de salón.
+ *
+ * Envuelta en `cache()` de React (spec 104), igual que `ensureAdminAccess`: si
+ * en el mismo render la llaman la page y algún componente anidado, el hop de
+ * red a Supabase Auth y las dos queries de membresía se pagan una sola vez.
  */
-export async function ensureMozoAccess(
+export const ensureMozoAccess = cache(async function ensureMozoAccess(
   businessId: string,
   businessSlug: string,
 ): Promise<MozoContext> {
@@ -84,7 +90,7 @@ export async function ensureMozoAccess(
     isPlatformAdmin,
     role,
   };
-}
+});
 
 export type MozoActionContext = {
   userId: string;

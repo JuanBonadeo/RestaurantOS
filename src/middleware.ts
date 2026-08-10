@@ -13,6 +13,22 @@ function resolveSlugFromHost(
   return slug;
 }
 
+/**
+ * Por qué `getClaims()` y no `getUser()` (spec 104).
+ *
+ * `getUser()` es un **hop de red a GoTrue** en cada request — y este matcher
+ * incluye las peticiones RSC, así que se pagaba también en cada navegación
+ * soft. `getClaims()` verifica la firma del JWT **local** con la clave pública
+ * (el proyecto usa signing keys asimétricas: su JWKS publica una ES256, y la
+ * librería la cachea). Si algún día el token volviera a ser simétrico,
+ * `getClaims` cae solo a `getUser` — el cambio no puede quedar por debajo del
+ * comportamiento anterior.
+ *
+ * Lo demás no cambia: `getClaims` llama a `getSession()` por dentro, así que el
+ * refresh del token y la escritura de cookies siguen ocurriendo igual. Y el
+ * gate fino sigue donde estaba: `ensureAdminAccess` / `ensureMozoAccess` en la
+ * page, más RLS. Acá sólo se bloquea la sesión anónima.
+ */
 export async function middleware(request: NextRequest) {
   const rootDomain = process.env.ROOT_DOMAIN;
   const host = request.headers.get("host");
@@ -55,10 +71,8 @@ export async function middleware(request: NextRequest) {
   if (isPlatformProtected) {
     const response = NextResponse.next();
     const supabase = makeSessionClient(request, response);
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) {
+    const { data: claims } = await supabase.auth.getClaims();
+    if (!claims) {
       const redirectUrl = request.nextUrl.clone();
       redirectUrl.pathname = `/login`;
       return NextResponse.redirect(redirectUrl);
@@ -78,10 +92,8 @@ export async function middleware(request: NextRequest) {
     if (!isAdminLogin) {
       const response = NextResponse.next();
       const supabase = makeSessionClient(request, response);
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) {
+      const { data: claims } = await supabase.auth.getClaims();
+      if (!claims) {
         const redirectUrl = request.nextUrl.clone();
         redirectUrl.pathname = `/${slug}/admin/login`;
         return NextResponse.redirect(redirectUrl);

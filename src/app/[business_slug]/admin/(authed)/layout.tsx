@@ -32,13 +32,40 @@ export default async function AdminAuthedLayout({
     redirect(`/${business_slug}/mozo`);
   }
 
-  const [pendingCount, lowBebidasCount, lowCocinaCount, myBusinesses] =
-    await Promise.all([
-      getPendingOrderCount(business.id, business.timezone),
-      getLowStockCount(business.id),
-      getLowKitchenStockCount(business.id),
-      getMyAdminBusinesses(),
-    ]);
+  // Notificaciones: el rol nominal para el platform admin sin membresía es
+  // "admin" — la jerarquía de `visibleTargetRoles` hace que el dueño vea
+  // también lo del encargado.
+  const notiRole = ctx.role ?? "admin";
+
+  // Una sola tanda, no dos en serie (spec 104): antes los contadores del
+  // sidebar y las notificaciones eran dos `Promise.all` encadenados, así que el
+  // layout pagaba dos round-trips a la DB antes de dejar renderizar `children`.
+  // Y `getMyAdminBusinesses` recibe el user ya resuelto, en vez de preguntarle
+  // de nuevo a Supabase Auth quién es.
+  const [
+    pendingCount,
+    lowBebidasCount,
+    lowCocinaCount,
+    myBusinesses,
+    notifications,
+    unreadCount,
+  ] = await Promise.all([
+    getPendingOrderCount(business.id, business.timezone),
+    getLowStockCount(business.id),
+    getLowKitchenStockCount(business.id),
+    getMyAdminBusinesses(ctx.user.id),
+    listForUser({
+      userId: ctx.user.id,
+      businessId: business.id,
+      role: notiRole,
+      limit: 20,
+    }),
+    countUnread({
+      userId: ctx.user.id,
+      businessId: business.id,
+      role: notiRole,
+    }),
+  ]);
   // Switcher de negocio: solo si el dueño es admin de ≥2 locales (spec 14).
   const siblings =
     myBusinesses.length >= 2
@@ -52,24 +79,6 @@ export default async function AdminAuthedLayout({
   // ya que ambos stocks ahora viven en la misma sección.
   const lowStockCount = lowBebidasCount + lowCocinaCount;
   const settings = getBusinessSettings(business);
-
-  // Notificaciones globales para el layout admin. Para platform admin sin
-  // membership usamos "admin" como rol nominal — la jerarquía de
-  // `visibleTargetRoles` hace que el dueño/admin vea también lo del encargado.
-  const notiRole = ctx.role ?? "admin";
-  const [notifications, unreadCount] = await Promise.all([
-    listForUser({
-      userId: ctx.user.id,
-      businessId: business.id,
-      role: notiRole,
-      limit: 20,
-    }),
-    countUnread({
-      userId: ctx.user.id,
-      businessId: business.id,
-      role: notiRole,
-    }),
-  ]);
 
   return (
     <div
