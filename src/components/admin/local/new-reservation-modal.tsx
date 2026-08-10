@@ -81,6 +81,7 @@ export function ReservaForm({
   onDone,
   tablePicker,
   footerClassName,
+  onChanged,
 }: {
   slug: string;
   tables: FloorTable[];
@@ -88,6 +89,8 @@ export function ReservaForm({
   onDone: () => void;
   tablePicker?: TablePickerBridge;
   footerClassName?: string;
+  /** Spec 103: re-sincroniza al que me renderiza (default: refresh de ruta). */
+  onChanged?: () => void;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -301,7 +304,11 @@ export function ReservaForm({
         return;
       }
       toast.success("Reserva creada.");
-      router.refresh();
+      // Spec 103: quien me renderiza decide cómo re-sincronizar. Sin `onChanged`
+      // se cae al refresh de ruta histórico (lo que sigue usando el panel de
+      // nueva reserva del salón).
+      if (onChanged) onChanged();
+      else router.refresh();
       onDone();
     });
   };
@@ -720,11 +727,14 @@ export function NewReservationModal({
   tables,
   floorPlanId,
   onClose,
+  onChanged,
 }: {
   slug: string;
   tables: FloorTable[];
   floorPlanId: string | null;
   onClose: () => void;
+  /** Spec 103: re-sincroniza al que me renderiza (default: refresh de ruta). */
+  onChanged?: () => void;
 }) {
   return (
     <Sheet
@@ -746,6 +756,7 @@ export function NewReservationModal({
           tables={tables}
           floorPlanId={floorPlanId}
           onDone={onClose}
+          onChanged={onChanged}
           footerClassName="border-t border-zinc-200 p-4"
         />
       </SheetContent>

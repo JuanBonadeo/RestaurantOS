@@ -87,15 +87,23 @@ export function useTabParam<T extends string>(
  * page-load**. Esta es la guarda de frescura: cada tab revalida lo suyo al
  * activarse, sin re-correr la página entera.
  *
- * El montaje queda excluido: ahí el panel recién pintó datos del server. Ojo
- * con **dónde** se llama, que es lo que decide si cubre la primera entrada a una
- * tab: desde el shell (que está siempre montado) `active` transiciona false→true
- * también la primera vez, así que la cubre; desde un panel de montaje lazy, no
- * — ese panel tiene que traer su propia carga inicial (como hacen Comandas y
- * Caja) o se queda con el snapshot del page-load.
+ * Por default el montaje queda excluido, porque ahí el panel recién pintó datos
+ * del server. Pero **ojo con dónde se llama**, que es lo que decide si cubre la
+ * primera entrada a una tab:
+ *
+ * - Desde el shell (siempre montado): `active` transiciona false→true también la
+ *   primera vez, así que el default alcanza.
+ * - Desde un panel de **montaje lazy**: el panel monta ya visible, así que el
+ *   default se come justo la entrada que más importa. Ahí va `onMount: true`, y
+ *   sólo cuando el panel montó lazy — si es la tab con la que abrió la página,
+ *   el server la acaba de renderizar y refetchear sería tirar plata.
  */
-export function useOnActivate(active: boolean, fn: () => void) {
-  const wasActive = useRef(active);
+export function useOnActivate(
+  active: boolean,
+  fn: () => void,
+  { onMount = false }: { onMount?: boolean } = {},
+) {
+  const wasActive = useRef(onMount ? false : active);
   // Ref para no re-correr el effect cuando el caller pasa una lambda nueva en
   // cada render (el disparador es el cambio de `active`, nada más).
   const fnRef = useRef(fn);

@@ -221,6 +221,7 @@ export function SalonDesktop({
   onDistribuirOpen,
   onDistribuirClose,
   tabActive = true,
+  refetchAlMontar = false,
   onServerData,
   onReservationsChanged,
 }: {
@@ -234,6 +235,8 @@ export function SalonDesktop({
   role: BusinessRole;
   /** Spec 101: `false` mientras la tab Mesas está oculta (sigue montada). */
   tabActive?: boolean;
+  /** `true` si el panel montó lazy (spec 103): entonces revalida al montar. */
+  refetchAlMontar?: boolean;
   /**
    * Spec 102: aviso de que cambió una reserva (realtime o acción propia). El
    * salón se re-sincroniza solo; esto es para el shell, porque la tab Reservas
@@ -323,7 +326,7 @@ export function SalonDesktop({
   // tiene realtime propio —los ítems y totales de una cuenta abierta cambian
   // desde el teléfono del mozo, sin tocar `tables`— y desde la spec 101 el
   // panel ya no se remonta al cambiar de tab.
-  useOnActivate(tabActive, refetchSalon);
+  useOnActivate(tabActive, refetchSalon, { onMount: refetchAlMontar });
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [walkInTableId, setWalkInTableId] = useState<string | null>(null);

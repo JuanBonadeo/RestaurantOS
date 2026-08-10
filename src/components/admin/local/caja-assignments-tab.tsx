@@ -37,6 +37,8 @@ type Props = {
   cajas: Caja[];
   assignments: AssignmentWithNames[];
   members: MemberOption[];
+  /** Spec 103: re-sincroniza al que me renderiza (default: refresh de ruta). */
+  onChanged?: () => void;
 };
 
 export function CajaAssignmentsPanel({
@@ -44,8 +46,12 @@ export function CajaAssignmentsPanel({
   cajas,
   assignments: initialAssignments,
   members,
+  onChanged,
 }: Props) {
   const router = useRouter();
+  // Spec 103: quien me renderiza decide cómo re-sincronizar. Sin esto se cae al
+  // `router.refresh()` histórico, que re-corre las 7 tabs de operación.
+  const resincronizar = () => (onChanged ? onChanged() : router.refresh());
   const [, startTransition] = useTransition();
   const [assignments, setAssignments] = useState(initialAssignments);
   const [addOpen, setAddOpen] = useState(false);
@@ -121,7 +127,7 @@ export function CajaAssignmentsPanel({
                             if (!r.ok) toast.error(r.error);
                             else {
                               toast.success("Asignación eliminada");
-                              router.refresh();
+                              resincronizar();
                             }
                           })
                         }
@@ -148,7 +154,7 @@ export function CajaAssignmentsPanel({
         slug={slug}
         onSuccess={() => {
           setAddOpen(false);
-          router.refresh();
+          resincronizar();
         }}
       />
     </div>

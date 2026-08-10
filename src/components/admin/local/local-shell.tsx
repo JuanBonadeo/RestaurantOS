@@ -3,13 +3,13 @@
 import {
   Suspense,
   use,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
-import { useRouter } from "next/navigation";
 import { Check, ChevronDown, MapPin } from "lucide-react";
 
 import { CajaAdminBoard } from "@/components/admin/local/caja-admin-board";
@@ -46,6 +46,10 @@ import type { SalonOption } from "@/lib/admin/floor-plan/queries";
 import { salonFilterStorageKey } from "@/lib/admin/salon-filter";
 import { useStickyMultiFilter } from "@/lib/ui/use-sticky-filter";
 import { useOnActivate, useTabParam } from "@/lib/ui/use-tab-param";
+import {
+  getFichajeTabData,
+  getReservasTabData,
+} from "@/app/[business_slug]/admin/(authed)/operacion/actions";
 import { cn } from "@/lib/utils";
 
 const TABS = [
@@ -171,6 +175,7 @@ function SalonPanel({
   onDistribuirOpen,
   onDistribuirClose,
   active,
+  refetchAlMontar,
   onServerData,
   onReservationsChanged,
 }: {
@@ -184,6 +189,7 @@ function SalonPanel({
   onDistribuirOpen: () => void;
   onDistribuirClose: () => void;
   active: boolean;
+  refetchAlMontar: boolean;
   onServerData: (d: SalonData) => void;
   onReservationsChanged: () => void;
 }) {
@@ -203,6 +209,7 @@ function SalonPanel({
       onDistribuirOpen={onDistribuirOpen}
       onDistribuirClose={onDistribuirClose}
       tabActive={active}
+      refetchAlMontar={refetchAlMontar}
       onServerData={onServerData}
       onReservationsChanged={onReservationsChanged}
     />
@@ -275,13 +282,25 @@ function CajaPanel({
   promise,
   slug,
   active,
+  refetchAlMontar,
+  onServerData,
 }: {
   promise: Promise<CajaData>;
   slug: string;
   active: boolean;
+  refetchAlMontar: boolean;
+  onServerData: (d: CajaData) => void;
 }) {
   const { cajas } = use(promise);
-  return <CajaAdminBoard slug={slug} cajas={cajas} active={active} />;
+  return (
+    <CajaAdminBoard
+      slug={slug}
+      cajas={cajas}
+      active={active}
+      refetchAlMontar={refetchAlMontar}
+      onServerData={onServerData}
+    />
+  );
 }
 
 function RendicionPanel({
@@ -289,11 +308,17 @@ function RendicionPanel({
   cajaPromise,
   slug,
   role,
+  active,
+  refetchAlMontar,
+  onServerData,
 }: {
   rendicionPromise: Promise<RendicionData>;
   cajaPromise: Promise<CajaData>;
   slug: string;
   role: BusinessRole;
+  active: boolean;
+  refetchAlMontar: boolean;
+  onServerData: (d: RendicionData) => void;
 }) {
   const {
     rendicionPendientes,
@@ -313,6 +338,9 @@ function RendicionPanel({
       cajaAssignments={cajaAssignments}
       members={businessMembers}
       showAssignments={role === "admin"}
+      active={active}
+      refetchAlMontar={refetchAlMontar}
+      onServerData={onServerData}
     />
   );
 }
@@ -322,24 +350,66 @@ function ReservasPanel({
   slug,
   timezone,
   salonIds,
+  active,
+  refetchAlMontar,
+  onServerData,
+  reloadRef,
 }: {
   promise: Promise<ReservasData>;
   slug: string;
   timezone: string;
   salonIds: string[];
+  active: boolean;
+  refetchAlMontar: boolean;
+  onServerData: (d: ReservasData) => void;
+  /** El shell publica acá cómo re-pedir el día que se está mirando. */
+  reloadRef: React.RefObject<(() => void) | null>;
 }) {
-  const { date, rows, floorPlans, activeTables, mode, services } = use(promise);
+  const inicial = use(promise);
+  // Snapshot propio (spec 103): el libro del día se re-pide con su action —al
+  // cambiar de día, al mutar, y al volver a la tab—, no re-corriendo la ruta.
+  const [data, setData] = useState(inicial);
+  const seq = useRef(0);
+  // Día PEDIDO, no el pintado: se marca antes del await, así una revalidación
+  // que se cruce con un cambio de día (realtime, vuelta a la tab) re-pide el día
+  // nuevo —el que ya quedó escrito en la URL— en vez de revertirlo al anterior.
+  const diaPedido = useRef(inicial.date);
+  const onServerDataRef = useRef(onServerData);
+  onServerDataRef.current = onServerData;
+  const refetch = useCallback(
+    async (date: string) => {
+      diaPedido.current = date;
+      const n = ++seq.current;
+      try {
+        const res = await getReservasTabData(slug, date);
+        if (n !== seq.current) return;
+        if (res.ok) {
+          setData(res.data);
+          onServerDataRef.current(res.data);
+        }
+      } catch {
+        // swallow: refresh de fondo, mantiene el día que se está mirando.
+      }
+    },
+    [slug],
+  );
+  useOnActivate(active, () => void refetch(diaPedido.current), {
+    onMount: refetchAlMontar,
+  });
+  reloadRef.current = () => void refetch(diaPedido.current);
+
   return (
     <AdminDayList
       slug={slug}
-      date={date}
-      rows={rows}
+      date={data.date}
+      rows={data.rows}
       timezone={timezone}
-      floorPlans={floorPlans}
-      activeTables={activeTables}
-      mode={mode}
-      services={services}
+      floorPlans={data.floorPlans}
+      activeTables={data.activeTables}
+      mode={data.mode}
+      services={data.services}
       salonIds={salonIds}
+      onChanged={(d) => void refetch(d)}
       // Embebida en el operativo: el navegador de fechas se queda acá
       // (`?tab=reservas&date=…`) en vez de saltar a /admin/reservas.
       datePath={`/${slug}/admin/operacion`}
@@ -351,17 +421,42 @@ function FichajePanel({
   promise,
   slug,
   active,
+  refetchAlMontar,
+  onServerData,
 }: {
   promise: Promise<FichajeData>;
   slug: string;
   active: boolean;
+  refetchAlMontar: boolean;
+  onServerData: (d: FichajeData) => void;
 }) {
-  const { initialPresent, todaySummary } = use(promise);
+  const inicial = use(promise);
+  // Snapshot propio (spec 103): el fichaje se re-pide con su action al volver a
+  // la tab. Reemplaza al puente `router.refresh()` de la spec 101.
+  const [data, setData] = useState(inicial);
+  const seq = useRef(0);
+  const onServerDataRef = useRef(onServerData);
+  onServerDataRef.current = onServerData;
+  useOnActivate(
+    active,
+    () => {
+      const n = ++seq.current;
+      void getFichajeTabData(slug)
+        .then((res) => {
+          if (n !== seq.current || !res.ok) return;
+          setData(res.data);
+          onServerDataRef.current(res.data);
+        })
+        .catch(() => {});
+    },
+    { onMount: refetchAlMontar },
+  );
+
   return (
     <FichajeTab
       slug={slug}
-      initialPresent={initialPresent}
-      todaySummary={todaySummary}
+      initialPresent={data.initialPresent}
+      todaySummary={data.todaySummary}
       active={active}
     />
   );
@@ -514,6 +609,10 @@ function TabsInner({
   // re-suscriba sus channels (`getSession()` + `setAuth()` cada vez) y pierda
   // scroll y filtros. Se monta lazy —no las 7 de una— para que el primer
   // pintado siga siendo el de Mesas.
+  // Con qué tab abrió la página: es la única cuyo dato viene recién renderizado
+  // por el server. Las demás montan lazy, con la promesa del page-load ya
+  // envejecida, así que al abrirlas revalidan.
+  const tabInicial = useRef(active).current;
   const visited = useRef<Set<Tab>>(new Set<Tab>([active]));
   visited.current.add(active);
   const mounted = (t: Tab) => visited.current.has(t);
@@ -521,37 +620,21 @@ function TabsInner({
   // un contenedor con altura definida y este wrapper queda en el medio.
   const paneClass = (t: Tab) => (active === t ? "h-full" : "hidden");
 
-  // ── Guarda de frescura de las tabs SIN refetch propio ──────────────────────
-  // Cortar la navegación deja la promesa RSC congelada al page-load, así que
-  // una tab que no sabe recargarse sola mostraría el estado de hace horas.
-  // Reservas, Rendición y Fichaje están en ese caso: no tienen action de tab ni
-  // realtime propio (el de reservas vive DENTRO de SalonDesktop, que puede no
-  // haber montado nunca si la sesión arrancó en otra tab).
+  // Ya no queda ningún puente `router.refresh()` (spec 103): las 7 tabs tienen
+  // su propio refetch y revalidan al activarse, cada una con sus queries.
   //
-  // El puente es `router.refresh()`: cuesta lo mismo que costaba ANTES cada
-  // click de tab, pero ahora sólo al entrar a estas tres — y jamás muestra
-  // plata vieja. Las specs 102/103 lo reemplazan por un refetch por tab.
-  //
-  // Van acá y no en cada panel a propósito: el shell NO monta lazy (lo lazy es
-  // el panel), así que `active === "x"` transiciona false→true también en la
-  // PRIMERA entrada. Y al abrir directo en una de estas tabs (`?tab=rendicion`)
-  // no dispara nada, que es lo correcto: el server acaba de renderizarla.
-  const router = useRouter();
-  const refrescarRuta = () => router.refresh();
-
   // La única suscripción a `reservations` de la app vive en SalonDesktop
   // (spec 102). Si el encargado está justo mirando el libro del día, una
-  // reserva nueva de la web o del chatbot tiene que aparecerle sin tocar nada:
-  // sólo ahí vale re-correr la ruta. Si está en otra tab no hace falta — al
-  // entrar a Reservas ya se revalida por el puente de abajo.
+  // reserva nueva de la web o del chatbot tiene que aparecerle sin tocar nada,
+  // así que se le avisa a la tab Reservas para que re-pida SU día. Si está en
+  // otra tab no hace falta: al volver, la tab revalida sola.
+  // El panel de Reservas publica acá cómo re-pedir el día que está mirando.
+  const recargarReservas = useRef<(() => void) | null>(null);
   const activeRef = useRef(active);
   activeRef.current = active;
   const onReservasCambiaron = () => {
-    if (activeRef.current === "reservas") router.refresh();
+    if (activeRef.current === "reservas") recargarReservas.current?.();
   };
-  useOnActivate(active === "reservas", refrescarRuta);
-  useOnActivate(active === "rendicion", refrescarRuta);
-  useOnActivate(active === "fichaje", refrescarRuta);
 
   // Como todo /admin/operacion es fullscreen, colapsamos el sidebar al entrar.
   useEffect(() => {
@@ -562,9 +645,14 @@ function TabsInner({
   // con las tabs en el header (en vez de dentro del SalonDesktop).
   const [distribuirOpen, setDistribuirOpen] = useState(false);
 
-  // Último snapshot que trajo el refetch de la tab Mesas (spec 102), para que
-  // su badge no quede contando lo del page-load.
+  // Último snapshot que trajo el refetch de cada tab (specs 102 y 103). Los
+  // badges cuentan sobre esto y no sobre la promesa del page-load, que desde
+  // que ninguna tab re-corre la ruta ya no se revalida nunca.
   const [salonData, setSalonData] = useState<SalonData | null>(null);
+  const [cajaData, setCajaData] = useState<CajaData | null>(null);
+  const [rendicionData, setRendicionData] = useState<RendicionData | null>(null);
+  const [reservasData, setReservasData] = useState<ReservasData | null>(null);
+  const [fichajeData, setFichajeData] = useState<FichajeData | null>(null);
 
   // ── Filtro por salón (spec 065) ──
   // Preferencia por máquina + negocio, multi-selección (vacío = todos).
@@ -606,7 +694,13 @@ function TabsInner({
       <TabButton
         active={active === "reservas"}
         onClick={() => setTab("reservas")}
-        count={<Pill promise={reservas} compute={(d) => countReservasPorSentar(d.rows, salonFilter)} />}
+        count={
+          <Pill
+            promise={reservas}
+            override={reservasData}
+            compute={(d) => countReservasPorSentar(d.rows, salonFilter)}
+          />
+        }
       >
         Reservas
       </TabButton>
@@ -626,21 +720,35 @@ function TabsInner({
       <TabButton
         active={active === "caja"}
         onClick={() => setTab("caja")}
-        count={<Pill promise={caja} compute={(d) => countCajas(d.cajas)} />}
+        count={
+          <Pill promise={caja} override={cajaData} compute={(d) => countCajas(d.cajas)} />
+        }
       >
         Caja
       </TabButton>
       <TabButton
         active={active === "rendicion"}
         onClick={() => setTab("rendicion")}
-        count={<Pill promise={rendicion} compute={(d) => countRendicionesPendientes(d.rendicionPendientes)} />}
+        count={
+          <Pill
+            promise={rendicion}
+            override={rendicionData}
+            compute={(d) => countRendicionesPendientes(d.rendicionPendientes)}
+          />
+        }
       >
         Rendición
       </TabButton>
       <TabButton
         active={active === "fichaje"}
         onClick={() => setTab("fichaje")}
-        count={<Pill promise={fichaje} compute={(d) => countPresentes(d.initialPresent)} />}
+        count={
+          <Pill
+            promise={fichaje}
+            override={fichajeData}
+            compute={(d) => countPresentes(d.initialPresent)}
+          />
+        }
       >
         Fichaje
       </TabButton>
@@ -683,6 +791,7 @@ function TabsInner({
                   onDistribuirOpen={() => setDistribuirOpen(true)}
                   onDistribuirClose={() => setDistribuirOpen(false)}
                   active={active === "salon"}
+                  refetchAlMontar={tabInicial !== "salon"}
                   onServerData={setSalonData}
                   onReservationsChanged={onReservasCambiaron}
                 />
@@ -713,6 +822,10 @@ function TabsInner({
                   slug={slug}
                   timezone={timezone}
                   salonIds={salonFilter}
+                  active={active === "reservas"}
+                  refetchAlMontar={tabInicial !== "reservas"}
+                  onServerData={setReservasData}
+                  reloadRef={recargarReservas}
                 />
               </Suspense>
             </ErrorBoundary>
@@ -742,6 +855,8 @@ function TabsInner({
                   promise={caja}
                   slug={slug}
                   active={active === "caja"}
+                  refetchAlMontar={tabInicial !== "caja"}
+                  onServerData={setCajaData}
                 />
               </Suspense>
             </ErrorBoundary>
@@ -756,6 +871,9 @@ function TabsInner({
                   cajaPromise={caja}
                   slug={slug}
                   role={role}
+                  active={active === "rendicion"}
+                  refetchAlMontar={tabInicial !== "rendicion"}
+                  onServerData={setRendicionData}
                 />
               </Suspense>
             </ErrorBoundary>
@@ -769,6 +887,8 @@ function TabsInner({
                   promise={fichaje}
                   slug={slug}
                   active={active === "fichaje"}
+                  refetchAlMontar={tabInicial !== "fichaje"}
+                  onServerData={setFichajeData}
                 />
               </Suspense>
             </ErrorBoundary>

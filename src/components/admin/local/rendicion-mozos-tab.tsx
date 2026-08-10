@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import {
   Banknote,
   CheckCircle2,
@@ -37,6 +36,9 @@ import type {
   RendicionMozoPendiente,
 } from "@/lib/caja/types";
 import { formatCurrency } from "@/lib/currency";
+import { useOnActivate } from "@/lib/ui/use-tab-param";
+import { getRendicionTabData } from "@/app/[business_slug]/admin/(authed)/operacion/actions";
+import type { RendicionData } from "@/app/[business_slug]/admin/(authed)/operacion/data";
 import { cn } from "@/lib/utils";
 
 const METHOD_LABEL: Record<PaymentMethod, string> = {
@@ -69,6 +71,12 @@ type Props = {
   cajaAssignments: AssignmentWithNames[];
   members: MemberOption[];
   showAssignments: boolean;
+  /** Spec 101: `false` mientras la tab está oculta (el panel sigue montado). */
+  active?: boolean;
+  /** `true` si el panel montó lazy (spec 103): entonces revalida al montar. */
+  refetchAlMontar?: boolean;
+  /** Spec 103: cada snapshot nuevo del refetch, para el badge de la tab. */
+  onServerData?: (d: RendicionData) => void;
 };
 
 export function RendicionMozosTab({
@@ -76,24 +84,51 @@ export function RendicionMozosTab({
   initialPendientes,
   initialHistorial,
   cajas,
-  cajaAssignments,
+  cajaAssignments: initialAssignments,
   members,
   showAssignments,
+  active = true,
+  refetchAlMontar = false,
+  onServerData,
 }: Props) {
-  const router = useRouter();
-  const [pendientes, setPendientes] = useState(initialPendientes);
-  const [historial, setHistorial] = useState(initialHistorial);
   const [rendirMozo, setRendirMozo] = useState<RendicionMozoPendiente | null>(
     null,
   );
 
-  useEffect(() => {
-    setPendientes(initialPendientes);
-  }, [initialPendientes]);
+  // Snapshot del server de la tab, seedeado de los props y actualizado sólo por
+  // el refetch (spec 103). Se reemplaza **entero**: es plata, y sumar en el
+  // cliente es como se duplica una rendición.
+  const [serverData, setServerData] = useState({
+    pendientes: initialPendientes,
+    historial: initialHistorial,
+    assignments: initialAssignments,
+  });
+  const { pendientes, historial, assignments } = serverData;
 
-  useEffect(() => {
-    setHistorial(initialHistorial);
-  }, [initialHistorial]);
+  const refetchSeq = useRef(0);
+  const onServerDataRef = useRef(onServerData);
+  onServerDataRef.current = onServerData;
+  const refetchRendicion = useCallback(async () => {
+    const seq = ++refetchSeq.current;
+    try {
+      const res = await getRendicionTabData(slug);
+      if (seq !== refetchSeq.current) return;
+      if (res.ok) {
+        setServerData({
+          pendientes: res.data.rendicionPendientes,
+          historial: res.data.rendicionHistorial,
+          assignments: res.data.cajaAssignments,
+        });
+        onServerDataRef.current?.(res.data);
+      }
+    } catch {
+      // swallow: refresh de fondo, mantiene lo que hay (nunca vacía la tabla).
+    }
+  }, [slug]);
+
+  // Volver a la tab revalida: es plata y el snapshot del page-load puede ser de
+  // hace horas. Reemplaza al puente `router.refresh()` de la spec 101.
+  useOnActivate(active, refetchRendicion, { onMount: refetchAlMontar });
 
   const conPagos = pendientes.filter((p) => p.pagos_count > 0);
   const sinPagos = pendientes.filter((p) => p.pagos_count === 0);
@@ -106,7 +141,7 @@ export function RendicionMozosTab({
         </p>
         <button
           type="button"
-          onClick={() => router.refresh()}
+          onClick={() => void refetchRendicion()}
           className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
           aria-label="Refrescar"
         >
@@ -242,7 +277,8 @@ export function RendicionMozosTab({
         <CajaAssignmentsPanel
           slug={slug}
           cajas={cajas}
-          assignments={cajaAssignments}
+          assignments={assignments}
+          onChanged={() => void refetchRendicion()}
           members={members}
         />
       )}
@@ -255,7 +291,7 @@ export function RendicionMozosTab({
           slug={slug}
           onSuccess={() => {
             setRendirMozo(null);
-            router.refresh();
+            void refetchRendicion();
           }}
         />
       )}

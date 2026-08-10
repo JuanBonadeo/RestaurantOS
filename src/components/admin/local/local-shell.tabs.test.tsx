@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -44,6 +44,15 @@ vi.mock("@/components/admin/orders-realtime-board", () => ({
 }));
 vi.mock("@/components/reservations/admin-day-list", () => ({
   AdminDayList: () => <div data-testid="panel-reservas">RESERVAS</div>,
+}));
+
+// Las actions de tab: lo que se verifica es que al entrar a una tab se pida
+// SÓLO lo suyo, en vez de re-correr la ruta entera.
+const getReservasTabData = vi.fn(async () => ({ ok: false as const, error: "x" }));
+const getFichajeTabData = vi.fn(async () => ({ ok: false as const, error: "x" }));
+vi.mock("@/app/[business_slug]/admin/(authed)/operacion/actions", () => ({
+  getReservasTabData: () => getReservasTabData(),
+  getFichajeTabData: () => getFichajeTabData(),
 }));
 
 /**
@@ -129,6 +138,11 @@ async function clickTab(
   });
 }
 
+beforeEach(() => {
+  // Los mocks son de módulo: sin esto, un test arrastra los conteos del anterior.
+  vi.clearAllMocks();
+});
+
 describe("LocalShell · tabs sin red (spec 101)", () => {
   it("cambiar de tab NO navega: la URL se escribe sin router.replace/push", async () => {
     const user = userEvent.setup();
@@ -176,32 +190,27 @@ describe("LocalShell · tabs sin red (spec 101)", () => {
     expect(screen.queryByTestId("panel-salon")).toBeNull();
   });
 
-  it("la primera entrada a Rendición revalida (no muestra plata del page-load)", async () => {
+  it("entrar a una tab pide SÓLO su tab, sin re-correr la ruta (spec 103)", async () => {
     const user = userEvent.setup();
-    refresh.mockClear();
-    await shell();
-    expect(refresh).not.toHaveBeenCalled();
-
-    // Montaje lazy: el panel monta YA activo. Sin la guarda con `onMount`, esta
-    // primera entrada —la que más importa— se quedaba con el snapshot inicial.
-    await clickTab(user, /Rendición/);
-    expect(screen.getByTestId("panel-rendicion")).toBeInTheDocument();
-    expect(refresh).toHaveBeenCalledTimes(1);
-
-    // Y vuelve a revalidar en cada re-entrada, no sólo la primera.
-    await clickTab(user, /Mesas/);
-    await clickTab(user, /Rendición/);
-    expect(refresh).toHaveBeenCalledTimes(2);
-  });
-
-  it("Reservas también revalida al entrar (no tiene realtime propio)", async () => {
-    const user = userEvent.setup();
-    refresh.mockClear();
     await shell();
 
+    // Reservas revalida con su propia action al activarse…
     await clickTab(user, /Reservas/);
     expect(screen.getByTestId("panel-reservas")).toBeInTheDocument();
-    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(getReservasTabData).toHaveBeenCalledTimes(1);
+
+    // …y otra vez en cada re-entrada, no sólo la primera.
+    await clickTab(user, /Mesas/);
+    await clickTab(user, /Reservas/);
+    expect(getReservasTabData).toHaveBeenCalledTimes(2);
+
+    // Fichaje, igual.
+    await clickTab(user, /Fichaje/);
+    expect(getFichajeTabData).toHaveBeenCalledTimes(1);
+
+    // Y en todo el recorrido, ni un solo refresh de ruta: eso era el puente de
+    // la spec 101, que re-corría las 7 promesas de tab.
+    expect(refresh).not.toHaveBeenCalled();
   });
 
   it("volver a la tab default deja la URL sin ?tab (canónica)", async () => {

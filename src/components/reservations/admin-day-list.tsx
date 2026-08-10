@@ -175,6 +175,7 @@ export function AdminDayList({
   services = [],
   salonIds = [],
   datePath,
+  onChanged,
 }: {
   slug: string;
   date: string;
@@ -191,6 +192,15 @@ export function AdminDayList({
    * que usa la página `/admin/reservas`, que no tiene selector propio).
    */
   salonIds?: string[];
+  /**
+   * Spec 103: cómo re-sincronizarse tras mutar o cambiar de día. Recibe el día
+   * pedido. Sin esto se cae al comportamiento histórico —`router.push` para la
+   * fecha, `router.refresh()` para las mutaciones—, que es lo que sigue usando
+   * la página `/admin/reservas`. Embebida en el operativo hace falta: cada
+   * flecha del navegador de fechas re-corría las **7** tabs para pintar otra
+   * lista, y el panel ya no lee los props que traía ese refresh.
+   */
+  onChanged?: (date: string) => void;
   /**
    * Ruta a la que apunta el navegador de fechas. Default: la página
    * `/admin/reservas`. La tab de Operación pasa `/admin/operacion` para que
@@ -226,11 +236,23 @@ export function AdminDayList({
   );
 
   function setDate(next: string) {
+    if (onChanged) {
+      // Sin navegar: la URL se escribe con la History API (igual que la tab en
+      // la spec 101) y el día nuevo se pide con la action de la tab.
+      const params = new URLSearchParams(window.location.search);
+      params.set("date", next);
+      window.history.replaceState(null, "", `?${params.toString()}`);
+      onChanged(next);
+      return;
+    }
     const params = new URLSearchParams(searchParams);
     params.set("date", next);
     const base = datePath ?? `/${slug}/admin/reservas`;
     router.push(`${base}?${params.toString()}`);
   }
+
+  /** Re-sincroniza el día que se está mirando. */
+  const resincronizar = () => (onChanged ? onChanged(date) : router.refresh());
 
   // ── Actions ──
 
@@ -242,7 +264,7 @@ export function AdminDayList({
       });
       if (result.ok) {
         toast.success("Mesa abierta con reserva.");
-        router.refresh();
+        resincronizar();
       } else {
         toast.error(result.error);
       }
@@ -258,7 +280,7 @@ export function AdminDayList({
       });
       if (result.ok) {
         toast.success("Estado actualizado.");
-        router.refresh();
+        resincronizar();
       } else {
         toast.error(result.error);
       }
@@ -279,7 +301,7 @@ export function AdminDayList({
       if (result.ok) {
         toast.success("Reserva actualizada.");
         callbacks.onDone();
-        router.refresh();
+        resincronizar();
         return;
       }
       // Sobrecupo: no es un "no", es un "confirmá" (spec 077).
@@ -616,6 +638,7 @@ export function AdminDayList({
           tables={activeTables}
           floorPlanId={null}
           onClose={() => setShowNewReservation(false)}
+          onChanged={onChanged ? () => onChanged(date) : undefined}
         />
       )}
 

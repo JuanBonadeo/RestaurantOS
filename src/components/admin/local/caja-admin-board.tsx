@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -48,6 +47,8 @@ import type {
   VentaOrigen,
 } from "@/lib/caja/types";
 import { useCajaPreferida } from "@/lib/caja/use-caja-preferida";
+import { useOnActivate } from "@/lib/ui/use-tab-param";
+import { getCajaTabData } from "@/app/[business_slug]/admin/(authed)/operacion/actions";
 import { formatCurrency } from "@/lib/currency";
 import { cn } from "@/lib/utils";
 
@@ -56,10 +57,19 @@ type Props = {
   cajas: CajaConEstado[];
   /** Spec 101: `false` mientras la tab está oculta (el panel sigue montado). */
   active?: boolean;
+  /** `true` si el panel montó lazy (spec 103): entonces revalida al montar. */
+  refetchAlMontar?: boolean;
+  /** Spec 103: cada snapshot nuevo del refetch, para el badge de la tab. */
+  onServerData?: (d: { cajas: CajaConEstado[] }) => void;
 };
 
-export function CajaAdminBoard({ slug, cajas, active = true }: Props) {
-  const router = useRouter();
+export function CajaAdminBoard({
+  slug,
+  cajas: initialCajas,
+  active = true,
+  refetchAlMontar = false,
+  onServerData,
+}: Props) {
   const [statsByCaja, setStatsByCaja] = useState<
     Record<string, CajaLiveStats | null>
   >({});
@@ -70,6 +80,44 @@ export function CajaAdminBoard({ slug, cajas, active = true }: Props) {
     Record<string, CajaPayment[]>
   >({});
   const [refreshKey, setRefreshKey] = useState(0);
+
+  // Snapshot del server de la tab (las cajas con su último corte y período),
+  // seedeado de los props y actualizado sólo por el refetch (spec 103). Antes
+  // esto se refrescaba con `router.refresh()`, que re-corría las 7 tabs.
+  const [cajas, setCajas] = useState(initialCajas);
+  const refetchSeq = useRef(0);
+  const onServerDataRef = useRef(onServerData);
+  onServerDataRef.current = onServerData;
+  const refetchCaja = useCallback(async () => {
+    const seq = ++refetchSeq.current;
+    try {
+      const res = await getCajaTabData(slug);
+      if (seq !== refetchSeq.current) return;
+      if (res.ok) {
+        setCajas(res.data.cajas);
+        onServerDataRef.current?.(res.data);
+      }
+    } catch {
+      // swallow: refresh de fondo. La caja NUNCA se vacía por un error de red;
+      // los números que decidan un corte salen del poll de stats, que avisa
+      // aparte.
+    }
+  }, [slug]);
+
+  /**
+   * Después de mover plata: se re-piden las dos mitades. `refetchCaja` trae el
+   * estado de la caja (último corte, período) y el bump del `refreshKey`
+   * recomputa los stats **después** del insert — nunca al revés, o el corte
+   * mostraría la plata del período que acaba de cerrar.
+   */
+  const resincronizar = useCallback(() => {
+    void refetchCaja();
+    setRefreshKey((k) => k + 1);
+  }, [refetchCaja]);
+
+  // Volver a la tab (o abrirla por primera vez) revalida el estado de las cajas
+  // sin esperar al tick de 30 s: es plata y se decide un corte con esto.
+  useOnActivate(active, () => void refetchCaja(), { onMount: refetchAlMontar });
 
   // ── Selector de caja activa (persiste por máquina) ──
   // Misma preferencia que usa el cobro: el puesto del bar registra en Caja Bar
@@ -184,10 +232,7 @@ export function CajaAdminBoard({ slug, cajas, active = true }: Props) {
         )}
         <button
           type="button"
-          onClick={() => {
-            setRefreshKey((k) => k + 1);
-            router.refresh();
-          }}
+          onClick={resincronizar}
           className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
           aria-label="Refrescar"
         >
@@ -202,6 +247,7 @@ export function CajaAdminBoard({ slug, cajas, active = true }: Props) {
         movimientos={movimientosByCaja[activeCaja.id] ?? []}
         payments={paymentsByCaja[activeCaja.id] ?? []}
         slug={slug}
+        onChanged={resincronizar}
       />
 
       <div className="pt-1 text-center">
@@ -225,14 +271,16 @@ function CajaCard({
   movimientos,
   payments,
   slug,
+  onChanged,
 }: {
   caja: CajaConEstado;
   stats: CajaLiveStats | null;
   movimientos: CajaMovimiento[];
   payments: CajaPayment[];
   slug: string;
+  /** Re-sincroniza la tab después de mover plata (spec 103). */
+  onChanged: () => void;
 }) {
-  const router = useRouter();
   const [, startTransition] = useTransition();
   const [sangriaOpen, setSangriaOpen] = useState(false);
   const [ingresoOpen, setIngresoOpen] = useState(false);
@@ -421,7 +469,7 @@ function CajaCard({
             else {
               toast.success("Sangría registrada");
               setSangriaOpen(false);
-              router.refresh();
+              onChanged();
             }
           })
         }
@@ -440,7 +488,7 @@ function CajaCard({
             else {
               toast.success("Ingreso registrado");
               setIngresoOpen(false);
-              router.refresh();
+              onChanged();
             }
           })
         }
@@ -465,7 +513,7 @@ function CajaCard({
                 : "Corte registrado",
             );
             setCorteOpen(false);
-            router.refresh();
+            onChanged();
           })
         }
       />

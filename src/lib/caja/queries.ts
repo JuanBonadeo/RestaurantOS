@@ -105,35 +105,44 @@ export async function getCajasConEstado(
   businessId: string,
 ): Promise<CajaConEstado[]> {
   const cajas = await getCajasForBusiness(businessId);
+  if (cajas.length === 0) return [];
   const service = db();
 
-  const results: CajaConEstado[] = [];
-  for (const caja of cajas) {
-    const { data: corte } = await service
-      .from("caja_cortes")
-      .select("*")
-      .eq("caja_id", caja.id)
-      .eq("business_id", businessId)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+  // Un solo round-trip lógico en vez de 2N encadenados (spec 103): esto corre
+  // en la carga inicial de `/admin/operacion`, así que lo pagaba **toda** la
+  // operación — con 3 cajas eran 6 queries en cascada antes de pintar nada.
+  //
+  // Cada corte se sigue pidiendo **acotado por caja** (`getUltimoCorte`, con su
+  // `limit(1)`) en vez de traer el historial del negocio y agrupar en JS: una
+  // lectura sin `.limit()` sobre una tabla que crece por transacción la trunca
+  // PostgREST en `max_rows` (1000, ver `supabase/config.toml`) **en silencio**,
+  // y una caja que quedara fuera de esa ventana se leería como "nunca cortada"
+  // — con "$0 inicio" y el período arrancando el día que se creó, en la misma
+  // tarjeta donde el efectivo esperado sí sale del corte real.
+  const ids = cajas.map((c) => c.id);
+  const [cortes, cajasRes] = await Promise.all([
+    Promise.all(cajas.map((c) => getUltimoCorte(c.id, businessId))),
+    service.from("cajas").select("id, created_at").in("id", ids),
+  ]);
 
-    const ultimoCorte = corte as CajaCorte | null;
-    const { data: cajaRow } = await service
-      .from("cajas")
-      .select("created_at")
-      .eq("id", caja.id)
-      .single();
-    const cajaCreatedAt = (cajaRow as { created_at: string } | null)?.created_at ?? new Date().toISOString();
+  const creadaPorCaja = new Map(
+    ((cajasRes.data ?? []) as Array<{ id: string; created_at: string }>).map(
+      (c) => [c.id, c.created_at],
+    ),
+  );
 
-    results.push({
+  return cajas.map((caja, i) => {
+    const ultimoCorte = cortes[i];
+    return {
       ...caja,
       ultimo_corte: ultimoCorte,
-      periodo_desde: ultimoCorte?.created_at ?? cajaCreatedAt,
-    });
-  }
-
-  return results;
+      // Sin corte previo, el período arranca cuando se creó la caja.
+      periodo_desde:
+        ultimoCorte?.created_at ??
+        creadaPorCaja.get(caja.id) ??
+        new Date().toISOString(),
+    };
+  });
 }
 
 export async function getMovimientosPeriodoActual(
@@ -514,17 +523,24 @@ export async function getRendicionesPendientesTodosLosMozos(
 
   if (!mozos || mozos.length === 0) return [];
 
-  const results: RendicionMozoPendiente[] = [];
-  for (const m of mozos as Array<{ user_id: string; full_name: string | null; role: string }>) {
-    const pendiente = await getRendicionPendienteMozo(
-      m.user_id,
-      businessId,
-      m.full_name ?? "Sin nombre",
-    );
-    results.push(pendiente);
-  }
-
-  return results;
+  // En paralelo, no en cascada (spec 103): esto corre en la carga inicial de
+  // `/admin/operacion` y con 8 mozos eran 8 round-trips encadenados —cada uno
+  // con su propia consulta de pagos— antes de que la página pudiera cerrar.
+  return Promise.all(
+    (
+      mozos as Array<{
+        user_id: string;
+        full_name: string | null;
+        role: string;
+      }>
+    ).map((m) =>
+      getRendicionPendienteMozo(
+        m.user_id,
+        businessId,
+        m.full_name ?? "Sin nombre",
+      ),
+    ),
+  );
 }
 
 export async function getRendicionesHistorial(
