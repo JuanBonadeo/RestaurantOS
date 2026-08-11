@@ -188,3 +188,71 @@ describe("persistOrder — el checkout público no regresiona", () => {
     expect(orderInsert()).toMatchObject({ delivery_fee_cents: 0 });
   });
 });
+
+// El pedido cargado por staff no es del staff: `userId` acá es el EMPLEADO
+// logueado (lo usa el override de precio y `mozo_id`), no el comensal. Ligarlo
+// a `customers.user_id` reventaba contra la unique parcial
+// `customers_business_user_unique (business_id, user_id)`: el segundo cliente
+// distinto que cargaba el mismo encargado tiraba «No pudimos guardar tus
+// datos.» y no dejaba marchar el delivery.
+describe("persistOrder — el cliente no se liga a la cuenta del staff", () => {
+  /** La fila upserteada en `customers`. */
+  const customerRow = () =>
+    (inserted.customers?.[0] ?? {}) as Record<string, unknown>;
+
+  it("cargado por staff: NO manda user_id", async () => {
+    await persistOrder(
+      input({
+        delivery_type: "delivery",
+        customer_name: "Juan",
+        customer_phone: "1155551234",
+        delivery_address: "Av. Golf 123",
+      }),
+      "empleado-1",
+      { mozoId: "empleado-1" },
+    );
+    expect(customerRow()).not.toHaveProperty("user_id");
+  });
+
+  it("dos clientes distintos del mismo encargado no chocan entre sí", async () => {
+    for (const phone of ["1155551234", "1166665555"]) {
+      inserted = {};
+      await persistOrder(
+        input({
+          delivery_type: "delivery",
+          customer_name: "Cliente",
+          customer_phone: phone,
+          delivery_address: "Av. Golf 123",
+        }),
+        "empleado-1",
+        { mozoId: "empleado-1" },
+      );
+      expect(customerRow()).not.toHaveProperty("user_id");
+    }
+  });
+
+  it("checkout público con login: sigue ligando la cuenta del comensal", async () => {
+    await persistOrder(
+      input({
+        delivery_type: "delivery",
+        customer_name: "Juan",
+        customer_phone: "1155551234",
+        delivery_address: "Av. Golf 123",
+      }),
+      "comensal-1",
+    );
+    expect(customerRow()).toMatchObject({ user_id: "comensal-1" });
+  });
+
+  it("checkout público sin login: no pisa con null el user_id ya ligado", async () => {
+    await persistOrder(
+      input({
+        delivery_type: "delivery",
+        customer_name: "Juan",
+        customer_phone: "1155551234",
+        delivery_address: "Av. Golf 123",
+      }),
+    );
+    expect(customerRow()).not.toHaveProperty("user_id");
+  });
+});

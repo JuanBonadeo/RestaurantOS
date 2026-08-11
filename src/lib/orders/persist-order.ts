@@ -496,11 +496,26 @@ export async function persistOrder(
 
   const totalCents = Math.max(0, subtotalCents + deliveryFeeCents - discountCents);
 
+  // `customers.user_id` liga el cliente a una cuenta de Supabase Auth, y hay
+  // una unique parcial `(business_id, user_id)`: UNA cuenta = UN cliente.
+  //
+  // Cuando el pedido lo carga el staff (`options.mozoId`), el `userId` que
+  // llega acá es el del EMPLEADO —lo usa el override de precio y `mozo_id`—,
+  // no el del comensal. Pegárselo al cliente hacía que el segundo cliente
+  // distinto del mismo encargado violara la unique: el delivery no se podía
+  // cargar («No pudimos guardar tus datos.»).
+  //
+  // Se omite la columna en vez de mandar `null`: en un upsert por
+  // `(business_id, phone)`, una columna ausente NO se toca en el UPDATE. Así el
+  // checkout público sin login tampoco desengancha la cuenta que ese cliente ya
+  // tenía ligada de una compra anterior.
+  const ligarCuenta = Boolean(userId) && !options?.mozoId;
   const { data: customer, error: customerErr } = await supabase
     .from("customers")
     .upsert(
       {
         business_id: business.id,
+        ...(ligarCuenta ? { user_id: userId } : {}),
         // Clave de identidad normalizada (issue #114): el checkout acepta
         // "+54 341…", "341 506-8633", etc. Sin colapsarlas, el mismo cliente se
         // duplica y no engancha su `user_id` (crítico con login Google, que no
@@ -509,7 +524,6 @@ export async function persistOrder(
         phone: customerPhoneKey(data.customer_phone),
         name: data.customer_name,
         email: data.customer_email ?? null,
-        user_id: userId ?? null,
       },
       { onConflict: "business_id,phone" },
     )
