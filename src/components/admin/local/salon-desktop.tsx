@@ -1644,6 +1644,16 @@ export function SalonDesktop({
                 }));
                 setWalkInTableId(null);
                 void refetchSalon();
+                // Abrir mesa y cargar pedido son el mismo movimiento: encadenamos
+                // directo al pedido en vez de volver al plano y pedir otro click.
+                const opened = tables.find((t) => t.id === walkInTableId);
+                if (opened) {
+                  openPedir({
+                    ...opened,
+                    operational_status: "ocupada",
+                    opened_at: new Date().toISOString(),
+                  });
+                }
               }}
             />
           ) : ventaRapidaOpen ? (
