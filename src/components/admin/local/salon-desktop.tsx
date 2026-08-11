@@ -1193,6 +1193,35 @@ export function SalonDesktop({
     selectedId,
   ]);
 
+  /**
+   * Mesa que hoy tiene tomado el panel con un modo propio (cobro, cuenta,
+   * pedido, abrir mesa). Sirve para distinguir, en el plano, "tocar la mesa en
+   * la que ya estoy" de "tocar otra".
+   */
+  const mesaEnModo =
+    cobroTable?.id ?? cuentaTable?.id ?? pedirTable?.id ?? walkInTableId ?? null;
+
+  /**
+   * Tap en el plano fuera de una mesa = salir de lo que estás haciendo, un
+   * nivel por tap (el mismo camino que Esc). Dos modos quedan afuera:
+   * - distribuir mozos / elegir mesa para una reserva: ahí el plano ES la
+   *   herramienta y un toque al aire no puede cancelar el flujo (para eso
+   *   están el "Cancelar" del banner y Esc);
+   * - venta rápida: no es de ninguna mesa y su carrito no sobrevive al cierre,
+   *   así que un tap perdido no puede llevarse la venta cargada.
+   */
+  const cerrarDesdePlano = useCallback(() => {
+    if (distribuirOpen || asignarReservaFor || pickingForNueva) return;
+    if (ventaRapidaOpen) return;
+    cerrarModoActual();
+  }, [
+    distribuirOpen,
+    asignarReservaFor,
+    pickingForNueva,
+    ventaRapidaOpen,
+    cerrarModoActual,
+  ]);
+
   // ── Panel de atajos (`?`) ──
   const [atajosOpen, setAtajosOpen] = useState(false);
   /** Qué modo está mostrando el panel: se listan sus atajos, no todos. */
@@ -1420,11 +1449,26 @@ export function SalonDesktop({
                     setPickingForNueva(false);
                     return;
                   }
+                  // Tocar la mesa que YA está abierta en un modo (pedido,
+                  // cuenta, cobro, abrir mesa) no hace nada: un tap de más
+                  // sobre el plano no puede tirar abajo lo que estás cargando.
+                  if (mesaEnModo === t.id) return;
+                  // Tocar OTRA mesa cambia de mesa: el modo abierto cede y
+                  // entra el detalle de la nueva. Antes el tap no hacía nada
+                  // visible —cobro/cuenta/pedido le ganan al detalle en el
+                  // panel— y el plano parecía muerto mientras cargabas un
+                  // pedido. El borrador del pedido se guarda por mesa, así que
+                  // saltar de una a otra no pierde lo cargado.
+                  closeCobro();
+                  closeCuenta();
+                  closePedir();
+                  setWalkInTableId(null);
                   // Tocar una mesa manda al detalle: la venta de mostrador no
                   // es de ninguna mesa, así que cede el panel.
                   setVentaRapidaOpen(false);
                   setSelectedId(t.id);
                 }}
+                onBackgroundClick={cerrarDesdePlano}
               />
             ) : (
               <div className="flex h-full items-center justify-center p-12 text-center">

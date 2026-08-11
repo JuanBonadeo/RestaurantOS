@@ -58,6 +58,13 @@ type Props = {
   extras?: Record<string, TableExtra>; // keyed by table.id
   onTableClick?: (table: FloorTable) => void;
   /**
+   * Tap en el plano PERO fuera de una mesa (el fondo, la imagen, el aire de
+   * los márgenes). Sirve para "salir de lo que estoy haciendo" sin ir a
+   * buscar la X del panel. Las mesas frenan la propagación, así que tocar una
+   * mesa nunca dispara esto.
+   */
+  onBackgroundClick?: () => void;
+  /**
    * Modo "pintura" — cuando está activo, las mesas se tiñen por mozo
    * asignado (en vez de color de estado) y el click llama a `onTableClick`
    * con la intención de asignar (el padre decide qué hacer). Cada mesa
@@ -67,7 +74,14 @@ type Props = {
   paintMode?: boolean;
 };
 
-export function FloorPlanViewer({ plan, tables, extras = {}, onTableClick, paintMode = false }: Props) {
+export function FloorPlanViewer({
+  plan,
+  tables,
+  extras = {},
+  onTableClick,
+  onBackgroundClick,
+  paintMode = false,
+}: Props) {
   const active = tables.filter((t) => t.status === "active");
 
   return (
@@ -82,6 +96,7 @@ export function FloorPlanViewer({ plan, tables, extras = {}, onTableClick, paint
         viewBox={`0 0 ${plan.width} ${plan.height}`}
         preserveAspectRatio="xMidYMid meet"
         className="block h-full w-full"
+        onClick={onBackgroundClick}
       >
         {plan.background_image_url && (
           <image
@@ -221,7 +236,16 @@ function ViewerTable({
   }
 
   return (
-    <g transform={transform} onClick={onClick} style={{ cursor: "pointer" }}>
+    <g
+      transform={transform}
+      // El tap de una mesa no es un tap "al plano": si burbujeara, abrir una
+      // mesa y cerrar el panel serían el mismo gesto.
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      style={{ cursor: "pointer" }}
+    >
       {/* Mesa */}
       {table.shape === "circle" ? (
         <ellipse

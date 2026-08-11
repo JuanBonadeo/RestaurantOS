@@ -1,5 +1,5 @@
 import { fireEvent, render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { DELAY_COLORS } from "@/lib/comandas/mesa-demora";
 import type { FloorTable } from "@/lib/reservations/types";
@@ -104,5 +104,31 @@ describe("FloorPlanViewer — punto de demora (spec 30)", () => {
     fireEvent.mouseEnter(dot!);
     expect(queryByText("Parrilla")).not.toBeNull();
     expect(queryByText("+23 min de demora")).not.toBeNull();
+  });
+});
+
+describe("FloorPlanViewer — tap fuera de una mesa", () => {
+  it("el fondo avisa al padre; la mesa abre la mesa y no cuenta como fondo", () => {
+    const onTableClick = vi.fn();
+    const onBackgroundClick = vi.fn();
+    const { container } = render(
+      <FloorPlanViewer
+        plan={plan}
+        tables={[makeTable()]}
+        onTableClick={onTableClick}
+        onBackgroundClick={onBackgroundClick}
+      />,
+    );
+
+    // Tocar el plano al aire = "salir de lo que estoy haciendo".
+    fireEvent.click(container.querySelector("svg")!);
+    expect(onBackgroundClick).toHaveBeenCalledTimes(1);
+    expect(onTableClick).not.toHaveBeenCalled();
+
+    // Tocar la mesa NO burbujea: si lo hiciera, el mismo gesto abriría la mesa
+    // y cerraría el panel que acaba de abrir.
+    fireEvent.click(container.querySelector("svg > g")!);
+    expect(onTableClick).toHaveBeenCalledTimes(1);
+    expect(onBackgroundClick).toHaveBeenCalledTimes(1);
   });
 });
