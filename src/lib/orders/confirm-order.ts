@@ -30,6 +30,14 @@ export type ConfirmarPedidoResult = RouteOrderResult;
 export async function confirmarPedido(
   orderId: string,
   slug: string,
+  /**
+   * Indicación para cocina que el encargado escribe RECIÉN al marchar («21:30»,
+   * «junto con la mesa 5»). Sale como «ENTREGAR x» arriba de la comanda. Se
+   * guarda antes de rutear, así el papel ya sale con ella; si viene vacía se
+   * borra la que hubiera (el encargado la sacó a propósito), y si viene
+   * `undefined` —el botón inline de la card, que no la pide— no se toca nada.
+   */
+  kitchenNotes?: string,
 ): Promise<ActionResult<ConfirmarPedidoResult>> {
   const business = await getBusiness(slug);
   if (!business) return actionError("Negocio no encontrado.");
@@ -74,6 +82,18 @@ export async function confirmarPedido(
     orderRow.status !== "preparing"
   ) {
     return actionError(`El pedido ya está en estado "${orderRow.status}".`);
+  }
+
+  if (kitchenNotes !== undefined) {
+    const nota = kitchenNotes.trim().slice(0, 120);
+    const { error: notesErr } = await service
+      .from("orders")
+      .update({ kitchen_notes: nota || null })
+      .eq("id", orderId)
+      .eq("business_id", business.id);
+    // Si falla, se marcha igual: mejor la comanda sin la nota que el pedido
+    // trabado en el board. Queda en el log del server.
+    if (notesErr) console.error("confirmarPedido · kitchen_notes", notesErr);
   }
 
   const result = await routeOrderToCocina(orderId, business.id);

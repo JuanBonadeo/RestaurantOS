@@ -2,7 +2,8 @@
 //
 // El otro papel que sale al marchar un delivery o un retiro. La comanda de
 // cocina va sin precios, partida por sector y sin cliente; ésta es al revés:
-// el pedido entero, con plata, destino y horario, para el que reparte.
+// el pedido entero, con plata y destino, para el que reparte. El horario de
+// entrega no va: lo dice la nota «ENTREGAR x» de la comanda.
 //
 // Reusa los primitivos de `ticket.ts` (ASCII, wrap, ESC/POS, ancho de columna)
 // para que los dos tickets salgan con el mismo espaciado en la misma térmica.
@@ -39,7 +40,11 @@ export type ControlTicketData = {
   order_number: number | string;
   delivery_type: "delivery" | "pickup";
   emitted_at: string;
-  /** `orders.scheduled_at`. Null = "lo antes posible". */
+  /**
+   * `orders.scheduled_at`. Ya NO se imprime: la hora de entrega se maneja con
+   * la nota «ENTREGAR x» de la comanda. Se conserva en el tipo porque los
+   * callers lo siguen mandando y por si vuelve a hacer falta en el papel.
+   */
   scheduled_at?: string | null;
   customer_name?: string | null;
   customer_phone?: string | null;
@@ -143,14 +148,11 @@ export function buildControlTicketLines(c: ControlTicketData): Line[] {
   push(RULE, { size: "sm" });
 
   // ── Cuándo ────────────────────────────────────────────────────────────────
-  // La hora de entrega es el dato operativo: es la que decide si el repartidor
-  // sale ya o espera. Por eso va en negrita, arriba de todo lo demás.
+  // Sólo el sello de emisión. La hora de entrega salía acá en negrita, pero
+  // pasó a manejarse con la nota «ENTREGAR x» de la comanda, que es donde la
+  // lee el que cocina: tenerla en los dos papeles daba dos fuentes para el
+  // mismo dato y se contradecían apenas el encargado corregía una.
   push(`Emitido: ${stamp(c.emitted_at)}`);
-  const entrega = c.scheduled_at
-    ? `ENTREGA: ${stamp(c.scheduled_at)}`
-    : "ENTREGA: lo antes posible";
-  // A doble alto entran 24 col: "lo antes posible" se pasa por uno.
-  for (const l of wrap(entrega, COLS.tall)) push(l, { bold: true });
   if (isDelivery) push("Repartidor: ____________");
   push(RULE, { size: "sm" });
 

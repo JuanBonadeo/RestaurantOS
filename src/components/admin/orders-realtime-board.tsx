@@ -258,14 +258,14 @@ export function OrdersRealtimeBoard({
   );
 
   const handleConfirm = useCallback(
-    async (order: AdminOrder) => {
+    async (order: AdminOrder, kitchenNotes?: string) => {
       // Optimistic: pasamos a "preparing" en local mientras la action corre.
       setOrders((prev) =>
         prev.map((o) =>
           o.id === order.id ? { ...o, status: "preparing" } : o,
         ),
       );
-      const result = await confirmarPedido(order.id, slug);
+      const result = await confirmarPedido(order.id, slug, kitchenNotes);
       if (!result.ok) {
         toast.error(result.error);
         setOrders((prev) =>

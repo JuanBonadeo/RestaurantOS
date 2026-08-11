@@ -127,6 +127,9 @@ export function CargarPedidoSheet({
   const [customerPhone, setCustomerPhone] = useState("");
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [deliveryNotes, setDeliveryNotes] = useState("");
+  // Indicación para cocina: sale como «ENTREGAR x» arriba de la comanda. Es
+  // otra cosa que las notas de arriba, que son del cliente y van al control.
+  const [kitchenNotes, setKitchenNotes] = useState("");
 
   const [clienteDirecciones, setClienteDirecciones] = useState<
     ClienteDireccion[]
@@ -265,6 +268,7 @@ export function CargarPedidoSheet({
     setCustomerPhone("");
     setDeliveryAddress("");
     setDeliveryNotes("");
+    setKitchenNotes("");
     setClienteDirecciones([]);
   }
 
@@ -393,6 +397,7 @@ export function CargarPedidoSheet({
             ? deliveryAddress.trim() || undefined
             : undefined,
         delivery_notes: deliveryNotes.trim() || undefined,
+        kitchen_notes: kitchenNotes.trim() || undefined,
         items: cart.map((c) => ({
           product_id: c.product_id,
           quantity: c.quantity,
@@ -764,7 +769,7 @@ export function CargarPedidoSheet({
                 )}
                 <div>
                   <label className="text-xs font-semibold text-zinc-600">
-                    Notas (opcional)
+                    Notas del pedido (opcional)
                   </label>
                   <input
                     type="text"
@@ -773,6 +778,25 @@ export function CargarPedidoSheet({
                     placeholder="ej: sin cebolla, tocar timbre…"
                     className="mt-1 block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
                   />
+                  <p className="mt-1 text-[11px] text-zinc-500">
+                    Va en el ticket de control, con los datos de la entrega.
+                  </p>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-zinc-600">
+                    Entregar (opcional)
+                  </label>
+                  <input
+                    type="text"
+                    value={kitchenNotes}
+                    onChange={(e) => setKitchenNotes(e.target.value)}
+                    maxLength={120}
+                    placeholder="ej: 21:30, junto con la mesa 5…"
+                    className="mt-1 block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+                  />
+                  <p className="mt-1 text-[11px] text-zinc-500">
+                    Sale arriba de la comanda como «ENTREGAR …», para cocina.
+                  </p>
                 </div>
               </section>
 

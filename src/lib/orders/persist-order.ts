@@ -549,6 +549,9 @@ export async function persistOrder(
     delivery_type: data.delivery_type,
     delivery_address: data.delivery_address ?? null,
     delivery_notes: data.delivery_notes ?? null,
+    // Nota para cocina (sale como «ENTREGAR x» en la comanda). Distinta de
+    // `delivery_notes`, que es del cliente y va al ticket de control.
+    kitchen_notes: data.kitchen_notes ?? null,
     subtotal_cents: subtotalCents,
     delivery_fee_cents: deliveryFeeCents,
     discount_cents: discountCents,

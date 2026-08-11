@@ -224,30 +224,56 @@ describe("buildTicketLines · con qué combina (otros sectores)", () => {
   });
 });
 
-describe("buildTicketLines · nota del pedido", () => {
-  const conNota = { ...base, order_notes: "tocar timbre, sin sal" };
+describe("buildTicketLines · nota de cocina («ENTREGAR x»)", () => {
+  const conNota = { ...base, kitchen_notes: "21:30" };
 
-  it("imprime la nota del pedido bajo «NOTA DEL PEDIDO»", () => {
+  it("imprime la nota de cocina con el prefijo ENTREGAR", () => {
+    // En doble ancho entran 11 col, así que «ENTREGAR 21:30» ocupa dos
+    // renglones — cortado por palabra, no partido al medio.
     const texts = buildTicketLines(conNota).map((l) => l.text);
-    expect(texts).toContain("NOTA DEL PEDIDO");
-    expect(texts).toContain("tocar timbre, sin sal");
+    expect(texts.slice(0, 2)).toEqual(["ENTREGAR", "21:30"]);
   });
 
-  it("va arriba de los ítems: cocina la lee antes de ponerse a cocinar", () => {
+  it("va arriba de todo: antes del sector y de los ítems", () => {
     const lines = buildTicketLines(conNota);
-    const nota = lines.findIndex((l) => l.text === "NOTA DEL PEDIDO");
-    const primerItem = lines.findIndex((l) => l.text.includes("Milanesa"));
-    expect(nota).toBeGreaterThan(0);
-    expect(nota).toBeLessThan(primerItem);
+    const entregar = lines.findIndex((l) => l.text.startsWith("ENTREGAR"));
+    const sector = lines.findIndex((l) => l.text === "COCINA");
+    expect(entregar).toBe(0);
+    expect(entregar).toBeLessThan(sector);
+  });
+
+  it("sale en el cuerpo más grande — se lee de lejos", () => {
+    const lines = buildTicketLines(conNota);
+    expect(lines[0]).toMatchObject({ size: "xl", bold: true });
+  });
+
+  it("una nota larga se parte por palabra, sin perder el prefijo", () => {
+    const texts = buildTicketLines({
+      ...conNota,
+      kitchen_notes: "junto con la mesa 5",
+    }).map((l) => l.text);
+    expect(texts[0].startsWith("ENTREGAR")).toBe(true);
+    expect(texts.join(" ")).toContain("mesa 5");
   });
 
   it("una comanda anulada no la imprime", () => {
     const texts = buildTicketLines({ ...conNota, cancelled: true }).map((l) => l.text);
-    expect(texts).not.toContain("NOTA DEL PEDIDO");
+    expect(texts.some((t) => t.startsWith("ENTREGAR"))).toBe(false);
   });
 
   it("sin el campo, el ticket sale igual que siempre (aditivo)", () => {
-    expect(buildTicketLines(base).map((l) => l.text)).not.toContain("NOTA DEL PEDIDO");
+    const texts = buildTicketLines(base).map((l) => l.text);
+    expect(texts.some((t) => t.startsWith("ENTREGAR"))).toBe(false);
+  });
+
+  it("la nota del CLIENTE no se cuela en la comanda: ésa va al control", () => {
+    const texts = buildTicketLines({
+      ...base,
+      // @ts-expect-error — campo que ya no existe en TicketComanda; el test fija
+      // que aunque el caller lo mande por error, no se imprime.
+      order_notes: "tocar timbre",
+    }).map((l) => l.text);
+    expect(texts.join(" ")).not.toContain("tocar timbre");
   });
 });
 

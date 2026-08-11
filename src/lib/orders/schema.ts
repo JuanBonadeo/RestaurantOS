@@ -70,6 +70,12 @@ export const CreateOrderInput = z
       .optional(),
     delivery_address: z.string().max(200).optional(),
     delivery_notes: z.string().max(500).optional(),
+    /**
+     * Indicación para cocina («ENTREGAR x» en la comanda). El checkout público
+     * NO la expresa —la escribe el encargado—, pero viaja acá porque
+     * `cargarPedidoStaff` mapea su input a esta forma antes de persistir.
+     */
+    kitchen_notes: z.string().max(120).optional(),
     payment_method: z.enum(["cash", "mp"]).optional(),
     /**
      * Optional promo code typed by the customer in checkout. The DB lookup
@@ -125,6 +131,12 @@ export const StaffOrderInput = z
     customer_phone: z.string().max(20).optional(),
     delivery_address: z.string().max(200).optional(),
     delivery_notes: z.string().max(500).optional(),
+    /**
+     * Indicación para cocina («21:30», «junto con la mesa 5»). Sale arriba de
+     * la comanda como «ENTREGAR x». Corta a propósito: es un renglón que se lee
+     * de lejos en doble ancho, no un párrafo.
+     */
+    kitchen_notes: z.string().max(120).optional(),
     /** Spec 085 — instante de retiro/entrega. Ausente = "para ahora". */
     scheduled_at: z.string().datetime({ offset: true }).optional(),
     items: z.array(StaffOrderItemInput).min(1),

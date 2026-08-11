@@ -106,10 +106,12 @@ describe("buildControlTicketLines", () => {
     expect(ret).not.toContain("Direccion:");
   });
 
-  it("muestra la hora de entrega de un programado, y si no «lo antes posible»", () => {
-    expect(text(base())).toContain("ENTREGA: lo antes\nposible");
+  it("NO lleva hora de entrega: eso lo dice la nota «ENTREGAR x» de la comanda", () => {
+    expect(text(base())).not.toContain("ENTREGA");
     const prog = text(base({ scheduled_at: "2026-07-28T20:30:00-03:00" }));
-    expect(prog).toContain("ENTREGA: 28/07 20:30");
+    expect(prog).not.toContain("ENTREGA");
+    // El sello de emisión sí se queda: es cuándo se imprimió el papel.
+    expect(prog).toContain("Emitido:");
   });
 
   it("sale 100% en ASCII imprimible (la térmica no recibe codepage)", () => {

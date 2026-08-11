@@ -2413,6 +2413,7 @@ export type Database = {
           delivery_lat: number | null
           delivery_lng: number | null
           delivery_notes: string | null
+          kitchen_notes: string | null
           delivery_type: string
           discount_cents: number
           discount_reason: string | null
@@ -2452,6 +2453,7 @@ export type Database = {
           delivery_lat?: number | null
           delivery_lng?: number | null
           delivery_notes?: string | null
+          kitchen_notes?: string | null
           delivery_type: string
           discount_cents?: number
           discount_reason?: string | null
@@ -2491,6 +2493,7 @@ export type Database = {
           delivery_lat?: number | null
           delivery_lng?: number | null
           delivery_notes?: string | null
+          kitchen_notes?: string | null
           delivery_type?: string
           discount_cents?: number
           discount_reason?: string | null

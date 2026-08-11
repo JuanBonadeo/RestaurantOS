@@ -12,6 +12,7 @@ import {
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Sheet,
@@ -114,7 +115,7 @@ export function OrderDetailSheet({
   slug: string;
   timezone: string;
   onAdvance: (order: AdminOrder, next: OrderStatus) => void;
-  onConfirm?: (order: AdminOrder) => void;
+  onConfirm?: (order: AdminOrder, kitchenNotes: string) => void;
 }) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -123,6 +124,8 @@ export function OrderDetailSheet({
   const [cancelling, startCancel] = useTransition();
   // Spec 054 — cobrar/facturar el pedido sin mesa desde el detalle.
   const [cobrarOpen, setCobrarOpen] = useState(false);
+  // Indicación para cocina que se escribe al marchar («ENTREGAR x»).
+  const [kitchenNotes, setKitchenNotes] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -189,6 +192,7 @@ export function OrderDetailSheet({
     if (!open) {
       setShowCancel(false);
       setReason("");
+      setKitchenNotes("");
     }
   }, [open]);
 
@@ -476,12 +480,30 @@ export function OrderDetailSheet({
                 Cobrar / Facturar
               </Button>
             )}
+            {isPendingOnline && onConfirm && (
+              <div className="w-full">
+                <Label
+                  htmlFor="kitchen-notes"
+                  className="text-muted-foreground text-[0.65rem] font-semibold uppercase tracking-wider"
+                >
+                  Entregar (sale en la comanda)
+                </Label>
+                <Input
+                  id="kitchen-notes"
+                  value={kitchenNotes}
+                  onChange={(e) => setKitchenNotes(e.target.value)}
+                  maxLength={120}
+                  placeholder="21:30, junto con la mesa 5…"
+                  className="mt-1.5"
+                />
+              </div>
+            )}
             {isPendingOnline && onConfirm ? (
               <Button
                 size="lg"
                 className="w-full font-semibold"
                 onClick={() => {
-                  onConfirm(order);
+                  onConfirm(order, kitchenNotes);
                   onOpenChange(false);
                 }}
               >

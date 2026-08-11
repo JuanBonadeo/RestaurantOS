@@ -89,6 +89,7 @@ export async function cargarPedidoStaff(
     customer_phone: data.customer_phone?.trim() || "-",
     delivery_address: data.delivery_address?.trim() || undefined,
     delivery_notes: data.delivery_notes?.trim() || undefined,
+    kitchen_notes: data.kitchen_notes?.trim() || undefined,
     payment_method: "cash",
     // Spec 085: `persistOrder` lo valida contra la grilla del negocio (hoy,
     // anticipación, horario) — la misma validación del checkout público.

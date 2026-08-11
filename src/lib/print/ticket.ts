@@ -84,12 +84,16 @@ export type TicketComanda = {
    */
   otros_sectores?: TicketSectorHermano[] | null;
   /**
-   * `orders.delivery_notes`: la nota que el cliente (o el encargado al cargar
-   * el pedido) deja sobre el pedido entero — «sin sal», «llego 21:30», «para
-   * llevar frío». Salía sólo en el ticket de control, así que cocina no la veía
-   * y no podía manejar el tiempo de cocción. Campo aditivo.
+   * `orders.kitchen_notes`: la indicación del encargado PARA COCINA — cuándo o
+   * cómo sacar el plato («21:30», «junto con la mesa 5»). Sale arriba de todo
+   * como «ENTREGAR x»: es lo primero que tiene que leer el que cocina, porque
+   * define el tiempo, no el contenido.
+   *
+   * NO confundir con `orders.delivery_notes`, que es la nota del CLIENTE sobre
+   * la entrega («tocar timbre», «depto 3B»): ésa no le sirve a la parrilla y va
+   * sólo en el ticket de control. Campo aditivo.
    */
-  order_notes?: string | null;
+  kitchen_notes?: string | null;
 };
 
 export type Size = "sm" | "tall" | "xl";
@@ -210,6 +214,15 @@ export function buildTicketLines(c: TicketComanda): Line[] {
     for (const l of wrap(text, COLS.xl)) push(l, { size: "xl", bold: true, align: "center" });
   };
 
+  // Lo PRIMERO del ticket, arriba incluso del sector: cuándo sale el plato
+  // manda sobre qué plato es. El prefijo lo pone el sistema —el encargado sólo
+  // escribe el «cuándo»— así que siempre se lee igual, lo escriba quien lo
+  // escriba. En una comanda anulada no va: no hay nada que entregar.
+  if (c.kitchen_notes && !c.cancelled) {
+    banner(`ENTREGAR ${c.kitchen_notes}`);
+    push(RULE);
+  }
+
   // Spec 049: comanda anulada → ticket ANULADA destacado para que cocina
   // descarte lo que ya tenía impreso.
   if (c.cancelled) {
@@ -263,16 +276,6 @@ export function buildTicketLines(c: TicketComanda): Line[] {
   if (c.cancelled && c.cancelled_reason)
     for (const l of wrap(`Motivo: ${c.cancelled_reason}`, COLS.tall))
       push(l, { size: "tall", bold: true });
-
-  // Nota del pedido entero (no de un ítem): va ANTES de los ítems porque
-  // condiciona cómo se cocina todo lo de abajo (tiempo de cocción, punto,
-  // horario de retiro). En una comanda anulada no se imprime.
-  if (c.order_notes && !c.cancelled) {
-    push(RULE);
-    push("NOTA DEL PEDIDO", { size: "tall", bold: true, align: "center" });
-    for (const l of wrap(String(c.order_notes), COLS.tall))
-      push(l, { size: "tall", bold: true });
-  }
 
   push(RULE);
   pad(EDGE_PADDING); // aire entre la línea y el primer ítem
