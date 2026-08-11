@@ -224,6 +224,33 @@ describe("buildTicketLines · con qué combina (otros sectores)", () => {
   });
 });
 
+describe("buildTicketLines · nota del pedido", () => {
+  const conNota = { ...base, order_notes: "tocar timbre, sin sal" };
+
+  it("imprime la nota del pedido bajo «NOTA DEL PEDIDO»", () => {
+    const texts = buildTicketLines(conNota).map((l) => l.text);
+    expect(texts).toContain("NOTA DEL PEDIDO");
+    expect(texts).toContain("tocar timbre, sin sal");
+  });
+
+  it("va arriba de los ítems: cocina la lee antes de ponerse a cocinar", () => {
+    const lines = buildTicketLines(conNota);
+    const nota = lines.findIndex((l) => l.text === "NOTA DEL PEDIDO");
+    const primerItem = lines.findIndex((l) => l.text.includes("Milanesa"));
+    expect(nota).toBeGreaterThan(0);
+    expect(nota).toBeLessThan(primerItem);
+  });
+
+  it("una comanda anulada no la imprime", () => {
+    const texts = buildTicketLines({ ...conNota, cancelled: true }).map((l) => l.text);
+    expect(texts).not.toContain("NOTA DEL PEDIDO");
+  });
+
+  it("sin el campo, el ticket sale igual que siempre (aditivo)", () => {
+    expect(buildTicketLines(base).map((l) => l.text)).not.toContain("NOTA DEL PEDIDO");
+  });
+});
+
 describe("buildTicketLines · solo ASCII imprimible", () => {
   it("saca tildes y eñes: la térmica no las imprime", () => {
     const texts = buildTicketLines({

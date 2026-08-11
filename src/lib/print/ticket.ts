@@ -83,6 +83,13 @@ export type TicketComanda = {
    * fritera, y cada sector cocina a destiempo. Campo aditivo.
    */
   otros_sectores?: TicketSectorHermano[] | null;
+  /**
+   * `orders.delivery_notes`: la nota que el cliente (o el encargado al cargar
+   * el pedido) deja sobre el pedido entero — «sin sal», «llego 21:30», «para
+   * llevar frío». Salía sólo en el ticket de control, así que cocina no la veía
+   * y no podía manejar el tiempo de cocción. Campo aditivo.
+   */
+  order_notes?: string | null;
 };
 
 export type Size = "sm" | "tall" | "xl";
@@ -256,6 +263,16 @@ export function buildTicketLines(c: TicketComanda): Line[] {
   if (c.cancelled && c.cancelled_reason)
     for (const l of wrap(`Motivo: ${c.cancelled_reason}`, COLS.tall))
       push(l, { size: "tall", bold: true });
+
+  // Nota del pedido entero (no de un ítem): va ANTES de los ítems porque
+  // condiciona cómo se cocina todo lo de abajo (tiempo de cocción, punto,
+  // horario de retiro). En una comanda anulada no se imprime.
+  if (c.order_notes && !c.cancelled) {
+    push(RULE);
+    push("NOTA DEL PEDIDO", { size: "tall", bold: true, align: "center" });
+    for (const l of wrap(String(c.order_notes), COLS.tall))
+      push(l, { size: "tall", bold: true });
+  }
 
   push(RULE);
   pad(EDGE_PADDING); // aire entre la línea y el primer ítem

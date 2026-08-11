@@ -230,6 +230,15 @@ function ticketLines(c) {
     for (const l of wrap(`Motivo: ${c.cancelled_reason}`, COLS.tall))
       push(l, { size: "tall", bold: true });
 
+  // Nota del pedido entero (no de un ítem): condiciona cómo se cocina todo lo
+  // de abajo (tiempo de cocción, punto, horario), así que va antes de los ítems.
+  if (c.order_notes && !c.cancelled) {
+    push(RULE);
+    push("NOTA DEL PEDIDO", { size: "tall", bold: true, align: "center" });
+    for (const l of wrap(String(c.order_notes), COLS.tall))
+      push(l, { size: "tall", bold: true });
+  }
+
   push(RULE);
   pad(EDGE_PADDING); // aire entre la línea y el primer ítem
 

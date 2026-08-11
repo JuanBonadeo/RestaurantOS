@@ -74,6 +74,7 @@ export async function GET(req: Request) {
         business_id,
         table_id,
         delivery_type,
+        delivery_notes,
         tables!orders_table_id_fkey(label)
       ),
       comanda_items(
@@ -141,6 +142,7 @@ export async function GET(req: Request) {
       business_id: string;
       table_id: string | null;
       delivery_type: string | null;
+      delivery_notes: string | null;
       tables: { label: string } | null;
     };
     const station = c.stations as unknown as {
@@ -176,6 +178,9 @@ export async function GET(req: Request) {
         | "delivery"
         | "pickup"
         | null,
+      // Nota del pedido entero: hasta ahora sólo salía en el ticket de control
+      // y cocina no la veía (no podía manejar el tiempo de cocción).
+      order_notes: sanitizeTicketText(order?.delivery_notes),
       // Con qué combina: lo del MISMO envío que sale de los otros sectores.
       otros_sectores: agruparOtrosSectores(
         otrosPorPedido.get(order?.id) ?? [],
