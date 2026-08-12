@@ -369,15 +369,18 @@ export function MozoPedirClient({
     return out;
   }, [catalog]);
 
-  // Super "principales" para filtrar el "Más pedidos".
-  const principalesSuperId: string | null = useMemo(() => {
-    return (
-      catalog.superCategories.find((s) => s.slug === "principales")?.id ?? null
-    );
-  }, [catalog.superCategories]);
-
-  // Top products → solo principales (el chip muestra los principales más
-  // vendidos; bebidas/entradas tienen su tab dedicado).
+  /**
+   * Los más pedidos del negocio, en orden.
+   *
+   * **Sin filtrar por supercategoría.** Había un filtro «sólo los de la super
+   * `principales`», con el argumento de que bebidas y entradas tenían su tab
+   * dedicado. Dos cosas: los tabs ya no existen en el panel (spec 111), y esa
+   * supercategoría **no existe en ningún negocio** —las supers son bebidas,
+   * cafetería, entradas-y-minutas, parrilla, pastas, pescados, picar, platos,
+   * postres y vinos—, así que el filtro nunca corrió. Quedaba como trampa: el
+   * día que alguien creara una super llamada «principales», la única lista del
+   * panel se habría vaciado de bebidas sin que nadie tocara nada.
+   */
   const topProducts: CatalogProduct[] = useMemo(() => {
     const seen = new Set<string>();
     const out: CatalogProduct[] = [];
@@ -385,18 +388,15 @@ export function MozoPedirClient({
       if (seen.has(id)) continue;
       seen.add(id);
       const p = productById.get(id);
-      if (!p || !p.category_id) continue;
-      const cat = categoryById.get(p.category_id);
-      if (!cat) continue;
-      // Si existe la super "principales", filtramos por ahí. Si no existe
-      // (admin la renombró/borró), aceptamos todos los top sin filtro.
-      if (principalesSuperId && cat.super_category_id !== principalesSuperId) {
-        continue;
-      }
-      out.push(p);
+      if (p) out.push(p);
     }
     return out;
-  }, [topProductIds, productById, categoryById, principalesSuperId]);
+  }, [topProductIds, productById]);
+
+  const topIds = useMemo(
+    () => new Set(topProducts.map((p) => p.id)),
+    [topProducts],
+  );
 
   const hasTopTab = topProducts.length > 0 || dailyMenus.length > 0;
   const hasOrphanTab = (categoriesBySuper[ORPHAN_TAB_ID] ?? []).length > 0;
@@ -503,14 +503,11 @@ export function MozoPedirClient({
       const tabId = productTabId.get(item.product_id);
       if (!tabId) continue;
       out[tabId] = true;
-      // El "Más pedidos" tiene principales; si tocamos algo que pertenece a
-      // principales, lo marcamos como tocado.
-      if (tabId === principalesSuperId && hasTopTab) {
-        out[TOP_TAB_ID] = true;
-      }
+      // Si lo cargado está entre los más pedidos, ese tab también queda tocado.
+      if (hasTopTab && topIds.has(item.product_id)) out[TOP_TAB_ID] = true;
     }
     return out;
-  }, [cart, productTabId, principalesSuperId, hasTopTab]);
+  }, [cart, productTabId, hasTopTab, topIds]);
 
   // Secciones de la pestaña activa (una por categoría, o la lista del tab
   // "Más pedidos"). Es lo que se ve sin búsqueda.
@@ -524,31 +521,19 @@ export function MozoPedirClient({
     // que desde la 110 aguanta acentos, plural y palabras en cualquier orden.
     // Elegir categoría era un rodeo de dos taps para llegar a lo mismo.
     if (embedded) {
-      // «Más pedidos» arriba y **el catálogo entero** abajo, por categoría, en
-      // un scroll continuo.
+      // Sin buscar se ven **sólo los más pedidos** (pedido de Juan): el panel
+      // es para cargar rápido lo que sale todo el tiempo, y para el resto está
+      // el buscador. Mostrar la carta entera lo volvía un catálogo de 482
+      // líneas para scrollear.
       //
-      // Mostrar sólo los más pedidos no alcanza: golf-jcr tiene 482 productos
-      // visibles y **3** con historial de 30 días, así que el panel abría con
-      // tres ítems y el resto de la carta —las bebidas entre ellas— sólo
-      // existía si sabías qué tipear. Y con un catálogo migrado de MaxiRest eso
-      // es la norma, no el arranque.
-      //
-      // Los que ya están en «Más pedidos» no se repiten abajo: el índice de
-      // teclado es un `Map` por id y un producto en dos lugares se pisa a sí
-      // mismo, dejando el foco corrido.
-      const topIds = new Set(topProducts.map((p) => p.id));
-      const secciones: {
-        category: CatalogCategory | null;
-        products: CatalogProduct[];
-      }[] = [];
-      if (topProducts.length > 0) {
-        secciones.push({ category: null, products: topProducts });
-      }
-      for (const c of catalog.categories) {
-        const resto = c.products.filter((p) => !topIds.has(p.id));
-        if (resto.length > 0) secciones.push({ category: c, products: resto });
-      }
-      return secciones;
+      // Único caso en que se muestra todo: cuando **no hay historial** (negocio
+      // recién arrancado). Ahí «los más pedidos» está vacío y la alternativa es
+      // una pantalla en blanco.
+      return topProducts.length > 0
+        ? [{ category: null, products: topProducts }]
+        : allProducts.length > 0
+          ? [{ category: null, products: allProducts }]
+          : [];
     }
     if (activeTab === TOP_TAB_ID) {
       return topProducts.length > 0
@@ -557,7 +542,7 @@ export function MozoPedirClient({
     }
     const cats = categoriesBySuper[activeTab] ?? [];
     return cats.map((c) => ({ category: c, products: c.products }));
-  }, [embedded, activeTab, topProducts, catalog, categoriesBySuper]);
+  }, [embedded, activeTab, topProducts, allProducts, categoriesBySuper]);
 
   // ── Búsqueda (spec 068: el mismo buscador que cargar pedido y venta rápida) ──
   // `browse` es lo visible sin búsqueda, aplanado en el orden en que se ve: el
@@ -1219,12 +1204,10 @@ export function MozoPedirClient({
               {itemsPedidos + cart.length > 0 &&
                 ` · ${itemsPedidos + cart.length}`}
             </button>
-          </div>
-
-          {/* El filtro de la carta online, arriba y con la cara del selector de
-              salones (spec 111, fase 5): es contexto de la PC, no un control
-              del buscador. */}
-          <div className="mt-2">
+            {/* El filtro de la carta online: a la derecha de la fila del
+                negocio, alineado con el selector de salones de la barra de
+                arriba (spec 111, fase 5). Es contexto de la PC —se elige una
+                vez por turno— no un control del buscador. */}
             <CartaOnlineSelector api={searchApi} />
           </div>
         </header>

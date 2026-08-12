@@ -8,10 +8,10 @@ import type { CatalogForMozo } from "@/lib/mozo/catalog-query";
 /**
  * Qué se ve en el panel del salón **sin** buscar (spec 111, fase 5).
  *
- * La fase 5 sacó el selector de categoría y dejó «Más pedidos» como vista de
- * entrada. Con el catálogo real eso escondía la carta: golf-jcr tiene 482
- * productos visibles y **3** con historial de 30 días, así que el panel abría
- * con tres ítems y las bebidas sólo existían si sabías qué tipear.
+ * Sólo los más pedidos: el panel es para cargar rápido lo que sale todo el
+ * tiempo, y para el resto está el buscador. Lo que estos tests fijan es que
+ * esa lista **no se recorte por categoría** —las bebidas tienen que estar— y
+ * que un negocio sin historial no abra en blanco.
  */
 
 vi.mock("next/navigation", () => ({
@@ -86,25 +86,31 @@ function renderPanel(topProductIds: string[] = []) {
 }
 
 describe("panel del salón · qué se ve sin buscar (spec 111)", () => {
-  it("muestra el catálogo entero, no sólo los más pedidos", () => {
-    // Un solo producto con historial: el resto de la carta tiene que estar.
-    renderPanel(["p1"]);
+  it("muestra los más pedidos y nada más", () => {
+    renderPanel(["p1", "p3"]);
 
     expect(screen.getByText("Asado de Tira")).toBeInTheDocument();
-    expect(screen.getByText("Entraña")).toBeInTheDocument();
-    // Las bebidas, que es lo que se había perdido.
     expect(screen.getByText("Coca-Cola 500ml")).toBeInTheDocument();
-    expect(screen.getByText("Sprite 500ml")).toBeInTheDocument();
-    expect(screen.getByText("Gaseosas")).toBeInTheDocument();
+    // El resto de la carta no está: para eso está el buscador.
+    expect(screen.queryByText("Entraña")).toBeNull();
+    expect(screen.queryByText("Sprite 500ml")).toBeNull();
   });
 
-  it("un producto no se repite: si está en «Más pedidos» no vuelve en su categoría", () => {
+  it("las bebidas entran en los más pedidos como cualquier otro producto", () => {
+    // Había un filtro por la supercategoría «principales» que las habría
+    // dejado afuera. No existe en ningún negocio, así que nunca corrió — pero
+    // el día que alguien creara esa super, el panel se quedaba sin bebidas.
+    renderPanel(["p3"]);
+    expect(screen.getByText("Coca-Cola 500ml")).toBeInTheDocument();
+  });
+
+  it("un producto no se repite en la lista", () => {
     // El índice de teclado es un Map por id; repetirlo corre el foco.
-    renderPanel(["p1"]);
+    renderPanel(["p1", "p1"]);
     expect(screen.getAllByText("Asado de Tira")).toHaveLength(1);
   });
 
-  it("sin historial de ventas también se ve la carta entera", () => {
+  it("sin historial de ventas se muestra la carta, no una pantalla en blanco", () => {
     renderPanel([]);
     expect(screen.getByText("Asado de Tira")).toBeInTheDocument();
     expect(screen.getByText("Coca-Cola 500ml")).toBeInTheDocument();
@@ -118,7 +124,7 @@ describe("panel del salón · qué se ve sin buscar (spec 111)", () => {
 
   it("el filtro de la carta online es un desplegable y puede dejar sólo lo del local", async () => {
     const user = userEvent.setup();
-    renderPanel(["p1"]);
+    renderPanel(["p1", "p3"]);
 
     await user.click(
       screen.getByRole("button", { name: "Filtrar por carta online" }),
