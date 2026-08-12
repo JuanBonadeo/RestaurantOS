@@ -199,6 +199,18 @@ export function OrderDetailSheet({
   const isTerminal =
     order.status === "delivered" || order.status === "cancelled";
 
+  /**
+   * Un pedido ENTREGADO puede seguir impago: el delivery que se marcó entregado
+   * antes de que el repartidor volviera con la plata, el retiro que se cobra al
+   * mostrador. El pie del detalle se escondía con `isTerminal`, así que esos
+   * pedidos no se podían cobrar ni facturar desde ningún lado.
+   *
+   * El server nunca tuvo ese límite: `registrarPago` rechaza sólo el pedido
+   * cancelado y la orden ya cerrada — `delivered` con la orden abierta se cobra
+   * normal. Así que el pie se muestra salvo en cancelado, que sí es final.
+   */
+  const isCancelled = order.status === "cancelled";
+
   // spec 047 — un pedido online en `pending` se manda a cocina con "Confirmar"
   // (onConfirm → confirmarPedido → routeOrderToCocina: crea comandas + imprime),
   // igual que el botón inline de la card. Avanzarlo por `onAdvance`/updateOrderStatus
@@ -458,7 +470,7 @@ export function OrderDetailSheet({
           )}
         </div>
 
-        {!isTerminal && !showCancel && (
+        {!isCancelled && !showCancel && (
           <footer className="border-border/60 flex flex-col gap-2 border-t px-5 py-4">
             {/* Un pedido ya saldado no se vuelve a cobrar: hasta ahora el botón
                 miraba sólo el estado operativo (`isTerminal` = entregado /
@@ -524,14 +536,17 @@ export function OrderDetailSheet({
                 </Button>
               )
             )}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-rose-700 hover:bg-rose-50 hover:text-rose-700"
-              onClick={() => setShowCancel(true)}
-            >
-              Cancelar pedido
-            </Button>
+            {/* Un pedido ya entregado no se cancela: sólo queda cobrarlo. */}
+            {!isTerminal && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-rose-700 hover:bg-rose-50 hover:text-rose-700"
+                onClick={() => setShowCancel(true)}
+              >
+                Cancelar pedido
+              </Button>
+            )}
           </footer>
         )}
 
