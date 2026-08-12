@@ -54,7 +54,8 @@ import {
   type EnviarComandaDailyMenuItem,
 } from "@/lib/comandas/actions";
 import type { ComandaConItems } from "@/lib/comandas/queries";
-import type { LoPedido } from "@/lib/mozo/lo-pedido";
+import { contarItemsVivos, type LoPedido } from "@/lib/mozo/lo-pedido";
+import { LoPedidoColumn } from "@/components/mozo/lo-pedido-column";
 import type { ComandaStatus } from "@/lib/comandas/types";
 import { useOptimisticAction } from "@/lib/ui/use-optimistic-action";
 import { useCartZone } from "@/lib/mozo/use-cart-zone";
@@ -78,7 +79,10 @@ import {
 import { PriceOverrideModal } from "@/components/shared/price-override-modal";
 import { canCancelItem, canOverrideItemPrice } from "@/lib/permissions/can";
 
-import { ProductModal, type AddToCartItem } from "@/components/mozo/product-modal";
+import {
+  ProductModal,
+  type AddToCartItem,
+} from "@/components/mozo/product-modal";
 import { ProductResultsList } from "@/components/mozo/product-results-list";
 
 type CartProductItem = AddToCartItem & {
@@ -208,9 +212,10 @@ const COLOR_MAP: Record<string, { inactive: string; active: string }> = {
   zinc: { inactive: "text-zinc-500", active: "text-zinc-300" },
 };
 
-function resolveColor(
-  slug: string | undefined | null,
-): { inactive: string; active: string } {
+function resolveColor(slug: string | undefined | null): {
+  inactive: string;
+  active: string;
+} {
   if (!slug) return COLOR_MAP.zinc;
   return COLOR_MAP[slug] ?? COLOR_MAP.zinc;
 }
@@ -256,7 +261,12 @@ function minutesSince(iso: string | null | undefined): number | null {
 /** Cambio optimista sobre las comandas ya enviadas (entregar / cancelar ítem). */
 type ComandaOptimistic =
   | { kind: "entregar"; comandaId: string; deliveredAt: string }
-  | { kind: "cancelarItem"; orderItemId: string; reason: string; cancelledAt: string };
+  | {
+      kind: "cancelarItem";
+      orderItemId: string;
+      reason: string;
+      cancelledAt: string;
+    };
 
 export function MozoPedirClient({
   slug,
@@ -265,6 +275,7 @@ export function MozoPedirClient({
   catalog,
   stationNameById,
   existingComandas,
+  loPedido,
   topProductIds,
   dailyMenus,
   role,
@@ -425,7 +436,9 @@ export function MozoPedirClient({
   const [step, setStep] = useState<Step>("catalogo");
   const [activeTab, setActiveTab] = useState<TabId>(tabs[0]?.id ?? TOP_TAB_ID);
   const [openProduct, setOpenProduct] = useState<CatalogProduct | null>(null);
-  const [openDailyMenu, setOpenDailyMenu] = useState<DailyMenuForMozo | null>(null);
+  const [openDailyMenu, setOpenDailyMenu] = useState<DailyMenuForMozo | null>(
+    null,
+  );
   const [cart, setCart] = useState<CartItem[]>([]);
 
   const [seatMode, setSeatMode] = useState(false);
@@ -478,16 +491,18 @@ export function MozoPedirClient({
 
   // Secciones de la pestaña activa (una por categoría, o la lista del tab
   // "Más pedidos"). Es lo que se ve sin búsqueda.
-  const tabSections: { category: CatalogCategory | null; products: CatalogProduct[] }[] =
-    useMemo(() => {
-      if (activeTab === TOP_TAB_ID) {
-        return topProducts.length > 0
-          ? [{ category: null, products: topProducts }]
-          : [];
-      }
-      const cats = categoriesBySuper[activeTab] ?? [];
-      return cats.map((c) => ({ category: c, products: c.products }));
-    }, [activeTab, topProducts, categoriesBySuper]);
+  const tabSections: {
+    category: CatalogCategory | null;
+    products: CatalogProduct[];
+  }[] = useMemo(() => {
+    if (activeTab === TOP_TAB_ID) {
+      return topProducts.length > 0
+        ? [{ category: null, products: topProducts }]
+        : [];
+    }
+    const cats = categoriesBySuper[activeTab] ?? [];
+    return cats.map((c) => ({ category: c, products: c.products }));
+  }, [activeTab, topProducts, categoriesBySuper]);
 
   // ── Búsqueda (spec 068: el mismo buscador que cargar pedido y venta rápida) ──
   // `browse` es lo visible sin búsqueda, aplanado en el orden en que se ve: el
@@ -651,7 +666,14 @@ export function MozoPedirClient({
   const cartCount = cart.reduce((a, c) => a + c.quantity, 0);
 
   const addToCart = (item: AddToCartItem) => {
-    setCart((prev) => [...prev, { ...item, _key: crypto.randomUUID(), seat_number: seatMode ? activeSeat : null }]);
+    setCart((prev) => [
+      ...prev,
+      {
+        ...item,
+        _key: crypto.randomUUID(),
+        seat_number: seatMode ? activeSeat : null,
+      },
+    ]);
   };
 
   const removeFromCart = (key: string) => {
@@ -674,7 +696,8 @@ export function MozoPedirClient({
             return {
               ...c,
               quantity: nextQty,
-              line_subtotal_cents: (c.unit_price_cents + choicesTotal) * nextQty,
+              line_subtotal_cents:
+                (c.unit_price_cents + choicesTotal) * nextQty,
             };
           }
           const modsTotal = c.modifiers.reduce(
@@ -725,7 +748,8 @@ export function MozoPedirClient({
     onType: escribirEnBuscador,
   });
   const priceTarget = cart.find(
-    (c): c is CartProductItem => c._key === priceTargetKey && !isDailyMenuCart(c),
+    (c): c is CartProductItem =>
+      c._key === priceTargetKey && !isDailyMenuCart(c),
   );
 
   /** `cents` null = volver al precio de la carta. */
@@ -758,35 +782,37 @@ export function MozoPedirClient({
     // Snapshot de los _key que se envían: al terminar quitamos SOLO estos del
     // carrito, preservando ítems agregados durante el envío en curso (FR-009).
     const sentKeys = new Set(cart.map((c) => c._key));
-    const items: (EnviarComandaItem | EnviarComandaDailyMenuItem)[] = cart.map((c) => {
-      if (isDailyMenuCart(c)) {
+    const items: (EnviarComandaItem | EnviarComandaDailyMenuItem)[] = cart.map(
+      (c) => {
+        if (isDailyMenuCart(c)) {
+          return {
+            kind: "daily_menu" as const,
+            daily_menu_id: c.daily_menu_id,
+            quantity: c.quantity,
+            notes: c.notes || null,
+            selected_choices: c.selected_choices.map((sc) => ({
+              choice_group_id: sc.choice_group_id,
+              product_id: sc.product_id,
+              modifier_ids: sc.modifier_ids,
+            })),
+            // _key estable de la línea → idempotencia server (spec 42).
+            client_line_key: c._key,
+          };
+        }
         return {
-          kind: "daily_menu" as const,
-          daily_menu_id: c.daily_menu_id,
+          product_id: c.product_id,
           quantity: c.quantity,
           notes: c.notes || null,
-          selected_choices: c.selected_choices.map((sc) => ({
-            choice_group_id: sc.choice_group_id,
-            product_id: sc.product_id,
-            modifier_ids: sc.modifier_ids,
-          })),
+          modifier_ids: c.modifiers.map((m) => m.id),
+          seat_number: c.seat_number,
           // _key estable de la línea → idempotencia server (spec 42).
           client_line_key: c._key,
+          // Precio pisado (spec 069). El server revalida rol + motivo.
+          price_override_cents: c.price_override_cents ?? null,
+          price_override_reason: c.price_override_reason ?? null,
         };
-      }
-      return {
-        product_id: c.product_id,
-        quantity: c.quantity,
-        notes: c.notes || null,
-        modifier_ids: c.modifiers.map((m) => m.id),
-        seat_number: c.seat_number,
-        // _key estable de la línea → idempotencia server (spec 42).
-        client_line_key: c._key,
-        // Precio pisado (spec 069). El server revalida rol + motivo.
-        price_override_cents: c.price_override_cents ?? null,
-        price_override_reason: c.price_override_reason ?? null,
-      };
-    });
+      },
+    );
     startTransition(async () => {
       let r: Awaited<ReturnType<typeof enviarComanda>>;
       try {
@@ -869,11 +895,18 @@ export function MozoPedirClient({
   const userCanCancel = canCancelItem(role);
   const tableMinutes = minutesSince(table.opened_at);
 
+  // «Lo pedido» (spec 111): cuántos ítems vivos tiene la mesa y —sólo cuando el
+  // panel es angosto— si la hoja está abierta sobre el catálogo.
+  const itemsPedidos = contarItemsVivos(loPedido?.items ?? []);
+  const [verLoPedido, setVerLoPedido] = useState(false);
+
   // Mostramos la nav de tabs (anterior/siguiente) en el footer sticky solo si
   // estamos en catálogo, no estamos buscando, y al menos hay un vecino al
   // que saltar.
   const showTabNavInFooter =
-    step === "catalogo" && !isSearching && (prevTab !== null || nextTab !== null);
+    step === "catalogo" &&
+    !isSearching &&
+    (prevTab !== null || nextTab !== null);
 
   // Layout: pantalla completa (mozo) vs embebido en un panel (sidebar admin).
   // Embebido = columna flex con scroll interno y footer no-fixed.
@@ -996,7 +1029,7 @@ export function MozoPedirClient({
               value={cancelReason}
               onChange={(e) => setCancelReason(e.target.value.slice(0, 200))}
               placeholder="ej: rotura, cliente cambió de opinión..."
-              className="mt-3 block w-full rounded-2xl border border-zinc-200 px-3 py-2 text-sm focus:border-red-400 focus:outline-none focus:ring-2 focus:ring-red-100"
+              className="mt-3 block w-full rounded-2xl border border-zinc-200 px-3 py-2 text-sm focus:border-red-400 focus:ring-2 focus:ring-red-100 focus:outline-none"
               rows={3}
               autoFocus
             />
@@ -1061,207 +1094,254 @@ export function MozoPedirClient({
               <ArrowLeft className="h-5 w-5" />
             </button>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+              <p className="truncate text-[10px] font-semibold tracking-[0.18em] text-zinc-500 uppercase">
                 {businessName}
               </p>
-              <h1 className="font-heading text-base font-bold leading-tight text-zinc-900">
+              <h1 className="font-heading text-base leading-tight font-bold text-zinc-900">
                 Mesa {table.label}
               </h1>
             </div>
-            {comandas.length > 0 && (
-              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-zinc-500">
+            {/* Abajo de @3xl «Lo pedido» no entra al lado (serían dos columnas
+                de ~280px): se abre como hoja sobre el catálogo. Arriba de @3xl
+                está siempre a la vista y el botón sobra. */}
+            {itemsPedidos > 0 && (
+              <button
+                type="button"
+                onClick={() => setVerLoPedido((v) => !v)}
+                aria-expanded={verLoPedido}
+                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1.5 text-[11px] font-semibold ring-1 transition @3xl:hidden ${
+                  verLoPedido
+                    ? "bg-zinc-900 text-white ring-zinc-900"
+                    : "bg-white text-zinc-600 ring-zinc-200"
+                }`}
+              >
                 <ClipboardList className="h-3.5 w-3.5" />
-                {comandas.length}
-              </span>
+                Lo pedido · {itemsPedidos}
+              </button>
             )}
           </div>
         </header>
 
-        {/* Buscador fijo + categorías secundarias. FR-001/003/014. */}
-        <div className="shrink-0 space-y-2 border-b border-zinc-200 bg-white px-3 py-2.5">
-          <ProductSearchInput api={searchApi} inputRef={searchRef} />
-          {!isSearching && tabs.length > 1 && (
-            <div className="flex items-center gap-2">
-              <label
-                htmlFor="cat-select"
-                className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-zinc-500"
-              >
-                Categoría
-              </label>
-              <select
-                id="cat-select"
-                value={activeTab}
-                onChange={(e) => setActiveTab(e.target.value)}
-                className="min-w-0 flex-1 rounded-xl border border-zinc-200 bg-white px-2.5 py-1.5 text-sm font-semibold text-zinc-800 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
-              >
-                {tabs.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.label}
-                    {tabTouched[t.id] ? " ✓" : ""}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
-
-        {/* Resultados / catálogo (scroll) — zona de teclado: ↓ desde el
-            buscador entra acá, ↓ pasado el último ítem sigue al carrito. */}
-        <div
-          onKeyDown={(e) => {
-            if (catalogo.handleKeyDown(e)) return;
-            if (isPrintableKey(e)) {
-              e.preventDefault();
-              escribirEnBuscador(e.key);
+        {/* Cuerpo en dos columnas (spec 111): lo ya pedido a la izquierda, la
+            carga a la derecha. El corte es por ancho **del panel** (container
+            query), no del viewport: el panel es el 44% de la pantalla. */}
+        <div className="relative flex min-h-0 flex-1 flex-col @3xl:flex-row">
+          {/* Izquierda: lo que la mesa ya tiene cargado. Ancha de verdad —el
+              detalle por ítem (modificadores, nota, sector, estado) no entra
+              en una columna angosta— pero nunca más que la de carga. */}
+          <LoPedidoColumn
+            loPedido={loPedido ?? null}
+            comandas={comandas}
+            stationNameById={stationNameById}
+            userCanCancel={userCanCancel}
+            pending={pending}
+            onCancelItem={(id, name) =>
+              setCancelTarget({ orderItemId: id, productName: name })
             }
-          }}
-          className="min-h-0 flex-1 overflow-y-auto px-3 py-3"
-        >
-          {isSearching ? (
-            <SearchResults
-              results={searchResults}
-              onPick={setOpenProduct}
-              enterTargetId={enterTargetId}
-              itemProps={catalogoProps}
-            />
-          ) : tabs.length === 0 ? (
-            <EmptyCatalog />
-          ) : (
-            <TabView
-              tabSections={visibleSections}
-              activeTabLabel={activeTabLabel}
-              isTopTab={activeTab === TOP_TAB_ID}
-              dailyMenus={menusVisibles}
-              onPick={setOpenProduct}
-              onPickDailyMenu={setOpenDailyMenu}
-              enterTargetId={enterTargetId}
-              itemProps={catalogoProps}
-            />
-          )}
-        </div>
+            onAdvance={handleAdvance}
+            className={
+              verLoPedido
+                ? // Hoja sobre el catálogo (panel angosto): tapa la carga a
+                  // propósito, es una consulta y se cierra con el mismo botón.
+                  "absolute inset-0 z-10 bg-zinc-50 @3xl:static @3xl:z-auto @3xl:w-[42%] @3xl:max-w-[380px] @3xl:shrink-0"
+                : "hidden @3xl:flex @3xl:w-[42%] @3xl:max-w-[380px] @3xl:shrink-0"
+            }
+          />
 
-        {/* Panel de pedido en armado — siempre visible. FR-005/006/007/008. */}
-        <div className="shrink-0 border-t border-zinc-200 bg-white">
-          <div className="flex items-center justify-between px-3 pt-2.5">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-              Tu pedido
-            </p>
-            <span className="text-[11px] font-semibold text-zinc-500 tabular-nums">
-              {cartCount > 0
-                ? `${cartCount} ${cartCount === 1 ? "ítem" : "ítems"}`
-                : "vacío"}
-            </span>
-          </div>
-
-          {cart.length === 0 ? (
-            <p className="px-3 pb-2.5 pt-1 text-xs text-zinc-500">
-              Todavía no cargaste nada. Buscá arriba y agregá con Enter; con ↓
-              bajás al catálogo y de ahí a lo cargado.
-            </p>
-          ) : (
-            <ul
-              onKeyDown={carrito.handleKeyDown}
-              className="max-h-44 space-y-1 overflow-y-auto px-3 py-2"
-            >
-              {cart.map((c, i) => (
-                <li
-                  key={c._key}
-                  {...carrito.itemProps(i)}
-                  aria-label={`${c.product_name}, cantidad ${c.quantity}. ← y → cambian la cantidad, Supr la quita.`}
-                  className="flex items-center gap-2 rounded-xl bg-zinc-50 px-2.5 py-1.5 outline-none ring-1 ring-zinc-100 focus-visible:ring-2 focus-visible:ring-emerald-500"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-zinc-900">
-                      {isDailyMenuCart(c) && (
-                        <span className="mr-1 inline-flex items-center rounded bg-emerald-100 px-1 align-middle text-[9px] font-bold uppercase text-emerald-700">
-                          Menú
-                        </span>
-                      )}
-                      {c.product_name}
-                    </p>
-                    {c.notes && (
-                      <p className="truncate text-[11px] italic text-zinc-500">
-                        &quot;{c.notes}&quot;
-                      </p>
-                    )}
-                    {!isDailyMenuCart(c) && c.price_override_cents != null && (
-                      <p className="truncate text-[11px] font-medium text-amber-700">
-                        <span className="line-through opacity-60">
-                          {formatCurrency(c.unit_price_cents)}
-                        </span>{" "}
-                        → {formatCurrency(c.price_override_cents)} ·{" "}
-                        {c.price_override_reason}
-                      </p>
-                    )}
-                  </div>
-                  <span className="shrink-0 text-xs font-semibold text-emerald-700 tabular-nums">
-                    {formatCurrency(c.line_subtotal_cents)}
-                  </span>
-                  <div className="flex shrink-0 items-center gap-1">
-                    {userCanEditPrice && !isDailyMenuCart(c) && (
-                      <button
-                        onClick={() => setPriceTargetKey(c._key)}
-                        className={`flex h-8 w-8 items-center justify-center rounded-full ring-1 active:scale-95 ${
-                          c.price_override_cents != null
-                            ? "bg-amber-100 text-amber-700 ring-amber-300"
-                            : "bg-white text-zinc-500 ring-zinc-200"
-                        }`}
-                        aria-label={`Cambiar el precio de ${c.product_name}`}
-                      >
-                        <Tag className="h-4 w-4" />
-                      </button>
-                    )}
-                    <button
-                      onClick={() => changeQuantity(c._key, -1)}
-                      disabled={c.quantity <= 1}
-                      className="flex h-8 w-8 items-center justify-center rounded-full bg-white ring-1 ring-zinc-200 active:scale-95 disabled:opacity-40"
-                      aria-label={`Restar ${c.product_name}`}
-                    >
-                      <Minus className="h-4 w-4" />
-                    </button>
-                    <span className="w-6 text-center text-sm font-bold tabular-nums">
-                      {c.quantity}
-                    </span>
-                    <button
-                      onClick={() => changeQuantity(c._key, 1)}
-                      disabled={c.quantity >= 99}
-                      className="flex h-8 w-8 items-center justify-center rounded-full bg-white ring-1 ring-zinc-200 active:scale-95 disabled:opacity-40"
-                      aria-label={`Sumar ${c.product_name}`}
-                    >
-                      <Plus className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => removeFromCart(c._key)}
-                      className="flex h-8 w-8 items-center justify-center rounded-full text-zinc-400 active:bg-red-50 active:text-red-600"
-                      aria-label={`Quitar ${c.product_name}`}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <div className="flex items-center gap-2 border-t border-zinc-100 px-3 py-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))]">
-            <div className="min-w-0 flex-1">
-              <p className="text-[11px] text-zinc-500">Total a enviar</p>
-              <p className="text-lg font-bold tabular-nums text-zinc-900">
-                {formatCurrency(cartTotal)}
-              </p>
+          {/* Derecha: la carga. Es la columna del camino feliz —buscador,
+              catálogo, carrito, enviar— y se queda con el resto del ancho. */}
+          <div className="flex min-h-0 flex-1 flex-col">
+            {/* Buscador fijo + categorías secundarias. FR-001/003/014. */}
+            <div className="shrink-0 space-y-2 border-b border-zinc-200 bg-white px-3 py-2.5">
+              <ProductSearchInput api={searchApi} inputRef={searchRef} />
+              {!isSearching && tabs.length > 1 && (
+                <div className="flex items-center gap-2">
+                  <label
+                    htmlFor="cat-select"
+                    className="shrink-0 text-[11px] font-semibold tracking-wide text-zinc-500 uppercase"
+                  >
+                    Categoría
+                  </label>
+                  <select
+                    id="cat-select"
+                    value={activeTab}
+                    onChange={(e) => setActiveTab(e.target.value)}
+                    className="min-w-0 flex-1 rounded-xl border border-zinc-200 bg-white px-2.5 py-1.5 text-sm font-semibold text-zinc-800 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none"
+                  >
+                    {tabs.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.label}
+                        {tabTouched[t.id] ? " ✓" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
-            <button
-              ref={enviarRef}
-              onClick={handleSend}
-              disabled={pending || cart.length === 0}
-              className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm active:scale-[0.98] disabled:opacity-50"
+
+            {/* Resultados / catálogo (scroll) — zona de teclado: ↓ desde el
+            buscador entra acá, ↓ pasado el último ítem sigue al carrito. */}
+            <div
+              onKeyDown={(e) => {
+                if (catalogo.handleKeyDown(e)) return;
+                if (isPrintableKey(e)) {
+                  e.preventDefault();
+                  escribirEnBuscador(e.key);
+                }
+              }}
+              className="min-h-0 flex-1 overflow-y-auto px-3 py-3"
             >
-              <Send className="h-4 w-4" />
-              {pending ? "Enviando..." : "Enviar"}
-              <kbd className="ml-1 hidden rounded bg-white/20 px-1.5 py-0.5 text-[10px] font-semibold sm:inline">
-                ⌘↵
-              </kbd>
-            </button>
+              {isSearching ? (
+                <SearchResults
+                  results={searchResults}
+                  onPick={setOpenProduct}
+                  enterTargetId={enterTargetId}
+                  itemProps={catalogoProps}
+                />
+              ) : tabs.length === 0 ? (
+                <EmptyCatalog />
+              ) : (
+                <TabView
+                  tabSections={visibleSections}
+                  activeTabLabel={activeTabLabel}
+                  isTopTab={activeTab === TOP_TAB_ID}
+                  dailyMenus={menusVisibles}
+                  onPick={setOpenProduct}
+                  onPickDailyMenu={setOpenDailyMenu}
+                  enterTargetId={enterTargetId}
+                  itemProps={catalogoProps}
+                />
+              )}
+            </div>
+
+            {/* Panel de pedido en armado — siempre visible. FR-005/006/007/008. */}
+            <div className="shrink-0 border-t border-zinc-200 bg-white">
+              <div className="flex items-center justify-between px-3 pt-2.5">
+                <p className="text-[10px] font-semibold tracking-[0.18em] text-zinc-500 uppercase">
+                  Tu pedido
+                </p>
+                <span className="text-[11px] font-semibold text-zinc-500 tabular-nums">
+                  {cartCount > 0
+                    ? `${cartCount} ${cartCount === 1 ? "ítem" : "ítems"}`
+                    : "vacío"}
+                </span>
+              </div>
+
+              {cart.length === 0 ? (
+                <p className="px-3 pt-1 pb-2.5 text-xs text-zinc-500">
+                  Todavía no cargaste nada. Buscá arriba y agregá con Enter; con
+                  ↓ bajás al catálogo y de ahí a lo cargado.
+                </p>
+              ) : (
+                <ul
+                  onKeyDown={carrito.handleKeyDown}
+                  // FR-008: 176px eran ~3 ítems y el carrito scrolleaba mientras
+                  // sobraba pantalla. Con el panel ancho crece; el catálogo cede
+                  // (es `flex-1`) y sigue habiendo tope para que no lo coma entero.
+                  className="max-h-44 space-y-1 overflow-y-auto px-3 py-2 @xl:max-h-72 @3xl:max-h-96"
+                >
+                  {cart.map((c, i) => (
+                    <li
+                      key={c._key}
+                      {...carrito.itemProps(i)}
+                      aria-label={`${c.product_name}, cantidad ${c.quantity}. ← y → cambian la cantidad, Supr la quita.`}
+                      className="flex items-center gap-2 rounded-xl bg-zinc-50 px-2.5 py-1.5 ring-1 ring-zinc-100 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-zinc-900">
+                          {isDailyMenuCart(c) && (
+                            <span className="mr-1 inline-flex items-center rounded bg-emerald-100 px-1 align-middle text-[9px] font-bold text-emerald-700 uppercase">
+                              Menú
+                            </span>
+                          )}
+                          {c.product_name}
+                        </p>
+                        {c.notes && (
+                          <p className="truncate text-[11px] text-zinc-500 italic">
+                            &quot;{c.notes}&quot;
+                          </p>
+                        )}
+                        {!isDailyMenuCart(c) &&
+                          c.price_override_cents != null && (
+                            <p className="truncate text-[11px] font-medium text-amber-700">
+                              <span className="line-through opacity-60">
+                                {formatCurrency(c.unit_price_cents)}
+                              </span>{" "}
+                              → {formatCurrency(c.price_override_cents)} ·{" "}
+                              {c.price_override_reason}
+                            </p>
+                          )}
+                      </div>
+                      <span className="shrink-0 text-xs font-semibold text-emerald-700 tabular-nums">
+                        {formatCurrency(c.line_subtotal_cents)}
+                      </span>
+                      <div className="flex shrink-0 items-center gap-1">
+                        {userCanEditPrice && !isDailyMenuCart(c) && (
+                          <button
+                            onClick={() => setPriceTargetKey(c._key)}
+                            className={`flex h-8 w-8 items-center justify-center rounded-full ring-1 active:scale-95 ${
+                              c.price_override_cents != null
+                                ? "bg-amber-100 text-amber-700 ring-amber-300"
+                                : "bg-white text-zinc-500 ring-zinc-200"
+                            }`}
+                            aria-label={`Cambiar el precio de ${c.product_name}`}
+                          >
+                            <Tag className="h-4 w-4" />
+                          </button>
+                        )}
+                        <button
+                          onClick={() => changeQuantity(c._key, -1)}
+                          disabled={c.quantity <= 1}
+                          className="flex h-8 w-8 items-center justify-center rounded-full bg-white ring-1 ring-zinc-200 active:scale-95 disabled:opacity-40"
+                          aria-label={`Restar ${c.product_name}`}
+                        >
+                          <Minus className="h-4 w-4" />
+                        </button>
+                        <span className="w-6 text-center text-sm font-bold tabular-nums">
+                          {c.quantity}
+                        </span>
+                        <button
+                          onClick={() => changeQuantity(c._key, 1)}
+                          disabled={c.quantity >= 99}
+                          className="flex h-8 w-8 items-center justify-center rounded-full bg-white ring-1 ring-zinc-200 active:scale-95 disabled:opacity-40"
+                          aria-label={`Sumar ${c.product_name}`}
+                        >
+                          <Plus className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => removeFromCart(c._key)}
+                          className="flex h-8 w-8 items-center justify-center rounded-full text-zinc-400 active:bg-red-50 active:text-red-600"
+                          aria-label={`Quitar ${c.product_name}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <div className="flex items-center gap-2 border-t border-zinc-100 px-3 py-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))]">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] text-zinc-500">Total a enviar</p>
+                  <p className="text-lg font-bold text-zinc-900 tabular-nums">
+                    {formatCurrency(cartTotal)}
+                  </p>
+                </div>
+                <button
+                  ref={enviarRef}
+                  onClick={handleSend}
+                  disabled={pending || cart.length === 0}
+                  className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm active:scale-[0.98] disabled:opacity-50"
+                >
+                  <Send className="h-4 w-4" />
+                  {pending ? "Enviando..." : "Enviar"}
+                  <kbd className="ml-1 hidden rounded bg-white/20 px-1.5 py-0.5 text-[10px] font-semibold sm:inline">
+                    ⌘↵
+                  </kbd>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1304,10 +1384,10 @@ export function MozoPedirClient({
             </button>
           )}
           <div className="min-w-0 flex-1">
-            <p className="truncate text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+            <p className="truncate text-[10px] font-semibold tracking-[0.18em] text-zinc-500 uppercase">
               {step === "catalogo" ? businessName : "Tu pedido"}
             </p>
-            <h1 className="font-heading text-base font-bold leading-tight tracking-tight text-zinc-900">
+            <h1 className="font-heading text-base leading-tight font-bold tracking-tight text-zinc-900">
               {step === "catalogo"
                 ? `Mesa ${table.label}`
                 : `Mesa ${table.label} · revisar`}
@@ -1324,12 +1404,15 @@ export function MozoPedirClient({
           <div className="mx-auto flex max-w-md items-center gap-2 px-3 pb-2">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-2.5 py-0.5 text-[11px] font-semibold text-zinc-700">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-              {TABLE_STATUS_LABEL[table.operational_status] ?? table.operational_status}
+              {TABLE_STATUS_LABEL[table.operational_status] ??
+                table.operational_status}
             </span>
             {comandas.length > 0 && (
               <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500">
                 · {comandas.length}{" "}
-                {comandas.length === 1 ? "comanda enviada" : "comandas enviadas"}
+                {comandas.length === 1
+                  ? "comanda enviada"
+                  : "comandas enviadas"}
               </span>
             )}
           </div>
@@ -1338,7 +1421,9 @@ export function MozoPedirClient({
         {step === "catalogo" && seatMode && (
           <div className="border-t border-zinc-100 bg-violet-50/50">
             <div className="mx-auto flex max-w-md items-center gap-2 px-3 py-2">
-              <span className="text-[11px] font-semibold text-violet-700">Comensal:</span>
+              <span className="text-[11px] font-semibold text-violet-700">
+                Comensal:
+              </span>
               <div className="flex gap-1">
                 {Array.from({ length: seatCount }, (_, i) => i + 1).map((n) => (
                   <button
@@ -1443,7 +1528,9 @@ export function MozoPedirClient({
             onToggleSeatMode={() => setSeatMode((v) => !v)}
             onItemSeatChange={(key, seat) =>
               setCart((prev) =>
-                prev.map((c) => (c._key === key ? { ...c, seat_number: seat } : c)),
+                prev.map((c) =>
+                  c._key === key ? { ...c, seat_number: seat } : c,
+                ),
               )
             }
             onChangeQty={changeQuantity}
@@ -1522,7 +1609,10 @@ function CatalogoStep({
   searchApi: ProductSearchApi;
   isSearching: boolean;
   searchResults: CatalogProduct[];
-  tabSections: { category: CatalogCategory | null; products: CatalogProduct[] }[];
+  tabSections: {
+    category: CatalogCategory | null;
+    products: CatalogProduct[];
+  }[];
   activeTabLabel: string;
   dailyMenus: DailyMenuForMozo[];
   isTopTab: boolean;
@@ -1605,7 +1695,10 @@ function TabView({
   enterTargetId,
   itemProps,
 }: {
-  tabSections: { category: CatalogCategory | null; products: CatalogProduct[] }[];
+  tabSections: {
+    category: CatalogCategory | null;
+    products: CatalogProduct[];
+  }[];
   activeTabLabel: string;
   isTopTab: boolean;
   dailyMenus: DailyMenuForMozo[];
@@ -1639,7 +1732,7 @@ function TabView({
     <div className="space-y-5">
       {showDailyMenus && (
         <section className="space-y-2">
-          <h3 className="px-1 text-xs font-bold uppercase tracking-wide text-emerald-700">
+          <h3 className="px-1 text-xs font-bold tracking-wide text-emerald-700 uppercase">
             Hoy en el menú del día
           </h3>
           <div className="space-y-2">
@@ -1674,7 +1767,7 @@ function TabView({
       {tabSections.map((section, idx) => (
         <div key={section.category?.id ?? `top-${idx}`} className="space-y-2">
           {section.category && tabSections.length > 1 && (
-            <h3 className="px-1 text-xs font-bold uppercase tracking-wide text-zinc-500">
+            <h3 className="px-1 text-xs font-bold tracking-wide text-zinc-500 uppercase">
               {section.category.name}
             </h3>
           )}
@@ -1713,7 +1806,7 @@ function TabNav({
             <ArrowLeft className="h-4 w-4 text-zinc-700" />
           </span>
           <div className="min-w-0">
-            <p className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">
+            <p className="text-[10px] font-bold tracking-wide text-zinc-500 uppercase">
               Anterior
             </p>
             <p className="flex items-center gap-1 text-sm font-bold text-zinc-900">
@@ -1729,7 +1822,7 @@ function TabNav({
           className="flex flex-1 items-center justify-end gap-2.5 rounded-2xl bg-white p-3 text-right ring-1 ring-zinc-200 active:scale-[0.98] active:bg-zinc-50"
         >
           <div className="min-w-0">
-            <p className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">
+            <p className="text-[10px] font-bold tracking-wide text-zinc-500 uppercase">
               Siguiente
             </p>
             <p className="flex items-center justify-end gap-1 text-sm font-bold text-zinc-900">
@@ -1760,7 +1853,7 @@ function DailyMenuCard({
     <button
       onClick={onClick}
       {...itemProps}
-      className="flex w-full gap-3 overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-50 via-white to-emerald-50 p-3 text-left shadow-sm outline-none ring-1 ring-emerald-200 transition active:scale-[0.99] focus-visible:ring-2 focus-visible:ring-emerald-500"
+      className="flex w-full gap-3 overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-50 via-white to-emerald-50 p-3 text-left shadow-sm ring-1 ring-emerald-200 transition outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 active:scale-[0.99]"
     >
       {menu.image_url ? (
         // eslint-disable-next-line @next/next/no-img-element
@@ -1776,7 +1869,7 @@ function DailyMenuCard({
       )}
       <div className="flex min-w-0 flex-1 flex-col justify-between py-1">
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-emerald-700">
+          <p className="text-[10px] font-bold tracking-[0.15em] text-emerald-700 uppercase">
             Menú del día
           </p>
           <h3 className="mt-0.5 truncate text-base font-extrabold text-zinc-900">
@@ -1861,7 +1954,7 @@ function ResumenStep({
         <header className="mb-2 space-y-2">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+              <p className="text-[10px] font-semibold tracking-[0.18em] text-zinc-500 uppercase">
                 Para enviar
               </p>
               <h2 className="font-heading text-base font-bold text-zinc-900">
@@ -1914,7 +2007,7 @@ function ResumenStep({
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-zinc-900">
                       {isDailyMenuCart(c) && (
-                        <span className="mr-1.5 inline-flex items-center rounded bg-emerald-100 px-1.5 py-0.5 align-middle text-[10px] font-bold uppercase tracking-wide text-emerald-700">
+                        <span className="mr-1.5 inline-flex items-center rounded bg-emerald-100 px-1.5 py-0.5 align-middle text-[10px] font-bold tracking-wide text-emerald-700 uppercase">
                           Menú
                         </span>
                       )}
@@ -1922,7 +2015,10 @@ function ResumenStep({
                       {c.seat_number != null && (
                         <button
                           onClick={() => {
-                            const next = c.seat_number === seatCount ? null : (c.seat_number ?? 0) + 1;
+                            const next =
+                              c.seat_number === seatCount
+                                ? null
+                                : (c.seat_number ?? 0) + 1;
                             onItemSeatChange(c._key, next);
                           }}
                           className="ml-1.5 inline-flex items-center gap-0.5 rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-700 active:bg-violet-200"
@@ -1938,11 +2034,13 @@ function ResumenStep({
                     )}
                     {isDailyMenuCart(c) && c.selected_choices.length > 0 && (
                       <p className="mt-0.5 text-xs text-zinc-500">
-                        {c.selected_choices.map((sc) => sc.product_name).join(" · ")}
+                        {c.selected_choices
+                          .map((sc) => sc.product_name)
+                          .join(" · ")}
                       </p>
                     )}
                     {c.notes && (
-                      <p className="mt-0.5 text-xs italic text-zinc-500">
+                      <p className="mt-0.5 text-xs text-zinc-500 italic">
                         &quot;{c.notes}&quot;
                       </p>
                     )}
@@ -1981,7 +2079,7 @@ function ResumenStep({
                   </button>
                 </div>
                 <div className="flex items-center justify-between border-t border-zinc-100 bg-zinc-50/60 px-3 py-2">
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+                  <span className="text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
                     Cantidad
                   </span>
                   <div className="flex items-center gap-2">
@@ -2015,12 +2113,14 @@ function ResumenStep({
       {existingComandas.length > 0 && (
         <section>
           <header className="mb-2">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+            <p className="text-[10px] font-semibold tracking-[0.18em] text-zinc-500 uppercase">
               Ya en cocina
             </p>
             <h2 className="font-heading text-base font-bold text-zinc-900">
               {existingComandas.length}{" "}
-              {existingComandas.length === 1 ? "comanda enviada" : "comandas enviadas"}
+              {existingComandas.length === 1
+                ? "comanda enviada"
+                : "comandas enviadas"}
             </h2>
           </header>
 
@@ -2067,11 +2167,13 @@ function ResumenStep({
                           </p>
                           {it.modifiers.length > 0 && (
                             <p className="mt-0.5 text-xs text-zinc-500">
-                              {it.modifiers.map((m) => m.modifier_name).join(" · ")}
+                              {it.modifiers
+                                .map((m) => m.modifier_name)
+                                .join(" · ")}
                             </p>
                           )}
                           {it.notes && (
-                            <p className="mt-0.5 text-xs italic text-zinc-500">
+                            <p className="mt-0.5 text-xs text-zinc-500 italic">
                               &ldquo;{it.notes}&rdquo;
                             </p>
                           )}
@@ -2206,7 +2308,7 @@ function BottomCTAResumen({
     <div className="space-y-2">
       <div className="flex items-center justify-between px-1 text-sm">
         <span className="text-zinc-600">Total a enviar</span>
-        <span className="text-lg font-bold tabular-nums text-zinc-900">
+        <span className="text-lg font-bold text-zinc-900 tabular-nums">
           {formatCurrency(cartTotal)}
         </span>
       </div>

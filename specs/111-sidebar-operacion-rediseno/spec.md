@@ -48,7 +48,7 @@ Ese paso 2-3 es un formulario de tres campos —Personas, Cliente, Notas— del 
 
 ### Fase 2 — Dos columnas en el modo de carga
 
-- **FR-004**: Con el panel ancho, el modo de carga se parte en dos columnas: **izquierda «Lo pedido»** (lo que ya se envió a cocina), **derecha «Cargando»** (buscador + catálogo + carrito + Enviar). Debajo del breakpoint vuelve a apilarse como hoy.
+- **FR-004**: Con el panel ancho, el modo de carga se parte en dos columnas: **izquierda «Lo pedido»** (42% del panel, tope 380px), **derecha la carga** (buscador + catálogo + carrito + Enviar). *(Al implementarlo: el corte es `@3xl` = **768px de panel**, o sea ~1745px de viewport. Más abajo dos columnas darían ~280px cada una y no entra el detalle por ítem. Debajo de ese corte «Lo pedido» no desaparece: se abre como **hoja sobre el catálogo** con un botón en el header — sigue sin haber que salir a Cuenta, que es lo que la spec vino a arreglar.)*
 - **FR-005**: La izquierda muestra, por ítem enviado: producto, cantidad, **modificadores elegidos** (`modifiers[]`, hoy visibles sólo en la cuenta y en la comanda de cocina), nota, precio de línea (hallazgo 4), sector y **estado de cocina** (pendiente / en preparación / listo / entregado), agrupado por comanda con su hora. Los cancelados se muestran tachados con el motivo, no se ocultan.
 - **FR-006**: La izquierda cierra con **el total de la mesa hasta ahora**, separado del «Total a enviar» del carrito. Son dos números distintos y hoy el panel sólo muestra el segundo.
 - **FR-007** *(D4)*: Las acciones sobre lo enviado son **entregar comanda y cancelar ítem** (con permiso), con el mismo overlay optimista que ya tiene `pedir-client`. **Editar un ítem enviado queda afuera**: es de la spec 110 y se cruza con la comanda ya impresa.
@@ -96,7 +96,7 @@ Ese paso 2-3 es un formulario de tres campos —Personas, Cliente, Notas— del 
 - [x] **T1** — Fase 1: ancho fluido + los nueve modos revisados a ese ancho (27 arreglos, todos con container queries: a 480px no cambia nada).
 - [x] **T2** — Fase 2a: datos de «Lo pedido» — `getLoPedido` + `TableOrderState` en el mismo viaje que las comandas, y `unit_price_cents`/`subtotal_cents`/`seat_number` en `ComandaItemSnapshot`.
 - [x] **T3** — Fase 2b: `lo-pedido.ts` (agrupación por tanda, puro, 10 tests) + `LoPedidoColumn`.
-- [ ] **T4** — Fase 2c: **cablear** `LoPedidoColumn` en el panel: layout de dos columnas en el modo de carga + carrito sin `max-h-44` + zona de teclado (FR-009). ← **acá quedó**
+- [x] **T4** — Fase 2c: `LoPedidoColumn` cableada, dos columnas a partir de `@3xl` (768px **de panel**) y carrito que crece con el ancho.
 - [ ] **T5** — Fase 3a: `enviarComanda` auto-asigna mozo al abrir mesa libre (FR-012) + test.
 - [ ] **T6** — Fase 3b: tap en mesa libre → modo de carga con foco en el buscador (FR-010/011).
 - [ ] **T7** — Fase 3c: migración `orders.party_size` + chips de Personas en el panel (FR-013/014) y «Cargar cliente» en el ⋯ (FR-015).

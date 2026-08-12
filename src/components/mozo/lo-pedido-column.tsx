@@ -58,6 +58,7 @@ export function LoPedidoColumn({
   pending,
   onCancelItem,
   onAdvance,
+  className = "",
 }: {
   loPedido: LoPedido | null;
   /** Sólo para el estado de la comanda y el botón «Entregar»: los ítems salen
@@ -68,6 +69,9 @@ export function LoPedidoColumn({
   pending: boolean;
   onCancelItem: (orderItemId: string, productName: string) => void;
   onAdvance: (comandaId: string) => void;
+  /** El panel la usa de columna (ancho fijo, borde a la derecha) o de hoja
+   *  desplegada sobre el catálogo cuando no entra al lado. */
+  className?: string;
 }) {
   const items = loPedido?.items ?? [];
   const tandas = agruparPorTanda(items);
@@ -80,7 +84,7 @@ export function LoPedidoColumn({
   return (
     <section
       aria-label="Lo pedido"
-      className="flex min-h-0 flex-col border-zinc-200 @3xl:border-r"
+      className={`flex min-h-0 flex-col border-zinc-200 @3xl:border-r ${className}`}
     >
       <header className="flex shrink-0 items-baseline justify-between gap-2 border-b border-zinc-200 px-3 py-2.5">
         <p className="text-[10px] font-semibold tracking-[0.18em] text-zinc-500 uppercase">
