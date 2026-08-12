@@ -106,7 +106,13 @@ export async function guardarDatosMesa(
     }
   }
 
-  revalidatePath(`/${input.slug}/mozo`);
-  revalidatePath(`/${input.slug}/admin/operacion`);
+  // Revalidar sólo si cambió algo que se ve **fuera** del panel: el nombre del
+  // cliente puede salir sobre la mesa en el plano (spec 067). Las personas no
+  // se ven en ningún otro lado, y revalidar por cada tap re-renderiza
+  // `/admin/operacion` entera — que es lo que hacía sentir el control trabado.
+  if (input.name || input.phone) {
+    revalidatePath(`/${input.slug}/mozo`);
+    revalidatePath(`/${input.slug}/admin/operacion`);
+  }
   return actionOk({ customerId: upsert.customerId });
 }
