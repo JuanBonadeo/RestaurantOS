@@ -221,7 +221,12 @@ export function CartaOnlineSelector({ api }: { api: ProductSearchApi }) {
       </button>
 
       {open && (
-        <div className="absolute top-full left-0 z-50 mt-1.5 min-w-56 rounded-xl bg-white p-1 shadow-lg ring-1 ring-zinc-200">
+        // `right-0` y ancho fijo: el selector vive pegado al borde derecho del
+        // header del panel, y el panel es `overflow-hidden`. Abriendo desde la
+        // izquierda con ancho libre, las descripciones estiraban el menú más
+        // allá del panel y quedaban cortadas al medio. Anclado a la derecha y
+        // con ancho, el texto envuelve y se lee entero.
+        <div className="absolute top-full right-0 z-50 mt-1.5 w-64 rounded-xl bg-white p-1 shadow-lg ring-1 ring-zinc-200">
           {[CARTA_ALL, CARTA_EN_LINEA, CARTA_SOLO_LOCAL].map((id) => (
             <button
               key={id}
