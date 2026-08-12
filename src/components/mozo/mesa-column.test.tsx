@@ -53,8 +53,6 @@ function renderColumna(over: Partial<Parameters<typeof MesaColumn>[0]> = {}) {
   return render(
     <MesaColumn
       tableLabel="VITRINA"
-      operationalStatus="ocupada"
-      minutosAbierta={1}
       loPedido={enviado}
       comandas={[]}
       stationNameById={{ cocina: "Cocina" }}
@@ -75,12 +73,15 @@ function renderColumna(over: Partial<Parameters<typeof MesaColumn>[0]> = {}) {
 }
 
 describe("MesaColumn (spec 111)", () => {
-  it("muestra la mesa, su estado y la orden", () => {
+  it("es la región de la mesa, sin repetir su título", () => {
     renderColumna();
-    expect(screen.getByText("VITRINA")).toBeInTheDocument();
-    expect(screen.getByText("Ocupada")).toBeInTheDocument();
-    expect(screen.getByText("Orden #25")).toBeInTheDocument();
-    expect(screen.getByText("2 personas")).toBeInTheDocument();
+    // El nombre y el estado los pone el header del panel: tenerlos también acá
+    // era decir dos veces lo mismo en dos franjas seguidas.
+    expect(
+      screen.getByRole("region", { name: "Mesa VITRINA" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("VITRINA")).toBeNull();
+    expect(screen.queryByText("Ocupada")).toBeNull();
   });
 
   it("de lo enviado muestra los modificadores elegidos y el estado de cocina", () => {

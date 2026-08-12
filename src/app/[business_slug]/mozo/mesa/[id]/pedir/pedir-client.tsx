@@ -1203,6 +1203,35 @@ export function MozoPedirClient({
               <h1 className="font-heading text-base leading-tight font-bold text-zinc-900">
                 Mesa {table.label}
               </h1>
+              {/* El estado de la mesa vive acá y no en la columna: repetir
+                  «Mesa CUAD» arriba y «CUAD» abajo gastaba una franja del
+                  panel en decir dos veces lo mismo. */}
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] font-semibold text-zinc-500">
+                <span className="inline-flex items-center gap-1">
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      table.operational_status === "libre"
+                        ? "bg-zinc-300"
+                        : table.operational_status === "pidio_cuenta"
+                          ? "bg-amber-500"
+                          : "bg-emerald-500"
+                    }`}
+                  />
+                  {table.operational_status === "libre"
+                    ? "Libre"
+                    : table.operational_status === "pidio_cuenta"
+                      ? "Pidió la cuenta"
+                      : "Ocupada"}
+                </span>
+                {tableMinutes != null && <span>{tableMinutes} min</span>}
+                {loPedido && <span>Orden #{loPedido.order_number}</span>}
+                {loPedido?.party_size != null && (
+                  <span>
+                    {loPedido.party_size}{" "}
+                    {loPedido.party_size === 1 ? "persona" : "personas"}
+                  </span>
+                )}
+              </div>
             </div>
             {/* Abajo de @2xl (672px **de panel**) la mesa no entra al lado de
                 la carga: se abre como hoja encima. Arriba está siempre a la
@@ -1239,8 +1268,6 @@ export function MozoPedirClient({
               en una columna angosta— pero nunca más que la de carga. */}
           <MesaColumn
             tableLabel={table.label}
-            operationalStatus={table.operational_status}
-            minutosAbierta={tableMinutes}
             loPedido={loPedido ?? null}
             comandas={comandas}
             stationNameById={stationNameById}
@@ -1262,7 +1289,6 @@ export function MozoPedirClient({
               ...mesaAcciones,
               onCargarCliente: () => setClienteOpen(true),
             }}
-            onClose={onClose}
             className={
               verLoPedido
                 ? // Hoja sobre la carga (panel angosto): la tapa a propósito.

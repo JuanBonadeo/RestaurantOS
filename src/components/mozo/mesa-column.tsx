@@ -1,14 +1,6 @@
 "use client";
 
-import {
-  Ban,
-  Check,
-  Clock,
-  MoreVertical,
-  Send,
-  Tag,
-  Trash2,
-} from "lucide-react";
+import { Ban, Check, MoreVertical, Send, Tag, Trash2 } from "lucide-react";
 
 import {
   DropdownMenu,
@@ -34,6 +26,10 @@ import {
  * Reemplaza al `TableDetail` que era un modo aparte del panel: tocar una mesa
  * abierta ya no muestra una pantalla que hay que cerrar para poder cargar —el
  * detalle **es** la mitad izquierda mientras cargás en la derecha.
+ *
+ * **Sin cabecera propia**: el header del panel ya dice qué mesa es y cómo
+ * está. Tenerlo dos veces —«Mesa CUAD» arriba y «CUAD» abajo— gastaba una
+ * franja de la columna en repetir lo mismo.
  *
  * Tres bloques, en el orden en que se miran:
  *  1. **Enviado** — lo que ya está en cocina, por tanda, con modificadores,
@@ -92,8 +88,6 @@ function horaDe(iso: string | null): string | null {
 
 export function MesaColumn({
   tableLabel,
-  operationalStatus,
-  minutosAbierta,
   loPedido,
   comandas,
   stationNameById,
@@ -109,13 +103,11 @@ export function MesaColumn({
   onEditPrice,
   onEnviar,
   acciones,
-  onClose,
   cartZone,
   className = "",
 }: {
+  /** Sólo para el `aria-label` de la región: el título lo pone el panel. */
   tableLabel: string;
-  operationalStatus: string;
-  minutosAbierta: number | null;
   loPedido: LoPedido | null;
   /** Sólo para «Entregar» y el estado de la comanda: los ítems salen de
    *  `loPedido`, que también trae los que no fueron a cocina. */
@@ -133,7 +125,6 @@ export function MesaColumn({
   onEditPrice: (key: string) => void;
   onEnviar: () => void;
   acciones?: MesaColumnAcciones;
-  onClose?: () => void;
   /**
    * La zona de teclado del carrito (`useCartZone`, specs 055/075). La cadena
    * buscador → resultados → carrito → enviar no cambia porque el carrito se
@@ -186,56 +177,6 @@ export function MesaColumn({
       aria-label={`Mesa ${tableLabel}`}
       className={`flex min-h-0 flex-col border-zinc-200 @2xl:border-r ${className}`}
     >
-      {/* Cabecera: qué mesa, cómo está y hace cuánto. */}
-      <header className="flex shrink-0 items-start gap-2 border-b border-zinc-200 bg-white px-4 py-3">
-        <div className="min-w-0 flex-1">
-          <h2 className="font-heading truncate text-2xl leading-none font-extrabold tracking-tight text-zinc-900 uppercase">
-            {tableLabel}
-          </h2>
-          <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-zinc-500">
-            <span className="inline-flex items-center gap-1">
-              <span
-                className={`h-1.5 w-1.5 rounded-full ${
-                  operationalStatus === "libre"
-                    ? "bg-zinc-300"
-                    : operationalStatus === "pidio_cuenta"
-                      ? "bg-amber-500"
-                      : "bg-emerald-500"
-                }`}
-              />
-              {operationalStatus === "libre"
-                ? "Libre"
-                : operationalStatus === "pidio_cuenta"
-                  ? "Pidió la cuenta"
-                  : "Ocupada"}
-            </span>
-            {minutosAbierta != null && (
-              <span className="inline-flex items-center gap-1">
-                <Clock className="h-3 w-3" />
-                {minutosAbierta} min
-              </span>
-            )}
-            {loPedido && <span>Orden #{loPedido.order_number}</span>}
-            {loPedido?.party_size != null && (
-              <span>
-                {loPedido.party_size}{" "}
-                {loPedido.party_size === 1 ? "persona" : "personas"}
-              </span>
-            )}
-          </div>
-        </div>
-        {onClose && (
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Cerrar mesa"
-            className="-mt-1 -mr-1 shrink-0 rounded-full p-2 text-zinc-400 transition hover:bg-zinc-100"
-          >
-            <span aria-hidden>✕</span>
-          </button>
-        )}
-      </header>
-
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
         {tandas.length === 0 && !haySinEnviar && (
           <p className="px-1 py-8 text-center text-xs text-zinc-500">
