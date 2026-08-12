@@ -3,6 +3,10 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { SalonDesktop } from "./salon-desktop";
+import {
+  loadPedirCatalog,
+  loadTableComandas,
+} from "@/lib/mozo/pedir-panel-data";
 import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
 
 /**
@@ -92,14 +96,52 @@ function renderSalon() {
   );
 }
 
-/** Deja la mesa 1 con "Cargar pedido" abierto (esperando el catálogo). */
+/**
+ * Deja la mesa 1 con la carga abierta, esperando el catálogo.
+ *
+ * Desde la spec 111 el tap **es** el camino: no hay un detalle en el medio con
+ * un botón «Cargar pedido» (la mesa vive en la columna izquierda de la carga).
+ */
 async function abrirPedidoDeMesa1(container: HTMLElement) {
-  const user = userEvent.setup();
   await act(async () => {
     fireEvent.click(mesaEnPlano(container, "1"));
   });
-  await user.click(await screen.findByRole("button", { name: /Cargar pedido/ }));
   expect(await screen.findByText(/Cargando catálogo/)).toBeInTheDocument();
+}
+
+/**
+ * Deja los loaders colgados: el panel se queda en «Cargando catálogo…», que es
+ * lo que estos tests necesitan para tocar el plano con el panel tomado.
+ *
+ * Va explícito por test porque `clearAllMocks` limpia las llamadas pero **no**
+ * las implementaciones: sin esto, el `mockResolvedValue` de un test se filtra
+ * a los que siguen.
+ */
+function conPanelQueNuncaLlega() {
+  vi.mocked(loadPedirCatalog).mockImplementation(
+    () => new Promise(() => {}) as never,
+  );
+  vi.mocked(loadTableComandas).mockImplementation(
+    () => new Promise(() => {}) as never,
+  );
+}
+
+/** Hace que el panel de carga llegue a montarse de verdad. */
+function conPanelQueMonta() {
+  vi.mocked(loadPedirCatalog).mockResolvedValue({
+    ok: true,
+    data: {
+      businessName: "Golf",
+      catalog: { superCategories: [], categories: [] },
+      stationNameById: {},
+      topProductIds: [],
+      dailyMenus: [],
+    },
+  } as never);
+  vi.mocked(loadTableComandas).mockResolvedValue({
+    ok: true,
+    data: { comandas: [], loPedido: null },
+  } as never);
 }
 
 beforeEach(() => {
@@ -108,19 +150,29 @@ beforeEach(() => {
 
 describe("SalonDesktop · el plano manda sobre el panel", () => {
   it("con un pedido abierto, tocar otra mesa la abre a ella", async () => {
+    conPanelQueMonta();
     const { container } = renderSalon();
-    await abrirPedidoDeMesa1(container);
+
+    await act(async () => {
+      fireEvent.click(mesaEnPlano(container, "1"));
+    });
+    expect(
+      await screen.findByRole("region", { name: "Mesa 1" }),
+    ).toBeInTheDocument();
 
     await act(async () => {
       fireEvent.click(mesaEnPlano(container, "2"));
     });
 
-    // El modo de la mesa 1 cedió y el panel muestra el detalle de la 2.
-    expect(screen.queryByText(/Cargando catálogo/)).toBeNull();
-    expect(screen.getByRole("heading", { level: 3 })).toHaveTextContent("2");
+    // El panel cambió de mesa: la columna izquierda es la 2.
+    expect(
+      await screen.findByRole("region", { name: "Mesa 2" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Mesa 1" })).toBeNull();
   });
 
   it("tocar la MISMA mesa que estás cargando no cierra nada", async () => {
+    conPanelQueNuncaLlega();
     const { container } = renderSalon();
     await abrirPedidoDeMesa1(container);
 
@@ -134,20 +186,17 @@ describe("SalonDesktop · el plano manda sobre el panel", () => {
   });
 
   it("tocar el plano fuera de una mesa cierra el modo abierto", async () => {
+    conPanelQueNuncaLlega();
     const { container } = renderSalon();
     await abrirPedidoDeMesa1(container);
 
-    // Primer tap al aire: se cierra el pedido y queda el detalle de la mesa.
+    // Un tap al aire cierra la carga y vuelve la lista del panel. Antes eran
+    // dos taps porque abajo de la carga quedaba el detalle de la mesa; desde
+    // la spec 111 ese nivel no existe (la mesa es la columna de la carga).
     await act(async () => {
       fireEvent.click(container.querySelector("svg")!);
     });
     expect(screen.queryByText(/Cargando catálogo/)).toBeNull();
-    expect(screen.getByRole("heading", { level: 3 })).toHaveTextContent("1");
-
-    // Segundo tap: se cierra el detalle y vuelve la lista del panel.
-    await act(async () => {
-      fireEvent.click(container.querySelector("svg")!);
-    });
     expect(screen.queryByLabelText("Cerrar detalle")).toBeNull();
   });
 });

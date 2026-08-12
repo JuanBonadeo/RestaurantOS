@@ -106,6 +106,7 @@ export async function getLoPedido(
 
   const o = order as unknown as {
     id: string;
+    order_number: number;
     subtotal_cents: number;
     discount_cents: number | null;
     tip_cents: number | null;
@@ -114,6 +115,7 @@ export async function getLoPedido(
   };
   return {
     order_id: o.id,
+    order_number: o.order_number,
     items,
     party_size: o.party_size,
     subtotal_cents: Number(o.subtotal_cents),

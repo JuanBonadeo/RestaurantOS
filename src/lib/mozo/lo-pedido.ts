@@ -41,6 +41,8 @@ export type LoPedidoItem = {
 
 export type LoPedido = {
   order_id: string;
+  /** El número que ve el local («Orden #25»). */
+  order_number: number;
   items: LoPedidoItem[];
   /** Personas de la visita (spec 111). `null` = no se cargó. */
   party_size: number | null;

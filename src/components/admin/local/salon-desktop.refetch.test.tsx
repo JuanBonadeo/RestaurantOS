@@ -30,7 +30,10 @@ vi.mock("@/lib/mozo/pedir-panel-data", () => ({
 }));
 vi.mock("@/lib/billing/cobro-panel-data", () => ({
   loadCobroForTable: vi.fn(async () => ({ ok: false as const, error: "test" })),
-  loadCuentaForTable: vi.fn(async () => ({ ok: false as const, error: "test" })),
+  loadCuentaForTable: vi.fn(async () => ({
+    ok: false as const,
+    error: "test",
+  })),
 }));
 
 const marcarComandaEntregada = vi.fn(async () => ({
@@ -107,6 +110,24 @@ function orden(estadoComanda: "pendiente" | "entregado"): SalonOrderRef[] {
   ] as unknown as SalonOrderRef[];
 }
 
+/**
+ * Una reserva sobre la mesa. Desde la spec 111 tocar una mesa entra directo a
+ * cargar; el **detalle** —que es lo que estos tests ejercitan, con su tarjeta
+ * de comandas y el cableo de refetch de la spec 102— sigue siendo el camino de
+ * una mesa con reserva encima (FR-016).
+ */
+const reservaEnMesa1 = [
+  {
+    id: "r1",
+    customer_name: "Pérez",
+    party_size: 2,
+    starts_at: "2026-08-08T21:00:00Z",
+    status: "confirmed",
+    table_id: "t1",
+    notes: null,
+  },
+] as unknown as Parameters<typeof SalonDesktop>[0]["reservations"];
+
 function renderSalon() {
   return render(
     <SalonDesktop
@@ -114,7 +135,7 @@ function renderSalon() {
       businessId="b1"
       floorPlans={plano("ocupada")}
       dineInOrders={orden("pendiente")}
-      reservations={[]}
+      reservations={reservaEnMesa1}
       mozos={[]}
       currentUserId="u1"
       role="encargado"
@@ -129,7 +150,7 @@ beforeEach(() => {
     data: {
       floorPlans: plano("ocupada"),
       dineInOrders: orden("entregado"),
-      reservations: [],
+      reservations: reservaEnMesa1,
       mozos: [],
     },
   });
@@ -140,7 +161,7 @@ describe("SalonDesktop · re-sincronización por refetch (spec 102)", () => {
     const user = userEvent.setup();
     renderSalon();
 
-    // Abrir el detalle de la mesa 1.
+    // Abrir el detalle de la mesa 1 (tiene reserva → detalle, no carga).
     const fila = screen
       .getAllByRole("button")
       .find((b) => b.textContent?.trim().startsWith("1"))!;
@@ -178,6 +199,8 @@ describe("SalonDesktop · re-sincronización por refetch (spec 102)", () => {
     // El error se traga —es un refresh de fondo, no una acción del usuario— y
     // el panel sigue mostrando lo que tenía en vez de quedar vacío.
     expect(getSalonTabData).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("button", { name: /Entregar/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Entregar/i }),
+    ).toBeInTheDocument();
   });
 });

@@ -1158,21 +1158,19 @@ export function SalonDesktop({
   /**
    * ¿Tocar esta mesa tiene que entrar directo a cargar? (spec 111, FR-010)
    *
-   * Sólo la mesa **libre**: la ocupada sigue abriendo su detalle (D2), que es
-   * desde donde se cobra, se transfiere y se anula.
+   * **Libre y ocupada las dos** (fase 5): la carga trae ahora la mesa entera
+   * en su columna izquierda —estado, orden, lo enviado, lo sin enviar, cobrar
+   * y el ⋯—, así que el detalle como modo aparte era una pantalla de paso que
+   * había que cerrar para poder trabajar.
    *
    * Con reserva encima **no** (FR-016): ahí el movimiento correcto es «Sentar
    * reserva» —el detalle lo ofrece como acción primaria—, no abrirla como
    * walk-in y dejar la reserva colgada.
    *
-   * Sin permiso de carga tampoco: el detalle es lo único que ese rol puede
-   * hacer con la mesa.
+   * Sin permiso de carga tampoco: para ese rol el detalle es lo único que hay.
    */
   const abreCargaDirecto = useCallback(
-    (t: FloorTable) =>
-      (t.operational_status ?? "libre") === "libre" &&
-      canCargarPedido(role) &&
-      !reservationByTable[t.id],
+    (t: FloorTable) => canCargarPedido(role) && !reservationByTable[t.id],
     [role, reservationByTable],
   );
 
@@ -1261,6 +1259,15 @@ export function SalonDesktop({
    * pedido, abrir mesa). Sirve para distinguir, en el plano, "tocar la mesa en
    * la que ya estoy" de "tocar otra".
    */
+  /** Estado **vivo** de la mesa que tiene el panel de carga: `pedirTable` es el
+   *  snapshot con el que se abrió, y una mesa que se abre cargando pasa a
+   *  ocupada recién al enviar (spec 111, FR-011). */
+  const pedirEstado = pedirTable
+    ? ((tables.find((t) => t.id === pedirTable.id)?.operational_status ??
+        pedirTable.operational_status ??
+        "libre") as string)
+    : "libre";
+
   const mesaEnModo =
     cobroTable?.id ??
     cuentaTable?.id ??
@@ -1467,9 +1474,12 @@ export function SalonDesktop({
           // De 1024 a 1279 se conserva 480: con el piso de 560 el plano
           // quedaría en ~450px y en una notebook eso es peor negocio.
           "lg:grid-cols-[minmax(0,1fr)_480px]",
-          // De 1280 para arriba, 44% del split con piso 560 y techo 900 — el
-          // techo es para que en un ultrawide el plano no termine en una franja.
-          "xl:grid-cols-[minmax(0,1fr)_minmax(560px,min(44%,900px))]",
+          // De 1280 para arriba, **la mitad** del split con piso 620 y techo
+          // 1100 (fase 5: el panel pasó a tener dos columnas de verdad —la
+          // mesa y la carga—, y con 44% la de la mesa quedaba angosta para el
+          // detalle por ítem). El techo es para que en un ultrawide el plano no
+          // termine en una franja.
+          "xl:grid-cols-[minmax(0,1fr)_minmax(620px,min(50%,1100px))]",
         )}
       >
         {/* Columna del plano: viewer arriba + stats al pie */}
@@ -1689,6 +1699,31 @@ export function SalonDesktop({
                 stationNameById={catalogBundle.stationNameById}
                 existingComandas={pedirState.comandas}
                 loPedido={pedirState.loPedido}
+                // Las acciones de la mesa viven en la columna izquierda del
+                // panel de carga (spec 111, fase 5): es la que reemplazó al
+                // detalle como modo aparte.
+                onMesaActualizada={() => void refetchSalon()}
+                mesaAcciones={{
+                  onCobrar: () => openCuenta(pedirTable),
+                  onCargarCliente: () => setClienteTableId(pedirTable.id),
+                  // Mismas reglas que tenía el detalle: transferir y trasladar
+                  // sólo con la mesa abierta, anular sólo si el rol puede
+                  // llevarla a `libre`.
+                  onTransferir:
+                    pedirEstado !== "libre" &&
+                    (role !== "mozo" || pedirTable.mozo_id === currentUserId)
+                      ? () => setTransferTableId(pedirTable.id)
+                      : undefined,
+                  onTrasladar:
+                    pedirEstado !== "libre" && canMoveTable(role)
+                      ? () => setTrasladarTableId(pedirTable.id)
+                      : undefined,
+                  onAnular:
+                    pedirEstado === "ocupada" &&
+                    canTransitionMesa(role, "ocupada", "libre")
+                      ? () => pedirAnular(pedirTable.id, pedirTable.label)
+                      : undefined,
+                }}
                 topProductIds={catalogBundle.topProductIds}
                 dailyMenus={catalogBundle.dailyMenus}
                 role={role}

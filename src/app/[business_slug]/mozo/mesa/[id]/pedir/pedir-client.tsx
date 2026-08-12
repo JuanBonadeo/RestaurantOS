@@ -37,7 +37,6 @@ import {
   Star,
   Tag,
   Trash2,
-  UserPlus,
   Users,
   UtensilsCrossed,
   Wine,
@@ -56,7 +55,11 @@ import {
 } from "@/lib/comandas/actions";
 import type { ComandaConItems } from "@/lib/comandas/queries";
 import { contarItemsVivos, type LoPedido } from "@/lib/mozo/lo-pedido";
-import { LoPedidoColumn } from "@/components/mozo/lo-pedido-column";
+import {
+  MesaColumn,
+  type MesaColumnAcciones,
+  type MesaColumnCartItem,
+} from "@/components/mozo/mesa-column";
 import {
   CargarClienteModal,
   PersonasChips,
@@ -77,6 +80,7 @@ import type { DailyMenuForMozo } from "@/lib/mozo/daily-menus-query";
 import type { DailyMenuSelection } from "@/lib/mozo/daily-menu-steps";
 import { DailyMenuWizard } from "@/components/mozo/daily-menu-wizard";
 import {
+  CartaOnlineSelector,
   ProductSearchInput,
   useProductSearch,
   type ProductSearchApi,
@@ -146,6 +150,18 @@ type Props = {
    *  ancho (spec 111). `null` = mesa sin orden abierta todavía. Sólo lo usa el
    *  modo `embedded`: el full-screen del mozo tiene su paso «resumen». */
   loPedido?: LoPedido | null;
+  /** Acciones de la mesa que vive el salón (cobrar, transferir, trasladar,
+   *  anular). Sólo llegan en el sidebar: en el full-screen del mozo la mesa se
+   *  maneja desde su propia pantalla. */
+  mesaAcciones?: MesaColumnAcciones;
+  /**
+   * Algo cambió en la mesa **sin** cerrar el panel: se entregó una comanda o
+   * se anuló un ítem. El salón lo necesita para repintar el plano (las demoras
+   * de la spec 30 salen de sus datos, y desde la spec 102 el panel no re-corre
+   * la ruta: se re-sincroniza con su propio fetch). Antes esto lo disparaba el
+   * detalle de mesa; ahora esas acciones viven acá.
+   */
+  onMesaActualizada?: () => void;
   topProductIds: string[];
   dailyMenus: DailyMenuForMozo[];
   role: BusinessRole;
@@ -281,6 +297,8 @@ export function MozoPedirClient({
   stationNameById,
   existingComandas,
   loPedido,
+  mesaAcciones,
+  onMesaActualizada,
   topProductIds,
   dailyMenus,
   role,
@@ -500,6 +518,17 @@ export function MozoPedirClient({
     category: CatalogCategory | null;
     products: CatalogProduct[];
   }[] = useMemo(() => {
+    // Sidebar del salón (spec 111, fase 5): **no hay navegación por
+    // categoría**. Sin búsqueda se ven «Más pedidos», que es a lo que la
+    // navegación terminaba volviendo, y para todo lo demás está el buscador —
+    // que desde la 110 aguanta acentos, plural y palabras en cualquier orden.
+    // Elegir categoría era un rodeo de dos taps para llegar a lo mismo.
+    if (embedded) {
+      // Un negocio recién arrancado no tiene «más pedidos» todavía: ahí se
+      // muestra el catálogo entero antes que una pantalla vacía.
+      const base = topProducts.length > 0 ? topProducts : allProducts;
+      return base.length > 0 ? [{ category: null, products: base }] : [];
+    }
     if (activeTab === TOP_TAB_ID) {
       return topProducts.length > 0
         ? [{ category: null, products: topProducts }]
@@ -507,7 +536,7 @@ export function MozoPedirClient({
     }
     const cats = categoriesBySuper[activeTab] ?? [];
     return cats.map((c) => ({ category: c, products: c.products }));
-  }, [activeTab, topProducts, categoriesBySuper]);
+  }, [embedded, activeTab, topProducts, allProducts, categoriesBySuper]);
 
   // ── Búsqueda (spec 068: el mismo buscador que cargar pedido y venta rápida) ──
   // `browse` es lo visible sin búsqueda, aplanado en el orden en que se ve: el
@@ -584,10 +613,12 @@ export function MozoPedirClient({
   // el primer tramo de la zona.
   const menusVisibles = useMemo(
     () =>
-      !isSearching && activeTab === TOP_TAB_ID && dailyMenus.length > 0
+      !isSearching &&
+      (embedded || activeTab === TOP_TAB_ID) &&
+      dailyMenus.length > 0
         ? dailyMenus
         : [],
-    [isSearching, activeTab, dailyMenus],
+    [isSearching, embedded, activeTab, dailyMenus],
   );
   const catalogoIndex = useMemo(() => {
     const index = new Map<string, number>();
@@ -883,7 +914,12 @@ export function MozoPedirClient({
       },
       async () => {
         const r = await cancelarItem(target.orderItemId, reason, slug);
-        if (r.ok) toast.success("Item cancelado");
+        if (r.ok) {
+          toast.success("Item cancelado");
+          // Anular mueve plata: el total de la mesa en el plano tiene que
+          // seguirlo (ver `onMesaActualizada`).
+          onMesaActualizada?.();
+        }
         return r;
       },
     );
@@ -899,7 +935,10 @@ export function MozoPedirClient({
       },
       async () => {
         const r = await marcarComandaEntregada(comandaId, slug);
-        if (r.ok) toast.success("Comanda entregada");
+        if (r.ok) {
+          toast.success("Comanda entregada");
+          onMesaActualizada?.();
+        }
         return r;
       },
     );
@@ -917,6 +956,28 @@ export function MozoPedirClient({
   // persiste solo; sin orden todavía, viaja con el primer envío —que es el que
   // la crea— así que vive acá hasta entonces.
   const [personas, setPersonas] = useState(loPedido?.party_size ?? 2);
+
+  // El carrito, aplanado para la columna de la mesa (spec 111, fase 5): ahí se
+  // muestra pegado a lo enviado, en verde, en vez de en la otra columna bajo
+  // el título «Tu pedido».
+  const cartParaColumna: MesaColumnCartItem[] = cart.map((c) => ({
+    _key: c._key,
+    product_name: c.product_name,
+    quantity: c.quantity,
+    notes: c.notes || null,
+    line_subtotal_cents: c.line_subtotal_cents,
+    modifiers: isDailyMenuCart(c)
+      ? c.selected_choices.map((s) => s.product_name)
+      : c.modifiers.map((m) => m.name),
+    esMenuDelDia: isDailyMenuCart(c),
+    price_override_cents: isDailyMenuCart(c)
+      ? null
+      : (c.price_override_cents ?? null),
+    price_override_reason: isDailyMenuCart(c)
+      ? null
+      : (c.price_override_reason ?? null),
+    unit_price_cents: c.unit_price_cents,
+  }));
   const [clienteOpen, setClienteOpen] = useState(false);
 
   // Mostramos la nav de tabs (anterior/siguiente) en el footer sticky solo si
@@ -1082,7 +1143,6 @@ export function MozoPedirClient({
   // resultados/catálogo con scroll → panel de pedido siempre visible. El
   // full-screen del mozo (abajo) conserva su flujo de 2 pasos intacto.
   if (embedded) {
-    const activeTabLabel = tabById[activeTab]?.label ?? "";
     return (
       <div
         className={rootClass}
@@ -1120,60 +1180,72 @@ export function MozoPedirClient({
                 Mesa {table.label}
               </h1>
             </div>
-            {/* Cliente: opcional y fuera del camino (spec 111, FR-015). Antes
-                había que pasar por nombre y teléfono para sentar a alguien. */}
+            {/* Abajo de @2xl (672px **de panel**) la mesa no entra al lado de
+                la carga: se abre como hoja encima. Arriba está siempre a la
+                vista y el botón sobra. */}
             <button
               type="button"
-              onClick={() => setClienteOpen(true)}
-              className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1.5 text-[11px] font-semibold text-zinc-600 ring-1 ring-zinc-200 transition active:scale-95"
+              onClick={() => setVerLoPedido((v) => !v)}
+              aria-expanded={verLoPedido}
+              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1.5 text-[11px] font-semibold ring-1 transition @2xl:hidden ${
+                verLoPedido
+                  ? "bg-zinc-900 text-white ring-zinc-900"
+                  : "bg-white text-zinc-600 ring-zinc-200"
+              }`}
             >
-              <UserPlus className="h-3.5 w-3.5" />
-              Cliente
+              <ClipboardList className="h-3.5 w-3.5" />
+              La mesa
+              {itemsPedidos + cart.length > 0 &&
+                ` · ${itemsPedidos + cart.length}`}
             </button>
-            {/* Abajo de @3xl «Lo pedido» no entra al lado (serían dos columnas
-                de ~280px): se abre como hoja sobre el catálogo. Arriba de @3xl
-                está siempre a la vista y el botón sobra. */}
-            {itemsPedidos > 0 && (
-              <button
-                type="button"
-                onClick={() => setVerLoPedido((v) => !v)}
-                aria-expanded={verLoPedido}
-                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1.5 text-[11px] font-semibold ring-1 transition @3xl:hidden ${
-                  verLoPedido
-                    ? "bg-zinc-900 text-white ring-zinc-900"
-                    : "bg-white text-zinc-600 ring-zinc-200"
-                }`}
-              >
-                <ClipboardList className="h-3.5 w-3.5" />
-                Lo pedido · {itemsPedidos}
-              </button>
-            )}
+          </div>
+
+          {/* El filtro de la carta online, arriba y con la cara del selector de
+              salones (spec 111, fase 5): es contexto de la PC, no un control
+              del buscador. */}
+          <div className="mt-2">
+            <CartaOnlineSelector api={searchApi} />
           </div>
         </header>
 
         {/* Cuerpo en dos columnas (spec 111): lo ya pedido a la izquierda, la
             carga a la derecha. El corte es por ancho **del panel** (container
             query), no del viewport: el panel es el 44% de la pantalla. */}
-        <div className="relative flex min-h-0 flex-1 flex-col @3xl:flex-row">
+        <div className="relative flex min-h-0 flex-1 flex-col @2xl:flex-row">
           {/* Izquierda: lo que la mesa ya tiene cargado. Ancha de verdad —el
               detalle por ítem (modificadores, nota, sector, estado) no entra
               en una columna angosta— pero nunca más que la de carga. */}
-          <LoPedidoColumn
+          <MesaColumn
+            tableLabel={table.label}
+            operationalStatus={table.operational_status}
+            minutosAbierta={tableMinutes}
             loPedido={loPedido ?? null}
             comandas={comandas}
             stationNameById={stationNameById}
+            cart={cartParaColumna}
+            cartTotalCents={cartTotal}
             userCanCancel={userCanCancel}
+            userCanEditPrice={userCanEditPrice}
             pending={pending}
             onCancelItem={(id, name) =>
               setCancelTarget({ orderItemId: id, productName: name })
             }
             onAdvance={handleAdvance}
+            onChangeQty={changeQuantity}
+            onRemoveCartItem={removeFromCart}
+            onEditPrice={setPriceTargetKey}
+            onEnviar={handleSend}
+            cartZone={carrito}
+            acciones={{
+              ...mesaAcciones,
+              onCargarCliente: () => setClienteOpen(true),
+            }}
+            onClose={onClose}
             className={
               verLoPedido
-                ? // Hoja sobre el catálogo (panel angosto): tapa la carga a
-                  // propósito, es una consulta y se cierra con el mismo botón.
-                  "absolute inset-0 z-10 bg-zinc-50 @3xl:static @3xl:z-auto @3xl:w-[42%] @3xl:max-w-[380px] @3xl:shrink-0"
-                : "hidden @3xl:flex @3xl:w-[42%] @3xl:max-w-[380px] @3xl:shrink-0"
+                ? // Hoja sobre la carga (panel angosto): la tapa a propósito.
+                  "absolute inset-0 z-10 bg-zinc-50 @2xl:static @2xl:z-auto @2xl:w-[46%] @2xl:max-w-[520px] @2xl:shrink-0"
+                : "hidden @2xl:flex @2xl:w-[46%] @2xl:max-w-[520px] @2xl:shrink-0"
             }
           />
 
@@ -1191,30 +1263,16 @@ export function MozoPedirClient({
                 onChange={setPersonas}
                 persistir={loPedido != null}
               />
-              <ProductSearchInput api={searchApi} inputRef={searchRef} />
-              {!isSearching && tabs.length > 1 && (
-                <div className="flex items-center gap-2">
-                  <label
-                    htmlFor="cat-select"
-                    className="shrink-0 text-[11px] font-semibold tracking-wide text-zinc-500 uppercase"
-                  >
-                    Categoría
-                  </label>
-                  <select
-                    id="cat-select"
-                    value={activeTab}
-                    onChange={(e) => setActiveTab(e.target.value)}
-                    className="min-w-0 flex-1 rounded-xl border border-zinc-200 bg-white px-2.5 py-1.5 text-sm font-semibold text-zinc-800 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none"
-                  >
-                    {tabs.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.label}
-                        {tabTouched[t.id] ? " ✓" : ""}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
+              {/* Sólo el buscador (spec 111, fase 5). El selector de categoría
+                  se fue: con el buscador tolerante a acentos y orden de
+                  palabras, elegir categoría es un rodeo — y sin búsqueda lo
+                  que se ve son «Más pedidos», que es a lo que se volvía. El
+                  filtro de la carta online subió al header del panel. */}
+              <ProductSearchInput
+                api={searchApi}
+                inputRef={searchRef}
+                conFiltroDeCarta={false}
+              />
             </div>
 
             {/* Resultados / catálogo (scroll) — zona de teclado: ↓ desde el
@@ -1241,8 +1299,8 @@ export function MozoPedirClient({
               ) : (
                 <TabView
                   tabSections={visibleSections}
-                  activeTabLabel={activeTabLabel}
-                  isTopTab={activeTab === TOP_TAB_ID}
+                  activeTabLabel="Más pedidos"
+                  isTopTab
                   dailyMenus={menusVisibles}
                   onPick={setOpenProduct}
                   onPickDailyMenu={setOpenDailyMenu}
@@ -1250,135 +1308,6 @@ export function MozoPedirClient({
                   itemProps={catalogoProps}
                 />
               )}
-            </div>
-
-            {/* Panel de pedido en armado — siempre visible. FR-005/006/007/008. */}
-            <div className="shrink-0 border-t border-zinc-200 bg-white">
-              <div className="flex items-center justify-between px-3 pt-2.5">
-                <p className="text-[10px] font-semibold tracking-[0.18em] text-zinc-500 uppercase">
-                  Tu pedido
-                </p>
-                <span className="text-[11px] font-semibold text-zinc-500 tabular-nums">
-                  {cartCount > 0
-                    ? `${cartCount} ${cartCount === 1 ? "ítem" : "ítems"}`
-                    : "vacío"}
-                </span>
-              </div>
-
-              {cart.length === 0 ? (
-                <p className="px-3 pt-1 pb-2.5 text-xs text-zinc-500">
-                  Todavía no cargaste nada. Buscá arriba y agregá con Enter; con
-                  ↓ bajás al catálogo y de ahí a lo cargado.
-                </p>
-              ) : (
-                <ul
-                  onKeyDown={carrito.handleKeyDown}
-                  // FR-008: 176px eran ~3 ítems y el carrito scrolleaba mientras
-                  // sobraba pantalla. Con el panel ancho crece; el catálogo cede
-                  // (es `flex-1`) y sigue habiendo tope para que no lo coma entero.
-                  className="max-h-44 space-y-1 overflow-y-auto px-3 py-2 @xl:max-h-72 @3xl:max-h-96"
-                >
-                  {cart.map((c, i) => (
-                    <li
-                      key={c._key}
-                      {...carrito.itemProps(i)}
-                      aria-label={`${c.product_name}, cantidad ${c.quantity}. ← y → cambian la cantidad, Supr la quita.`}
-                      className="flex items-center gap-2 rounded-xl bg-zinc-50 px-2.5 py-1.5 ring-1 ring-zinc-100 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold text-zinc-900">
-                          {isDailyMenuCart(c) && (
-                            <span className="mr-1 inline-flex items-center rounded bg-emerald-100 px-1 align-middle text-[9px] font-bold text-emerald-700 uppercase">
-                              Menú
-                            </span>
-                          )}
-                          {c.product_name}
-                        </p>
-                        {c.notes && (
-                          <p className="truncate text-[11px] text-zinc-500 italic">
-                            &quot;{c.notes}&quot;
-                          </p>
-                        )}
-                        {!isDailyMenuCart(c) &&
-                          c.price_override_cents != null && (
-                            <p className="truncate text-[11px] font-medium text-amber-700">
-                              <span className="line-through opacity-60">
-                                {formatCurrency(c.unit_price_cents)}
-                              </span>{" "}
-                              → {formatCurrency(c.price_override_cents)} ·{" "}
-                              {c.price_override_reason}
-                            </p>
-                          )}
-                      </div>
-                      <span className="shrink-0 text-xs font-semibold text-emerald-700 tabular-nums">
-                        {formatCurrency(c.line_subtotal_cents)}
-                      </span>
-                      <div className="flex shrink-0 items-center gap-1">
-                        {userCanEditPrice && !isDailyMenuCart(c) && (
-                          <button
-                            onClick={() => setPriceTargetKey(c._key)}
-                            className={`flex h-8 w-8 items-center justify-center rounded-full ring-1 active:scale-95 ${
-                              c.price_override_cents != null
-                                ? "bg-amber-100 text-amber-700 ring-amber-300"
-                                : "bg-white text-zinc-500 ring-zinc-200"
-                            }`}
-                            aria-label={`Cambiar el precio de ${c.product_name}`}
-                          >
-                            <Tag className="h-4 w-4" />
-                          </button>
-                        )}
-                        <button
-                          onClick={() => changeQuantity(c._key, -1)}
-                          disabled={c.quantity <= 1}
-                          className="flex h-8 w-8 items-center justify-center rounded-full bg-white ring-1 ring-zinc-200 active:scale-95 disabled:opacity-40"
-                          aria-label={`Restar ${c.product_name}`}
-                        >
-                          <Minus className="h-4 w-4" />
-                        </button>
-                        <span className="w-6 text-center text-sm font-bold tabular-nums">
-                          {c.quantity}
-                        </span>
-                        <button
-                          onClick={() => changeQuantity(c._key, 1)}
-                          disabled={c.quantity >= 99}
-                          className="flex h-8 w-8 items-center justify-center rounded-full bg-white ring-1 ring-zinc-200 active:scale-95 disabled:opacity-40"
-                          aria-label={`Sumar ${c.product_name}`}
-                        >
-                          <Plus className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => removeFromCart(c._key)}
-                          className="flex h-8 w-8 items-center justify-center rounded-full text-zinc-400 active:bg-red-50 active:text-red-600"
-                          aria-label={`Quitar ${c.product_name}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              <div className="flex items-center gap-2 border-t border-zinc-100 px-3 py-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))]">
-                <div className="min-w-0 flex-1">
-                  <p className="text-[11px] text-zinc-500">Total a enviar</p>
-                  <p className="text-lg font-bold text-zinc-900 tabular-nums">
-                    {formatCurrency(cartTotal)}
-                  </p>
-                </div>
-                <button
-                  ref={enviarRef}
-                  onClick={handleSend}
-                  disabled={pending || cart.length === 0}
-                  className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm active:scale-[0.98] disabled:opacity-50"
-                >
-                  <Send className="h-4 w-4" />
-                  {pending ? "Enviando..." : "Enviar"}
-                  <kbd className="ml-1 hidden rounded bg-white/20 px-1.5 py-0.5 text-[10px] font-semibold sm:inline">
-                    ⌘↵
-                  </kbd>
-                </button>
-              </div>
             </div>
           </div>
         </div>

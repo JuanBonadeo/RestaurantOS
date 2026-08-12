@@ -74,12 +74,27 @@ Ese paso 2-3 es un formulario de tres campos —Personas, Cliente, Notas— del 
 - **FR-021**: `VentaRapidaPanel` queda alineado en ancho y densidad (no necesita las dos columnas: no tiene cliente ni comandas previas).
 - **NFR-001**: Nada de esto toca el kanban de comandas ni el flujo de cobro más allá de que respiren con el ancho nuevo.
 
+### Fase 5 — el panel limpio *(pedido de Juan, 2026-08-12, sobre las fases 1-4 andando)*
+
+Con las dos columnas a la vista quedó claro que la de carga seguía siendo la de antes con menos cosas, y que el detalle de mesa —un modo aparte— era una pantalla de paso. El pedido: *«que sea solo el buscador, con los más pedidos, que no te deje elegir categoría; lo de carta online tiralo para arriba como lo de los planos; más grande todavía; el detalle de mesa tiene que ser la columna izquierda; la parte de "Tu pedido" no debería aparecer; y que se note lo que todavía no mandaste».*
+
+- **FR-022**: La columna de carga es **sólo el buscador y los resultados**. Se va el selector de categoría: con el buscador tolerante (acentos, plural, palabras en cualquier orden) elegir categoría es un rodeo de dos taps para llegar a lo mismo, y sin búsqueda lo que se ve son **«Más pedidos»**, que es a donde la navegación volvía. Un negocio sin historial de ventas ve el catálogo entero en vez de una pantalla vacía.
+- **FR-023**: El filtro de la carta online sube al **header del panel**, con la cara del selector de salones (`SegmentedSelector`). Es contexto de la PC —se elige una vez por turno y queda pegado—, no un control del buscador; abajo era una fila que se leía antes de poder tipear.
+- **FR-024**: **«Tu pedido» desaparece de la columna de carga.** El carrito se muda a la de la mesa, pegado a lo enviado: comparar dos listas en dos lados de la pantalla era el trabajo que hacía el que carga.
+- **FR-025**: En la columna de la mesa, **lo sin enviar se distingue de lo enviado**: bloque propio, verde y con borde grueso. Confundirlos es servir de menos o mandar dos veces.
+- **FR-026**: La columna izquierda pasa a ser **la mesa entera**: título, estado, minutos, orden, personas · lo enviado por tanda · lo sin enviar · total · acción primaria (**Enviar** si hay pendientes, **Cobrar** si no) y el ⋯ con cliente, transferir, trasladar y anular. Es la foto que pasó Juan, con el carrito adentro.
+- **FR-027**: **`TableDetail` deja de ser un modo del panel** (revisa D2): tocar una mesa —libre u ocupada— entra a cargar, y la mesa se ve al lado. El detalle sobrevive para lo que la carga no cubre: **mesa con reserva** (donde «Sentar reserva» tiene que ganar, FR-016) y roles sin permiso de carga.
+- **FR-028**: Más ancho: **50% del split**, piso 620 / techo 1100, y el corte de dos columnas baja a `@2xl` (672px **de panel**) para que una notebook de 1440 ya las vea.
+- **NFR-002**: La cadena de teclado de las specs 055/075 no cambia: buscador → resultados → carrito → enviar. El carrito cambió de lado, no de lugar en el recorrido (`cartZone` viaja a la columna).
+
+**Hallazgo al mover las acciones:** entregar una comanda desde el detalle disparaba el refetch del salón (spec 102); al mudarse a la columna, el plano se habría quedado con las demoras viejas. Se agregó `onMesaActualizada` — entregar y anular avisan al salón sin cerrar el panel.
+
 ## Decisiones *(cerradas con Juan, 2026-08-11)*
 
 | # | Decisión | Resuelto | |
 |---|---|---|---|
 | **D1** | Cuánto ancho | **44% fluido**, piso 560 / techo 900 | FR-001 |
-| **D2** | Qué pasa con `TableDetail` | **Sigue existiendo**; el click que se ahorra es el de la mesa libre. Fase 3 chica y de bajo riesgo | FR-017 |
+| **D2** | Qué pasa con `TableDetail` | Sigue existiendo (fase 3) → **revisado en la fase 5**: con la mesa entera en la columna izquierda, el detalle como modo aparte quedó sin razón de ser. Sobrevive para mesa con reserva y roles sin permiso de carga | FR-017 → FR-027 |
 | **D3** | «Personas» | **Se queda y se guarda** (migración `orders.party_size`), y es **lo primero del panel de carga** — chips arriba del buscador, sin nombre ni nada más al lado. Cargar al cliente pasa a ser una opción del ⋯ | FR-013/014/015 |
 | **D4** | ¿Editar lo ya enviado? | **No**: sólo entregar y cancelar. Editar es de la spec 110 | FR-007 |
 
@@ -101,6 +116,7 @@ Ese paso 2-3 es un formulario de tres campos —Personas, Cliente, Notas— del 
 - [x] **T6** — Fase 3b: tap/Enter en mesa libre → carga con foco en el buscador (FR-010/011), en el plano y en la lista. Test nuevo; el de «Esc devuelve el foco» pasó a mesa ocupada porque codificaba el camino viejo.
 - [x] **T7** — Fase 3c: migración 0045 `orders.party_size` (aplicada al cloud) escrita por los tres caminos, chips de Personas arriba del buscador (FR-013/014) y «Cargar cliente» en el panel y en el ⋯ del detalle (FR-015).
 - [x] **T8** — Fase 4: `CargarPedidoSheet` a dos columnas desde `xl`, sin paso «datos» (FR-019/020). `VentaRapidaPanel` ya había quedado alineado en T1 (FR-021).
+- [x] **T10** — Fase 5: columna de carga sólo con buscador + más pedidos, filtro de carta online arriba, «Tu pedido» fuera, `MesaColumn` con lo enviado vs lo sin enviar y las acciones de la mesa, ancho al 50% (FR-022…028) + 8 tests nuevos.
 - [ ] **T9** — `pnpm typecheck` + suite + build; **verificar en vivo con rol real** (encargado, no service_role).
 
 ## Verify

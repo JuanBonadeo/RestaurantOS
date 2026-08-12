@@ -153,11 +153,14 @@ describe("SalonDesktop · teclado del panel lateral (spec 075)", () => {
     expect(filaMesa("2")).toHaveFocus();
   });
 
-  it("Enter sobre una fila abre el detalle de esa mesa", async () => {
+  // La mesa 2 tiene una reserva encima: ésa sigue abriendo el detalle, porque
+  // el movimiento correcto ahí es «Sentar reserva» y no abrirla como walk-in
+  // (spec 111, FR-016).
+  it("Enter sobre una mesa con reserva abre el detalle", async () => {
     const user = userEvent.setup();
     renderPanel();
 
-    pararseEn(filaMesa("1"));
+    pararseEn(filaMesa("2"));
     await user.keyboard("{Enter}");
 
     expect(
@@ -165,13 +168,11 @@ describe("SalonDesktop · teclado del panel lateral (spec 075)", () => {
     ).toBeInTheDocument();
   });
 
-  // La mesa es **ocupada** a propósito: desde la spec 111 una libre no abre el
-  // detalle, entra directo a cargar (ver el test de abajo).
   it("Esc cierra el detalle y devuelve el foco a la fila de donde vino", async () => {
     const user = userEvent.setup();
     renderPanel();
 
-    pararseEn(filaMesa("1"));
+    pararseEn(filaMesa("2")); // con reserva → detalle
     await user.keyboard("{Enter}");
     expect(
       screen.getByRole("button", { name: "Cerrar detalle" }),
@@ -181,9 +182,9 @@ describe("SalonDesktop · teclado del panel lateral (spec 075)", () => {
     expect(
       screen.queryByRole("button", { name: "Cerrar detalle" }),
     ).not.toBeInTheDocument();
-    // Vuelve a la mesa 1, no al principio de la lista.
+    // Vuelve a la mesa 2, no al principio de la lista.
     await waitFor(() => {
-      expect(filaMesa("1")).toHaveFocus();
+      expect(filaMesa("2")).toHaveFocus();
     });
   });
 
@@ -220,15 +221,34 @@ describe("SalonDesktop · teclado del panel lateral (spec 075)", () => {
     expect(loadTableComandas).toHaveBeenCalledWith(expect.any(String), "t3");
   });
 
-  it("Enter en una mesa ocupada sigue abriendo el detalle", async () => {
+  it("Enter en una mesa ocupada entra a cargar, con la mesa a la izquierda (spec 111)", async () => {
     const user = userEvent.setup();
+    vi.mocked(loadPedirCatalog).mockResolvedValue({
+      ok: true,
+      data: {
+        businessName: "Golf",
+        catalog: { superCategories: [], categories: [] },
+        stationNameById: {},
+        topProductIds: [],
+        dailyMenus: [],
+      },
+    } as never);
+    vi.mocked(loadTableComandas).mockResolvedValue({
+      ok: true,
+      data: { comandas: [], loPedido: null },
+    } as never);
     renderPanel();
 
     pararseEn(filaMesa("1")); // ocupada
     await user.keyboard("{Enter}");
+
+    // El detalle dejó de ser una pantalla de paso: es la columna izquierda.
     expect(
-      screen.getByRole("button", { name: "Cerrar detalle" }),
+      await screen.findByRole("region", { name: "Mesa 1" }),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Cerrar detalle" }),
+    ).not.toBeInTheDocument();
   });
 
   it("solo la fila activa queda en el orden de tabulación", async () => {
@@ -245,7 +265,7 @@ describe("SalonDesktop · teclado del panel lateral (spec 075)", () => {
     const user = userEvent.setup();
     renderPanel();
 
-    pararseEn(filaMesa("1"));
+    pararseEn(filaMesa("2")); // con reserva → detalle
     await user.keyboard("{Enter}");
 
     // Desde el botón de cerrar (el primero del panel), ↓ baja al siguiente

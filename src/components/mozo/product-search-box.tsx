@@ -6,6 +6,7 @@ import { Search, X } from "lucide-react";
 import type { CatalogProduct } from "@/lib/mozo/catalog-query";
 import { filterProductsByQuery } from "@/lib/mozo/product-search";
 import { useStickyFilter } from "@/lib/ui/use-sticky-filter";
+import { SegmentedSelector } from "@/components/admin/local/segmented-selector";
 
 export const CARTA_ALL = "all";
 /**
@@ -119,9 +120,7 @@ export function useProductSearch({
     });
     // El matcheo tolerante (acentos, puntuación, tokens en cualquier orden,
     // plural) y el orden por relevancia viven en `product-search.ts`.
-    return isSearching
-      ? filterProductsByQuery(candidates, search)
-      : candidates;
+    return isSearching ? filterProductsByQuery(candidates, search) : candidates;
   }, [products, browse, search, cartaFilter, isSearching]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -158,6 +157,36 @@ export function useProductSearch({
 export type ProductSearchApi = ReturnType<typeof useProductSearch>;
 
 /**
+ * El filtro de la carta online, arriba del panel y con la misma cara que el
+ * selector de salones (spec 111).
+ *
+ * Es un filtro de **contexto** —«en esta PC cargo delivery, mostrame sólo lo
+ * publicado»—, se elige una vez por turno y queda pegado (`useStickyFilter`).
+ * Abajo del buscador era una segunda fila de controles que se leía antes de
+ * poder tipear, en la pantalla que la spec 111 vino a despejar. Arriba, junto
+ * al salón, queda con los otros selectores de contexto.
+ *
+ * Se renderiza sólo si el catálogo tiene de los dos tipos.
+ */
+export function CartaOnlineSelector({ api }: { api: ProductSearchApi }) {
+  const { showCartaFilter, cartaFilter, setCartaFilter } = api;
+  if (!showCartaFilter) return null;
+
+  return (
+    <SegmentedSelector
+      ariaLabel="Carta online"
+      activeId={cartaFilter}
+      onSelect={setCartaFilter}
+      items={[
+        { id: CARTA_ALL, label: "Toda la carta" },
+        { id: CARTA_EN_LINEA, label: "En la carta online" },
+        { id: CARTA_SOLO_LOCAL, label: "Solo para el local" },
+      ]}
+    />
+  );
+}
+
+/**
  * Input del buscador + los chips del filtro de la carta online. Uno solo para
  * las tres
  * pantallas (antes eran tres inputs con el mismo `onKeyDown` copiado).
@@ -168,8 +197,13 @@ export function ProductSearchInput({
   autoFocus = false,
   placeholder = "Buscar producto…",
   className = "block h-11 w-full rounded-2xl border border-zinc-200 bg-white pl-9 pr-9 text-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100",
+  conFiltroDeCarta = true,
 }: {
   api: ProductSearchApi;
+  /** El sidebar del salón (spec 111) sube el filtro de la carta online al
+   *  header del panel, con `CartaOnlineSelector`: acá abajo son dos filas de
+   *  controles antes de poder tipear, que es justo lo que se vino a limpiar. */
+  conFiltroDeCarta?: boolean;
   /** Para los callers que necesitan devolverle el foco al buscador después de
    *  agregar un producto (venta rápida, mesa). */
   inputRef?: React.RefObject<HTMLInputElement | null>;
@@ -217,7 +251,7 @@ export function ProductSearchInput({
   return (
     <>
       <div className="relative">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+        <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-zinc-400" />
         <input
           ref={inputRef}
           type="text"
@@ -236,7 +270,7 @@ export function ProductSearchInput({
               setSearch("");
               inputRef.current?.focus();
             }}
-            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-zinc-400 active:bg-zinc-100"
+            className="absolute top-1/2 right-2 -translate-y-1/2 rounded-full p-1 text-zinc-400 active:bg-zinc-100"
             aria-label="Limpiar"
           >
             <X className="h-4 w-4" />
@@ -244,10 +278,10 @@ export function ProductSearchInput({
         )}
       </div>
 
-      {showCartaFilter && (
+      {conFiltroDeCarta && showCartaFilter && (
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+            <span className="text-[11px] font-semibold tracking-wide text-zinc-400 uppercase">
               Carta online
             </span>
             {chip(CARTA_ALL, "Todos")}
@@ -257,7 +291,9 @@ export function ProductSearchInput({
           {/* La explicación aparece sólo cuando hay un filtro puesto: con
               «Todos» no hay nada que aclarar y sería ruido permanente. */}
           {cartaHint && (
-            <p className="text-[11px] leading-snug text-zinc-500">{cartaHint}</p>
+            <p className="text-[11px] leading-snug text-zinc-500">
+              {cartaHint}
+            </p>
           )}
         </div>
       )}

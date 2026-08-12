@@ -1,0 +1,627 @@
+"use client";
+
+import {
+  Ban,
+  Check,
+  Clock,
+  MoreVertical,
+  Send,
+  Tag,
+  Trash2,
+} from "lucide-react";
+
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import type { ComandaConItems } from "@/lib/comandas/queries";
+import type { KitchenItemStatus } from "@/lib/comandas/types";
+import { formatCurrency } from "@/lib/currency";
+import {
+  agruparPorTanda,
+  estaAnulado,
+  type LoPedido,
+  type LoPedidoItem,
+} from "@/lib/mozo/lo-pedido";
+
+/**
+ * La columna de **la mesa** (spec 111, fase 5): todo lo que pasa con ella, de
+ * un vistazo y en un solo lugar.
+ *
+ * Reemplaza al `TableDetail` que era un modo aparte del panel: tocar una mesa
+ * abierta ya no muestra una pantalla que hay que cerrar para poder cargar —el
+ * detalle **es** la mitad izquierda mientras cargás en la derecha.
+ *
+ * Tres bloques, en el orden en que se miran:
+ *  1. **Enviado** — lo que ya está en cocina, por tanda, con modificadores,
+ *     estado y plata. Es la memoria de la mesa.
+ *  2. **Sin enviar** — el carrito, en verde y con borde: lo que se está
+ *     armando y todavía no vio nadie. Antes vivía en la otra columna bajo el
+ *     título «Tu pedido», que lo dejaba lejos de lo enviado y obligaba a
+ *     comparar dos listas en dos lados de la pantalla.
+ *  3. **Acciones** — el total y qué hacer: mandar lo pendiente, o cobrar.
+ */
+
+const KITCHEN_LABEL: Record<KitchenItemStatus, string> = {
+  pending: "Pendiente",
+  preparing: "En preparación",
+  ready: "Listo",
+  delivered: "Entregado",
+};
+
+const KITCHEN_PILL: Record<KitchenItemStatus, string> = {
+  pending: "bg-zinc-100 text-zinc-600",
+  preparing: "bg-sky-100 text-sky-800",
+  ready: "bg-amber-100 text-amber-800",
+  delivered: "bg-emerald-100 text-emerald-800",
+};
+
+/** Lo mínimo que la columna necesita de una línea del carrito. */
+export type MesaColumnCartItem = {
+  _key: string;
+  product_name: string;
+  quantity: number;
+  notes: string | null;
+  line_subtotal_cents: number;
+  /** Nombres de los modificadores elegidos, para que la línea sin enviar se
+   *  lea igual que la enviada. */
+  modifiers: string[];
+  esMenuDelDia: boolean;
+  price_override_cents: number | null;
+  price_override_reason: string | null;
+  unit_price_cents: number;
+};
+
+export type MesaColumnAcciones = {
+  onCobrar?: () => void;
+  onCargarCliente?: () => void;
+  onTransferir?: () => void;
+  onTrasladar?: () => void;
+  onAnular?: () => void;
+};
+
+function horaDe(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+}
+
+export function MesaColumn({
+  tableLabel,
+  operationalStatus,
+  minutosAbierta,
+  loPedido,
+  comandas,
+  stationNameById,
+  cart,
+  cartTotalCents,
+  userCanCancel,
+  userCanEditPrice,
+  pending,
+  onCancelItem,
+  onAdvance,
+  onChangeQty,
+  onRemoveCartItem,
+  onEditPrice,
+  onEnviar,
+  acciones,
+  onClose,
+  cartZone,
+  className = "",
+}: {
+  tableLabel: string;
+  operationalStatus: string;
+  minutosAbierta: number | null;
+  loPedido: LoPedido | null;
+  /** Sólo para «Entregar» y el estado de la comanda: los ítems salen de
+   *  `loPedido`, que también trae los que no fueron a cocina. */
+  comandas: ComandaConItems[];
+  stationNameById: Record<string, string>;
+  cart: MesaColumnCartItem[];
+  cartTotalCents: number;
+  userCanCancel: boolean;
+  userCanEditPrice: boolean;
+  pending: boolean;
+  onCancelItem: (orderItemId: string, productName: string) => void;
+  onAdvance: (comandaId: string) => void;
+  onChangeQty: (key: string, delta: number) => void;
+  onRemoveCartItem: (key: string) => void;
+  onEditPrice: (key: string) => void;
+  onEnviar: () => void;
+  acciones?: MesaColumnAcciones;
+  onClose?: () => void;
+  /**
+   * La zona de teclado del carrito (`useCartZone`, specs 055/075). La cadena
+   * buscador → resultados → carrito → enviar no cambia porque el carrito se
+   * haya mudado a esta columna: ↓ desde el último resultado sigue cayendo acá.
+   * Sin esto, mudarlo lo habría dejado fuera del teclado en silencio.
+   */
+  cartZone?: {
+    handleKeyDown: (e: React.KeyboardEvent) => void;
+    itemProps: (i: number) => Record<string, unknown>;
+  };
+  className?: string;
+}) {
+  const enviados = loPedido?.items ?? [];
+  const tandas = agruparPorTanda(enviados);
+  const comandaById = new Map(comandas.map((c) => [c.id, c]));
+  const haySinEnviar = cart.length > 0;
+  const hayEnviado = enviados.some((i) => !estaAnulado(i));
+
+  const menu = acciones ?? {};
+  const menuItems = [
+    menu.onCargarCliente && {
+      key: "cliente",
+      label: "Cargar cliente",
+      onClick: menu.onCargarCliente,
+    },
+    // Cobrar vive en el ⋯ cuando hay algo sin enviar: ahí el botón grande es
+    // «Enviar», y cobrar una mesa con líneas sin mandar es casi siempre un
+    // error de tap.
+    haySinEnviar &&
+      hayEnviado &&
+      menu.onCobrar && {
+        key: "cobrar",
+        label: "Cobrar",
+        onClick: menu.onCobrar,
+      },
+    menu.onTransferir && {
+      key: "transferir",
+      label: "Transferir mozo",
+      onClick: menu.onTransferir,
+    },
+    menu.onTrasladar && {
+      key: "trasladar",
+      label: "Trasladar mesa",
+      onClick: menu.onTrasladar,
+    },
+  ].filter(Boolean) as { key: string; label: string; onClick: () => void }[];
+
+  return (
+    <section
+      aria-label={`Mesa ${tableLabel}`}
+      className={`flex min-h-0 flex-col border-zinc-200 @2xl:border-r ${className}`}
+    >
+      {/* Cabecera: qué mesa, cómo está y hace cuánto. */}
+      <header className="flex shrink-0 items-start gap-2 border-b border-zinc-200 bg-white px-4 py-3">
+        <div className="min-w-0 flex-1">
+          <h2 className="font-heading truncate text-2xl leading-none font-extrabold tracking-tight text-zinc-900 uppercase">
+            {tableLabel}
+          </h2>
+          <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-zinc-500">
+            <span className="inline-flex items-center gap-1">
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  operationalStatus === "libre"
+                    ? "bg-zinc-300"
+                    : operationalStatus === "pidio_cuenta"
+                      ? "bg-amber-500"
+                      : "bg-emerald-500"
+                }`}
+              />
+              {operationalStatus === "libre"
+                ? "Libre"
+                : operationalStatus === "pidio_cuenta"
+                  ? "Pidió la cuenta"
+                  : "Ocupada"}
+            </span>
+            {minutosAbierta != null && (
+              <span className="inline-flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                {minutosAbierta} min
+              </span>
+            )}
+            {loPedido && <span>Orden #{loPedido.order_number}</span>}
+            {loPedido?.party_size != null && (
+              <span>
+                {loPedido.party_size}{" "}
+                {loPedido.party_size === 1 ? "persona" : "personas"}
+              </span>
+            )}
+          </div>
+        </div>
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Cerrar mesa"
+            className="-mt-1 -mr-1 shrink-0 rounded-full p-2 text-zinc-400 transition hover:bg-zinc-100"
+          >
+            <span aria-hidden>✕</span>
+          </button>
+        )}
+      </header>
+
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
+        {tandas.length === 0 && !haySinEnviar && (
+          <p className="px-1 py-8 text-center text-xs text-zinc-500">
+            La mesa todavía no tiene nada cargado. Buscá un producto a la
+            derecha y agregalo con Enter.
+          </p>
+        )}
+
+        {/* ── Enviado ── */}
+        {tandas.map((tanda) => {
+          const hora = horaDe(tanda.emitted_at);
+          const comandasDeTanda = [
+            ...new Set(
+              tanda.items
+                .map((i) => i.comanda_id)
+                .filter((id): id is string => Boolean(id)),
+            ),
+          ]
+            .map((id) => comandaById.get(id))
+            .filter((c): c is ComandaConItems => Boolean(c))
+            .filter((c) => c.status !== "entregado");
+
+          return (
+            <article
+              key={tanda.batch ?? "sin-comanda"}
+              className="overflow-hidden rounded-2xl bg-white ring-1 ring-zinc-200"
+            >
+              <header className="flex items-baseline justify-between gap-2 border-b border-zinc-100 bg-zinc-50/60 px-3 py-1.5">
+                <span className="text-[11px] font-semibold text-zinc-700">
+                  {tanda.batch == null ? "Sin comanda" : `Tanda ${tanda.batch}`}
+                </span>
+                <span className="text-[11px] text-zinc-500">
+                  {tanda.batch == null ? "no va a cocina" : (hora ?? "")}
+                </span>
+              </header>
+
+              <ul className="divide-y divide-zinc-100">
+                {tanda.items.map((item) => (
+                  <ItemEnviado
+                    key={item.order_item_id}
+                    item={item}
+                    sector={
+                      item.station_id
+                        ? (stationNameById[item.station_id] ?? null)
+                        : null
+                    }
+                    userCanCancel={userCanCancel}
+                    pending={pending}
+                    onCancelItem={onCancelItem}
+                  />
+                ))}
+              </ul>
+
+              {comandasDeTanda.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 border-t border-zinc-100 p-2">
+                  {comandasDeTanda.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => onAdvance(c.id)}
+                      disabled={pending}
+                      className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl bg-emerald-50 px-3 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200 active:scale-[0.98] disabled:opacity-60"
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                      Entregar
+                      {comandasDeTanda.length > 1 && c.station_id && (
+                        <span className="font-normal">
+                          {stationNameById[c.station_id] ?? "sector"}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </article>
+          );
+        })}
+
+        {/* ── Sin enviar ──
+            En verde y con borde grueso: es lo único de la columna que todavía
+            no vio nadie en cocina, y confundirlo con lo enviado es servir de
+            menos o mandar dos veces. */}
+        {haySinEnviar && (
+          <article className="overflow-hidden rounded-2xl bg-emerald-50/60 ring-2 ring-emerald-400">
+            <header className="flex items-baseline justify-between gap-2 border-b border-emerald-200 bg-emerald-100/70 px-3 py-1.5">
+              <span className="text-[11px] font-bold text-emerald-800 uppercase">
+                Sin enviar
+              </span>
+              <span className="text-[11px] font-semibold text-emerald-700 tabular-nums">
+                {formatCurrency(cartTotalCents)}
+              </span>
+            </header>
+            <ul
+              onKeyDown={cartZone?.handleKeyDown}
+              className="divide-y divide-emerald-200/70"
+            >
+              {cart.map((c, i) => (
+                <ItemSinEnviar
+                  key={c._key}
+                  item={c}
+                  rowProps={cartZone?.itemProps(i)}
+                  userCanEditPrice={userCanEditPrice}
+                  onChangeQty={onChangeQty}
+                  onRemove={onRemoveCartItem}
+                  onEditPrice={onEditPrice}
+                />
+              ))}
+            </ul>
+          </article>
+        )}
+      </div>
+
+      {/* ── Pie: total + qué hacer ── */}
+      <footer className="shrink-0 space-y-2 border-t border-zinc-200 bg-white px-3 py-3">
+        {loPedido && hayEnviado && (
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-[11px] text-zinc-500">
+              {haySinEnviar ? "Enviado hasta ahora" : "Total de la mesa"}
+            </span>
+            <span className="text-lg font-bold text-zinc-900 tabular-nums">
+              {formatCurrency(loPedido.total_cents)}
+            </span>
+          </div>
+        )}
+
+        <div className="flex items-stretch gap-2">
+          <div className="min-w-0 flex-1">
+            {haySinEnviar ? (
+              <button
+                type="button"
+                onClick={onEnviar}
+                disabled={pending}
+                className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 text-base font-bold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-60"
+              >
+                <Send className="h-5 w-5" />
+                {pending
+                  ? "Enviando…"
+                  : `Enviar ${formatCurrency(cartTotalCents)}`}
+                <kbd className="ml-1 rounded bg-white/20 px-1.5 py-0.5 text-[10px] font-semibold">
+                  ⌘↵
+                </kbd>
+              </button>
+            ) : acciones?.onCobrar && hayEnviado ? (
+              <button
+                type="button"
+                onClick={acciones.onCobrar}
+                disabled={pending}
+                className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-amber-500 text-base font-bold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-60"
+              >
+                Cobrar
+              </button>
+            ) : null}
+          </div>
+
+          {(menuItems.length > 0 || menu.onAnular) && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                aria-label="Más acciones de la mesa"
+                disabled={pending}
+                className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white text-zinc-600 ring-1 ring-zinc-200 transition hover:bg-zinc-50 disabled:opacity-50"
+              >
+                <MoreVertical className="size-5" strokeWidth={2.5} />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52">
+                {menuItems.map((it) => (
+                  <DropdownMenuItem key={it.key} onClick={it.onClick}>
+                    {it.label}
+                  </DropdownMenuItem>
+                ))}
+                {menu.onAnular && (
+                  <>
+                    {menuItems.length > 0 && <DropdownMenuSeparator />}
+                    <DropdownMenuItem
+                      onClick={menu.onAnular}
+                      className="text-red-600 focus:text-red-600"
+                    >
+                      Anular mesa
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
+      </footer>
+    </section>
+  );
+}
+
+function ItemEnviado({
+  item,
+  sector,
+  userCanCancel,
+  pending,
+  onCancelItem,
+}: {
+  item: LoPedidoItem;
+  sector: string | null;
+  userCanCancel: boolean;
+  pending: boolean;
+  onCancelItem: (orderItemId: string, productName: string) => void;
+}) {
+  if (estaAnulado(item)) {
+    return (
+      <li className="flex items-start gap-2 bg-zinc-50 px-3 py-2 text-zinc-400">
+        <span className="text-xs font-semibold tabular-nums line-through">
+          {item.quantity}×
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-semibold line-through">
+            {item.product_name}
+          </p>
+          {item.cancelled_reason && (
+            <p className="mt-0.5 text-[11px] text-red-500">
+              Anulado: {item.cancelled_reason}
+            </p>
+          )}
+        </div>
+      </li>
+    );
+  }
+
+  return (
+    <li className="flex items-start gap-2 px-3 py-2">
+      <span className="mt-0.5 text-sm font-bold text-zinc-700 tabular-nums">
+        {item.quantity}×
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold text-zinc-900">
+          {item.product_name}
+        </p>
+        {/* Los modificadores son la mitad del pedido: sin ellos «Milanesa» no
+            dice si va con papas o con puré. */}
+        {item.modifiers.length > 0 && (
+          <p className="mt-0.5 text-xs text-zinc-600">
+            {item.modifiers.join(" · ")}
+          </p>
+        )}
+        {item.notes && (
+          <p className="mt-0.5 text-xs text-zinc-500 italic">
+            &ldquo;{item.notes}&rdquo;
+          </p>
+        )}
+        <div className="mt-1 flex flex-wrap items-center gap-1">
+          <span
+            className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${KITCHEN_PILL[item.kitchen_status]}`}
+          >
+            {KITCHEN_LABEL[item.kitchen_status]}
+          </span>
+          {sector && (
+            <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600">
+              {sector}
+            </span>
+          )}
+          {item.seat_number != null && (
+            <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600">
+              Cubierto {item.seat_number}
+            </span>
+          )}
+        </div>
+      </div>
+      <span className="shrink-0 text-xs font-semibold text-zinc-700 tabular-nums">
+        {formatCurrency(item.subtotal_cents)}
+      </span>
+      {userCanCancel && (
+        <button
+          type="button"
+          onClick={() => onCancelItem(item.order_item_id, item.product_name)}
+          disabled={pending}
+          className="shrink-0 rounded-full p-1.5 text-zinc-400 active:bg-red-50 active:text-red-600 disabled:opacity-40"
+          aria-label={`Anular ${item.product_name}`}
+        >
+          <Ban className="h-4 w-4" />
+        </button>
+      )}
+    </li>
+  );
+}
+
+function ItemSinEnviar({
+  item,
+  userCanEditPrice,
+  onChangeQty,
+  onRemove,
+  onEditPrice,
+  rowProps,
+}: {
+  item: MesaColumnCartItem;
+  userCanEditPrice: boolean;
+  onChangeQty: (key: string, delta: number) => void;
+  onRemove: (key: string) => void;
+  onEditPrice: (key: string) => void;
+  rowProps?: Record<string, unknown>;
+}) {
+  return (
+    <li
+      // La línea entera es la parada de teclado (spec 075): parado encima,
+      // ←/→ mueven la cantidad y Supr la quita.
+      {...rowProps}
+      aria-label={`${item.product_name}, cantidad ${item.quantity}. Sin enviar. ← y → cambian la cantidad, Supr la quita.`}
+      className="flex items-start gap-2 px-3 py-2 outline-none focus-visible:bg-emerald-100 focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-inset"
+    >
+      <span className="mt-0.5 text-sm font-bold text-emerald-800 tabular-nums">
+        {item.quantity}×
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold text-zinc-900">
+          {item.esMenuDelDia && (
+            <span className="mr-1 inline-flex items-center rounded bg-emerald-200 px-1 align-middle text-[9px] font-bold text-emerald-800 uppercase">
+              Menú
+            </span>
+          )}
+          {item.product_name}
+        </p>
+        {item.modifiers.length > 0 && (
+          <p className="mt-0.5 text-xs text-zinc-600">
+            {item.modifiers.join(" · ")}
+          </p>
+        )}
+        {item.notes && (
+          <p className="mt-0.5 text-xs text-zinc-500 italic">
+            &ldquo;{item.notes}&rdquo;
+          </p>
+        )}
+        {item.price_override_cents != null && (
+          <p className="mt-0.5 text-[11px] font-medium text-amber-700">
+            <span className="line-through opacity-60">
+              {formatCurrency(item.unit_price_cents)}
+            </span>{" "}
+            → {formatCurrency(item.price_override_cents)} ·{" "}
+            {item.price_override_reason}
+          </p>
+        )}
+      </div>
+      <span className="shrink-0 text-xs font-semibold text-emerald-800 tabular-nums">
+        {formatCurrency(item.line_subtotal_cents)}
+      </span>
+      <div className="flex shrink-0 items-center gap-1">
+        {userCanEditPrice && !item.esMenuDelDia && (
+          <button
+            type="button"
+            onClick={() => onEditPrice(item._key)}
+            className={`flex h-8 w-8 items-center justify-center rounded-full ring-1 active:scale-95 ${
+              item.price_override_cents != null
+                ? "bg-amber-100 text-amber-700 ring-amber-300"
+                : "bg-white text-zinc-500 ring-zinc-200"
+            }`}
+            aria-label={`Cambiar el precio de ${item.product_name}`}
+          >
+            <Tag className="h-4 w-4" />
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => onChangeQty(item._key, -1)}
+          disabled={item.quantity <= 1}
+          className="flex h-8 w-8 items-center justify-center rounded-full bg-white ring-1 ring-zinc-200 active:scale-95 disabled:opacity-40"
+          aria-label={`Restar ${item.product_name}`}
+        >
+          <span aria-hidden className="text-lg leading-none">
+            −
+          </span>
+        </button>
+        <span className="w-6 text-center text-sm font-bold tabular-nums">
+          {item.quantity}
+        </span>
+        <button
+          type="button"
+          onClick={() => onChangeQty(item._key, 1)}
+          disabled={item.quantity >= 99}
+          className="flex h-8 w-8 items-center justify-center rounded-full bg-white ring-1 ring-zinc-200 active:scale-95 disabled:opacity-40"
+          aria-label={`Sumar ${item.product_name}`}
+        >
+          <span aria-hidden className="text-lg leading-none">
+            +
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => onRemove(item._key)}
+          className="flex h-8 w-8 items-center justify-center rounded-full text-zinc-400 active:bg-red-50 active:text-red-600"
+          aria-label={`Quitar ${item.product_name}`}
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
+    </li>
+  );
+}
