@@ -411,3 +411,77 @@ describe("asistente del menú del día · modificadores del producto (spec 083)"
     expect(onAdd.mock.calls[0]![2][0].modifier_ids).toEqual([]);
   });
 });
+
+describe("asistente del menú del día · el segundo Enter sigue (spec 118)", () => {
+  /** «Estilo de papas»: **opcional**, hasta 1. No se cierra solo — lleva
+   *  «Seguir», porque «ninguno» también es una respuesta válida (FR-003). */
+  const ESTILO = {
+    id: "g-estilo",
+    name: "Estilo de papas",
+    is_required: false,
+    min_selection: 0,
+    max_selection: 1,
+    sort_order: 0,
+    modifiers: [
+      { id: "m-baston", name: "Bastón", price_delta_cents: 0, is_available: true, sort_order: 0 },
+      { id: "m-rejilla", name: "Rejilla", price_delta_cents: 10000, is_available: true, sort_order: 1 },
+      { id: "m-espanola", name: "Española", price_delta_cents: 0, is_available: true, sort_order: 2 },
+    ],
+  };
+
+  function menuConEstilo(): DailyMenuForMozo {
+    sortOrder = 0;
+    const papas = {
+      ...option("gp", "Principal", 1),
+      product_name: "Papas c/Crema",
+      modifier_groups: [ESTILO],
+    };
+    return {
+      ...MENU,
+      price_cents: 2400000,
+      components: [papas],
+      choice_groups: [
+        {
+          choice_group_id: "gp",
+          label: "Plato Principal",
+          options: [papas],
+          applies_when_group_id: null,
+          applies_when_product_ids: [],
+        },
+      ],
+      has_choices: true,
+    };
+  }
+
+  it("con la opción ya elegida, el segundo Enter avanza en vez de desmarcarla", async () => {
+    const { onAdd } = renderWizard(menuConEstilo());
+    await expectFocusOn(/Papas c\/Crema/);
+    fireEvent.keyDown(focused(), { key: "1" });
+
+    // Paso opcional: elegir no cierra el paso, hay que «Seguir».
+    await expectFocusOn(/Bastón/);
+    fireEvent.keyDown(focused(), { key: "Enter" });
+
+    // El segundo Enter sobre lo ya elegido es «Seguir». Antes lo desmarcaba:
+    // dos Enter seguidos y volvías a cero sin darte cuenta.
+    fireEvent.keyDown(focused(), { key: "Enter" });
+    await expectFocusOn(/Agregar/);
+
+    fireEvent.click(focused());
+    expect(onAdd.mock.calls[0]![2][0].modifier_ids).toEqual(["m-baston"]);
+  });
+
+  it("sin nada elegido el Enter sigue eligiendo, no avanza", async () => {
+    renderWizard(menuConEstilo());
+    await expectFocusOn(/Papas c\/Crema/);
+    fireEvent.keyDown(focused(), { key: "1" });
+
+    await expectFocusOn(/Bastón/);
+    fireEvent.keyDown(focused(), { key: "Enter" });
+    // Sigue en el paso, con Bastón marcado. (Grupo opcional → `checkbox`.)
+    expect(screen.getByRole("checkbox", { name: /Bastón/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+  });
+});

@@ -338,7 +338,22 @@ export function DailyMenuWizard({
         if (role !== "radio" && role !== "checkbox") return;
         e.preventDefault();
         const modifier = step.group.modifiers[activeIndex];
-        if (modifier) toggleModifier(step, modifier);
+        if (!modifier) return;
+        // Segundo Enter sobre lo que ya elegiste = «Seguir».
+        //
+        // Los grupos opcionales o de varias no se cierran solos (FR-003), así
+        // que después de elegir hay que salir del paso — y el Enter, que es
+        // donde la mano ya está, **desmarcaba**: dos Enter seguidos y volvías a
+        // cero sin enterarte. Ahora el segundo avanza, que es lo que se espera
+        // de un asistente. Para desmarcar quedan el dígito y el click.
+        const yaElegido = modifiersOf(step.choiceGroupId).some(
+          (m) => m.id === modifier.id,
+        );
+        if (yaElegido && faltan === 0) {
+          goToStep(Math.min(currentIndex + 1, steps.length - 1), selections);
+          return;
+        }
+        toggleModifier(step, modifier);
       }
       return;
     }
