@@ -93,6 +93,11 @@ import {
   type AddToCartItem,
 } from "@/components/mozo/product-modal";
 import { ProductResultsList } from "@/components/mozo/product-results-list";
+import {
+  ColumnaDeCarga,
+  ColumnaLateral,
+  PanelDeCarga,
+} from "@/components/mozo/panel-de-carga";
 
 type CartProductItem = AddToCartItem & {
   _key: string;
@@ -1272,111 +1277,104 @@ export function MozoPedirClient({
           </div>
         </header>
 
-        {/* Cuerpo en dos columnas (spec 111): lo ya pedido a la izquierda, la
-            carga a la derecha. El corte es por ancho **del panel** (container
-            query), no del viewport: el panel es el 44% de la pantalla. */}
-        <div className="relative flex min-h-0 flex-1 flex-col @2xl:flex-row">
+        {/* Cuerpo en dos columnas (spec 111; shell compartido con los pedidos
+            online desde la 115): lo ya pedido a la izquierda, la carga a la
+            derecha. El corte es por ancho **del panel** (container query), no
+            del viewport: el panel es el 44% de la pantalla. */}
+        <PanelDeCarga>
           {/* Izquierda: lo que la mesa ya tiene cargado. Ancha de verdad —el
               detalle por ítem (modificadores, nota, sector, estado) no entra
               en una columna angosta— pero nunca más que la de carga. */}
-          <MesaColumn
-            tableLabel={table.label}
-            loPedido={loPedido ?? null}
-            cargando={mesaCargando}
-            comandas={comandas}
-            stationNameById={stationNameById}
-            cart={cartParaColumna}
-            cartTotalCents={cartTotal}
-            userCanCancel={userCanCancel}
-            userCanEditPrice={userCanEditPrice}
-            enviando={pending}
-            onCancelItem={(id, name) =>
-              setCancelTarget({ orderItemId: id, productName: name })
-            }
-            onAdvance={handleAdvance}
-            onChangeQty={changeQuantity}
-            onRemoveCartItem={removeFromCart}
-            onEditPrice={setPriceTargetKey}
-            onEnviar={handleSend}
-            cartZone={carrito}
-            acciones={{
-              ...mesaAcciones,
-              onCargarCliente: () => setClienteOpen(true),
-            }}
-            className={
-              verLoPedido
-                ? // Hoja sobre la carga (panel angosto): la tapa a propósito.
-                  "absolute inset-0 z-10 bg-zinc-50 @2xl:static @2xl:z-auto @2xl:w-[46%] @2xl:max-w-[520px] @2xl:shrink-0"
-                : "hidden @2xl:flex @2xl:w-[46%] @2xl:max-w-[520px] @2xl:shrink-0"
-            }
-          />
+          <ColumnaLateral abierta={verLoPedido}>
+            <MesaColumn
+              tableLabel={table.label}
+              loPedido={loPedido ?? null}
+              cargando={mesaCargando}
+              comandas={comandas}
+              stationNameById={stationNameById}
+              cart={cartParaColumna}
+              cartTotalCents={cartTotal}
+              userCanCancel={userCanCancel}
+              userCanEditPrice={userCanEditPrice}
+              enviando={pending}
+              onCancelItem={(id, name) =>
+                setCancelTarget({ orderItemId: id, productName: name })
+              }
+              onAdvance={handleAdvance}
+              onChangeQty={changeQuantity}
+              onRemoveCartItem={removeFromCart}
+              onEditPrice={setPriceTargetKey}
+              onEnviar={handleSend}
+              cartZone={carrito}
+              acciones={{
+                ...mesaAcciones,
+                onCargarCliente: () => setClienteOpen(true),
+              }}
+              className="min-h-0 flex-1"
+            />
+          </ColumnaLateral>
 
           {/* Derecha: la carga. Es la columna del camino feliz —buscador,
-              catálogo, enviar— y se queda con el resto del ancho.
-              `relative`: los modales de carga se scopean acá adentro. */}
-          <div className="relative flex min-h-0 flex-1 flex-col">
-            {/* Buscador fijo + categorías secundarias. FR-001/003/014. */}
-            <div className="shrink-0 space-y-2 border-b border-zinc-200 bg-white px-3 py-2.5">
-              {/* Personas primero (spec 111, FR-013): es el dato de la mesa y
-                  se resuelve con un tap, sin sacarle el foco al buscador. */}
-              <PersonasChips
-                slug={slug}
-                tableId={table.id}
-                value={personas}
-                onChange={setPersonas}
-                persistir={loPedido != null}
-              />
-              {/* Sólo el buscador (spec 111, fase 5). El selector de categoría
-                  se fue: con el buscador tolerante a acentos y orden de
-                  palabras, elegir categoría es un rodeo — y sin búsqueda lo
-                  que se ve son «Más pedidos», que es a lo que se volvía. El
-                  filtro de la carta online subió al header del panel. */}
-              <ProductSearchInput
-                api={searchApi}
-                inputRef={searchRef}
-                conFiltroDeCarta={false}
-              />
-            </div>
-
-            {/* Resultados / catálogo (scroll) — zona de teclado: ↓ desde el
-            buscador entra acá, ↓ pasado el último ítem sigue al carrito. */}
-            <div
-              onKeyDown={(e) => {
-                if (catalogo.handleKeyDown(e)) return;
-                if (isPrintableKey(e)) {
-                  e.preventDefault();
-                  escribirEnBuscador(e.key);
-                }
-              }}
-              className="min-h-0 flex-1 overflow-y-auto px-3 py-3"
-            >
-              {isSearching ? (
-                <SearchResults
-                  results={searchResults}
-                  onPick={setOpenProduct}
-                  enterTargetId={enterTargetId}
-                  itemProps={catalogoProps}
+              catálogo, enviar— y se queda con el resto del ancho. */}
+          <ColumnaDeCarga
+            encabezado={
+              <>
+                {/* Personas primero (spec 111, FR-013): es el dato de la mesa y
+                    se resuelve con un tap, sin sacarle el foco al buscador. */}
+                <PersonasChips
+                  slug={slug}
+                  tableId={table.id}
+                  value={personas}
+                  onChange={setPersonas}
+                  persistir={loPedido != null}
                 />
-              ) : tabs.length === 0 ? (
-                <EmptyCatalog />
-              ) : (
-                <TabView
-                  tabSections={visibleSections}
-                  activeTabLabel="el catálogo"
-                  isTopTab={topProducts.length > 0}
-                  dailyMenus={menusVisibles}
-                  onPick={setOpenProduct}
-                  onPickDailyMenu={setOpenDailyMenu}
-                  enterTargetId={enterTargetId}
-                  itemProps={catalogoProps}
+                {/* Sólo el buscador (spec 111, fase 5). El selector de categoría
+                    se fue: con el buscador tolerante a acentos y orden de
+                    palabras, elegir categoría es un rodeo — y sin búsqueda lo
+                    que se ve son «Más pedidos», que es a lo que se volvía. El
+                    filtro de la carta online subió al header del panel. */}
+                <ProductSearchInput
+                  api={searchApi}
+                  inputRef={searchRef}
+                  conFiltroDeCarta={false}
                 />
-              )}
-            </div>
-
-            {/* Elegir modificadores tapa la carga, no la mesa. */}
-            {modalsCargaEl}
-          </div>
-        </div>
+              </>
+            }
+            // Zona de teclado: ↓ desde el buscador entra acá, ↓ pasado el
+            // último ítem sigue al carrito.
+            onKeyDownResultados={(e) => {
+              if (catalogo.handleKeyDown(e)) return;
+              if (isPrintableKey(e)) {
+                e.preventDefault();
+                escribirEnBuscador(e.key);
+              }
+            }}
+            // Elegir modificadores tapa la carga, no la mesa.
+            pie={modalsCargaEl}
+          >
+            {isSearching ? (
+              <SearchResults
+                results={searchResults}
+                onPick={setOpenProduct}
+                enterTargetId={enterTargetId}
+                itemProps={catalogoProps}
+              />
+            ) : tabs.length === 0 ? (
+              <EmptyCatalog />
+            ) : (
+              <TabView
+                tabSections={visibleSections}
+                activeTabLabel="el catálogo"
+                isTopTab={topProducts.length > 0}
+                dailyMenus={menusVisibles}
+                onPick={setOpenProduct}
+                onPickDailyMenu={setOpenDailyMenu}
+                enterTargetId={enterTargetId}
+                itemProps={catalogoProps}
+              />
+            )}
+          </ColumnaDeCarga>
+        </PanelDeCarga>
 
         {clienteOpen && (
           <CargarClienteModal

@@ -29,7 +29,6 @@ import {
   type ClienteMatch,
 } from "@/lib/admin/customers-actions";
 import { formatCurrency } from "@/lib/currency";
-import { cn } from "@/lib/utils";
 import type { CatalogForMozo, CatalogProduct } from "@/lib/mozo/catalog-query";
 import { loadPedirCatalog } from "@/lib/mozo/pedir-panel-data";
 import { confirmarPedido } from "@/lib/orders/confirm-order";
@@ -46,6 +45,12 @@ import {
 import { CustomerFields } from "@/components/shared/customer-fields";
 import { PriceOverrideModal } from "@/components/shared/price-override-modal";
 import { ProductResultsList } from "@/components/mozo/product-results-list";
+import {
+  ColumnaDeCarga,
+  ColumnaLateral,
+  PanelDeCarga,
+  useAnchoDePanel,
+} from "@/components/mozo/panel-de-carga";
 import { useCartZone } from "@/lib/mozo/use-cart-zone";
 import { isPrintableKey } from "@/lib/ui/roving";
 import { useRovingList } from "@/lib/ui/use-roving-list";
@@ -91,17 +96,9 @@ function formatDireccion(a: ClienteDireccion): string {
  * paso «datos» deja de existir (spec 111). El layout lo resuelve CSS; esto es
  * sólo para ⌘Enter, que sin saberlo mandaría a un paso invisible.
  */
-function useSheetAncho(): boolean {
-  const [ancho, setAncho] = useState(false);
-  useEffect(() => {
-    const mq = window.matchMedia("(min-width: 1280px)");
-    const sync = () => setAncho(mq.matches);
-    sync();
-    mq.addEventListener("change", sync);
-    return () => mq.removeEventListener("change", sync);
-  }, []);
-  return ancho;
-}
+/* `useSheetAncho` (media query de viewport a 1280 px) se fue en la spec 115: el
+   layout lo decide el ancho **de la hoja**, no el de la pantalla, y ahora JS y
+   CSS miden lo mismo con `useAnchoDePanel`. */
 
 export function CargarPedidoSheet({
   slug,
@@ -129,7 +126,8 @@ export function CargarPedidoSheet({
   const [catalogError, setCatalogError] = useState<string | null>(null);
 
   const [view, setView] = useState<View>("carga");
-  const sheetAncho = useSheetAncho();
+  const hojaRef = useRef<HTMLDivElement>(null);
+  const sheetAncho = useAnchoDePanel(hojaRef);
   const [activeCategory, setActiveCategory] = useState<string>("");
   const [openProduct, setOpenProduct] = useState<CatalogProduct | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -487,7 +485,11 @@ export function CargarPedidoSheet({
             else if (view === "datos" && canSubmit) submit(!isScheduled);
           }
         }}
-        className="relative flex h-full w-full max-w-md flex-col overflow-hidden bg-zinc-50 shadow-2xl xl:max-w-[900px]"
+        ref={hojaRef}
+        // `@container`: el layout de adentro se adapta al ancho **de la hoja**
+        // (spec 115), igual que el panel del salón. El `xl:` de acá es otra
+        // cosa: cuánto se le permite ensancharse a la hoja en pantalla grande.
+        className="@container relative flex h-full w-full max-w-md flex-col overflow-hidden bg-zinc-50 shadow-2xl xl:max-w-[900px]"
       >
         {/* ─── Header ─── */}
         <header className="shrink-0 border-b border-zinc-200 bg-white px-3 py-2.5">
@@ -495,7 +497,7 @@ export function CargarPedidoSheet({
             {view === "datos" ? (
               <button
                 onClick={() => setView("carga")}
-                className="-ml-1 rounded-full p-2 text-zinc-700 active:bg-zinc-100 xl:hidden"
+                className="-ml-1 rounded-full p-2 text-zinc-700 active:bg-zinc-100 @2xl:hidden"
                 aria-label="Volver a la carga"
               >
                 <ArrowLeft className="h-5 w-5" />
@@ -545,208 +547,117 @@ export function CargarPedidoSheet({
           </div>
         </header>
 
-        {/* ── Cuerpo ──
+        {/* ── Cuerpo ── (shell compartido con el panel del salón, spec 115)
             Angosto: una vista por vez (carga → «Continuar» → datos), como
-            siempre. Ancho (xl, spec 111): las dos a la vez, sin ese paso —
-            cliente y entrega a la izquierda, la carga a la derecha. Es el
-            mismo click de menos que en el salón, en la otra superficie. */}
-        <div className="flex min-h-0 flex-1 flex-col xl:flex-row">
-          <div
-            className={cn(
-              "flex min-h-0 flex-1 flex-col xl:order-2",
-              view === "carga" ? "" : "hidden xl:flex",
-            )}
-          >
-            {/* ─── Buscador fijo + categorías (spec 055) ─── */}
-            <div className="shrink-0 space-y-2 border-b border-zinc-200 bg-white px-3 py-2.5">
-              <ProductSearchInput api={searchApi} inputRef={searchRef} />
-              {!isSearching && categoriesWithProducts.length > 1 && (
-                <div className="flex items-center gap-2">
-                  <label
-                    htmlFor="cargar-cat"
-                    className="shrink-0 text-[11px] font-semibold tracking-wide text-zinc-500 uppercase"
-                  >
-                    Categoría
-                  </label>
-                  <select
-                    id="cargar-cat"
-                    value={activeCategory}
-                    onChange={(e) => setActiveCategory(e.target.value)}
-                    className="min-w-0 flex-1 rounded-xl border border-zinc-200 bg-white px-2.5 py-1.5 text-sm font-semibold text-zinc-800 focus:border-emerald-400 focus:outline-none"
-                  >
-                    {categoriesWithProducts.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
-
-            {/* ─── Resultados (scroll) ─── */}
-            <div
-              onKeyDown={(e) => {
-                if (catalogo.handleKeyDown(e)) return;
-                if (isPrintableKey(e)) {
-                  e.preventDefault();
-                  escribirEnBuscador(e.key);
-                }
-              }}
-              className="min-h-0 flex-1 overflow-y-auto px-3 py-3"
-            >
-              {loadingCatalog ? (
-                <div className="flex h-40 items-center justify-center text-zinc-400">
-                  <Loader2 className="h-6 w-6 animate-spin" />
-                </div>
-              ) : catalogError ? (
-                <div className="rounded-2xl border border-dashed border-red-200 bg-red-50 py-10 text-center">
-                  <p className="text-sm font-semibold text-red-700">
-                    {catalogError}
-                  </p>
-                </div>
-              ) : catalogProducts.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-zinc-200 bg-white py-10 text-center">
-                  <p className="text-sm font-semibold text-zinc-700">
-                    {isSearching ? "Sin resultados" : "Sin productos"}
-                  </p>
-                </div>
-              ) : (
-                // Buscando o no, la misma lista navegable por ↓/↑. Spec 073.
-                <ProductResultsList
-                  products={catalogProducts}
-                  onPick={setOpenProduct}
-                  enterTargetId={enterTargetId}
-                  itemProps={(id) => {
-                    const i = catalogProducts.findIndex((p) => p.id === id);
-                    return i < 0 ? {} : catalogo.itemProps(i);
-                  }}
-                />
-              )}
-            </div>
-
-            {/* ─── Pedido en armado (siempre visible) ─── */}
-            <div className="shrink-0 border-t border-zinc-200 bg-white">
-              <div className="flex items-center justify-between px-3 pt-2.5">
-                <p className="text-[10px] font-semibold tracking-[0.18em] text-zinc-500 uppercase">
-                  Tu pedido
-                </p>
-                <span className="text-[11px] font-semibold text-zinc-500 tabular-nums">
-                  {cartCount > 0
-                    ? `${cartCount} ${cartCount === 1 ? "ítem" : "ítems"}`
-                    : "vacío"}
-                </span>
-              </div>
-              {cart.length === 0 ? (
-                <p className="px-3 pt-1 pb-2.5 text-xs text-zinc-500">
-                  Todavía no cargaste nada. Buscá arriba y agregá con Enter.
-                </p>
-              ) : (
-                <ul
-                  onKeyDown={carrito.handleKeyDown}
-                  className="max-h-36 space-y-1 overflow-y-auto px-3 py-2"
-                >
-                  {cart.map((c, i) => (
-                    <li
-                      key={c._key}
-                      {...carrito.itemProps(i)}
-                      aria-label={`${c.product_name}, cantidad ${c.quantity}. ← y → cambian la cantidad, Supr la quita.`}
-                      className="flex items-center gap-2 rounded-xl bg-zinc-50 px-2.5 py-1.5 ring-1 ring-zinc-100 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+            siempre — «datos» se abre encima de la carga. Ancho: las dos a la
+            vez, sin ese paso. Es el mismo click de menos que en el salón, en la
+            otra superficie. El corte lo decide el ancho **de la hoja**. */}
+        <PanelDeCarga>
+          <ColumnaDeCarga
+            className="@2xl:order-2"
+            encabezado={
+              <>
+                <ProductSearchInput api={searchApi} inputRef={searchRef} />
+                {/* El selector se queda —a diferencia del salón, que lo sacó en
+                    la 111— porque acá no hay catálogo entero abajo: sin
+                    búsqueda, la lista ES la categoría elegida. Sacarlo sin
+                    portar el catálogo completo obligaría a buscar todo. */}
+                {!isSearching && categoriesWithProducts.length > 1 && (
+                  <div className="flex items-center gap-2">
+                    <label
+                      htmlFor="cargar-cat"
+                      className="shrink-0 text-[11px] font-semibold tracking-wide text-zinc-500 uppercase"
                     >
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold text-zinc-900">
-                          {c.product_name}
-                        </p>
-                        {c.notes && (
-                          <p className="truncate text-[11px] text-zinc-500 italic">
-                            &quot;{c.notes}&quot;
-                          </p>
-                        )}
-                        {c.price_override_cents != null && (
-                          <p className="truncate text-[11px] font-medium text-amber-700">
-                            <span className="line-through opacity-60">
-                              {formatCurrency(c.unit_price_cents)}
-                            </span>{" "}
-                            → {formatCurrency(c.price_override_cents)} ·{" "}
-                            {c.price_override_reason}
-                          </p>
-                        )}
-                      </div>
-                      <span className="shrink-0 text-xs font-semibold text-emerald-700 tabular-nums">
-                        {formatCurrency(c.line_subtotal_cents)}
-                      </span>
-                      <div className="flex shrink-0 items-center gap-1">
-                        <button
-                          onClick={() => setPriceTargetKey(c._key)}
-                          className={`flex h-7 w-7 items-center justify-center rounded-full ring-1 active:scale-95 ${
-                            c.price_override_cents != null
-                              ? "bg-amber-100 text-amber-700 ring-amber-300"
-                              : "text-zinc-500 ring-zinc-200 active:bg-zinc-100"
-                          }`}
-                          aria-label={`Cambiar el precio de ${c.product_name}`}
-                        >
-                          <Tag className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          onClick={() => changeQty(c._key, -1)}
-                          disabled={c.quantity <= 1}
-                          className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100 disabled:opacity-40"
-                          aria-label="Menos"
-                        >
-                          <Minus className="h-3.5 w-3.5" />
-                        </button>
-                        <span className="w-5 text-center text-sm font-bold tabular-nums">
-                          {c.quantity}
-                        </span>
-                        <button
-                          onClick={() => changeQty(c._key, 1)}
-                          disabled={c.quantity >= 99}
-                          className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100 disabled:opacity-40"
-                          aria-label="Más"
-                        >
-                          <Plus className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          onClick={() => removeFromCart(c._key)}
-                          className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-400 active:bg-zinc-100"
-                          aria-label={`Quitar ${c.product_name}`}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <div className="flex items-center gap-2 border-t border-zinc-100 px-3 py-2.5">
-                <div className="min-w-0 flex-1">
-                  <p className="text-[11px] text-zinc-500">Total</p>
-                  <p className="text-lg font-bold text-zinc-900 tabular-nums">
-                    {formatCurrency(cartTotal)}
-                  </p>
+                      Categoría
+                    </label>
+                    <select
+                      id="cargar-cat"
+                      value={activeCategory}
+                      onChange={(e) => setActiveCategory(e.target.value)}
+                      className="min-w-0 flex-1 rounded-xl border border-zinc-200 bg-white px-2.5 py-1.5 text-sm font-semibold text-zinc-800 focus:border-emerald-400 focus:outline-none"
+                    >
+                      {categoriesWithProducts.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </>
+            }
+            onKeyDownResultados={(e) => {
+              if (catalogo.handleKeyDown(e)) return;
+              if (isPrintableKey(e)) {
+                e.preventDefault();
+                escribirEnBuscador(e.key);
+              }
+            }}
+            // Sólo angosto: ancho, el pedido y el total están a la izquierda y
+            // no hay a dónde «continuar» — igual que la carga del salón, que no
+            // tiene pie. Angosto es el único lugar donde el carrito no se ve.
+            pie={
+              <div className="shrink-0 border-t border-zinc-200 bg-white @2xl:hidden">
+                <div className="flex items-center gap-2 px-3 py-2.5">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11px] text-zinc-500">
+                      Total ·{" "}
+                      {cartCount > 0
+                        ? `${cartCount} ${cartCount === 1 ? "ítem" : "ítems"}`
+                        : "vacío"}
+                    </p>
+                    <p className="text-lg font-bold text-zinc-900 tabular-nums">
+                      {formatCurrency(cartTotal)}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setView("datos")}
+                    disabled={cart.length === 0}
+                    className="flex h-11 items-center gap-2 rounded-2xl bg-zinc-900 px-5 text-sm font-semibold text-white transition active:scale-[0.98] disabled:opacity-40"
+                  >
+                    Continuar
+                    <span className="ml-1 hidden rounded bg-white/20 px-1.5 py-0.5 text-[10px] sm:inline">
+                      ⌘↵
+                    </span>
+                  </button>
                 </div>
-                <button
-                  onClick={() => setView("datos")}
-                  disabled={cart.length === 0}
-                  // A partir de xl no hay a dónde continuar: cliente y entrega
-                  // están a la izquierda y el pedido se confirma desde ahí.
-                  className="flex h-11 items-center gap-2 rounded-2xl bg-zinc-900 px-5 text-sm font-semibold text-white transition active:scale-[0.98] disabled:opacity-40 xl:hidden"
-                >
-                  Continuar
-                  <span className="ml-1 hidden rounded bg-white/20 px-1.5 py-0.5 text-[10px] sm:inline">
-                    ⌘↵
-                  </span>
-                </button>
               </div>
-            </div>
-          </div>
-
-          {/* ─── Cliente + entrega ─── */}
-          <div
-            className={cn(
-              "flex min-h-0 flex-col xl:order-1 xl:w-[38%] xl:max-w-[360px] xl:shrink-0 xl:border-r xl:border-zinc-200",
-              view === "datos" ? "" : "hidden xl:flex",
+            }
+          >
+            {loadingCatalog ? (
+              <div className="flex h-40 items-center justify-center text-zinc-400">
+                <Loader2 className="h-6 w-6 animate-spin" />
+              </div>
+            ) : catalogError ? (
+              <div className="rounded-2xl border border-dashed border-red-200 bg-red-50 py-10 text-center">
+                <p className="text-sm font-semibold text-red-700">
+                  {catalogError}
+                </p>
+              </div>
+            ) : catalogProducts.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-zinc-200 bg-white py-10 text-center">
+                <p className="text-sm font-semibold text-zinc-700">
+                  {isSearching ? "Sin resultados" : "Sin productos"}
+                </p>
+              </div>
+            ) : (
+              // Buscando o no, la misma lista navegable por ↓/↑. Spec 073.
+              <ProductResultsList
+                products={catalogProducts}
+                onPick={setOpenProduct}
+                enterTargetId={enterTargetId}
+                itemProps={(id) => {
+                  const i = catalogProducts.findIndex((p) => p.id === id);
+                  return i < 0 ? {} : catalogo.itemProps(i);
+                }}
+              />
             )}
+          </ColumnaDeCarga>
+
+          {/* ─── Izquierda: cliente, entrega y el pedido en armado ─── */}
+          <ColumnaLateral
+            abierta={view === "datos"}
+            className="@2xl:order-1 @2xl:border-r @2xl:border-zinc-200"
           >
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3 py-3">
               {/* Spec 068: mismo bloque de cliente que abrir mesa y nueva
@@ -919,15 +830,108 @@ export function CargarPedidoSheet({
                 )}
               </section>
 
-              {/* Resumen del pedido */}
-              <div className="flex items-center justify-between rounded-2xl bg-zinc-100 px-4 py-3">
-                <span className="text-sm font-medium text-zinc-600">
-                  {cartCount} {cartCount === 1 ? "ítem" : "ítems"}
-                </span>
-                <span className="text-lg font-bold text-zinc-900 tabular-nums">
-                  {formatCurrency(cartTotal)}
-                </span>
-              </div>
+              {/* El pedido en armado. Vive acá, con el cliente y la entrega:
+                  la izquierda es «el pedido y a quién va», que es el espejo de
+                  la columna de la mesa en el salón (spec 115). */}
+              <section className="space-y-2 rounded-2xl bg-white p-3 ring-1 ring-zinc-200">
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] font-semibold tracking-[0.18em] text-zinc-500 uppercase">
+                    Tu pedido
+                  </p>
+                  <span className="text-[11px] font-semibold text-zinc-500 tabular-nums">
+                    {cartCount > 0
+                      ? `${cartCount} ${cartCount === 1 ? "ítem" : "ítems"}`
+                      : "vacío"}
+                  </span>
+                </div>
+                {cart.length === 0 ? (
+                  <p className="text-xs text-zinc-500">
+                    Todavía no cargaste nada. Buscá en la carta y agregá con
+                    Enter.
+                  </p>
+                ) : (
+                  <ul onKeyDown={carrito.handleKeyDown} className="space-y-1">
+                    {cart.map((c, i) => (
+                      <li
+                        key={c._key}
+                        {...carrito.itemProps(i)}
+                        aria-label={`${c.product_name}, cantidad ${c.quantity}. ← y → cambian la cantidad, Supr la quita.`}
+                        className="flex items-center gap-2 rounded-xl bg-zinc-50 px-2.5 py-1.5 ring-1 ring-zinc-100 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-zinc-900">
+                            {c.product_name}
+                          </p>
+                          {c.notes && (
+                            <p className="truncate text-[11px] text-zinc-500 italic">
+                              &quot;{c.notes}&quot;
+                            </p>
+                          )}
+                          {c.price_override_cents != null && (
+                            <p className="truncate text-[11px] font-medium text-amber-700">
+                              <span className="line-through opacity-60">
+                                {formatCurrency(c.unit_price_cents)}
+                              </span>{" "}
+                              → {formatCurrency(c.price_override_cents)} ·{" "}
+                              {c.price_override_reason}
+                            </p>
+                          )}
+                        </div>
+                        <span className="shrink-0 text-xs font-semibold text-emerald-700 tabular-nums">
+                          {formatCurrency(c.line_subtotal_cents)}
+                        </span>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button
+                            onClick={() => setPriceTargetKey(c._key)}
+                            className={`flex h-7 w-7 items-center justify-center rounded-full ring-1 active:scale-95 ${
+                              c.price_override_cents != null
+                                ? "bg-amber-100 text-amber-700 ring-amber-300"
+                                : "text-zinc-500 ring-zinc-200 active:bg-zinc-100"
+                            }`}
+                            aria-label={`Cambiar el precio de ${c.product_name}`}
+                          >
+                            <Tag className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={() => changeQty(c._key, -1)}
+                            disabled={c.quantity <= 1}
+                            className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100 disabled:opacity-40"
+                            aria-label="Menos"
+                          >
+                            <Minus className="h-3.5 w-3.5" />
+                          </button>
+                          <span className="w-5 text-center text-sm font-bold tabular-nums">
+                            {c.quantity}
+                          </span>
+                          <button
+                            onClick={() => changeQty(c._key, 1)}
+                            disabled={c.quantity >= 99}
+                            className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100 disabled:opacity-40"
+                            aria-label="Más"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={() => removeFromCart(c._key)}
+                            className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-400 active:bg-zinc-100"
+                            aria-label={`Quitar ${c.product_name}`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <div className="flex items-center justify-between border-t border-zinc-100 pt-2.5">
+                  <span className="text-sm font-medium text-zinc-600">
+                    Total
+                  </span>
+                  <span className="text-lg font-bold text-zinc-900 tabular-nums">
+                    {formatCurrency(cartTotal)}
+                  </span>
+                </div>
+              </section>
             </div>
 
             {/* Footer datos — programado: una sola acción, porque "enviar a
@@ -968,8 +972,8 @@ export function CargarPedidoSheet({
                 </>
               )}
             </footer>
-          </div>
-        </div>
+          </ColumnaLateral>
+        </PanelDeCarga>
 
         {priceTarget && (
           <PriceOverrideModal
