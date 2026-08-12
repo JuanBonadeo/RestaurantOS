@@ -674,32 +674,53 @@ export function MozoPedirClient({
   const cartCacheKey = `mozo-cart:${slug}:${table.id}`;
   const skipFirstPersist = useRef(true);
 
-  // Hidratar al montar (client-only).
+  const guardarBorrador = useCallback(
+    (items: CartItem[]) => {
+      try {
+        if (items.length === 0) window.localStorage.removeItem(cartCacheKey);
+        else window.localStorage.setItem(cartCacheKey, JSON.stringify(items));
+      } catch {
+        // ignorar (modo privado, cuota excedida, etc.)
+      }
+    },
+    [cartCacheKey],
+  );
+
+  // Hidratar al montar **y al cambiar de mesa**: desde el keep-alive (specs
+  // 101/114) el panel no se desmonta entre mesas, así que esto es lo único que
+  // separa un carrito del otro. Si la mesa nueva no tiene borrador el carrito
+  // queda vacío — arrastrar el de la anterior era cargarle a la mesa
+  // equivocada, y de ahí salía comida de más.
   useEffect(() => {
+    let saved: CartItem[] | null = null;
     try {
       const raw = window.localStorage.getItem(cartCacheKey);
-      const saved = raw ? (JSON.parse(raw) as CartItem[]) : null;
-      if (Array.isArray(saved) && saved.length > 0) setCart(saved);
+      saved = raw ? (JSON.parse(raw) as CartItem[]) : null;
     } catch {
       // localStorage no disponible / JSON corrupto → arrancamos vacío.
     }
+    setCart(Array.isArray(saved) && saved.length > 0 ? saved : []);
+    // El próximo persist es el de esta hidratación: no tiene que pisar el
+    // borrador recién leído con el carrito de la mesa anterior.
+    skipFirstPersist.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cartCacheKey]);
 
-  // Persistir en cada cambio (salteando la 1ª corrida para no pisar lo recién
-  // hidratado); limpiar cuando queda vacío.
+  // Persistir en cada cambio; limpiar cuando queda vacío.
   useEffect(() => {
     if (skipFirstPersist.current) {
       skipFirstPersist.current = false;
       return;
     }
-    try {
-      if (cart.length === 0) window.localStorage.removeItem(cartCacheKey);
-      else window.localStorage.setItem(cartCacheKey, JSON.stringify(cart));
-    } catch {
-      // ignorar (modo privado, cuota excedida, etc.)
-    }
-  }, [cart, cartCacheKey]);
+    guardarBorrador(cart);
+  }, [cart, guardarBorrador]);
+
+  // Espejo del carrito para leerlo fuera del render — `handleSend` lo necesita
+  // después del `await`, cuando el closure ya quedó viejo.
+  const cartRef = useRef(cart);
+  useEffect(() => {
+    cartRef.current = cart;
+  }, [cart]);
 
   // Tabs vecinas para los botones de navegación.
   const { prevTab, nextTab } = useMemo(() => {
@@ -896,7 +917,17 @@ export function MozoPedirClient({
         `Enviado · ${r.data.comanda_ids.length} ${r.data.comanda_ids.length === 1 ? "comanda" : "comandas"}`,
       );
       // Quitamos solo los ítems enviados (no vaciamos el carrito) — FR-009.
-      setCart((prev) => prev.filter((c) => !sentKeys.has(c._key)));
+      // `cartRef` y no el `cart` del closure: durante el envío se pueden haber
+      // agregado líneas nuevas, y ésas se quedan.
+      const quedan = cartRef.current.filter((c) => !sentKeys.has(c._key));
+      setCart(quedan);
+      // El borrador se escribe acá, sincrónico, y no en el efecto de persistir:
+      // el panel se puede desmontar en este mismo commit (el salón cierra la
+      // carga en `onSent`), y entonces ni el efecto ni el updater de `setCart`
+      // llegan a correr. Así quedaba guardado lo que **ya salió a cocina**, y
+      // la próxima vez que abrías la mesa estaba de nuevo ahí, listo para
+      // mandarlo por segunda vez.
+      guardarBorrador(quedan);
       // Embebido (panel del salón): cerramos el panel y refrescamos vía onSent,
       // sin navegar. Si no, volvemos al origen: el mozo a /mozo con el drawer de
       // la mesa abierto; el admin (ruta) a la vista de operación (homeHref).
