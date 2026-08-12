@@ -83,8 +83,9 @@ El orden `[lng, lat]` es el de GeoJSON — contraintuitivo pero es la convenció
 
 ### Fase B — El admin dibuja (Ajustes › Envío)
 
-- **FR-006**: Sección nueva **Envío** en Ajustes, con el mapa. Leaflet cargado con `next/dynamic` + `ssr: false` para no engordar el bundle del panel, que ya tiene deuda ([spec 108](../108-bundle-del-panel/spec.md)).
-- **FR-007**: **Marcar dónde está el local** — pin sobre `businesses.lat/lng`, hoy `null` en todos los negocios. Es el primer uso de esas columnas y es requisito de todo lo demás: sin punto del local, el mapa no sabe dónde abrir. Si el negocio no lo marcó, la sección arranca pidiendo eso antes de dejar dibujar.
+- **FR-006**: El mapa va en la sección **Envío que ya existe** — Ajustes › Negocio, [business-profile-form.tsx:302](../../src/components/admin/settings/business-profile-form.tsx#L302), la `SettingsSection` con ícono `Truck` que hoy tiene Costo de envío, Pedido mínimo y Tiempo estimado. No se crea sección nueva: el lugar donde se dice *cuánto sale llevar* es el mismo donde se dice *hasta dónde*. La descripción de la sección se amplía. Leaflet entra con `next/dynamic` + `ssr: false` para no engordar el bundle del panel, que ya tiene deuda ([spec 108](../108-bundle-del-panel/spec.md)).
+- **FR-007**: **Un solo mapa hace las dos cosas, en orden.** Si `businesses.lat/lng` está en `null` —hoy, en todos los negocios— el mapa arranca pidiendo marcar dónde está el local y no deja dibujar hasta que haya punto: sin él no sabe dónde abrir. Marcado eso, las zonas se dibujan encima. **No** va un segundo mapa al lado del campo `address` de la sección Contacto: es la misma dirección en coordenadas, pero dos mapas en una pantalla son dos montajes de Leaflet y un modelo mental partido.
+- **FR-007b**: `lat` y `lng` del local son **dos campos más del Zod de `business-profile-form`** ([:40](../../src/components/admin/settings/business-profile-form.tsx#L40)) y se guardan con el botón Guardar que ya existe — las cuatro `SettingsSection` viven dentro de un mismo `<form>`. Las **zonas no**: van por server action propia, por zona, al cerrar el polígono. Meterlas en el form obligaría al submit del perfil a diffear polígonos contra la base.
 - **FR-008**: Dibujar una zona: click agrega vértice, arrastrar un vértice lo mueve, y se cierra al tocar el primero (o con un botón «Cerrar zona» — el doble click en mobile no existe). Nombre y color por zona. Editar y borrar zonas existentes. Sin `leaflet-draw`: es una dependencia grande y desactualizada para ~150 líneas propias.
 - **FR-009**: Lista de zonas al lado del mapa con activar/desactivar. Desactivar ≠ borrar: una zona apagada no cubre, pero no se pierde el dibujo.
 - **FR-010**: Server action de guardado que revalida con `parsePolygon` (FR-004) y chequea permisos con `can.ts`. El cliente nunca es fuente de verdad del polígono.
@@ -121,7 +122,7 @@ El orden `[lng, lat]` es el de GeoJSON — contraintuitivo pero es la convenció
 1. `pnpm typecheck` + `pnpm test` en verde.
 2. Tests de FR-005 escritos antes que `geo.ts`.
 3. En vivo con el **rol real** (encargado/owner, nunca service_role):
-   - Ajustes › Envío → marcar el local → dibujar una zona → guardar → recargar y que siga ahí.
+   - Ajustes › Negocio › Envío → marcar el local → Guardar → dibujar una zona → recargar y que sigan los dos.
    - Checkout público con una dirección adentro → confirma. Mover el pin afuera → se bloquea y ofrece retiro.
    - Forzar el submit fuera de zona salteando el cliente → el server lo rechaza (FR-013).
    - Confirmar un pedido y verificar `delivery_lat/lng/zone_id` en la fila de `orders`.
