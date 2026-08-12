@@ -315,11 +315,7 @@ export function MozoPedirClient({
   // Overlay optimista de las comandas enviadas (spec 21): entregar y cancelar
   // ítem se ven al instante; el server reconcilia vía revalidatePath y el
   // overlay se descarta al terminar la transición (rollback si falla).
-  const {
-    state: comandas,
-    run: runComanda,
-    pending: comandaPending,
-  } = useOptimisticAction(
+  const { state: comandas, run: runComanda } = useOptimisticAction(
     existingComandas,
     (cs: ComandaConItems[], a: ComandaOptimistic): ComandaConItems[] => {
       if (a.kind === "entregar") {
@@ -1136,7 +1132,6 @@ export function MozoPedirClient({
                   setCancelTarget(null);
                   setCancelReason("");
                 }}
-                disabled={pending}
                 className="flex h-12 flex-1 items-center justify-center rounded-2xl bg-zinc-100 text-sm font-semibold text-zinc-700 active:scale-[0.98]"
               >
                 Volver
@@ -1275,7 +1270,7 @@ export function MozoPedirClient({
             cartTotalCents={cartTotal}
             userCanCancel={userCanCancel}
             userCanEditPrice={userCanEditPrice}
-            pending={pending}
+            enviando={pending}
             onCancelItem={(id, name) =>
               setCancelTarget({ orderItemId: id, productName: name })
             }
@@ -1554,7 +1549,10 @@ export function MozoPedirClient({
             existingComandas={comandas}
             stationNameById={stationNameById}
             userCanCancel={userCanCancel}
-            pending={pending || comandaPending}
+            // Sólo el envío. Antes iba `pending || comandaPending`, así que
+            // entregar UNA comanda apagaba los «Entregar» de las otras —y con
+            // una comanda por sector, entregar varias seguidas es lo normal.
+            pending={pending}
             seatMode={seatMode}
             seatCount={seatCount}
             onToggleSeatMode={() => setSeatMode((v) => !v)}
@@ -2215,8 +2213,7 @@ function ResumenStep({
                             onClick={() =>
                               onCancelItem(it.order_item_id, it.product_name)
                             }
-                            disabled={pending}
-                            className="rounded-full p-2 text-zinc-400 active:bg-red-50 active:text-red-600 disabled:opacity-40"
+                            className="rounded-full p-2 text-zinc-400 active:bg-red-50 active:text-red-600"
                             aria-label="Cancelar item"
                           >
                             <Ban className="h-4 w-4" />
@@ -2249,8 +2246,7 @@ function ResumenStep({
                     <div className="border-t border-zinc-100 p-2">
                       <button
                         onClick={() => onAdvance(c.id)}
-                        disabled={pending}
-                        className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-emerald-50 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200 active:scale-[0.98] disabled:opacity-60"
+                        className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-emerald-50 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200 active:scale-[0.98]"
                       >
                         <Check className="h-4 w-4" />
                         Entregar

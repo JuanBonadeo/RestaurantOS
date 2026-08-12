@@ -31,7 +31,11 @@ export type ComandaSummary = {
 export type OrderSummaryData = {
   order_number: number;
   total_cents: number;
-  items: { product_name: string; quantity: number; cancelled_at: string | null }[];
+  items: {
+    product_name: string;
+    quantity: number;
+    cancelled_at: string | null;
+  }[];
   comandas: ComandaSummary[];
 };
 
@@ -83,16 +87,26 @@ export function OrderSummaryCard({
   onChanged?: () => void;
 }) {
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
   const [anularTarget, setAnularTarget] = useState<ComandaSummary | null>(null);
 
   const active = order.items.filter((it) => it.cancelled_at === null);
   const cancelled = order.items.filter((it) => it.cancelled_at !== null);
   const totalQty = active.reduce((acc, it) => acc + it.quantity, 0);
 
+  /**
+   * Cuál comanda se está entregando. **Por id, no un pending global**: el mozo
+   * llega con la bandeja y tilda parrilla, cocina y bar de un saque; con un
+   * `disabled` compartido, tocar la primera apagaba las otras dos hasta que
+   * volvía el server y terminaba tocando dos veces cada una.
+   */
+  const [entregando, setEntregando] = useState<string | null>(null);
+
   const handleMarcarEntregada = (comandaId: string) => {
+    setEntregando(comandaId);
     startTransition(async () => {
       const r = await marcarComandaEntregada(comandaId, slug);
+      setEntregando(null);
       if (!r.ok) toast.error(r.error);
       else if (onChanged) onChanged();
       else router.refresh();
@@ -117,10 +131,10 @@ export function OrderSummaryCard({
       {/* Resumen de items + total */}
       <div className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4">
         <div className="flex items-baseline justify-between">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+          <p className="text-[10px] font-semibold tracking-wide text-emerald-700 uppercase">
             Orden #{order.order_number}
           </p>
-          <p className="inline-flex items-center gap-1.5 text-lg font-bold tabular-nums text-zinc-900">
+          <p className="inline-flex items-center gap-1.5 text-lg font-bold text-zinc-900 tabular-nums">
             <Receipt className="h-4 w-4" />
             {formatCurrency(order.total_cents)}
           </p>
@@ -132,7 +146,7 @@ export function OrderSummaryCard({
                 key={`a-${i}`}
                 className="flex items-center gap-2 text-sm text-zinc-800"
               >
-                <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-white px-1 text-[11px] font-bold tabular-nums text-zinc-700 ring-1 ring-zinc-200">
+                <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-white px-1 text-[11px] font-bold text-zinc-700 tabular-nums ring-1 ring-zinc-200">
                   {it.quantity}
                 </span>
                 <span className="flex-1 truncate">{it.product_name}</span>
@@ -168,11 +182,11 @@ export function OrderSummaryCard({
       {showComandas && (
         <div className="rounded-2xl bg-white p-4 ring-1 ring-zinc-200">
           <div className="flex items-center justify-between gap-2">
-            <p className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+            <p className="inline-flex items-center gap-1.5 text-[10px] font-semibold tracking-wide text-zinc-500 uppercase">
               <ChefHat className="size-3" strokeWidth={2} />
               Comandas
             </p>
-            <p className="text-[10px] font-semibold tabular-nums text-zinc-500">
+            <p className="text-[10px] font-semibold text-zinc-500 tabular-nums">
               {activeComandasCount > 0
                 ? `${activeComandasCount} activa${activeComandasCount === 1 ? "" : "s"} · ${order.comandas.length} total`
                 : `${order.comandas.length} cerrada${order.comandas.length === 1 ? "" : "s"}`}
@@ -190,7 +204,7 @@ export function OrderSummaryCard({
                 <ComandaRow
                   key={c.id}
                   comanda={c}
-                  isPending={isPending}
+                  isPending={entregando === c.id}
                   canAnular={canAnular}
                   onMarcarEntregada={() => handleMarcarEntregada(c.id)}
                   onAnular={() => setAnularTarget(c)}
@@ -312,7 +326,11 @@ function ComandaRow({
         <span
           className={cn(
             "shrink-0 text-[11px] font-semibold tabular-nums",
-            isUrgent ? "text-rose-700" : isLate ? "text-amber-700" : "text-zinc-500",
+            isUrgent
+              ? "text-rose-700"
+              : isLate
+                ? "text-amber-700"
+                : "text-zinc-500",
           )}
         >
           {formatElapsed(elapsed)}
@@ -333,7 +351,7 @@ function ComandaRow({
               key={`${comanda.id}-${i}`}
               className="flex items-baseline gap-1.5"
             >
-              <span className="shrink-0 font-semibold tabular-nums text-zinc-500">
+              <span className="shrink-0 font-semibold text-zinc-500 tabular-nums">
                 {it.quantity}x
               </span>
               <span className="truncate font-medium">{it.product_name}</span>
@@ -356,11 +374,13 @@ function ComandaRow({
       >
         <span
           className={cn(
-            "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+            "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wide uppercase",
             DISPLAY_CLASS[displayStatus],
           )}
         >
-          <span className={cn("size-1.5 rounded-full", DISPLAY_DOT[displayStatus])} />
+          <span
+            className={cn("size-1.5 rounded-full", DISPLAY_DOT[displayStatus])}
+          />
           {DISPLAY_LABEL[displayStatus]}
         </span>
 
@@ -382,7 +402,7 @@ function ComandaRow({
                 <DropdownMenuTrigger
                   aria-label="Opciones de la comanda"
                   disabled={isPending}
-                  className="inline-flex size-8 items-center justify-center rounded-full text-zinc-500 ring-1 ring-zinc-200 transition hover:bg-white data-[popup-open]:bg-white disabled:opacity-50"
+                  className="inline-flex size-8 items-center justify-center rounded-full text-zinc-500 ring-1 ring-zinc-200 transition hover:bg-white disabled:opacity-50 data-[popup-open]:bg-white"
                 >
                   <MoreVertical className="size-4" strokeWidth={2.5} />
                 </DropdownMenuTrigger>

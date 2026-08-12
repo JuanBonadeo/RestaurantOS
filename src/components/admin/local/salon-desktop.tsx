@@ -2639,18 +2639,19 @@ type MesaMenuItem = {
 function MesaOptionsMenu({
   items,
   onAnular,
-  disabled,
 }: {
   items: MesaMenuItem[];
   onAnular: (() => void) | null;
-  disabled: boolean;
 }) {
+  // Sin `disabled`: abrir el menú y sus ítems no escriben nada —abren un modal
+  // o un panel— y antes quedaban apagados por cualquier acción en vuelo del
+  // panel, aunque fuera de otra mesa. «Anular mesa» tampoco lo necesita: pide
+  // motivo en un diálogo aparte, y ahí sí está el candado.
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
         aria-label="Más acciones de la mesa"
-        disabled={disabled}
-        className="text-muted-foreground ring-border/70 hover:bg-muted/60 data-[popup-open]:bg-muted/60 flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ring-1 transition disabled:opacity-50"
+        className="text-muted-foreground ring-border/70 hover:bg-muted/60 data-[popup-open]:bg-muted/60 flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ring-1 transition"
       >
         <MoreVertical className="size-5" strokeWidth={2.5} />
       </DropdownMenuTrigger>
@@ -2658,11 +2659,7 @@ function MesaOptionsMenu({
         {items.map((it) => {
           const Icon = it.icon;
           return (
-            <DropdownMenuItem
-              key={it.key}
-              onClick={it.onClick}
-              disabled={disabled}
-            >
+            <DropdownMenuItem key={it.key} onClick={it.onClick}>
               <Icon />
               {it.label}
             </DropdownMenuItem>
@@ -2671,11 +2668,7 @@ function MesaOptionsMenu({
         {onAnular && (
           <>
             {items.length > 0 && <DropdownMenuSeparator />}
-            <DropdownMenuItem
-              variant="destructive"
-              onClick={onAnular}
-              disabled={disabled}
-            >
+            <DropdownMenuItem variant="destructive" onClick={onAnular}>
               <Ban />
               Anular mesa
             </DropdownMenuItem>
@@ -2961,6 +2954,9 @@ function TableDetail({
               <button
                 type="button"
                 onClick={onSentarReserva}
+                // El único primario que conserva el candado: sienta de verdad
+                // —crea la orden y ocupa la mesa— y dos taps son dos veces.
+                // Los otros tres sólo abren un panel.
                 disabled={pending}
                 className={primaryClass}
               >
@@ -2971,12 +2967,7 @@ function TableDetail({
             );
           } else if (canWalkIn) {
             primary = (
-              <button
-                type="button"
-                onClick={onWalkIn}
-                disabled={pending}
-                className={primaryClass}
-              >
+              <button type="button" onClick={onWalkIn} className={primaryClass}>
                 <UserPlus className="h-5 w-5" />
                 Sentar walk-in
                 {enterHint}
@@ -2987,7 +2978,6 @@ function TableDetail({
               <button
                 type="button"
                 onClick={onPedirCuenta}
-                disabled={pending}
                 className={primaryAmberClass}
               >
                 <Receipt className="h-5 w-5" />
@@ -3000,7 +2990,6 @@ function TableDetail({
               <button
                 type="button"
                 onClick={() => onCargarPedido()}
-                disabled={pending}
                 className={primaryClass}
               >
                 <ClipboardList className="h-5 w-5" />
@@ -3073,7 +3062,6 @@ function TableDetail({
                 <MesaOptionsMenu
                   items={menuItems}
                   onAnular={canAnular ? onAnular : null}
-                  disabled={pending}
                 />
               )}
             </div>

@@ -60,7 +60,7 @@ function renderColumna(over: Partial<Parameters<typeof MesaColumn>[0]> = {}) {
       cartTotalCents={0}
       userCanCancel
       userCanEditPrice
-      pending={false}
+      enviando={false}
       onCancelItem={vi.fn()}
       onAdvance={vi.fn()}
       onChangeQty={vi.fn()}
@@ -100,6 +100,26 @@ describe("MesaColumn (spec 111)", () => {
     const bloque = titulo.closest("article")!;
     expect(within(bloque).getByText("Coca-Cola")).toBeInTheDocument();
     expect(within(bloque).queryByText("Milanesa napolitana")).toBeNull();
+  });
+
+  it("un envío en curso sólo apaga «Enviar»: lo demás sigue vivo", () => {
+    // El reporte de Juan era sobre personas, pero el patrón estaba en toda la
+    // columna: un pending global apagando controles que no tienen nada que ver
+    // con la acción en vuelo. Entregar, anular y el ⋯ no esperan al envío.
+    renderColumna({
+      cart: sinEnviar,
+      cartTotalCents: 200000,
+      enviando: true,
+      acciones: { onCobrar: vi.fn(), onTransferir: vi.fn() },
+    });
+
+    expect(screen.getByRole("button", { name: /Enviando/ })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Más acciones de la mesa" }),
+    ).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Anular Milanesa napolitana" }),
+    ).toBeEnabled();
   });
 
   it("con algo sin enviar, la acción primaria es enviarlo", async () => {

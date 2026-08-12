@@ -313,7 +313,11 @@ export function ComandasKanban({
   // es `serverData.comandas` (snapshot del server + merge de realtime): el
   // overlay optimista persiste hasta que termina SU transición, sin pisar el
   // cambio ni hacer flash. El rollback es automático si la action falla.
-  const { state: comandas, run, pending: isPending } = useOptimisticAction(
+  const {
+    state: comandas,
+    run,
+    pending: isPending,
+  } = useOptimisticAction(
     serverData.comandas,
     (cs: LocalComanda[], action: ComandaOptimistic): LocalComanda[] =>
       cs.map((c) => {
@@ -337,9 +341,8 @@ export function ComandasKanban({
   };
 
   const onEntregar = (id: string) => {
-    run(
-      { kind: "entregar", id, deliveredAt: new Date().toISOString() },
-      () => marcarComandaEntregada(id, slug),
+    run({ kind: "entregar", id, deliveredAt: new Date().toISOString() }, () =>
+      marcarComandaEntregada(id, slug),
     );
   };
 
@@ -505,8 +508,7 @@ export function ComandasKanban({
       visibles.filter(
         (c) =>
           c.print_failed_at &&
-          (c.status === "entregado" ||
-            c.items.some((it) => !it.cancelled_at)),
+          (c.status === "entregado" || c.items.some((it) => !it.cancelled_at)),
       ).length,
     [visibles],
   );
@@ -625,10 +627,14 @@ export function ComandasKanban({
                   <ComandaCard
                     key={c.id}
                     comanda={c}
-                    stationStyle={stationStyleById.get(c.station_id) ?? FALLBACK}
+                    stationStyle={
+                      stationStyleById.get(c.station_id) ?? FALLBACK
+                    }
                     columnRing={col.ring}
                     buttonClass={col.buttonClass}
-                    mozoName={c.mozo_id ? (mozoNameById.get(c.mozo_id) ?? null) : null}
+                    mozoName={
+                      c.mozo_id ? (mozoNameById.get(c.mozo_id) ?? null) : null
+                    }
                     onEmpezar={onEmpezar}
                     onEntregar={onEntregar}
                     onReimprimir={onReimprimir}
@@ -691,9 +697,9 @@ function SectorStatsBar({
 }) {
   if (stations.length === 0) {
     return (
-      <div className="border-amber-200 bg-amber-50 text-amber-900 rounded-2xl border border-dashed p-3 text-sm">
-        No hay sectores configurados. Cargá los sectores desde el catálogo
-        para que las comandas se ruteen a cocina.
+      <div className="rounded-2xl border border-dashed border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+        No hay sectores configurados. Cargá los sectores desde el catálogo para
+        que las comandas se ruteen a cocina.
       </div>
     );
   }
@@ -702,7 +708,7 @@ function SectorStatsBar({
     <div className="bg-card ring-border/60 rounded-2xl p-3 ring-1">
       <div className="text-muted-foreground mb-2 flex items-center gap-2">
         <ChefHat className="size-4" />
-        <h3 className="text-xs font-bold uppercase tracking-wider">
+        <h3 className="text-xs font-bold tracking-wider uppercase">
           Saturación por sector
         </h3>
       </div>
@@ -721,7 +727,9 @@ function SectorStatsBar({
                   {s.name}
                 </span>
               </div>
-              <span className={`text-base font-bold tabular-nums ${style.text}`}>
+              <span
+                className={`text-base font-bold tabular-nums ${style.text}`}
+              >
                 {count}
               </span>
             </div>
@@ -765,7 +773,9 @@ function ComandaCard({
   const reprintQueued = Boolean(comanda.reprint_requested_at);
   // Para entregadas mostramos la recencia ("hace X") en vez del tiempo desde
   // emisión, que crecería sin sentido. El KPI de prep va abajo en su chip.
-  const deliveredAgo = useElapsedMinutes(comanda.delivered_at ?? comanda.emitted_at);
+  const deliveredAgo = useElapsedMinutes(
+    comanda.delivered_at ?? comanda.emitted_at,
+  );
   const prep = prepMinutes(comanda.emitted_at, comanda.delivered_at);
 
   const liveItems = comanda.items.filter((it) => !it.cancelled_at);
@@ -791,7 +801,7 @@ function ComandaCard({
     >
       {/* Badge de fallo de impresión (spec 35) — distinto de una recién creada. */}
       {printFailed && (
-        <span className="inline-flex items-center gap-1 self-start rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-700">
+        <span className="inline-flex items-center gap-1 self-start rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold tracking-wide text-rose-700 uppercase">
           <Printer className="size-3" strokeWidth={2.5} />
           No imprimió
         </span>
@@ -800,7 +810,7 @@ function ComandaCard({
       {/* Top row: origen + minutos + canal */}
       <header className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="text-foreground truncate text-base font-extrabold leading-none tracking-tight">
+          <span className="text-foreground truncate text-base leading-none font-extrabold tracking-tight">
             {origenLabel}
           </span>
           <span
@@ -826,22 +836,27 @@ function ComandaCard({
           trunca si falta lugar. */}
       <div className="flex min-w-0 items-center gap-1.5 text-[11px]">
         <span
-          className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 font-bold uppercase tracking-wide ${stationStyle.bg} ${stationStyle.text}`}
+          className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 font-bold tracking-wide uppercase ${stationStyle.bg} ${stationStyle.text}`}
         >
           <span className={`h-1.5 w-1.5 rounded-full ${stationStyle.dot}`} />
           {comanda.station_name}
         </span>
-        {mozoName && comanda.mozo_id && (() => {
-          const p = mozoPalette(comanda.mozo_id);
-          return (
-            <span
-              className={`inline-flex min-w-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${p.bg} ${p.text} ${p.ring}`}
-            >
-              <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${p.dot}`} />
-              <span className="truncate">{mozoName}</span>
-            </span>
-          );
-        })()}
+        {mozoName &&
+          comanda.mozo_id &&
+          (() => {
+            const p = mozoPalette(comanda.mozo_id);
+            return (
+              <span
+                className={`inline-flex min-w-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${p.bg} ${p.text} ${p.ring}`}
+              >
+                <span
+                  aria-hidden
+                  className={`size-1.5 shrink-0 rounded-full ${p.dot}`}
+                />
+                <span className="truncate">{mozoName}</span>
+              </span>
+            );
+          })()}
         {!isTerminal && (
           <span className="text-muted-foreground/70 ml-auto inline-flex shrink-0 items-center gap-1 tabular-nums">
             <Clock className="size-3" strokeWidth={2.5} />
@@ -890,7 +905,7 @@ function ComandaCard({
                 {it.product_name}
               </p>
               {it.cancelled_reason && (
-                <p className="text-rose-600/80 truncate no-underline">
+                <p className="truncate text-rose-600/80 no-underline">
                   Cancelado: {it.cancelled_reason}
                 </p>
               )}
@@ -908,8 +923,7 @@ function ComandaCard({
             <button
               type="button"
               onClick={() => onEmpezar(comanda.id)}
-              disabled={isPending}
-              className={`inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition active:translate-y-px disabled:opacity-50 ${buttonClass}`}
+              className={`inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition active:translate-y-px ${buttonClass}`}
             >
               <Play className="size-3.5" strokeWidth={2.5} />
               Empezar
@@ -919,8 +933,7 @@ function ComandaCard({
             <button
               type="button"
               onClick={() => onEntregar(comanda.id)}
-              disabled={isPending}
-              className={`inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition active:translate-y-px disabled:opacity-50 ${buttonClass}`}
+              className={`inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition active:translate-y-px ${buttonClass}`}
             >
               <Check className="size-3.5" strokeWidth={2.5} />
               Entregar
@@ -948,7 +961,9 @@ function ComandaCard({
               Preparada en {formatRelativeTime(prep)}
             </span>
           ) : (
-            <span className="text-muted-foreground/60 text-[11px]">Entregada</span>
+            <span className="text-muted-foreground/60 text-[11px]">
+              Entregada
+            </span>
           )}
           <ComandaMenu
             comanda={comanda}
@@ -1165,13 +1180,16 @@ function EditarComandaModal({
     setLoadingProducts(true);
     void getSwappableProducts(slug, comanda.station_id).then((r) => {
       if (r.ok) setProducts(r.data);
-      else toast.error(r.error ?? "No pudimos cargar los productos del sector.");
+      else
+        toast.error(r.error ?? "No pudimos cargar los productos del sector.");
       setLoadingProducts(false);
     });
   };
 
   const patchRow = (itemId: string, patch: Partial<EditRow>) =>
-    setRows((rs) => rs.map((r) => (r.itemId === itemId ? { ...r, ...patch } : r)));
+    setRows((rs) =>
+      rs.map((r) => (r.itemId === itemId ? { ...r, ...patch } : r)),
+    );
 
   const rowChanged = (r: EditRow) =>
     r.removed ||
@@ -1201,7 +1219,11 @@ function EditarComandaModal({
     startTransition(async () => {
       for (const r of rows) {
         if (r.removed) {
-          const res = await cancelarItem(r.itemId, "Quitado por el encargado", slug);
+          const res = await cancelarItem(
+            r.itemId,
+            "Quitado por el encargado",
+            slug,
+          );
           if (!res.ok) {
             toast.error(res.error ?? "No pudimos quitar un ítem.");
             return;
@@ -1235,7 +1257,9 @@ function EditarComandaModal({
       if (!rp.ok) {
         toast.error("Cambios guardados, pero no se pudo reimprimir.");
       } else {
-        toast.success("Comanda actualizada · se reimprime el ticket corregido.");
+        toast.success(
+          "Comanda actualizada · se reimprime el ticket corregido.",
+        );
       }
       onDone();
     });
@@ -1327,7 +1351,9 @@ function EditarComandaModal({
                         type="button"
                         onClick={() => {
                           ensureProducts();
-                          setPickerFor(pickerFor === r.itemId ? null : r.itemId);
+                          setPickerFor(
+                            pickerFor === r.itemId ? null : r.itemId,
+                          );
                         }}
                         disabled={pending}
                         className="text-muted-foreground hover:text-foreground text-xs font-semibold underline underline-offset-2 disabled:opacity-50"
@@ -1374,9 +1400,10 @@ function EditarComandaModal({
                             onChange={(e) => {
                               const v = Number(e.target.value);
                               patchRow(r.itemId, {
-                                overrideCents: Number.isFinite(v) && v >= 0
-                                  ? Math.round(v * 100)
-                                  : 0,
+                                overrideCents:
+                                  Number.isFinite(v) && v >= 0
+                                    ? Math.round(v * 100)
+                                    : 0,
                               });
                             }}
                             disabled={pending}
@@ -1387,7 +1414,9 @@ function EditarComandaModal({
                             type="text"
                             value={r.overrideReason}
                             onChange={(e) =>
-                              patchRow(r.itemId, { overrideReason: e.target.value })
+                              patchRow(r.itemId, {
+                                overrideReason: e.target.value,
+                              })
                             }
                             disabled={pending}
                             placeholder="Motivo (obligatorio)"
@@ -1452,7 +1481,9 @@ function EditarComandaModal({
                           }}
                           className={[
                             "hover:bg-muted/60 flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-xs",
-                            p.id === r.productId ? "bg-muted/40 font-semibold" : "",
+                            p.id === r.productId
+                              ? "bg-muted/40 font-semibold"
+                              : "",
                           ].join(" ")}
                         >
                           <span className="truncate">{p.name}</span>
@@ -1467,7 +1498,9 @@ function EditarComandaModal({
                   <input
                     type="text"
                     value={r.notes}
-                    onChange={(e) => patchRow(r.itemId, { notes: e.target.value })}
+                    onChange={(e) =>
+                      patchRow(r.itemId, { notes: e.target.value })
+                    }
                     disabled={pending}
                     placeholder="Aclaración (ej: sin sal, bien cocido)"
                     className="border-input bg-background focus-visible:ring-ring w-full rounded-lg border px-3 py-1.5 text-xs outline-none focus-visible:ring-2 disabled:opacity-50"

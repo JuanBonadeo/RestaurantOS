@@ -95,7 +95,7 @@ export function MesaColumn({
   cartTotalCents,
   userCanCancel,
   userCanEditPrice,
-  pending,
+  enviando,
   onCancelItem,
   onAdvance,
   onChangeQty,
@@ -117,7 +117,15 @@ export function MesaColumn({
   cartTotalCents: number;
   userCanCancel: boolean;
   userCanEditPrice: boolean;
-  pending: boolean;
+  /**
+   * Hay un envío a cocina en vuelo. **Sólo apaga «Enviar»** (esa sí es una
+   * acción que no se puede disparar dos veces).
+   *
+   * Todo lo demás de la columna sigue vivo: entregar otra tanda, anular un
+   * ítem o abrir el ⋯ no tienen nada que ver con el envío, y apagarlos hacía
+   * sentir que la mesa entera se congelaba de a ratos.
+   */
+  enviando: boolean;
   onCancelItem: (orderItemId: string, productName: string) => void;
   onAdvance: (comandaId: string) => void;
   onChangeQty: (key: string, delta: number) => void;
@@ -224,7 +232,6 @@ export function MesaColumn({
                         : null
                     }
                     userCanCancel={userCanCancel}
-                    pending={pending}
                     onCancelItem={onCancelItem}
                   />
                 ))}
@@ -237,7 +244,6 @@ export function MesaColumn({
                       key={c.id}
                       type="button"
                       onClick={() => onAdvance(c.id)}
-                      disabled={pending}
                       className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl bg-emerald-50 px-3 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200 active:scale-[0.98] disabled:opacity-60"
                     >
                       <Check className="h-3.5 w-3.5" />
@@ -308,11 +314,11 @@ export function MesaColumn({
               <button
                 type="button"
                 onClick={onEnviar}
-                disabled={pending}
+                disabled={enviando}
                 className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 text-base font-bold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-60"
               >
                 <Send className="h-5 w-5" />
-                {pending
+                {enviando
                   ? "Enviando…"
                   : `Enviar ${formatCurrency(cartTotalCents)}`}
                 <kbd className="ml-1 rounded bg-white/20 px-1.5 py-0.5 text-[10px] font-semibold">
@@ -323,7 +329,6 @@ export function MesaColumn({
               <button
                 type="button"
                 onClick={acciones.onCobrar}
-                disabled={pending}
                 className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-amber-500 text-base font-bold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-60"
               >
                 Cobrar
@@ -335,7 +340,6 @@ export function MesaColumn({
             <DropdownMenu>
               <DropdownMenuTrigger
                 aria-label="Más acciones de la mesa"
-                disabled={pending}
                 className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white text-zinc-600 ring-1 ring-zinc-200 transition hover:bg-zinc-50 disabled:opacity-50"
               >
                 <MoreVertical className="size-5" strokeWidth={2.5} />
@@ -370,13 +374,11 @@ function ItemEnviado({
   item,
   sector,
   userCanCancel,
-  pending,
   onCancelItem,
 }: {
   item: LoPedidoItem;
   sector: string | null;
   userCanCancel: boolean;
-  pending: boolean;
   onCancelItem: (orderItemId: string, productName: string) => void;
 }) {
   if (estaAnulado(item)) {
@@ -445,8 +447,7 @@ function ItemEnviado({
         <button
           type="button"
           onClick={() => onCancelItem(item.order_item_id, item.product_name)}
-          disabled={pending}
-          className="shrink-0 rounded-full p-1.5 text-zinc-400 active:bg-red-50 active:text-red-600 disabled:opacity-40"
+          className="shrink-0 rounded-full p-1.5 text-zinc-400 active:bg-red-50 active:text-red-600"
           aria-label={`Anular ${item.product_name}`}
         >
           <Ban className="h-4 w-4" />
