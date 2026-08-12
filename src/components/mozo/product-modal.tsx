@@ -96,7 +96,7 @@ export function ProductModal({
 
   useEscapeToClose(onClose, open);
 
-  // ── Los modificadores son una zona más del panel (spec 110) ──────────────
+  // ── Los modificadores son una zona más del panel (spec 113) ──────────────
   //
   // Hasta acá este modal era la única superficie de carga sin flechas: para
   // llegar a la tercera salsa había que tabular tres veces, y el resto del

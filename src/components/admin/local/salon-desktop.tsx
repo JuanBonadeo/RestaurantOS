@@ -94,9 +94,7 @@ import {
 import { useArrowFocus } from "@/lib/ui/use-arrow-focus";
 import { useRovingList } from "@/lib/ui/use-roving-list";
 import {
-  loadPedirCatalog,
   loadTableComandas,
-  type PedirCatalogBundle,
 } from "@/lib/mozo/pedir-panel-data";
 import {
   sentarReserva,
@@ -115,6 +113,8 @@ import {
   canTransitionMesa,
 } from "@/lib/permissions/can";
 import type { FloorTable } from "@/lib/reservations/types";
+import { PedirPanelSkeleton } from "@/components/skeletons/mesa-route-skeleton";
+import { useCatalogBundle } from "@/lib/mozo/use-catalog-bundle";
 import { useOnActivate } from "@/lib/ui/use-tab-param";
 import { cn } from "@/lib/utils";
 import { getSalonTabData } from "@/app/[business_slug]/admin/(authed)/operacion/actions";
@@ -418,14 +418,18 @@ export function SalonDesktop({
   // El catálogo (pesado, business-level) se PREFETCHEA al montar y se cachea;
   // al abrir una mesa solo se piden sus comandas (chico). Así la apertura se
   // siente instantánea en vez de esperar un fetch grande cada vez.
-  const [catalogBundle, setCatalogBundle] = useState<PedirCatalogBundle | null>(
-    null,
-  );
-  const catalogBundleRef = useRef<PedirCatalogBundle | null>(null);
-  catalogBundleRef.current = catalogBundle;
+  // El catálogo sale del cache compartido con el mozo (spec 105): memoria de
+  // módulo + `localStorage`, revalidación en background. El panel tenía su
+  // propio prefetch en `useState`, que no sobrevivía a nada: **cada** carga de
+  // `/admin/operacion` bajaba los ~195 kB del catálogo aunque el encargado no
+  // abriera una sola mesa, y un F5 los volvía a bajar.
+  const {
+    bundle: catalogBundle,
+    error: catalogError,
+    recargar: recargarCatalogo,
+  } = useCatalogBundle(slug);
   const [pedirTable, setPedirTable] = useState<FloorTable | null>(null);
   const [pedirState, setPedirState] = useState<TableOrderState | null>(null);
-  const [pedirLoading, setPedirLoading] = useState(false);
 
   // ── "Cobrar mesa" embebido en el panel derecho (no navega) ──
   // Espejo de "pedir": al tocar Cobrar se carga la cuenta + iniciarCobro de la
@@ -441,22 +445,6 @@ export function SalonDesktop({
   const [cuentaTable, setCuentaTable] = useState<FloorTable | null>(null);
   const [cuentaData, setCuentaData] = useState<CuentaPanelData | null>(null);
   const [cuentaLoading, setCuentaLoading] = useState(false);
-
-  // Prefetch del catálogo al montar (no bloquea; si falla se reintenta al abrir).
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await loadPedirCatalog(slug);
-        if (!cancelled && r.ok) setCatalogBundle(r.data);
-      } catch {
-        // ignore — se reintenta on-demand al abrir el panel
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [slug]);
 
   const closePedir = useCallback(() => {
     setPedirTable(null);
@@ -588,18 +576,10 @@ export function SalonDesktop({
       setCuentaData(null);
       setPedirTable(table);
       setPedirState(null);
-      setPedirLoading(true);
       (async () => {
         try {
-          // Catálogo: cache primero; si todavía no llegó el prefetch, lo traemos.
-          let bundle = catalogBundleRef.current;
-          if (!bundle) {
-            const cr = await loadPedirCatalog(slug);
-            if (!cr.ok) throw new Error(cr.error);
-            bundle = cr.data;
-            setCatalogBundle(bundle);
-          }
-          // Estado de la mesa puntual: comandas + «Lo pedido» (rápido).
+          // El catálogo lo resuelve `useCatalogBundle` (cache + revalidación).
+          // Acá sólo se pide el estado de ESTA mesa: comandas + «Lo pedido».
           const tr = await loadTableComandas(slug, table.id);
           setPedirState(tr.ok ? tr.data : { comandas: [], loPedido: null });
         } catch (e) {
@@ -607,8 +587,6 @@ export function SalonDesktop({
             e instanceof Error ? e.message : "No pudimos abrir el pedido.",
           );
           setPedirTable(null);
-        } finally {
-          setPedirLoading(false);
         }
       })();
     },
@@ -1685,7 +1663,32 @@ export function SalonDesktop({
               </div>
             )
           ) : pedirTable ? (
-            catalogBundle && pedirState ? (
+            catalogError && !catalogBundle ? (
+              /* Sin nada cacheado y con la carga fallada, el panel no puede
+                 quedarse en el skeleton para siempre: hay que poder salir. */
+              <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
+                <p className="text-sm font-semibold text-zinc-900">
+                  No pudimos cargar el menú.
+                </p>
+                <p className="max-w-xs text-xs text-zinc-600">{catalogError}</p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={recargarCatalogo}
+                    className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-semibold text-white"
+                  >
+                    Reintentar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={closePedir}
+                    className="rounded-full px-4 py-2 text-sm font-semibold text-zinc-600 hover:bg-zinc-100"
+                  >
+                    Cerrar
+                  </button>
+                </div>
+              </div>
+            ) : catalogBundle && pedirState ? (
               <MozoPedirClient
                 slug={slug}
                 businessName={catalogBundle.businessName}
@@ -1745,9 +1748,7 @@ export function SalonDesktop({
                 }}
               />
             ) : (
-              <div className="text-muted-foreground flex h-full items-center justify-center p-8 text-center text-sm">
-                {pedirLoading ? "Cargando catálogo…" : "…"}
-              </div>
+              <PedirPanelSkeleton />
             )
           ) : walkInTableId ? (
             /* Abrir mesa (spec 066): panel, no overlay — el plano queda a la

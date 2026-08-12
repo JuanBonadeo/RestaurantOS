@@ -37,6 +37,37 @@ function MesaHeaderSkeleton({ variant }: { variant: MesaRouteVariant }) {
   );
 }
 
+/**
+ * Skeleton del panel de carga **embebido** en el sidebar del salón (spec 114).
+ *
+ * Antes ahí había una línea de texto que decía "Cargando catálogo…" — y mentía
+ * dos veces: el catálogo ya está en memoria (cache de la spec 105) y lo que se
+ * espera es el estado de esa mesa. Un renglón centrado tampoco dice nada de lo
+ * que viene; esto calca el buscador, los chips y la grilla, que es lo que el
+ * que carga está por usar.
+ */
+export function PedirPanelSkeleton() {
+  return (
+    // `role="status"` con nombre: el resto de los skeletons son `aria-hidden`
+    // porque acompañan a un contenido que ya se anuncia, pero acá el panel
+    // entero es esto — sin nombre, quien no ve la pantalla no se entera de que
+    // hay algo cargando.
+    <div role="status" aria-label="Cargando la mesa" className="space-y-4 p-4">
+      <Skeleton className="h-11 w-full rounded-2xl" />
+      <div className="flex gap-2 overflow-hidden">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Skeleton key={i} className="h-7 w-20 shrink-0 rounded-full" />
+        ))}
+      </div>
+      <div className="space-y-2">
+        {Array.from({ length: 7 }).map((_, i) => (
+          <Skeleton key={i} className="h-12 w-full rounded-xl" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function PedirBodySkeleton() {
   return (
     <div className="mx-auto max-w-md space-y-4 p-4">

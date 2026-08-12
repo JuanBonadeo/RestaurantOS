@@ -122,13 +122,24 @@ export async function loadTableComandas(
   if (!gate.ok) return actionError(gate.error);
   const { business } = gate;
 
-  // Cross-tenant: la mesa debe pertenecer a un floor_plan de este business.
+  // Abrir el panel de una mesa costaba **cuatro viajes en serie** a Virginia —
+  // el gate, la mesa, la orden abierta y recién ahí sus comandas—, y eso es lo
+  // que el encargado veía como "Cargando catálogo…" con el catálogo ya en
+  // memoria (spec 114). Estos dos no dependen entre sí: van juntos.
+  //
+  // El chequeo cross-tenant se mantiene igual de estricto: la mesa tiene que
+  // colgar de un `floor_plan` de este negocio. Lo único que cambia es que no
+  // espera su turno.
   const service = createSupabaseServiceClient();
-  const { data: tableRow } = await service
-    .from("tables")
-    .select("id, floor_plans!inner(business_id)")
-    .eq("id", tableId)
-    .maybeSingle();
+  const [tableRes, activeOrder] = await Promise.all([
+    service
+      .from("tables")
+      .select("id, floor_plans!inner(business_id)")
+      .eq("id", tableId)
+      .maybeSingle(),
+    getActiveOrderByTable(tableId, business.id),
+  ]);
+  const tableRow = tableRes.data;
   const tableBusinessId = (
     tableRow as { floor_plans?: { business_id: string } } | null
   )?.floor_plans?.business_id;
@@ -136,7 +147,6 @@ export async function loadTableComandas(
     return actionError("Mesa no encontrada.");
   }
 
-  const activeOrder = await getActiveOrderByTable(tableId, business.id);
   if (!activeOrder) return actionOk({ comandas: [], loPedido: null });
 
   const [comandas, loPedido] = await Promise.all([

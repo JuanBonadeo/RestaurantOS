@@ -6,7 +6,7 @@ import { ProductModal } from "./product-modal";
 import type { CatalogProduct } from "@/lib/mozo/catalog-query";
 
 /**
- * Spec 110 — los modificadores se navegan con flechas, como el resto del panel.
+ * Spec 113 — los modificadores se navegan con flechas, como el resto del panel.
  *
  * Era la única superficie de carga sin teclado: para llegar a la tercera salsa
  * había que tabular tres veces, mientras que resultados, carrito, filas de mesa
@@ -72,7 +72,7 @@ function abrir(onAdd = vi.fn()) {
 const opcion = (nombre: string) =>
   screen.getByText(nombre).closest("button") as HTMLButtonElement;
 
-describe("ProductModal · teclado de los modificadores (spec 110)", () => {
+describe("ProductModal · teclado de los modificadores (spec 113)", () => {
   it("abre con el foco en la primera opción", async () => {
     abrir();
     await new Promise((r) => setTimeout(r, 0));

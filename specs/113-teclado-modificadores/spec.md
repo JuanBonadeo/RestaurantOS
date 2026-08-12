@@ -1,8 +1,12 @@
 # Feature Specification: Los modificadores se navegan como el resto del panel
 
-**Feature Branch**: `110-teclado-modificadores`
+**Feature Branch**: `113-teclado-modificadores`
 
 **Created**: 2026-08-09
+
+> **Renumerada de 110 a 113.** Se commiteó como `110` (commit `3d6000c`) chocando con
+> [`110-items-sin-comanda-editables`](../110-items-sin-comanda-editables/spec.md), de otra sesión que
+> venía trabajando en paralelo sobre el mismo working tree. El commit y la issue [#175](https://github.com/gachetponzellini/RestaurantOS-app/issues/175) quedan con el número viejo en su texto.
 
 **Status**: 🟡 Implementada — typecheck / suite (1585 tests) / build en verde, review con 1 hallazgo corregido. **Pendiente verificar en vivo con rol real**. Issue [#175](https://github.com/gachetponzellini/RestaurantOS-app/issues/175).
 

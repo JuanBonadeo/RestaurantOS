@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   loadPedirCatalog,
@@ -76,10 +76,19 @@ function guardar(slug: string, bundle: PedirCatalogBundle) {
   }
 }
 
-/** El bundle del negocio y, si no hay nada que pintar todavía, el error. */
+/**
+ * El bundle del negocio, el error si no hay nada que pintar, y un reintento.
+ *
+ * `recargar` existe porque el effect corre **una vez por montaje** y hay
+ * pantallas que viven un turno entero sin remontarse —el panel del salón, desde
+ * el keep-alive de la spec 101—. Sin él, un solo fallo de red al abrir la
+ * pantalla dejaba al encargado sin poder cargar pedidos hasta que recargara la
+ * página, y nada se lo decía (spec 114).
+ */
 export function useCatalogBundle(slug: string): {
   bundle: PedirCatalogBundle | null;
   error: string | null;
+  recargar: () => void;
 } {
   // El estado inicial NO mira `localStorage`: el render del server y el primer
   // render del cliente tienen que coincidir. Lo cacheado se aplica en el effect
@@ -88,9 +97,13 @@ export function useCatalogBundle(slug: string): {
     enMemoria.get(slug)?.bundle ?? null,
   );
   const [error, setError] = useState<string | null>(null);
+  const [intento, setIntento] = useState(0);
 
   useEffect(() => {
     let cancelado = false;
+    // En un reintento no se respeta la ventana de revalidación: si lo cacheado
+    // es reciente pero está roto, saltearla dejaría el reintento sin efecto.
+    const forzado = intento > 0;
 
     // 1) Pintar ya con lo que haya (memoria primero, storage después).
     const cacheado = enMemoria.get(slug) ?? leerDelStorage(slug);
@@ -99,7 +112,7 @@ export function useCatalogBundle(slug: string): {
       setBundle(cacheado.bundle);
       // 2) Y si es reciente, no se pide nada: abrir la mesa 12 del turno no
       // vuelve a descargar el catálogo.
-      if (Date.now() - cacheado.guardadoEn < REVALIDAR_CADA_MS) return;
+      if (!forzado && Date.now() - cacheado.guardadoEn < REVALIDAR_CADA_MS) return;
     }
 
     // 3) Revalidación en background (o carga inicial si no había nada).
@@ -125,7 +138,14 @@ export function useCatalogBundle(slug: string): {
     return () => {
       cancelado = true;
     };
-  }, [slug]);
+  }, [slug, intento]);
 
-  return { bundle, error };
+  // Limpia el error antes de volar: mientras se re-pide se ve el skeleton, no
+  // el mensaje viejo.
+  const recargar = useCallback(() => {
+    setError(null);
+    setIntento((n) => n + 1);
+  }, []);
+
+  return { bundle, error, recargar };
 }

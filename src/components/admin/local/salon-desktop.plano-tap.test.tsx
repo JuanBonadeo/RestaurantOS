@@ -106,11 +106,11 @@ async function abrirPedidoDeMesa1(container: HTMLElement) {
   await act(async () => {
     fireEvent.click(mesaEnPlano(container, "1"));
   });
-  expect(await screen.findByText(/Cargando catálogo/)).toBeInTheDocument();
+  expect(await screen.findByRole("status", { name: /Cargando la mesa/ })).toBeInTheDocument();
 }
 
 /**
- * Deja los loaders colgados: el panel se queda en «Cargando catálogo…», que es
+ * Deja los loaders colgados: el panel se queda en su skeleton, que es
  * lo que estos tests necesitan para tocar el plano con el panel tomado.
  *
  * Va explícito por test porque `clearAllMocks` limpia las llamadas pero **no**
@@ -182,7 +182,7 @@ describe("SalonDesktop · el plano manda sobre el panel", () => {
 
     // Un tap de más sobre la mesa en la que ya estás no puede tirar abajo el
     // pedido en armado.
-    expect(screen.getByText(/Cargando catálogo/)).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: /Cargando la mesa/ })).toBeInTheDocument();
   });
 
   it("tocar el plano fuera de una mesa cierra el modo abierto", async () => {
@@ -196,7 +196,7 @@ describe("SalonDesktop · el plano manda sobre el panel", () => {
     await act(async () => {
       fireEvent.click(container.querySelector("svg")!);
     });
-    expect(screen.queryByText(/Cargando catálogo/)).toBeNull();
+    expect(screen.queryByRole("status", { name: /Cargando la mesa/ })).toBeNull();
     expect(screen.queryByLabelText("Cerrar detalle")).toBeNull();
   });
 });

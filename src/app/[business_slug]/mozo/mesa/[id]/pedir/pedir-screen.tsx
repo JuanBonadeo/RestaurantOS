@@ -38,7 +38,7 @@ export function MozoPedirScreen({
   role: BusinessRole;
   homeHref?: string;
 }) {
-  const { bundle, error } = useCatalogBundle(slug);
+  const { bundle, error, recargar } = useCatalogBundle(slug);
 
   if (!bundle) {
     if (error) {
@@ -47,7 +47,7 @@ export function MozoPedirScreen({
           <p className="text-sm font-semibold text-red-800">{error}</p>
           <button
             type="button"
-            onClick={() => window.location.reload()}
+            onClick={recargar}
             className="rounded-full bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
           >
             Reintentar
