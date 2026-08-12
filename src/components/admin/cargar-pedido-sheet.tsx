@@ -71,6 +71,19 @@ type CartItem = AddToCartItem & {
 function effectiveUnitPriceCents(c: CartItem): number {
   return c.price_override_cents ?? c.unit_price_cents;
 }
+/**
+ * ¿Se puede elegir para cuándo es el pedido? (spec 085 · apagado en la 120)
+ *
+ * En `false` la hoja no muestra el paso y todo sale **para ahora**: la comanda
+ * va a cocina al confirmar, como siempre. El motor de programados —los slots,
+ * el cron que marcha con el lead, «Próximos»— queda intacto; esto sólo esconde
+ * la puerta de entrada desde la carga del personal.
+ *
+ * Tipado `boolean` a propósito: sin eso TypeScript estrecha a `false` y marca
+ * como muerto todo el bloque, que es justamente el que hay que poder revivir.
+ */
+const MOSTRAR_PROGRAMADO: boolean = false;
+
 type DeliveryType = "pickup" | "delivery";
 type View = "carga" | "datos";
 /** Spec 085 — para ahora (lo de siempre) o programado a una hora de hoy. */
@@ -719,7 +732,7 @@ export function CargarPedidoSheet({
                 )}
                 <div>
                   <label className="text-xs font-semibold text-zinc-600">
-                    Notas del pedido (opcional)
+                    Nota para el pedido (opcional)
                   </label>
                   <input
                     type="text"
@@ -734,7 +747,7 @@ export function CargarPedidoSheet({
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-zinc-600">
-                    Entregar (opcional)
+                    Nota para cocina (opcional)
                   </label>
                   <input
                     type="text"
@@ -753,73 +766,82 @@ export function CargarPedidoSheet({
               {/* ─── ¿Para cuándo? (spec 085) ───
                   El encargue telefónico: mismos horarios que ve el cliente,
                   sólo hoy. Al programar, la comanda no sale ahora — la manda el
-                  cron con el lead del negocio. */}
-              <section className="space-y-2.5 rounded-2xl bg-white p-3 ring-1 ring-zinc-200">
-                <h3 className="text-[11px] font-bold tracking-wide text-zinc-500 uppercase">
-                  ¿Para cuándo?
-                </h3>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setWhen("now")}
-                    className={`h-9 flex-1 rounded-xl text-sm font-semibold transition ${
-                      !isScheduled
-                        ? "bg-zinc-900 text-white"
-                        : "bg-white text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100"
-                    }`}
-                  >
-                    Ahora
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!canSchedule}
-                    onClick={() => setWhen("scheduled")}
-                    className={`flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${
-                      isScheduled
-                        ? "bg-zinc-900 text-white"
-                        : "bg-white text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100"
-                    }`}
-                  >
-                    <Clock className="h-4 w-4" /> Programar
-                  </button>
-                </div>
-                {!canSchedule ? (
-                  <p className="text-[11px] leading-snug text-zinc-500">
-                    No quedan horarios para hoy — se programa con al menos{" "}
-                    {SCHEDULED_MIN_LEAD_MIN} min de anticipación, sobre los
-                    horarios del local.
-                  </p>
-                ) : (
-                  isScheduled && (
-                    <>
-                      <div className="grid grid-cols-4 gap-1.5">
-                        {availableSlots.map((slot) => {
-                          const active = schedSlot === slot;
-                          return (
-                            <button
-                              key={slot}
-                              type="button"
-                              onClick={() => setSchedSlot(slot)}
-                              className={`h-9 rounded-xl text-sm font-semibold tabular-nums transition ${
-                                active
-                                  ? "bg-emerald-600 text-white"
-                                  : "bg-white text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100"
-                              }`}
-                            >
-                              {slot}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <p className="text-[11px] leading-snug text-zinc-500">
-                        {schedSlot
-                          ? `La comanda sale sola ${marchLeadMin} min antes de las ${schedSlot}. Hasta entonces queda en «Próximos».`
-                          : "Elegí la hora del retiro o la entrega — sólo para hoy."}
-                      </p>
-                    </>
-                  )
-                )}
-              </section>
+                  cron con el lead del negocio.
+
+                  Apagado por ahora (spec 120): el local arranca mandando todo
+                  al momento, y un paso más en la carga por una función que
+                  todavía no usan es fricción en hora pico. Con el interruptor
+                  en `false` el pedido queda siempre «para ahora» — nada del
+                  motor de programados se tocó, así que volver a mostrarlo es
+                  cambiar esta constante. */}
+              {MOSTRAR_PROGRAMADO && (
+                <section className="space-y-2.5 rounded-2xl bg-white p-3 ring-1 ring-zinc-200">
+                  <h3 className="text-[11px] font-bold tracking-wide text-zinc-500 uppercase">
+                    ¿Para cuándo?
+                  </h3>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setWhen("now")}
+                      className={`h-9 flex-1 rounded-xl text-sm font-semibold transition ${
+                        !isScheduled
+                          ? "bg-zinc-900 text-white"
+                          : "bg-white text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100"
+                      }`}
+                    >
+                      Ahora
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!canSchedule}
+                      onClick={() => setWhen("scheduled")}
+                      className={`flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                        isScheduled
+                          ? "bg-zinc-900 text-white"
+                          : "bg-white text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100"
+                      }`}
+                    >
+                      <Clock className="h-4 w-4" /> Programar
+                    </button>
+                  </div>
+                  {!canSchedule ? (
+                    <p className="text-[11px] leading-snug text-zinc-500">
+                      No quedan horarios para hoy — se programa con al menos{" "}
+                      {SCHEDULED_MIN_LEAD_MIN} min de anticipación, sobre los
+                      horarios del local.
+                    </p>
+                  ) : (
+                    isScheduled && (
+                      <>
+                        <div className="grid grid-cols-4 gap-1.5">
+                          {availableSlots.map((slot) => {
+                            const active = schedSlot === slot;
+                            return (
+                              <button
+                                key={slot}
+                                type="button"
+                                onClick={() => setSchedSlot(slot)}
+                                className={`h-9 rounded-xl text-sm font-semibold tabular-nums transition ${
+                                  active
+                                    ? "bg-emerald-600 text-white"
+                                    : "bg-white text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100"
+                                }`}
+                              >
+                                {slot}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <p className="text-[11px] leading-snug text-zinc-500">
+                          {schedSlot
+                            ? `La comanda sale sola ${marchLeadMin} min antes de las ${schedSlot}. Hasta entonces queda en «Próximos».`
+                            : "Elegí la hora del retiro o la entrega — sólo para hoy."}
+                        </p>
+                      </>
+                    )
+                  )}
+                </section>
+              )}
 
               {/* El pedido en armado. Vive acá, con el cliente y la entrega:
                   la izquierda es «el pedido y a quién va», que es el espejo de
