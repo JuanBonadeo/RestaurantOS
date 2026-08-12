@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
 
 import type { CatalogProduct } from "@/lib/mozo/catalog-query";
+import { filterProductsByQuery } from "@/lib/mozo/product-search";
 import { useStickyFilter } from "@/lib/ui/use-sticky-filter";
 
 export const CARTA_ALL = "all";
@@ -111,14 +112,16 @@ export function useProductSearch({
    * mostraban igual pero no filtraban nada.
    */
   const results = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const candidates = isSearching ? products : browse;
-    return candidates.filter((p) => {
-      if (isSearching && !p.name.toLowerCase().includes(q)) return false;
+    const candidates = (isSearching ? products : browse).filter((p) => {
       if (cartaFilter === CARTA_EN_LINEA) return p.show_online;
       if (cartaFilter === CARTA_SOLO_LOCAL) return !p.show_online;
       return true;
     });
+    // El matcheo tolerante (acentos, puntuación, tokens en cualquier orden,
+    // plural) y el orden por relevancia viven en `product-search.ts`.
+    return isSearching
+      ? filterProductsByQuery(candidates, search)
+      : candidates;
   }, [products, browse, search, cartaFilter, isSearching]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {

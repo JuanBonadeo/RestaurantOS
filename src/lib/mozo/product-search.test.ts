@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 
-import { clampIndex, moveSelection, resetSelection } from "./product-search";
+import {
+  clampIndex,
+  filterProductsByQuery,
+  moveSelection,
+  resetSelection,
+} from "./product-search";
 
 describe("clampIndex", () => {
   it("índice dentro de rango: lo devuelve igual", () => {
@@ -63,5 +68,48 @@ describe("resetSelection", () => {
 
   it("sin resultados: -1", () => {
     expect(resetSelection(0)).toBe(-1);
+  });
+});
+
+describe("filterProductsByQuery", () => {
+  const carta = [
+    { name: "Milanesa napolitana" },
+    { name: "Puré de papas" },
+    { name: "Coca-Cola 500ml" },
+    { name: "Empanada de carne" },
+    { name: "Ñoquis con salsa" },
+    { name: "Papas fritas" },
+  ];
+  const names = (q: string) => filterProductsByQuery(carta, q).map((p) => p.name);
+
+  it("sin búsqueda devuelve todo en el orden del catálogo", () => {
+    expect(filterProductsByQuery(carta, "   ")).toEqual(carta);
+  });
+
+  it("ignora acentos en los dos sentidos", () => {
+    expect(names("pure")).toEqual(["Puré de papas"]);
+    expect(names("puré")).toEqual(["Puré de papas"]);
+    expect(names("noquis")).toEqual(["Ñoquis con salsa"]);
+  });
+
+  it("ignora la puntuación del nombre", () => {
+    expect(names("coca cola")).toEqual(["Coca-Cola 500ml"]);
+  });
+
+  it("los tokens van en cualquier orden", () => {
+    expect(names("napo mila")).toEqual(["Milanesa napolitana"]);
+  });
+
+  it("matchea en singular lo que se tipea en plural", () => {
+    expect(names("empanadas")).toEqual(["Empanada de carne"]);
+  });
+
+  it("ordena por relevancia: primero lo que arranca con lo tipeado", () => {
+    // «Papas fritas» arranca con «papas»; en «Puré de papas» está al final.
+    expect(names("papas")).toEqual(["Papas fritas", "Puré de papas"]);
+  });
+
+  it("sin coincidencias devuelve vacío", () => {
+    expect(names("zzz")).toEqual([]);
   });
 });
