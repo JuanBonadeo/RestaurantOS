@@ -165,11 +165,14 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   );
 }
 
-// El menú del día, con la misma fila que un plato (nombre ··· precio) en vez de
-// la caja dorada de antes. Debajo, en lugar de la descripción, cuándo se ofrece;
-// y los pasos del menú —sólo el nombre del grupo— apilados con un «+» dorado.
-// Listar las opciones una por una tapaba media carta: el «Menú» de golf-jcr
-// tiene 57 componentes (spec 112).
+// El menú del día como bloque centrado dentro de un marco de línea dorada
+// finita — no como una fila de plato: el menú es el único ítem de la carta que
+// se lee de arriba a abajo (nombre → cuándo se ofrece → los pasos → precio), y
+// el marco lo separa del listado sin el relleno dorado de antes.
+//
+// Los pasos son SÓLO el nombre del grupo, apilados con un «+». Listar las
+// opciones una por una tapaba media carta: el «Menú» de golf-jcr tiene 57
+// componentes (spec 112). Qué milanesa hay se pregunta en la mesa.
 function DailyMenuCard({
   menu,
   isSuggestion,
@@ -181,63 +184,50 @@ function DailyMenuCard({
   const disponibilidad = disponibilidadTexto(menu.available_days);
 
   return (
-    <li style={{ listStyle: "none", padding: "11px 0" }}>
-      {/* Nombre ······ Precio */}
-      <div style={{ display: "flex", alignItems: "flex-end" }}>
-        <span
+    <li
+      style={{
+        listStyle: "none",
+        textAlign: "center",
+        padding: "20px 18px 18px",
+        border:
+          "1px solid color-mix(in srgb, var(--carta-gold) 55%, transparent)",
+        borderRadius: 3,
+      }}
+    >
+      {isSuggestion && (
+        <div
           style={{
-            fontWeight: 600,
-            fontSize: 15.5,
-            lineHeight: 1.25,
-            color: "var(--carta-ink)",
+            fontSize: 9.5,
+            fontWeight: 700,
+            textTransform: "uppercase",
+            letterSpacing: 1.6,
+            color: "var(--carta-gold)",
+            marginBottom: 5,
           }}
         >
-          {menu.name}
-        </span>
-        {isSuggestion && (
-          <span
-            style={{
-              marginLeft: 7,
-              fontSize: 10,
-              fontWeight: 700,
-              textTransform: "uppercase",
-              letterSpacing: 0.5,
-              color: "var(--carta-gold)",
-              flexShrink: 0,
-            }}
-          >
-            Sugerencia
-          </span>
-        )}
-        <span
-          aria-hidden
-          style={{
-            flex: 1,
-            margin: "0 8px 5px",
-            borderBottom: "1px dotted var(--carta-gold)",
-            minWidth: 16,
-          }}
-        />
-        <span
-          style={{
-            fontWeight: 600,
-            fontSize: 15.5,
-            color: "var(--carta-ink)",
-            whiteSpace: "nowrap",
-            flexShrink: 0,
-          }}
-        >
-          {formatCurrency(menu.price_cents)}
-        </span>
+          Sugerencia
+        </div>
+      )}
+
+      <div
+        style={{
+          fontSize: 14,
+          fontWeight: 700,
+          textTransform: "uppercase",
+          letterSpacing: 1.8,
+          color: "var(--carta-ink)",
+        }}
+      >
+        {menu.name}
       </div>
 
       {disponibilidad && (
         <div
           style={{
-            fontSize: 13,
+            marginTop: 2,
+            fontSize: 12.5,
+            fontStyle: "italic",
             color: "var(--carta-ink-2)",
-            lineHeight: 1.4,
-            marginTop: 3,
           }}
         >
           {disponibilidad}
@@ -245,20 +235,13 @@ function DailyMenuCard({
       )}
 
       {pasos.length > 0 && (
-        <ul
-          style={{
-            listStyle: "none",
-            margin: "10px 0 2px",
-            padding: 0,
-            textAlign: "center",
-          }}
-        >
+        <ul style={{ listStyle: "none", margin: "13px 0 0", padding: 0 }}>
           {pasos.map((paso, i) => (
             <li
               key={`${paso}-${i}`}
               style={{
-                fontSize: 13.5,
-                lineHeight: 1.45,
+                fontSize: 14.5,
+                lineHeight: 1.35,
                 color: "var(--carta-ink)",
               }}
             >
@@ -268,7 +251,7 @@ function DailyMenuCard({
                   style={{
                     display: "block",
                     fontSize: 11,
-                    lineHeight: 1.4,
+                    lineHeight: 1.6,
                     color: "var(--carta-gold)",
                   }}
                 >
@@ -280,6 +263,17 @@ function DailyMenuCard({
           ))}
         </ul>
       )}
+
+      <div
+        style={{
+          marginTop: 13,
+          fontSize: 15.5,
+          fontWeight: 600,
+          color: "var(--carta-ink)",
+        }}
+      >
+        {formatCurrency(menu.price_cents)}
+      </div>
     </li>
   );
 }
@@ -287,17 +281,23 @@ function DailyMenuCard({
 function DailyMenu({ menus }: { menus: MenuDailyMenu[] }) {
   const regular = menus.filter((m) => !m.is_suggestion);
   const suggestions = menus.filter((m) => m.is_suggestion);
-  if (menus.length === 0) return null;
+  const ordenados = [...regular, ...suggestions];
+  if (ordenados.length === 0) return null;
 
   return (
     <section>
       <SectionTitle>Menú del día</SectionTitle>
-      <ul style={{ margin: 0, padding: 0 }}>
-        {regular.map((m) => (
-          <DailyMenuCard key={m.id} menu={m} />
-        ))}
-        {suggestions.map((m) => (
-          <DailyMenuCard key={m.id} menu={m} isSuggestion />
+      <ul
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+          margin: "10px 0 0",
+          padding: 0,
+        }}
+      >
+        {ordenados.map((m) => (
+          <DailyMenuCard key={m.id} menu={m} isSuggestion={m.is_suggestion} />
         ))}
       </ul>
     </section>
