@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import Link from "next/link";
 import {
   ArrowLeftRight,
@@ -30,7 +37,10 @@ import { ReservationsPanel } from "@/components/admin/local/reservations-panel";
 import { SegmentedSelector } from "@/components/admin/local/segmented-selector";
 import { VentaRapidaPanel } from "@/components/admin/local/venta-rapida-panel";
 import { AsignarMozosPanel } from "@/components/mozo/asignar-mozos-panel";
-import { FloorPlanViewer, type TableExtra } from "@/components/mozo/floor-plan-viewer";
+import {
+  FloorPlanViewer,
+  type TableExtra,
+} from "@/components/mozo/floor-plan-viewer";
 import { OrderSummaryCard } from "@/components/mozo/order-summary-card";
 import { TransferTableModal } from "@/components/mozo/transfer-table-modal";
 import { TrasladarMesaModal } from "@/components/mozo/trasladar-mesa-modal";
@@ -64,7 +74,7 @@ import {
   type CobroPanelData,
   type CuentaPanelData,
 } from "@/lib/billing/cobro-panel-data";
-import type { ComandaConItems } from "@/lib/comandas/queries";
+import type { TableOrderState } from "@/lib/mozo/pedir-panel-data";
 import {
   DELAY_COLORS,
   tableDelay,
@@ -118,7 +128,11 @@ export type SalonOrderRef = {
   created_at: string;
   status: string;
   customer_name: string | null;
-  items: { product_name: string; quantity: number; cancelled_at: string | null }[];
+  items: {
+    product_name: string;
+    quantity: number;
+    cancelled_at: string | null;
+  }[];
   comandas: {
     id: string;
     batch: number;
@@ -128,7 +142,11 @@ export type SalonOrderRef = {
     delivered_at: string | null;
     /** Anulada (spec 049): la fila se pinta «Anulada» y pierde sus acciones. */
     cancelled_at: string | null;
-    items: { product_name: string; quantity: number; prep_time_minutes: number | null }[];
+    items: {
+      product_name: string;
+      quantity: number;
+      prep_time_minutes: number | null;
+    }[];
   }[];
 };
 
@@ -156,8 +174,16 @@ const STATUS_COLORS: Record<
   { dot: string; bg: string; text: string }
 > = {
   libre: { dot: "bg-zinc-300", bg: "bg-zinc-50", text: "text-zinc-600" },
-  ocupada: { dot: "bg-emerald-500", bg: "bg-emerald-50", text: "text-emerald-800" },
-  pidio_cuenta: { dot: "bg-amber-500", bg: "bg-amber-50", text: "text-amber-800" },
+  ocupada: {
+    dot: "bg-emerald-500",
+    bg: "bg-emerald-50",
+    text: "text-emerald-800",
+  },
+  pidio_cuenta: {
+    dot: "bg-amber-500",
+    bg: "bg-amber-50",
+    text: "text-amber-800",
+  },
 };
 
 const STATS_ORDER: OperationalStatus[] = ["libre", "ocupada", "pidio_cuenta"];
@@ -352,7 +378,9 @@ export function SalonDesktop({
   const [anularReason, setAnularReason] = useState("");
   const [showNewReservation, setShowNewReservation] = useState(false);
   // Mesa elegida en el plano para la reserva que se está creando (spec 059).
-  const [nuevaReservaTable, setNuevaReservaTable] = useState<FloorTable | null>(null);
+  const [nuevaReservaTable, setNuevaReservaTable] = useState<FloorTable | null>(
+    null,
+  );
   const [pickingForNueva, setPickingForNueva] = useState(false);
   // Venta rápida de mostrador (spec 058): modo del sidebar, no de una mesa.
   const [ventaRapidaOpen, setVentaRapidaOpen] = useState(false);
@@ -392,9 +420,7 @@ export function SalonDesktop({
   const catalogBundleRef = useRef<PedirCatalogBundle | null>(null);
   catalogBundleRef.current = catalogBundle;
   const [pedirTable, setPedirTable] = useState<FloorTable | null>(null);
-  const [pedirComandas, setPedirComandas] = useState<ComandaConItems[] | null>(
-    null,
-  );
+  const [pedirState, setPedirState] = useState<TableOrderState | null>(null);
   const [pedirLoading, setPedirLoading] = useState(false);
 
   // ── "Cobrar mesa" embebido en el panel derecho (no navega) ──
@@ -430,7 +456,7 @@ export function SalonDesktop({
 
   const closePedir = useCallback(() => {
     setPedirTable(null);
-    setPedirComandas(null);
+    setPedirState(null);
   }, []);
 
   const closeCobro = useCallback(() => {
@@ -442,7 +468,7 @@ export function SalonDesktop({
     (table: FloorTable) => {
       // Cobro, cuenta y pedir son excluyentes por mesa: abrir uno cierra los otros.
       setPedirTable(null);
-      setPedirComandas(null);
+      setPedirState(null);
       setCuentaTable(null);
       setCuentaData(null);
       setCobroTable(table);
@@ -502,7 +528,7 @@ export function SalonDesktop({
     (table: FloorTable) => {
       // Excluyente con cobro y pedir.
       setPedirTable(null);
-      setPedirComandas(null);
+      setPedirState(null);
       setCobroTable(null);
       setCobroData(null);
       setCuentaTable(table);
@@ -557,7 +583,7 @@ export function SalonDesktop({
       setCuentaTable(null);
       setCuentaData(null);
       setPedirTable(table);
-      setPedirComandas(null);
+      setPedirState(null);
       setPedirLoading(true);
       (async () => {
         try {
@@ -569,9 +595,9 @@ export function SalonDesktop({
             bundle = cr.data;
             setCatalogBundle(bundle);
           }
-          // Comandas de la mesa puntual (rápido).
+          // Estado de la mesa puntual: comandas + «Lo pedido» (rápido).
           const tr = await loadTableComandas(slug, table.id);
-          setPedirComandas(tr.ok ? tr.data : []);
+          setPedirState(tr.ok ? tr.data : { comandas: [], loPedido: null });
         } catch (e) {
           toast.error(
             e instanceof Error ? e.message : "No pudimos abrir el pedido.",
@@ -741,7 +767,8 @@ export function SalonDesktop({
       if (!r.table_id) continue;
       // Una reserva `seated` sobre una mesa libre quedó huérfana → no la pegamos.
       // Las `confirmed` (próximas) sí pueden mostrarse sobre una mesa libre.
-      if (r.status === "seated" && tableStatusById[r.table_id] === "libre") continue;
+      if (r.status === "seated" && tableStatusById[r.table_id] === "libre")
+        continue;
       m[r.table_id] = r;
     }
     return m;
@@ -1199,7 +1226,11 @@ export function SalonDesktop({
    * la que ya estoy" de "tocar otra".
    */
   const mesaEnModo =
-    cobroTable?.id ?? cuentaTable?.id ?? pedirTable?.id ?? walkInTableId ?? null;
+    cobroTable?.id ??
+    cuentaTable?.id ??
+    pedirTable?.id ??
+    walkInTableId ??
+    null;
 
   /**
    * Tap en el plano fuera de una mesa = salir de lo que estás haciendo, un
@@ -1264,7 +1295,9 @@ export function SalonDesktop({
       if (e.defaultPrevented) return;
       const el = e.target as HTMLElement;
       const escribiendo =
-        el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable;
+        el.tagName === "INPUT" ||
+        el.tagName === "TEXTAREA" ||
+        el.isContentEditable;
       // Con un modal abierto adentro del panel (alta de producto, asistente del
       // menú) las teclas son suyas: las maneja él y el panel no se mueve.
       const enDialog = !!el.closest?.("[role='dialog']");
@@ -1299,7 +1332,7 @@ export function SalonDesktop({
       // En paint mode usamos `localAssign` (optimistic) para que el tap
       // pinte la mesa de inmediato sin esperar al server.
       const effectiveMozoId = distribuirOpen
-        ? localAssign[t.id] ?? null
+        ? (localAssign[t.id] ?? null)
         : t.mozo_id;
       const mozoName = effectiveMozoId
         ? mozoNameById.get(effectiveMozoId)
@@ -1389,11 +1422,18 @@ export function SalonDesktop({
       <div
         className={cn(
           "grid min-h-0 flex-1 grid-cols-1 gap-4",
-          // Ancho único del panel: el de cobro (el modo más denso: KPI + cajas +
-          // splits + form de pago). Antes la base era 360 y crecía por modo, así
-          // que el sidebar "saltaba" al entrar a cobrar y las filas de reservas
-          // quedaban apretadas. Pedido de Juan: que arranque ya en ese ancho.
-          "lg:grid-cols-[1fr_480px]",
+          // Ancho **único para todos los modos** (invariante desde que la base
+          // era 360 y crecía por modo: el sidebar "saltaba" al entrar a cobrar).
+          // Lo que cambia con la spec 111 es cuánto: el panel es donde se
+          // trabaja el turno entero, y 480px fijos eran el 25% de un monitor de
+          // 1920 para la tarea y el 75% para un plano que no cambia.
+          //
+          // De 1024 a 1279 se conserva 480: con el piso de 560 el plano
+          // quedaría en ~450px y en una notebook eso es peor negocio.
+          "lg:grid-cols-[minmax(0,1fr)_480px]",
+          // De 1280 para arriba, 44% del split con piso 560 y techo 900 — el
+          // techo es para que en un ultrawide el plano no termine en una franja.
+          "xl:grid-cols-[minmax(0,1fr)_minmax(560px,min(44%,900px))]",
         )}
       >
         {/* Columna del plano: viewer arriba + stats al pie */}
@@ -1422,7 +1462,9 @@ export function SalonDesktop({
           <div
             className={cn(
               "bg-card min-h-0 flex-1 overflow-hidden rounded-2xl ring-1",
-              asignarReservaFor || pickingForNueva ? "ring-2 ring-indigo-500" : "ring-border/60",
+              asignarReservaFor || pickingForNueva
+                ? "ring-2 ring-indigo-500"
+                : "ring-border/60",
             )}
           >
             {plan ? (
@@ -1493,7 +1535,10 @@ export function SalonDesktop({
           ref={asideRef}
           tabIndex={-1}
           onKeyDown={handleAsideKeyDown}
-          className="bg-card ring-border/60 relative flex min-h-0 flex-col overflow-hidden rounded-2xl outline-none ring-1"
+          // `@container`: los modos de adentro se adaptan al ancho **del panel**,
+          // no al del viewport (spec 111). No es lo mismo: el panel es el 44% de
+          // la pantalla, así que un `xl:` acá mentiría por más de 700px.
+          className="bg-card ring-border/60 @container relative flex min-h-0 flex-col overflow-hidden rounded-2xl ring-1 outline-none"
         >
           {atajosOpen && (
             <AtajosHelp modo={modoPanel} onClose={() => setAtajosOpen(false)} />
@@ -1584,7 +1629,7 @@ export function SalonDesktop({
               </div>
             )
           ) : pedirTable ? (
-            catalogBundle && pedirComandas ? (
+            catalogBundle && pedirState ? (
               <MozoPedirClient
                 slug={slug}
                 businessName={catalogBundle.businessName}
@@ -1596,7 +1641,8 @@ export function SalonDesktop({
                 }}
                 catalog={catalogBundle.catalog}
                 stationNameById={catalogBundle.stationNameById}
-                existingComandas={pedirComandas}
+                existingComandas={pedirState.comandas}
+                loPedido={pedirState.loPedido}
                 topProductIds={catalogBundle.topProductIds}
                 dailyMenus={catalogBundle.dailyMenus}
                 role={role}
@@ -1670,7 +1716,9 @@ export function SalonDesktop({
               order={orderByTable[selected.id]}
               reservation={reservationByTable[selected.id]}
               mozoName={
-                selected.mozo_id ? (mozoNameById.get(selected.mozo_id) ?? null) : null
+                selected.mozo_id
+                  ? (mozoNameById.get(selected.mozo_id) ?? null)
+                  : null
               }
               now={now}
               role={role}
@@ -1808,7 +1856,7 @@ export function SalonDesktop({
             .filter(
               (t) =>
                 t.id !== trasladarTableId &&
-                ((withOverlay(t).operational_status ?? "libre") === "libre"),
+                (withOverlay(t).operational_status ?? "libre") === "libre",
             )
             .map((t) => ({
               id: t.id,
@@ -1852,7 +1900,7 @@ export function SalonDesktop({
               value={anularReason}
               onChange={(e) => setAnularReason(e.target.value.slice(0, 200))}
               placeholder="ej: cliente se fue, error de carga, ..."
-              className="block w-full rounded-2xl border border-zinc-200 px-3 py-2 text-sm focus:border-red-400 focus:outline-none focus:ring-2 focus:ring-red-100"
+              className="block w-full rounded-2xl border border-zinc-200 px-3 py-2 text-sm focus:border-red-400 focus:ring-2 focus:ring-red-100 focus:outline-none"
               rows={3}
               autoFocus
             />
@@ -1902,8 +1950,8 @@ export function SalonDesktop({
               </DialogDescription>
             </DialogHeader>
             <p className="text-sm text-zinc-600">
-              Podés abrirla igual para un walk-in, pero después vas a necesitar la
-              mesa para esta reserva.
+              Podés abrirla igual para un walk-in, pero después vas a necesitar
+              la mesa para esta reserva.
             </p>
             <DialogFooter>
               <Button
@@ -1977,7 +2025,9 @@ function SalonStats({
           <span key={s} className="inline-flex items-center gap-1.5">
             <span className={cn("h-2 w-2 shrink-0 rounded-full", c.dot)} />
             <span className={cn("font-medium", c.text)}>{STATUS_LABEL[s]}</span>
-            <span className={cn("font-bold tabular-nums", c.text)}>{count}</span>
+            <span className={cn("font-bold tabular-nums", c.text)}>
+              {count}
+            </span>
           </span>
         );
       })}
@@ -2008,8 +2058,8 @@ function MozosLegend({
             className="size-2.5 shrink-0 rounded-full"
             style={{ background: m.color }}
           />
-          <span className="truncate max-w-[10rem]">{m.name}</span>
-          <span className="tabular-nums text-zinc-400">{m.count}</span>
+          <span className="max-w-[10rem] truncate">{m.name}</span>
+          <span className="text-zinc-400 tabular-nums">{m.count}</span>
         </span>
       ))}
       {sinAsignar > 0 && (
@@ -2017,9 +2067,12 @@ function MozosLegend({
           className="inline-flex items-center gap-1.5 text-[11px] font-medium text-zinc-500"
           title={`${sinAsignar} mesa${sinAsignar === 1 ? "" : "s"} sin mozo`}
         >
-          <span aria-hidden className="size-2.5 shrink-0 rounded-full bg-zinc-300" />
+          <span
+            aria-hidden
+            className="size-2.5 shrink-0 rounded-full bg-zinc-300"
+          />
           Sin asignar
-          <span className="tabular-nums text-zinc-400">{sinAsignar}</span>
+          <span className="text-zinc-400 tabular-nums">{sinAsignar}</span>
         </span>
       )}
     </div>
@@ -2063,9 +2116,9 @@ function DemorasPanel({
   if (demoras.length === 0) return null;
   return (
     <section className="border-border/60 border-b">
-      <header className="flex items-center gap-2 px-4 pb-1.5 pt-3">
+      <header className="flex items-center gap-2 px-4 pt-3 pb-1.5">
         <Clock className="size-3.5 text-red-600" />
-        <h3 className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-red-700">
+        <h3 className="text-[0.65rem] font-semibold tracking-[0.14em] text-red-700 uppercase">
           Cocina demorada · {demoras.length}
         </h3>
       </header>
@@ -2076,7 +2129,7 @@ function DemorasPanel({
               type="button"
               onClick={() => onSelect(d.tableId)}
               {...rowProps(`demora:${d.tableId}`)}
-              className="flex w-full items-center gap-2.5 px-4 py-1.5 text-left outline-none transition hover:bg-zinc-50 focus-visible:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-zinc-900/20"
+              className="flex w-full items-center gap-2.5 px-4 py-1.5 text-left transition outline-none hover:bg-zinc-50 focus-visible:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-zinc-900/20 focus-visible:ring-inset"
             >
               <span
                 aria-hidden
@@ -2086,10 +2139,10 @@ function DemorasPanel({
               <span className="font-heading min-w-0 flex-1 truncate text-sm font-bold text-zinc-900">
                 {d.label}
               </span>
-              <span className="max-w-[7rem] truncate text-[11px] text-zinc-500">
+              <span className="max-w-[7rem] truncate text-[11px] text-zinc-500 @lg:max-w-[14rem]">
                 {d.station}
               </span>
-              <span className="shrink-0 text-[11px] font-semibold tabular-nums text-red-700">
+              <span className="shrink-0 text-[11px] font-semibold text-red-700 tabular-nums">
                 +{d.excessMin} min
               </span>
             </button>
@@ -2144,7 +2197,7 @@ function ActiveTablesList({
     if (group.tables.length === 0) return null;
     return (
       <section key={group.tone} className="space-y-1.5">
-        <h4 className="px-4 pt-3 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+        <h4 className="px-4 pt-3 text-[0.65rem] font-semibold tracking-[0.14em] text-zinc-500 uppercase">
           {group.title} · {group.tables.length}
         </h4>
         <ul>
@@ -2176,59 +2229,62 @@ function ActiveTablesList({
       {/* Título y acciones van en filas separadas: en 360px de sidebar los tres
           CTAs no entran al lado del título sin machacarlo (spec 058 sumó el
           tercero). El `flex-wrap` cubre labels más largos o zoom del navegador. */}
-      <header className="border-border/60 space-y-2 border-b px-4 py-3">
+      {/* Con el panel ancho (spec 111) el título y los CTAs sí entran en un
+          renglón: `@xl` mide el panel, así que a 480px queda apilado igual. */}
+      <header className="border-border/60 space-y-2 border-b px-4 py-3 @xl:flex @xl:items-center @xl:justify-between @xl:gap-3 @xl:space-y-0">
         <div className="flex items-baseline justify-between gap-2">
           <h3 className="text-foreground text-sm font-bold tracking-tight">
             Mesas
           </h3>
           <p className="text-muted-foreground shrink-0 text-[11px]">
-            {totalActivas} {totalActivas === 1 ? "activa" : "activas"} · {total} totales
+            {totalActivas} {totalActivas === 1 ? "activa" : "activas"} · {total}{" "}
+            totales
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-            {canVentaRapida && (
-              <button
-                type="button"
-                onClick={onVentaRapida}
-                className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:brightness-110 active:scale-[0.97]"
-              >
-                <Store className="size-3" />
-                Venta rápida
-              </button>
-            )}
-            {canDistribuir && (
-              <button
-                type="button"
-                onClick={onDistribuir}
-                className="inline-flex items-center gap-1.5 rounded-full bg-zinc-900 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:brightness-110 active:scale-[0.97]"
-              >
-                <Users className="size-3" />
-                Distribuir mozos
-              </button>
-            )}
-            {/* El teclado es el camino rápido de este panel; el botón es para
-                descubrirlo con el mouse. Mismo panel que abre `?`. */}
+          {canVentaRapida && (
             <button
               type="button"
-              onClick={onAtajos}
-              aria-label="Ver atajos de teclado"
-              title="Atajos de teclado (?)"
-              className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2.5 py-1.5 text-[11px] font-semibold text-zinc-600 ring-1 ring-zinc-200 transition hover:bg-zinc-200"
+              onClick={onVentaRapida}
+              className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:brightness-110 active:scale-[0.97]"
             >
-              <Keyboard className="size-3" />?
+              <Store className="size-3" />
+              Venta rápida
             </button>
-            {editPlanHref && (
-              // Icon-only: es la acción menos frecuente de las tres y así las
-              // otras dos entran en un solo renglón.
-              <Link
-                href={editPlanHref}
-                className="inline-flex items-center justify-center rounded-full bg-zinc-100 p-2 text-zinc-700 ring-1 ring-zinc-200 transition hover:bg-zinc-200 active:scale-[0.97]"
-                aria-label="Editar mesas del salón"
-                title="Editar mesas del salón"
-              >
-                <Pencil className="size-3" />
-              </Link>
-            )}
+          )}
+          {canDistribuir && (
+            <button
+              type="button"
+              onClick={onDistribuir}
+              className="inline-flex items-center gap-1.5 rounded-full bg-zinc-900 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:brightness-110 active:scale-[0.97]"
+            >
+              <Users className="size-3" />
+              Distribuir mozos
+            </button>
+          )}
+          {/* El teclado es el camino rápido de este panel; el botón es para
+                descubrirlo con el mouse. Mismo panel que abre `?`. */}
+          <button
+            type="button"
+            onClick={onAtajos}
+            aria-label="Ver atajos de teclado"
+            title="Atajos de teclado (?)"
+            className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2.5 py-1.5 text-[11px] font-semibold text-zinc-600 ring-1 ring-zinc-200 transition hover:bg-zinc-200"
+          >
+            <Keyboard className="size-3" />?
+          </button>
+          {editPlanHref && (
+            // Icon-only: es la acción menos frecuente de las tres y así las
+            // otras dos entran en un solo renglón.
+            <Link
+              href={editPlanHref}
+              className="inline-flex items-center justify-center rounded-full bg-zinc-100 p-2 text-zinc-700 ring-1 ring-zinc-200 transition hover:bg-zinc-200 active:scale-[0.97]"
+              aria-label="Editar mesas del salón"
+              title="Editar mesas del salón"
+            >
+              <Pencil className="size-3" />
+            </Link>
+          )}
         </div>
       </header>
       <div className="flex-1 overflow-y-auto pb-3">
@@ -2298,8 +2354,8 @@ function ActiveTableRow({
         onClick={() => onSelect(table.id)}
         {...rowProps(`mesa:${table.id}`)}
         className={cn(
-          "block w-full border-l-[3px] px-4 py-3 text-left outline-none transition hover:bg-zinc-50",
-          "focus-visible:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-zinc-900/20",
+          "block w-full border-l-[3px] px-4 py-3 text-left transition outline-none hover:bg-zinc-50",
+          "focus-visible:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-zinc-900/20 focus-visible:ring-inset",
           borderClass[tone],
         )}
       >
@@ -2337,7 +2393,7 @@ function ActiveTableRow({
         {/* Línea 3: order info (si hay) */}
         {order && (
           <p className="mt-0.5 text-[11px] text-zinc-500">
-            <span className="font-semibold tabular-nums text-zinc-700">
+            <span className="font-semibold text-zinc-700 tabular-nums">
               {formatMoney(order.total_cents)}
             </span>
             {activeItemsCount > 0 && (
@@ -2359,25 +2415,27 @@ function ActiveTableRow({
 
         {/* Línea 5: mozo asignado — chip con color del palette del mozo
             (distinto de los colores de estado, ver lib/mozo/colors.ts). */}
-        {mozoName && table.mozo_id && (() => {
-          const p = mozoPalette(table.mozo_id);
-          return (
-            <p
-              className={cn(
-                "mt-1 inline-flex max-w-full items-center gap-1 truncate rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1",
-                p.bg,
-                p.text,
-                p.ring,
-              )}
-            >
-              <span
-                aria-hidden
-                className={cn("size-1.5 shrink-0 rounded-full", p.dot)}
-              />
-              <span className="truncate">{mozoName}</span>
-            </p>
-          );
-        })()}
+        {mozoName &&
+          table.mozo_id &&
+          (() => {
+            const p = mozoPalette(table.mozo_id);
+            return (
+              <p
+                className={cn(
+                  "mt-1 inline-flex max-w-full items-center gap-1 truncate rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1",
+                  p.bg,
+                  p.text,
+                  p.ring,
+                )}
+              >
+                <span
+                  aria-hidden
+                  className={cn("size-1.5 shrink-0 rounded-full", p.dot)}
+                />
+                <span className="truncate">{mozoName}</span>
+              </p>
+            );
+          })()}
       </button>
     </li>
   );
@@ -2405,10 +2463,10 @@ function CobroPanelEmptyState({
     <div className="flex h-full min-h-0 flex-col">
       <header className="border-border/60 flex items-center gap-3 border-b px-4 py-3">
         <div className="min-w-0 flex-1">
-          <h3 className="text-foreground text-2xl font-extrabold leading-none tracking-tight">
+          <h3 className="text-foreground text-2xl leading-none font-extrabold tracking-tight">
             {tableLabel}
           </h3>
-          <p className="text-muted-foreground mt-1 text-[11px] font-semibold uppercase tracking-wider">
+          <p className="text-muted-foreground mt-1 text-[11px] font-semibold tracking-wider uppercase">
             Cobrar mesa
           </p>
         </div>
@@ -2506,7 +2564,11 @@ function MesaOptionsMenu({
         {items.map((it) => {
           const Icon = it.icon;
           return (
-            <DropdownMenuItem key={it.key} onClick={it.onClick} disabled={disabled}>
+            <DropdownMenuItem
+              key={it.key}
+              onClick={it.onClick}
+              disabled={disabled}
+            >
               <Icon />
               {it.label}
             </DropdownMenuItem>
@@ -2597,8 +2659,7 @@ function TableDetail({
 
   const canWalkIn = status === "libre";
   const canTransfer =
-    status !== "libre" &&
-    (role !== "mozo" || table.mozo_id === currentUserId);
+    status !== "libre" && (role !== "mozo" || table.mozo_id === currentUserId);
   const canAnular =
     status === "ocupada" && canTransitionMesa(role, status, "libre");
   // Trasladar la mesa entera a otra libre (spec 048): mesa con order abierta,
@@ -2638,7 +2699,7 @@ function TableDetail({
       {/* Header limpio: Mesa N · estado · tiempo · avatar mozo · close. */}
       <header className="border-border/60 flex items-center gap-3 border-b px-4 py-3">
         <div className="min-w-0 flex-1">
-          <h3 className="text-foreground text-2xl font-extrabold leading-none tracking-tight">
+          <h3 className="text-foreground text-2xl leading-none font-extrabold tracking-tight">
             {table.label}
           </h3>
           <div className="mt-1.5 flex flex-wrap items-center gap-2">
@@ -2658,25 +2719,27 @@ function TableDetail({
                 {tiempoLabel}
               </span>
             )}
-            {mozoName && table.mozo_id && (() => {
-              const p = mozoPalette(table.mozo_id);
-              return (
-                <span
-                  className={cn(
-                    "inline-flex max-w-[180px] items-center gap-1 truncate rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1",
-                    p.bg,
-                    p.text,
-                    p.ring,
-                  )}
-                >
+            {mozoName &&
+              table.mozo_id &&
+              (() => {
+                const p = mozoPalette(table.mozo_id);
+                return (
                   <span
-                    aria-hidden
-                    className={cn("h-1.5 w-1.5 shrink-0 rounded-full", p.dot)}
-                  />
-                  <span className="truncate">{mozoName}</span>
-                </span>
-              );
-            })()}
+                    className={cn(
+                      "inline-flex max-w-[180px] items-center gap-1 truncate rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 @lg:max-w-[300px]",
+                      p.bg,
+                      p.text,
+                      p.ring,
+                    )}
+                  >
+                    <span
+                      aria-hidden
+                      className={cn("h-1.5 w-1.5 shrink-0 rounded-full", p.dot)}
+                    />
+                    <span className="truncate">{mozoName}</span>
+                  </span>
+                );
+              })()}
           </div>
         </div>
         <button
@@ -2725,7 +2788,7 @@ function TableDetail({
           </div>
         )}
         {reservation?.notes && (
-          <p className="-mt-1 px-1 text-xs italic text-zinc-600">
+          <p className="-mt-1 max-w-prose px-1 text-xs text-zinc-600 italic">
             “{reservation.notes}”
           </p>
         )}
@@ -2759,7 +2822,9 @@ function TableDetail({
             </p>
             <p className="mt-3 max-w-[18rem] text-xs text-zinc-500">
               Tocá{" "}
-              <span className="font-semibold text-zinc-700">Sentar walk-in</span>{" "}
+              <span className="font-semibold text-zinc-700">
+                Sentar walk-in
+              </span>{" "}
               para abrir la mesa con un comensal que llegó sin reserva.
             </p>
           </div>
@@ -2796,7 +2861,12 @@ function TableDetail({
           let primary: React.ReactNode = null;
           if (canWalkIn && reservation) {
             primary = (
-              <button type="button" onClick={onSentarReserva} disabled={pending} className={primaryClass}>
+              <button
+                type="button"
+                onClick={onSentarReserva}
+                disabled={pending}
+                className={primaryClass}
+              >
                 <UserCheck className="h-5 w-5" />
                 Sentar reserva
                 {enterHint}
@@ -2804,7 +2874,12 @@ function TableDetail({
             );
           } else if (canWalkIn) {
             primary = (
-              <button type="button" onClick={onWalkIn} disabled={pending} className={primaryClass}>
+              <button
+                type="button"
+                onClick={onWalkIn}
+                disabled={pending}
+                className={primaryClass}
+              >
                 <UserPlus className="h-5 w-5" />
                 Sentar walk-in
                 {enterHint}
@@ -2812,7 +2887,12 @@ function TableDetail({
             );
           } else if (canShowCuenta && (status === "pidio_cuenta" || hasItems)) {
             primary = (
-              <button type="button" onClick={onPedirCuenta} disabled={pending} className={primaryAmberClass}>
+              <button
+                type="button"
+                onClick={onPedirCuenta}
+                disabled={pending}
+                className={primaryAmberClass}
+              >
                 <Receipt className="h-5 w-5" />
                 Cobrar
                 {enterHint}
@@ -2820,7 +2900,12 @@ function TableDetail({
             );
           } else if (canPedir) {
             primary = (
-              <button type="button" onClick={() => onCargarPedido()} disabled={pending} className={primaryClass}>
+              <button
+                type="button"
+                onClick={() => onCargarPedido()}
+                disabled={pending}
+                className={primaryClass}
+              >
                 <ClipboardList className="h-5 w-5" />
                 Cargar pedido
                 {enterHint}
@@ -2834,21 +2919,48 @@ function TableDetail({
           const showCargarMas = status === "ocupada" && hasItems && canPedir;
           const menuItems: MesaMenuItem[] = [];
           if (showWalkInSec)
-            menuItems.push({ key: "walkin", icon: UserPlus, label: "Sentar walk-in", onClick: onWalkIn });
+            menuItems.push({
+              key: "walkin",
+              icon: UserPlus,
+              label: "Sentar walk-in",
+              onClick: onWalkIn,
+            });
           if (showVolverAPedir)
-            menuItems.push({ key: "volver", icon: ClipboardList, label: "Volver a pedir", onClick: onCargarPedido });
+            menuItems.push({
+              key: "volver",
+              icon: ClipboardList,
+              label: "Volver a pedir",
+              onClick: onCargarPedido,
+            });
           if (showCargarMas)
-            menuItems.push({ key: "cargar-mas", icon: ClipboardList, label: "Cargar más", onClick: onCargarPedido });
+            menuItems.push({
+              key: "cargar-mas",
+              icon: ClipboardList,
+              label: "Cargar más",
+              onClick: onCargarPedido,
+            });
           if (canTransfer)
-            menuItems.push({ key: "transferir", icon: ArrowLeftRight, label: "Transferir mozo", onClick: onTransfer });
+            menuItems.push({
+              key: "transferir",
+              icon: ArrowLeftRight,
+              label: "Transferir mozo",
+              onClick: onTransfer,
+            });
           if (canTrasladar)
-            menuItems.push({ key: "trasladar", icon: MoveRight, label: "Trasladar mesa", onClick: onTrasladar });
+            menuItems.push({
+              key: "trasladar",
+              icon: MoveRight,
+              label: "Trasladar mesa",
+              onClick: onTrasladar,
+            });
 
           const hasMenu = menuItems.length > 0 || canAnular;
           if (!primary && !hasMenu) return null;
 
           return (
-            <div className="flex items-stretch gap-2">
+            /* Tope de ancho: el primario es `w-full` y con el panel ancho
+               quedaba una losa de 810px con el label flotando en el medio. */
+            <div className="mx-auto flex w-full max-w-2xl items-stretch gap-2">
               {primary && <div className="min-w-0 flex-1">{primary}</div>}
               {hasMenu && (
                 <MesaOptionsMenu

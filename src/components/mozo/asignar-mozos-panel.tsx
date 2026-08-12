@@ -58,7 +58,7 @@ export function AsignarMozosPanel({
       {/* Header — mismo lenguaje que TableDetail. */}
       <header className="border-border/60 flex items-center justify-between gap-3 border-b px-4 py-3">
         <div className="min-w-0">
-          <p className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+          <p className="text-[0.6rem] font-semibold tracking-[0.18em] text-zinc-500 uppercase">
             Modo pintura
           </p>
           <h3 className="text-foreground text-lg font-semibold tracking-tight">
@@ -78,11 +78,11 @@ export function AsignarMozosPanel({
       {/* Lista de mozos — palette */}
       <div className="flex-1 space-y-3 overflow-y-auto p-4">
         <div className="flex items-center justify-between">
-          <p className="text-[0.6rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+          <p className="text-[0.6rem] font-semibold tracking-[0.14em] text-zinc-500 uppercase">
             Mozos
           </p>
           {totalSinAsignar > 0 && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold tabular-nums text-zinc-700">
+            <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-700 tabular-nums">
               {totalSinAsignar} sin asignar
             </span>
           )}
@@ -90,11 +90,14 @@ export function AsignarMozosPanel({
 
         {targetMozos.length === 0 ? (
           <p className="rounded-xl bg-zinc-50 p-3 text-xs text-zinc-500 ring-1 ring-zinc-200">
-            No hay mozos cargados. Agregá empleados con rol &quot;mozo&quot; desde{" "}
-            <span className="font-semibold">/admin/empleados</span>.
+            No hay mozos cargados. Agregá empleados con rol &quot;mozo&quot;
+            desde <span className="font-semibold">/admin/empleados</span>.
           </p>
         ) : (
-          <div className="flex flex-col gap-1.5">
+          /* Dos columnas con el panel ancho (spec 111): con el equipo real
+             estas filas bajas dejaban 700px vacíos y obligaban a scrollear
+             justo la lista que hay que tapear. */
+          <div className="grid grid-cols-1 gap-1.5 @xl:grid-cols-2">
             {targetMozos.map((m) => {
               const isActive = activeMozoId === m.user_id;
               const color = mozoColor(m.user_id);
@@ -146,7 +149,8 @@ export function AsignarMozosPanel({
               type="button"
               onClick={() => onActiveMozoChange(null)}
               className={cn(
-                "flex flex-shrink-0 items-center gap-2.5 rounded-xl px-3 py-2 text-left transition active:scale-[0.99]",
+                // Fila completa: no es un mozo más, es la acción de la paleta.
+                "flex flex-shrink-0 items-center gap-2.5 rounded-xl px-3 py-2 text-left transition active:scale-[0.99] @xl:col-span-2",
                 activeMozoId === null
                   ? "bg-rose-100 text-rose-900 ring-1 ring-rose-300"
                   : "bg-zinc-50 text-zinc-600 hover:bg-zinc-100",
@@ -157,7 +161,7 @@ export function AsignarMozosPanel({
               </span>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold">Desasignar</p>
-                <p className="text-[0.65rem] tabular-nums text-zinc-500">
+                <p className="text-[0.65rem] text-zinc-500 tabular-nums">
                   {totalSinAsignar} mesas
                 </p>
               </div>
@@ -165,11 +169,10 @@ export function AsignarMozosPanel({
           </div>
         )}
 
-        <p className="mt-2 rounded-xl bg-zinc-50 p-3 text-[0.7rem] leading-relaxed text-zinc-600 ring-1 ring-zinc-200">
-          Tocá un mozo y después las mesas que le tocan en el plano. Tap en
-          una mesa ya asignada al mozo activo la desasigna. La asignación
-          queda <span className="font-semibold">fija</span> hasta que la
-          cambies.
+        <p className="mt-2 rounded-xl bg-zinc-50 p-3 text-[0.7rem] leading-relaxed text-zinc-600 ring-1 ring-zinc-200 @xl:max-w-prose">
+          Tocá un mozo y después las mesas que le tocan en el plano. Tap en una
+          mesa ya asignada al mozo activo la desasigna. La asignación queda{" "}
+          <span className="font-semibold">fija</span> hasta que la cambies.
         </p>
       </div>
 

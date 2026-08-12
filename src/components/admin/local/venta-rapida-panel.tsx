@@ -373,7 +373,7 @@ export function VentaRapidaPanel({
               id="venta-cat"
               value={activeCategory}
               onChange={(e) => setActiveCategory(e.target.value)}
-              className="min-w-0 flex-1 rounded-xl border border-zinc-200 bg-white px-2.5 py-1.5 text-sm font-semibold text-zinc-800 focus:border-emerald-400 focus:outline-none"
+              className="min-w-0 flex-1 rounded-xl border border-zinc-200 bg-white px-2.5 py-1.5 text-sm font-semibold text-zinc-800 focus:border-emerald-400 focus:outline-none @lg:max-w-sm"
             >
               {categoriesWithProducts.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -444,7 +444,7 @@ export function VentaRapidaPanel({
         ) : (
           <ul
             onKeyDown={carrito.handleKeyDown}
-            className="max-h-32 space-y-1 overflow-y-auto px-3 py-2"
+            className="max-h-32 space-y-1 overflow-y-auto px-3 py-2 @2xl:max-h-56"
           >
             {cart.map((c, i) => (
               <li

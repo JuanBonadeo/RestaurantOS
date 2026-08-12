@@ -54,6 +54,7 @@ import {
   type EnviarComandaDailyMenuItem,
 } from "@/lib/comandas/actions";
 import type { ComandaConItems } from "@/lib/comandas/queries";
+import type { LoPedido } from "@/lib/mozo/lo-pedido";
 import type { ComandaStatus } from "@/lib/comandas/types";
 import { useOptimisticAction } from "@/lib/ui/use-optimistic-action";
 import { useCartZone } from "@/lib/mozo/use-cart-zone";
@@ -132,6 +133,10 @@ type Props = {
   catalog: CatalogForMozo;
   stationNameById: Record<string, string>;
   existingComandas: ComandaConItems[];
+  /** Lo que la mesa ya tiene cargado, para la columna «Lo pedido» del panel
+   *  ancho (spec 111). `null` = mesa sin orden abierta todavía. Sólo lo usa el
+   *  modo `embedded`: el full-screen del mozo tiene su paso «resumen». */
+  loPedido?: LoPedido | null;
   topProductIds: string[];
   dailyMenus: DailyMenuForMozo[];
   role: BusinessRole;

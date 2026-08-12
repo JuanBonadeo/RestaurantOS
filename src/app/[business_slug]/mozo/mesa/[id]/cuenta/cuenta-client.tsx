@@ -139,8 +139,8 @@ export function CuentaClient({
   const discountReasonText =
     discountReasonValue === "otro"
       ? discountReasonOther
-      : DISCOUNT_REASONS.find((r) => r.value === discountReasonValue)?.label ??
-        "";
+      : (DISCOUNT_REASONS.find((r) => r.value === discountReasonValue)?.label ??
+        "");
 
   const discountCents =
     subtotal === 0 ? 0 : Math.round((subtotal * discountPercent) / 100);
@@ -226,10 +226,10 @@ export function CuentaClient({
       {embedded ? (
         <header className="border-border/60 flex items-center gap-3 border-b px-4 py-3">
           <div className="min-w-0 flex-1">
-            <h3 className="text-foreground text-2xl font-extrabold leading-none tracking-tight">
+            <h3 className="text-foreground text-2xl leading-none font-extrabold tracking-tight">
               {tableLabel}
             </h3>
-            <p className="text-muted-foreground mt-1 text-[11px] font-semibold uppercase tracking-wider">
+            <p className="text-muted-foreground mt-1 text-[11px] font-semibold tracking-wider uppercase">
               Cuenta
             </p>
           </div>
@@ -254,7 +254,7 @@ export function CuentaClient({
               <ArrowRight className="size-4 rotate-180" />
             </button>
             <div className="min-w-0 flex-1">
-              <p className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+              <p className="text-[0.6rem] font-semibold tracking-[0.18em] text-zinc-500 uppercase">
                 {tableLabel}
               </p>
               <h1 className="text-base font-semibold tracking-tight text-zinc-900">
@@ -262,7 +262,7 @@ export function CuentaClient({
               </h1>
             </div>
             <div className="text-right">
-              <p className="text-[0.6rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+              <p className="text-[0.6rem] font-semibold tracking-[0.14em] text-zinc-500 uppercase">
                 Total
               </p>
               <p className="text-lg font-bold tracking-tight text-zinc-900 tabular-nums">
@@ -273,295 +273,307 @@ export function CuentaClient({
         </header>
       )}
 
-      <div className={cn(embedded ? "min-h-0 flex-1 overflow-y-auto" : "contents")}>
-      <PageShell width="narrow" className="!py-4 sm:!py-6">
-        {/* Banner: división activa */}
-        {cuenta.splits.length > 0 && (
-          <SplitsBanner
-            splits={cuenta.splits}
-            onLimpiar={() =>
-              startTransition(async () => {
-                const r = await limpiarDivision(cuenta.order.id, slug);
-                if (!r.ok) toast.error(r.error);
-                else {
-                  toast.success("División eliminada");
-                  reloadData();
-                }
-              })
-            }
-          />
-        )}
+      <div
+        className={cn(embedded ? "min-h-0 flex-1 overflow-y-auto" : "contents")}
+      >
+        <PageShell width="narrow" className="!py-4 sm:!py-6">
+          {/* Banner: división activa */}
+          {cuenta.splits.length > 0 && (
+            <SplitsBanner
+              splits={cuenta.splits}
+              onLimpiar={() =>
+                startTransition(async () => {
+                  const r = await limpiarDivision(cuenta.order.id, slug);
+                  if (!r.ok) toast.error(r.error);
+                  else {
+                    toast.success("División eliminada");
+                    reloadData();
+                  }
+                })
+              }
+            />
+          )}
 
-        {/* Items */}
-        <section className="rounded-2xl bg-white ring-1 ring-zinc-200/70">
-          <div className="flex items-center justify-between px-4 py-3">
-            <div>
-              <p className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                Detalle
+          {/* Items */}
+          <section className="rounded-2xl bg-white ring-1 ring-zinc-200/70">
+            <div className="flex items-center justify-between px-4 py-3">
+              <div>
+                <p className="text-[0.6rem] font-semibold tracking-[0.18em] text-zinc-500 uppercase">
+                  Detalle
+                </p>
+                <h2 className="text-sm font-semibold tracking-tight text-zinc-900">
+                  {items.filter((it) => it.cancelled_at === null).length} items
+                </h2>
+              </div>
+              <p className="text-sm font-semibold text-zinc-900 tabular-nums">
+                {formatCurrency(subtotal)}
               </p>
-              <h2 className="text-sm font-semibold tracking-tight text-zinc-900">
-                {items.filter((it) => it.cancelled_at === null).length}{" "}
-                items
-              </h2>
             </div>
-            <p className="text-sm font-semibold text-zinc-900 tabular-nums">
-              {formatCurrency(subtotal)}
-            </p>
-          </div>
-          <ul className="divide-y divide-zinc-100 border-t border-zinc-100">
-            {items.map((it) => {
-              const cancelled = it.cancelled_at !== null;
-              return (
-                <li
-                  key={it.id}
-                  className={cn(
-                    "flex items-start justify-between gap-3 px-4 py-3",
-                    cancelled && "opacity-50",
-                  )}
-                >
-                  <div className="flex min-w-0 flex-1 items-start gap-3">
-                    <span className="mt-0.5 inline-flex size-7 flex-shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-700 tabular-nums">
-                      {it.quantity}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p
+            <ul className="divide-y divide-zinc-100 border-t border-zinc-100">
+              {items.map((it) => {
+                const cancelled = it.cancelled_at !== null;
+                return (
+                  <li
+                    key={it.id}
+                    className={cn(
+                      "flex items-start justify-between gap-3 px-4 py-3",
+                      cancelled && "opacity-50",
+                    )}
+                  >
+                    <div className="flex min-w-0 flex-1 items-start gap-3">
+                      <span className="mt-0.5 inline-flex size-7 flex-shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-700 tabular-nums">
+                        {it.quantity}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p
+                          className={cn(
+                            "text-sm font-medium text-zinc-900",
+                            cancelled && "line-through",
+                          )}
+                        >
+                          {it.product_name}
+                        </p>
+                        {(it as { seat_number?: number | null }).seat_number !=
+                          null && (
+                          <span className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-violet-100 px-1.5 py-0.5 text-[0.6rem] font-semibold text-violet-700">
+                            Comensal{" "}
+                            {(it as { seat_number: number }).seat_number}
+                          </span>
+                        )}
+                        {it.notes && (
+                          <p className="mt-0.5 text-xs text-zinc-500">
+                            {it.notes}
+                          </p>
+                        )}
+                        {cancelled && (
+                          <p className="mt-0.5 text-[0.65rem] font-semibold tracking-[0.14em] text-rose-600 uppercase">
+                            Cancelado
+                          </p>
+                        )}
+                        {!cancelled && it.price_original_cents != null && (
+                          <p className="mt-0.5 text-xs font-medium text-amber-700">
+                            <span className="tabular-nums line-through opacity-60">
+                              {formatCurrency(it.price_original_cents)}
+                            </span>{" "}
+                            <span className="tabular-nums">
+                              {formatCurrency(it.unit_price_cents)}
+                            </span>
+                            {it.price_override_reason
+                              ? ` · ${it.price_override_reason}`
+                              : ""}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span
                         className={cn(
-                          "text-sm font-medium text-zinc-900",
+                          "text-sm font-medium text-zinc-900 tabular-nums",
                           cancelled && "line-through",
                         )}
                       >
-                        {it.product_name}
-                      </p>
-                      {(it as { seat_number?: number | null }).seat_number != null && (
-                        <span className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-violet-100 px-1.5 py-0.5 text-[0.6rem] font-semibold text-violet-700">
-                          Comensal {(it as { seat_number: number }).seat_number}
-                        </span>
-                      )}
-                      {it.notes && (
-                        <p className="mt-0.5 text-xs text-zinc-500">
-                          {it.notes}
-                        </p>
-                      )}
-                      {cancelled && (
-                        <p className="mt-0.5 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-rose-600">
-                          Cancelado
-                        </p>
-                      )}
-                      {!cancelled && it.price_original_cents != null && (
-                        <p className="mt-0.5 text-xs font-medium text-amber-700">
-                          <span className="line-through opacity-60 tabular-nums">
-                            {formatCurrency(it.price_original_cents)}
-                          </span>{" "}
-                          <span className="tabular-nums">
-                            {formatCurrency(it.unit_price_cents)}
-                          </span>
-                          {it.price_override_reason
-                            ? ` · ${it.price_override_reason}`
-                            : ""}
-                        </p>
+                        {formatCurrency(it.subtotal_cents)}
+                      </span>
+                      {!cancelled && canCancelItem(role) && (
+                        <button
+                          type="button"
+                          onClick={() => setCancelarItemId(it.id)}
+                          className="inline-flex size-7 items-center justify-center rounded-full text-zinc-400 transition hover:bg-rose-50 hover:text-rose-600"
+                          aria-label="Cancelar item"
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
                       )}
                     </div>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <span
-                      className={cn(
-                        "text-sm font-medium text-zinc-900 tabular-nums",
-                        cancelled && "line-through",
-                      )}
-                    >
-                      {formatCurrency(it.subtotal_cents)}
-                    </span>
-                    {!cancelled && canCancelItem(role) && (
-                      <button
-                        type="button"
-                        onClick={() => setCancelarItemId(it.id)}
-                        className="inline-flex size-7 items-center justify-center rounded-full text-zinc-400 transition hover:bg-rose-50 hover:text-rose-600"
-                        aria-label="Cancelar item"
-                      >
-                        <Trash2 className="size-3.5" />
-                      </button>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
 
-        {/* Propina */}
-        <section className="rounded-2xl bg-white p-4 ring-1 ring-zinc-200/70">
-          <div className="flex items-baseline justify-between">
-            <div>
-              <p className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                Propina
-              </p>
-              <h2 className="text-sm font-semibold tracking-tight text-zinc-900">
-                Sugerencia para el mozo
-              </h2>
-            </div>
-            <p className="text-sm font-semibold text-zinc-900 tabular-nums">
-              {tipCents > 0 ? `+ ${formatCurrency(tipCents)}` : "—"}
-            </p>
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {TIP_PRESETS.map((p) => (
-              <button
-                key={p}
-                type="button"
-                onClick={() => setTipPercent(p)}
-                className={cn(
-                  "rounded-full px-3.5 py-1.5 text-xs font-semibold ring-1 transition",
-                  tipPercent === p
-                    ? "bg-zinc-900 text-white ring-zinc-900"
-                    : "bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50",
-                )}
-              >
-                {p === 0 ? "Sin propina" : `${p}%`}
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => setTipPercent("custom")}
-              className={cn(
-                "rounded-full px-3.5 py-1.5 text-xs font-semibold ring-1 transition",
-                tipPercent === "custom"
-                  ? "bg-zinc-900 text-white ring-zinc-900"
-                  : "bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50",
-              )}
-            >
-              Custom
-            </button>
-          </div>
-          {tipPercent === "custom" && (
-            <Input
-              type="number"
-              className="mt-3"
-              value={tipCustomCents / 100}
-              onChange={(e) =>
-                setTipCustomCents(
-                  Math.max(0, Math.round(Number(e.target.value) * 100)),
-                )
-              }
-              placeholder="0.00"
-              inputMode="decimal"
-            />
-          )}
-        </section>
-
-        {/* Descuento */}
-        <section className="rounded-2xl bg-white p-4 ring-1 ring-zinc-200/70">
-          <div className="flex items-baseline justify-between">
-            <div>
-              <p className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                Descuento
-              </p>
-              <h2 className="text-sm font-semibold tracking-tight text-zinc-900">
-                Tu rol permite hasta {tramoDescuento}
-              </h2>
-            </div>
-            <p className="text-sm font-semibold tabular-nums text-rose-600">
-              {discountCents > 0 ? `− ${formatCurrency(discountCents)}` : "—"}
-            </p>
-          </div>
-          <div className="mt-3 flex items-center gap-3">
-            <Input
-              type="number"
-              value={discountPercent}
-              onChange={(e) =>
-                setDiscountPercent(
-                  Math.max(0, Math.min(100, Number(e.target.value))),
-                )
-              }
-              placeholder="0"
-              className="w-24"
-              inputMode="decimal"
-            />
-            <span className="text-sm text-zinc-500">%</span>
-          </div>
-          {cantApplyDiscount && (
-            <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-2.5 py-1 text-[0.65rem] font-semibold text-rose-700">
-              <Lock className="size-3" />
-              Excede tu autorización · pedile al encargado
-            </div>
-          )}
-          {discountCents > 0 && (
-            <div className="mt-3 grid gap-2">
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {DISCOUNT_REASONS.map((r) => (
+          {/* Propina y descuento, lado a lado con el panel ancho (spec 111): son
+            dos secciones bajas y angostas por contenido, y apiladas obligaban a
+            scrollear el panel para llegar a «Pasar a cobro». */}
+          <div className="grid items-start gap-3 @2xl:grid-cols-2">
+            {/* Propina */}
+            <section className="rounded-2xl bg-white p-4 ring-1 ring-zinc-200/70">
+              <div className="flex items-baseline justify-between">
+                <div>
+                  <p className="text-[0.6rem] font-semibold tracking-[0.18em] text-zinc-500 uppercase">
+                    Propina
+                  </p>
+                  <h2 className="text-sm font-semibold tracking-tight text-zinc-900">
+                    Sugerencia para el mozo
+                  </h2>
+                </div>
+                <p className="text-sm font-semibold text-zinc-900 tabular-nums">
+                  {tipCents > 0 ? `+ ${formatCurrency(tipCents)}` : "—"}
+                </p>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {TIP_PRESETS.map((p) => (
                   <button
-                    key={r.value}
+                    key={p}
                     type="button"
-                    onClick={() => setDiscountReasonValue(r.value)}
+                    onClick={() => setTipPercent(p)}
                     className={cn(
-                      "rounded-lg px-2.5 py-2 text-xs font-medium ring-1 transition",
-                      discountReasonValue === r.value
+                      "rounded-full px-3.5 py-1.5 text-xs font-semibold ring-1 transition",
+                      tipPercent === p
                         ? "bg-zinc-900 text-white ring-zinc-900"
                         : "bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50",
                     )}
                   >
-                    {r.label}
+                    {p === 0 ? "Sin propina" : `${p}%`}
                   </button>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => setTipPercent("custom")}
+                  className={cn(
+                    "rounded-full px-3.5 py-1.5 text-xs font-semibold ring-1 transition",
+                    tipPercent === "custom"
+                      ? "bg-zinc-900 text-white ring-zinc-900"
+                      : "bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50",
+                  )}
+                >
+                  Custom
+                </button>
               </div>
-              {discountReasonValue === "otro" && (
+              {tipPercent === "custom" && (
                 <Input
-                  value={discountReasonOther}
-                  onChange={(e) => setDiscountReasonOther(e.target.value)}
-                  placeholder="Especificá el motivo"
+                  type="number"
+                  className="mt-3 w-40"
+                  value={tipCustomCents / 100}
+                  onChange={(e) =>
+                    setTipCustomCents(
+                      Math.max(0, Math.round(Number(e.target.value) * 100)),
+                    )
+                  }
+                  placeholder="0.00"
+                  inputMode="decimal"
                 />
               )}
-            </div>
-          )}
-        </section>
+            </section>
 
-        {/* Resumen + dividir */}
-        <section className="rounded-2xl bg-white p-4 ring-1 ring-zinc-200/70">
-          <ResumenRow label="Subtotal" value={formatCurrency(subtotal)} />
-          {tipCents > 0 && (
-            <ResumenRow
-              label="Propina"
-              value={`+ ${formatCurrency(tipCents)}`}
-            />
-          )}
-          {discountCents > 0 && (
-            <ResumenRow
-              label="Descuento"
-              value={`− ${formatCurrency(discountCents)}`}
-              tone="discount"
-            />
-          )}
-          <div className="mt-2 flex items-baseline justify-between border-t border-zinc-200 pt-2">
-            <span className="text-sm font-semibold text-zinc-900">Total</span>
-            <span className="text-xl font-bold tracking-tight text-zinc-900 tabular-nums">
-              {formatCurrency(total)}
-            </span>
+            {/* Descuento */}
+            <section className="rounded-2xl bg-white p-4 ring-1 ring-zinc-200/70">
+              <div className="flex items-baseline justify-between">
+                <div>
+                  <p className="text-[0.6rem] font-semibold tracking-[0.18em] text-zinc-500 uppercase">
+                    Descuento
+                  </p>
+                  <h2 className="text-sm font-semibold tracking-tight text-zinc-900">
+                    Tu rol permite hasta {tramoDescuento}
+                  </h2>
+                </div>
+                <p className="text-sm font-semibold text-rose-600 tabular-nums">
+                  {discountCents > 0
+                    ? `− ${formatCurrency(discountCents)}`
+                    : "—"}
+                </p>
+              </div>
+              <div className="mt-3 flex items-center gap-3">
+                <Input
+                  type="number"
+                  value={discountPercent}
+                  onChange={(e) =>
+                    setDiscountPercent(
+                      Math.max(0, Math.min(100, Number(e.target.value))),
+                    )
+                  }
+                  placeholder="0"
+                  className="w-24"
+                  inputMode="decimal"
+                />
+                <span className="text-sm text-zinc-500">%</span>
+              </div>
+              {cantApplyDiscount && (
+                <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-2.5 py-1 text-[0.65rem] font-semibold text-rose-700">
+                  <Lock className="size-3" />
+                  Excede tu autorización · pedile al encargado
+                </div>
+              )}
+              {discountCents > 0 && (
+                <div className="mt-3 grid gap-2">
+                  {/* `@md` = ancho del panel; con `sm:` (viewport) esto estaba
+                  congelado en 3 columnas y el `grid-cols-2` era código muerto. */}
+                  <div className="grid grid-cols-2 gap-2 @md:grid-cols-3">
+                    {DISCOUNT_REASONS.map((r) => (
+                      <button
+                        key={r.value}
+                        type="button"
+                        onClick={() => setDiscountReasonValue(r.value)}
+                        className={cn(
+                          "rounded-lg px-2.5 py-2 text-xs font-medium ring-1 transition",
+                          discountReasonValue === r.value
+                            ? "bg-zinc-900 text-white ring-zinc-900"
+                            : "bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50",
+                        )}
+                      >
+                        {r.label}
+                      </button>
+                    ))}
+                  </div>
+                  {discountReasonValue === "otro" && (
+                    <Input
+                      value={discountReasonOther}
+                      onChange={(e) => setDiscountReasonOther(e.target.value)}
+                      placeholder="Especificá el motivo"
+                    />
+                  )}
+                </div>
+              )}
+            </section>
           </div>
-          <div className="mt-4 grid gap-2">
-            {/* Spec 080: el papel que se le da a la mesa. Se puede tocar las
+
+          {/* Resumen + dividir */}
+          <section className="rounded-2xl bg-white p-4 ring-1 ring-zinc-200/70">
+            <ResumenRow label="Subtotal" value={formatCurrency(subtotal)} />
+            {tipCents > 0 && (
+              <ResumenRow
+                label="Propina"
+                value={`+ ${formatCurrency(tipCents)}`}
+              />
+            )}
+            {discountCents > 0 && (
+              <ResumenRow
+                label="Descuento"
+                value={`− ${formatCurrency(discountCents)}`}
+                tone="discount"
+              />
+            )}
+            <div className="mt-2 flex items-baseline justify-between border-t border-zinc-200 pt-2">
+              <span className="text-sm font-semibold text-zinc-900">Total</span>
+              <span className="text-xl font-bold tracking-tight text-zinc-900 tabular-nums">
+                {formatCurrency(total)}
+              </span>
+            </div>
+            <div className="mt-4 grid gap-2 @lg:grid-cols-2">
+              {/* Spec 080: el papel que se le da a la mesa. Se puede tocar las
                 veces que haga falta — agregan un café y la vuelven a pedir. */}
-            <button
-              type="button"
-              onClick={handleImprimir}
-              disabled={total === 0 || imprimiendo}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold text-zinc-700 ring-1 ring-zinc-200 transition hover:bg-zinc-50 disabled:opacity-50"
-            >
-              <Printer className="size-4" />
-              {imprimiendo ? "Imprimiendo…" : "Imprimir cuenta"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setDividirOpen(true)}
-              disabled={total === 0}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold text-zinc-700 ring-1 ring-zinc-200 transition hover:bg-zinc-50 disabled:opacity-50"
-            >
-              <Scissors className="size-4" />
-              {cuenta.splits.length > 0
-                ? `Volver a dividir (${cuenta.splits.length})`
-                : "Dividir cuenta"}
-            </button>
-          </div>
-        </section>
-      </PageShell>
+              <button
+                type="button"
+                onClick={handleImprimir}
+                disabled={total === 0 || imprimiendo}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold text-zinc-700 ring-1 ring-zinc-200 transition hover:bg-zinc-50 disabled:opacity-50"
+              >
+                <Printer className="size-4" />
+                {imprimiendo ? "Imprimiendo…" : "Imprimir cuenta"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setDividirOpen(true)}
+                disabled={total === 0}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold text-zinc-700 ring-1 ring-zinc-200 transition hover:bg-zinc-50 disabled:opacity-50"
+              >
+                <Scissors className="size-4" />
+                {cuenta.splits.length > 0
+                  ? `Volver a dividir (${cuenta.splits.length})`
+                  : "Dividir cuenta"}
+              </button>
+            </div>
+          </section>
+        </PageShell>
       </div>
 
       {/* CTA — fija en página, al pie del panel en embebido */}

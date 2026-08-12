@@ -15,6 +15,8 @@ import {
   getDailyMenusForToday,
   type DailyMenuForMozo,
 } from "@/lib/mozo/daily-menus-query";
+import type { LoPedido } from "@/lib/mozo/lo-pedido";
+import { getLoPedido } from "@/lib/mozo/lo-pedido-query";
 import { getTopProductIds } from "@/lib/mozo/top-products";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
@@ -103,10 +105,19 @@ export async function loadPedirCatalog(
   });
 }
 
+/** Lo que el panel necesita de **esta** mesa: las comandas (para entregar y
+ *  para el overlay optimista) y «Lo pedido» (la columna izquierda, spec 111).
+ *  Van juntos en un viaje: los dos salen de la misma orden abierta. */
+export type TableOrderState = {
+  comandas: ComandaConItems[];
+  /** `null` si la mesa todavía no tiene orden abierta (nunca se envió nada). */
+  loPedido: LoPedido | null;
+};
+
 export async function loadTableComandas(
   slug: string,
   tableId: string,
-): Promise<ActionResult<ComandaConItems[]>> {
+): Promise<ActionResult<TableOrderState>> {
   const gate = await gateAdmin(slug);
   if (!gate.ok) return actionError(gate.error);
   const { business } = gate;
@@ -126,8 +137,11 @@ export async function loadTableComandas(
   }
 
   const activeOrder = await getActiveOrderByTable(tableId, business.id);
-  const comandas = activeOrder
-    ? await getComandasByOrder(activeOrder.id, business.id)
-    : [];
-  return actionOk(comandas);
+  if (!activeOrder) return actionOk({ comandas: [], loPedido: null });
+
+  const [comandas, loPedido] = await Promise.all([
+    getComandasByOrder(activeOrder.id, business.id),
+    getLoPedido(activeOrder.id, business.id),
+  ]);
+  return actionOk({ comandas, loPedido });
 }

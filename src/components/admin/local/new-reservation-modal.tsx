@@ -394,7 +394,7 @@ export function ReservaForm({
     <div>
       <label className={LABEL_CLS}>Mesa (opcional)</label>
       {tablePicker.pickedTableId ? (
-        <div className="mt-1 flex items-center gap-2 rounded-xl bg-indigo-50 px-3 py-2.5 ring-1 ring-indigo-200">
+        <div className="mt-1 flex items-center gap-2 rounded-xl bg-indigo-50 px-3 py-2.5 ring-1 ring-indigo-200 @lg:max-w-xs">
           <MapPin className="h-4 w-4 shrink-0 text-indigo-600" />
           <span className="min-w-0 flex-1 truncate text-sm font-semibold text-indigo-900">
             Mesa {tablePicker.pickedLabel}
@@ -419,7 +419,7 @@ export function ReservaForm({
         <button
           type="button"
           onClick={tablePicker.onRequest}
-          className={`mt-1 flex h-12 w-full items-center justify-center gap-2 rounded-xl text-sm font-bold text-white transition active:scale-[0.98] ${
+          className={`mt-1 flex h-12 w-full items-center justify-center gap-2 rounded-xl text-sm font-bold text-white transition active:scale-[0.98] @lg:max-w-xs ${
             tablePicker.picking
               ? "bg-indigo-700 ring-2 ring-indigo-300"
               : "bg-indigo-600 hover:bg-indigo-700"
@@ -504,7 +504,7 @@ export function ReservaForm({
               · teclas 1-9, + y −
             </span>
           </label>
-          <div className="mt-2 flex items-center justify-between rounded-2xl bg-zinc-50 p-2 ring-1 ring-zinc-200">
+          <div className="mt-2 flex items-center justify-between rounded-2xl bg-zinc-50 p-2 ring-1 ring-zinc-200 @lg:max-w-xs">
             <button
               type="button"
               aria-label="Una persona menos"
@@ -537,7 +537,7 @@ export function ReservaForm({
             min={todayISO()}
             max={maxDateISO(60)}
             onChange={(e) => setDate(e.target.value)}
-            className={INPUT_CLS}
+            className={`${INPUT_CLS} @lg:max-w-xs`}
           />
         </div>
 
@@ -592,7 +592,7 @@ export function ReservaForm({
                 <div
                   ref={horariosRef}
                   onKeyDown={horariosZona.handleKeyDown}
-                  className="mt-2 grid grid-cols-4 gap-1.5 sm:grid-cols-5"
+                  className="mt-2 grid grid-cols-4 gap-1.5 sm:grid-cols-5 @lg:grid-cols-6 @2xl:grid-cols-7 @3xl:grid-cols-8"
                 >
                   {shownArrivalOptions.map((t, i) => (
                     <button
@@ -661,7 +661,7 @@ export function ReservaForm({
                 <div
                   ref={horariosRef}
                   onKeyDown={horariosZona.handleKeyDown}
-                  className="mt-2 grid grid-cols-4 gap-1.5 sm:grid-cols-5"
+                  className="mt-2 grid grid-cols-4 gap-1.5 sm:grid-cols-5 @lg:grid-cols-6 @2xl:grid-cols-7 @3xl:grid-cols-8"
                 >
                   {slots.map((s, i) => (
                     <button
@@ -702,7 +702,7 @@ export function ReservaForm({
         <button
           type="submit"
           disabled={!canSubmit}
-          className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 text-base font-bold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-60"
+          className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 text-base font-bold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-60 @2xl:mx-auto @2xl:max-w-md"
         >
           {pending ? (
             <>

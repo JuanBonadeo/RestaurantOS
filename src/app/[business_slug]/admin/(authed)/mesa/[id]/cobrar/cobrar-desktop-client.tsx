@@ -161,7 +161,10 @@ export function CobrarDesktopClient({
     <div
       className={cn(
         embedded
-          ? "space-y-4"
+          ? // Embebido era una sola columna porque el panel medía 480px. Desde
+            // la spec 111 puede llegar a 900: a partir de 800 de **panel**
+            // (container query, no viewport) toma la misma grilla que la página.
+            "space-y-4 @min-[800px]:grid @min-[800px]:grid-cols-[minmax(0,1fr)_minmax(0,420px)] @min-[800px]:items-start @min-[800px]:gap-4 @min-[800px]:space-y-0"
           : "grid gap-4 lg:grid-cols-[1fr_minmax(0,420px)]",
       )}
     >
@@ -207,7 +210,7 @@ export function CobrarDesktopClient({
                 value={cajaId}
                 onValueChange={(v) => v && setCajaId(v)}
               >
-                <SelectTrigger className="mt-1.5">
+                <SelectTrigger className="mt-1.5 @xl:max-w-xs">
                   <SelectValue placeholder="Seleccionar caja">
                     {init.cajas.find((c) => c.id === cajaId)?.name ?? "Caja"}
                   </SelectValue>
@@ -662,7 +665,7 @@ function AnularCobroSection({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex w-full items-center justify-center gap-1.5 rounded-full bg-rose-50 px-4 py-2 text-xs font-semibold text-rose-700 ring-1 ring-rose-200 transition hover:bg-rose-100"
+        className="inline-flex w-full items-center justify-center gap-1.5 rounded-full bg-rose-50 px-4 py-2 text-xs font-semibold text-rose-700 ring-1 ring-rose-200 transition hover:bg-rose-100 @xl:w-auto"
       >
         <Trash2 className="size-3.5" />
         Anular cobro

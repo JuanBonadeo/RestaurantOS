@@ -471,7 +471,11 @@ export function CobroForm<T = unknown>({
           handleConfirm();
         }
       }}
-      className="space-y-4"
+      // Tope de ancho para el tramo en que el panel del salón ya es ancho pero
+      // todavía no entra en dos columnas (spec 111): el input de monto y el
+      // botón de confirmar no ganan nada midiendo 560px. Inerte fuera del
+      // panel: sin ancestro `@container` la query nunca matchea.
+      className="space-y-4 @xl:max-w-[480px]"
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">

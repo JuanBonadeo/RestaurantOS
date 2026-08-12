@@ -43,6 +43,15 @@ export type ComandaItemSnapshot = {
   notes: string | null;
   modifiers: { modifier_name: string }[];
   station_id: string | null;
+  /** Precio unitario **snapshot** al cargarse (ya con el override de la spec
+   *  069 aplicado, si lo hubo). La comanda de cocina no lo muestra; lo usa la
+   *  columna «Lo pedido» del panel de carga (spec 111), que necesita saber
+   *  cuánto va la mesa sin salir a la cuenta. */
+  unit_price_cents: number;
+  /** `unit_price_cents * quantity` + modificadores, como quedó guardado. */
+  subtotal_cents: number;
+  /** Cubierto al que va el ítem, si el pedido se cargó por comensal. */
+  seat_number: number | null;
   kitchen_status: KitchenItemStatus;
   cancelled_at: string | null;
   cancelled_reason: string | null;

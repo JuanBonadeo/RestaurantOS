@@ -22,6 +22,9 @@ type RawOrderItem = {
   quantity: number;
   notes: string | null;
   station_id: string | null;
+  unit_price_cents: number;
+  subtotal_cents: number;
+  seat_number: number | null;
   kitchen_status: KitchenItemStatus;
   cancelled_at: string | null;
   cancelled_reason: string | null;
@@ -37,6 +40,9 @@ function toItemSnapshot(row: RawOrderItem): ComandaItemSnapshot {
     notes: row.notes,
     modifiers: row.order_item_modifiers ?? [],
     station_id: row.station_id,
+    unit_price_cents: row.unit_price_cents,
+    subtotal_cents: row.subtotal_cents,
+    seat_number: row.seat_number,
     kitchen_status: row.kitchen_status,
     cancelled_at: row.cancelled_at,
     cancelled_reason: row.cancelled_reason,
@@ -122,6 +128,7 @@ export async function getComandasBySector(
       order_item_id,
       order_items (
         id, product_id, product_name, quantity, notes, station_id,
+        unit_price_cents, subtotal_cents, seat_number,
         kitchen_status, cancelled_at, cancelled_reason,
         order_item_modifiers ( modifier_name )
       )
@@ -194,6 +201,7 @@ async function loadCombinaCon(
       comanda_items (
         order_items (
           id, product_id, product_name, quantity, notes, station_id,
+          unit_price_cents, subtotal_cents, seat_number,
           kitchen_status, cancelled_at, cancelled_reason,
           order_item_modifiers ( modifier_name )
         )
@@ -258,6 +266,7 @@ export async function getComandasByOrder(
       comanda_items (
         order_items (
           id, product_id, product_name, quantity, notes, station_id,
+          unit_price_cents, subtotal_cents, seat_number,
           kitchen_status, cancelled_at, cancelled_reason,
           order_item_modifiers ( modifier_name )
         )

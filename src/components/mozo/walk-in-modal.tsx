@@ -141,9 +141,19 @@ function WalkInForm({
       onKeyDown={handleKeyDown}
       onSubmit={handleSubmit(onSubmit)}
     >
-      <div className={isPanel ? "min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4" : "space-y-4"}>
+      {/* En el panel ancho (spec 111) el cuerpo pasa a dos columnas: Cliente y
+          Teléfono son un par natural y quedaban apilados a 868px cada uno.
+          `CustomerFields` devuelve dos `<div>` hermanos, así que caen solos en
+          la misma fila sin tocar el componente compartido. */}
+      <div
+        className={
+          isPanel
+            ? "min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 @xl:grid @xl:grid-cols-2 @xl:gap-x-3 @xl:gap-y-4 @xl:space-y-0"
+            : "space-y-4"
+        }
+      >
         {/* Party size: quick-pick directo + stepper */}
-        <div>
+        <div className="@xl:col-span-2 @xl:max-w-md">
           <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
             Personas
             <span className="ml-1.5 font-semibold normal-case tracking-normal text-zinc-400">

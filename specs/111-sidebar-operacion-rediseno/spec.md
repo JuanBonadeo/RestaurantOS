@@ -1,0 +1,111 @@
+# Feature Specification: El sidebar operacional, rediseñado
+
+**Feature Branch**: `111-sidebar-operacion-rediseno`
+
+**Created**: 2026-08-11
+
+**Status**: 🟢 Listo para implementar — decisiones D1-D4 cerradas con Juan (2026-08-11, §Decisiones).
+
+**Input**: Pedido de Juan — *"el sidebar operacional: que sea más ancho, dos columnas con los ítems ya pedidos a la izquierda con máximo detalle (modificadores por ítem), disminuir la cantidad de clicks para comandar, que el nombre y apellido al sentar sean opcionales (que vayan a los 3 puntos), y que al tocar una mesa vacía aparezca enfocado el input de cargar ítem. Que contemple también el sidebar de los pedidos."*
+
+## Contexto y problema
+
+El `<aside>` de `/admin/operacion` ([salon-desktop.tsx:1492](../../src/components/admin/local/salon-desktop.tsx#L1492)) es donde el encargado vive el turno entero: es lista de entrada, detalle de mesa, abrir mesa, cargar pedido, cuenta y cobro — seis modos en el mismo marco.
+
+**Mide 480px fijos** ([salon-desktop.tsx:1396](../../src/components/admin/local/salon-desktop.tsx#L1396) — `lg:grid-cols-[1fr_480px]`). El ancho es único a propósito: se fijó en el del modo más denso (cobro) porque antes crecía por modo y el panel "saltaba" al entrar a cobrar. En un monitor de 1920 eso es **25% de la pantalla para la tarea principal y 75% para un plano que no cambia**.
+
+Adentro de ese ancho, el modo de carga ([pedir-client.tsx:1027](../../src/app/[business_slug]/mozo/mesa/[id]/pedir/pedir-client.tsx#L1027)) apila **una sola columna**: header → buscador → catálogo con scroll → carrito con `max-h-44` (176px, ~3 ítems visibles) → total + Enviar. Consecuencias:
+
+- **Lo ya pedido no se ve.** De todo lo enviado a cocina, el panel de carga muestra **un número** al lado de un ícono ([pedir-client.tsx:1066](../../src/app/[business_slug]/mozo/mesa/[id]/pedir/pedir-client.tsx#L1066)). Para ver qué comió la mesa hay que salir a Cuenta — es decir, salir del modo de carga. El `ResumenStep` que sí lo lista completo sólo existe en el full-screen del mozo, no en el sidebar.
+- **El carrito y el catálogo se pelean 40 líneas de alto.** Con 6 ítems cargados, el carrito scrollea dentro de 176px mientras a la derecha sobran 1400px de pantalla vacía.
+
+Y el camino para comandar en una mesa libre son **tres clicks y un formulario**:
+
+| # | Hoy | |
+|---|---|---|
+| 1 | tap en la mesa del plano | → `TableDetail` |
+| 2 | «Sentar walk-in» | → `WalkInPanel` |
+| 3 | «Abrir Mesa N» (Enter) | → encadena a cargar pedido ([salon-desktop.tsx:1647](../../src/components/admin/local/salon-desktop.tsx#L1647)) |
+| 4 | tipear | el buscador recién acá se lleva el foco |
+
+Ese paso 2-3 es un formulario de tres campos —Personas, Cliente, Notas— del que **nada es obligatorio**… y del que, además, hay un hallazgo:
+
+## Hallazgos del relevamiento
+
+1. **`party_size` del walk-in no se persiste en ninguna parte.** `sentarWalkIn` lo valida con Zod y no lo usa: no se lo pasa a `openTable` ([walk-in.ts:123](../../src/lib/mozo/walk-in.ts#L123)) y no existe columna — `party_size` sólo está en `reservations` y `reservation_settings` (`0001_baseline.sql`). El control más prominente del formulario (6 botones + stepper + atajos 1-9/+/−) escribe en el vacío. **Guardar cubiertos requiere migración**; sacarlo del camino crítico, no.
+2. **`enviarComanda` ya abre la mesa solo.** Si la mesa está `libre`, la pasa a `ocupada`, fija `opened_at` y crea la `order` si no existe ([comandas/actions.ts:869](../../src/lib/comandas/actions.ts#L869) y [:388](../../src/lib/comandas/actions.ts#L388)). O sea: **entrar a cargar sin abrir la mesa antes ya funciona hoy**, sin tocar el server.
+3. **…pero la apertura diferida perdería el mozo.** `openTable` auto-asigna `tables.mozo_id` al actor si la mesa no tenía ([open-table.ts:52](../../src/lib/mozo/open-table.ts#L52)); `enviarComanda` **no toca `tables.mozo_id`**. Una mesa abierta por el envío quedaría sin mozo en el plano, en la distribución y en la rendición. Es el único cambio de server que exige la fase 3.
+4. **La plata por ítem ya está en la base, falta traerla.** `ComandaItemSnapshot` ([comandas/types.ts:38](../../src/lib/comandas/types.ts#L38)) trae nombre, cantidad, notas, modificadores, sector y estado de cocina, pero **no precio**; `order_items` sí tiene `unit_price_cents`, `subtotal_cents` y `seat_number`. La columna izquierda con total por línea es ampliar un `select`, no una migración.
+5. **Son tres superficies de carga, no una.** El mismo patrón vive en el sidebar del salón (`MozoPedirClient embedded`), en el sheet del board de pedidos ([cargar-pedido-sheet.tsx](../../src/components/admin/cargar-pedido-sheet.tsx), 959 líneas, mostrador/delivery) y en `VentaRapidaPanel`. La spec 068 ya unificó buscador y resultados; el layout sigue copiado.
+
+## Requirements *(mandatory)*
+
+### Fase 1 — Ancho
+
+- **FR-001** *(D1)*: El panel pasa de 480px fijos a un ancho **fluido con piso y techo**: `lg:grid-cols-[minmax(0,1fr)_minmax(560px,44%)]`, con techo duro (`max-w-[900px]`) para que en un ultrawide el plano no quede en una franja.
+- **FR-002**: **El ancho sigue siendo único para todos los modos** (invariante de la decisión previa: el panel no puede saltar al cambiar de modo). Los modos que hoy están calibrados a 480 —lista de entrada, `TableDetail`, cobro, cuenta— no pueden quedar con una columna estirada: el contenido va con `max-w` propio o pasa a dos columnas donde tenga sentido. **Esta es la parte del trabajo que se subestima**: son seis modos, no uno.
+- **FR-003**: Por debajo de `lg` no cambia nada (el plano ya se apila y el panel es full-width).
+
+### Fase 2 — Dos columnas en el modo de carga
+
+- **FR-004**: Con el panel ancho, el modo de carga se parte en dos columnas: **izquierda «Lo pedido»** (lo que ya se envió a cocina), **derecha «Cargando»** (buscador + catálogo + carrito + Enviar). Debajo del breakpoint vuelve a apilarse como hoy.
+- **FR-005**: La izquierda muestra, por ítem enviado: producto, cantidad, **modificadores elegidos** (`modifiers[]`, hoy visibles sólo en la cuenta y en la comanda de cocina), nota, precio de línea (hallazgo 4), sector y **estado de cocina** (pendiente / en preparación / listo / entregado), agrupado por comanda con su hora. Los cancelados se muestran tachados con el motivo, no se ocultan.
+- **FR-006**: La izquierda cierra con **el total de la mesa hasta ahora**, separado del «Total a enviar» del carrito. Son dos números distintos y hoy el panel sólo muestra el segundo.
+- **FR-007** *(D4)*: Las acciones sobre lo enviado son **entregar comanda y cancelar ítem** (con permiso), con el mismo overlay optimista que ya tiene `pedir-client`. **Editar un ítem enviado queda afuera**: es de la spec 110 y se cruza con la comanda ya impresa.
+- **FR-008**: El carrito deja de estar encerrado en `max-h-44`: crece con la columna y scrollea sólo cuando de verdad no entra.
+- **FR-009**: El recorrido de teclado sigue siendo el de las specs 055/075: buscador → resultados → carrito → Enviar. La columna izquierda queda **fuera de la cadena de flechas** y se alcanza con Tab. *(Al implementarlo: no se le puso `useRovingList` — sin una tecla de entrada propia sería una zona muerta, y meterla en la cadena alargaría justo el recorrido que las 055/075 acortaron. Mirar lo ya pedido es una consulta, no un paso de la carga.)*
+
+### Fase 3 — Menos clicks para comandar
+
+- **FR-010**: **Tap en una mesa libre entra directo al modo de carga, con el foco en el buscador.** Sin formulario de walk-in en el medio. De 3 clicks + Enter a **1 click y tipear**.
+- **FR-011**: La mesa se abre **al enviar la primera comanda** (hallazgo 2), no al tocarla: un tap accidental no ensucia el salón con mesas abiertas. Salir sin enviar no deja rastro.
+- **FR-012**: Al abrir por envío, **la mesa se auto-asigna al actor si no tenía mozo** — la regla de `openTable` (hallazgo 3), aplicada en `enviarComanda` para que el plano, la distribución y la rendición no pierdan el dato.
+- **FR-013** *(D3)*: **«Personas» es lo primero del panel de carga** — una fila de chips 1-9 arriba del buscador, con 2 por defecto. Es **un tap, no un paso**: no tiene pantalla propia, no bloquea, y el foco arranca igual en el buscador (FR-010). Con el cursor en el buscador los dígitos escriben texto, así que acá es tap; los atajos 1-9/+/− siguen viviendo en el walk-in con formulario (FR-016).
+- **FR-014** *(D3)*: **«Personas» se guarda de verdad.** Migración: `orders.party_size` (int, nullable). Lo escriben el walk-in con formulario, los chips de FR-013 y «Datos de la mesa». Sin esto el control seguiría siendo decorativo (hallazgo 1) — que es justo lo que esta spec viene a arreglar.
+- **FR-015**: **Nombre y teléfono salen del camino.** El bloque `CustomerFields` pasa a una acción **«Cargar cliente»** en el menú ⋯ (`MesaOptionsMenu`), disponible antes y después de enviar. Un ítem del menú, no un paso — y ya no se pide nada del cliente para sentar a alguien.
+- **FR-016**: El camino de mesa con reserva **no cambia**: si la mesa tiene reserva, tocarla sigue ofreciendo «Sentar reserva» (el bloqueo blando de la spec 059 se conserva).
+- **FR-017** *(D2)*: **`TableDetail` sigue existiendo** tal cual para la mesa ocupada: se toca sólo para que respire con el ancho nuevo. El click que se ahorra es el de la mesa libre.
+- **FR-018**: El walk-in con formulario **sigue existiendo** —desde el ⋯ y en la app del mozo en mobile (`WalkInModal`), con sus atajos de teclado—: se saca del camino por defecto, no del producto.
+
+### Fase 4 — El sidebar de los pedidos
+
+- **FR-019**: `CargarPedidoSheet` (mostrador/delivery) hereda ancho y dos columnas: izquierda **el pedido en armado + cliente y entrega**, derecha buscador + catálogo. Ahí no hay comandas previas, así que la izquierda es el carrito, no lo enviado.
+- **FR-020**: **Se elimina el paso «datos»** (`view: "carga" | "datos"`, [cargar-pedido-sheet.tsx:65](../../src/components/admin/cargar-pedido-sheet.tsx#L65)): con dos columnas, cliente + entrega + cuándo entran a la vista sin un segundo paso. Es el mismo click de menos que la fase 3, en la otra superficie.
+- **FR-021**: `VentaRapidaPanel` queda alineado en ancho y densidad (no necesita las dos columnas: no tiene cliente ni comandas previas).
+- **NFR-001**: Nada de esto toca el kanban de comandas ni el flujo de cobro más allá de que respiren con el ancho nuevo.
+
+## Decisiones *(cerradas con Juan, 2026-08-11)*
+
+| # | Decisión | Resuelto | |
+|---|---|---|---|
+| **D1** | Cuánto ancho | **44% fluido**, piso 560 / techo 900 | FR-001 |
+| **D2** | Qué pasa con `TableDetail` | **Sigue existiendo**; el click que se ahorra es el de la mesa libre. Fase 3 chica y de bajo riesgo | FR-017 |
+| **D3** | «Personas» | **Se queda y se guarda** (migración `orders.party_size`), y es **lo primero del panel de carga** — chips arriba del buscador, sin nombre ni nada más al lado. Cargar al cliente pasa a ser una opción del ⋯ | FR-013/014/015 |
+| **D4** | ¿Editar lo ya enviado? | **No**: sólo entregar y cancelar. Editar es de la spec 110 | FR-007 |
+
+## Riesgos
+
+- **Regresión de teclado.** El panel tiene ocho zonas de `useRovingList` encadenadas (specs 055/075/110) y una suite grande que las cubre. Partir el layout en dos columnas es exactamente el tipo de cambio que rompe el encadenado sin romper un test. → FR-009 explícito + correr `salon-desktop.keyboard`, `product-search-box`, `product-modal.teclado` y `walk-in-modal` antes de dar nada por hecho.
+- **Seis modos, un ancho.** El riesgo real de la fase 1 no es el panel de carga: es cobro con sus KPI, la lista de reservas y `TableDetail` estirándose feo.
+- **Apertura diferida y estados de mesa.** FR-011 cambia *cuándo* una mesa pasa a ocupada. Hay que revisar el kanban, las demoras, `anularMesa` y la rendición con una mesa "en carga" que todavía figura libre.
+- **`pedir-client.tsx` ya son 2218 líneas** y `salon-desktop.tsx` 2866. Esta spec agrega layout a los dos. Extraer la columna «Lo pedido» a su propio componente es parte del trabajo, no un extra.
+
+## Tasks
+
+- [x] **T0** — Cerrar D1-D4 con Juan.
+- [x] **T1** — Fase 1: ancho fluido + los nueve modos revisados a ese ancho (27 arreglos, todos con container queries: a 480px no cambia nada).
+- [x] **T2** — Fase 2a: datos de «Lo pedido» — `getLoPedido` + `TableOrderState` en el mismo viaje que las comandas, y `unit_price_cents`/`subtotal_cents`/`seat_number` en `ComandaItemSnapshot`.
+- [x] **T3** — Fase 2b: `lo-pedido.ts` (agrupación por tanda, puro, 10 tests) + `LoPedidoColumn`.
+- [ ] **T4** — Fase 2c: **cablear** `LoPedidoColumn` en el panel: layout de dos columnas en el modo de carga + carrito sin `max-h-44` + zona de teclado (FR-009). ← **acá quedó**
+- [ ] **T5** — Fase 3a: `enviarComanda` auto-asigna mozo al abrir mesa libre (FR-012) + test.
+- [ ] **T6** — Fase 3b: tap en mesa libre → modo de carga con foco en el buscador (FR-010/011).
+- [ ] **T7** — Fase 3c: migración `orders.party_size` + chips de Personas en el panel (FR-013/014) y «Cargar cliente» en el ⋯ (FR-015).
+- [ ] **T8** — Fase 4: `CargarPedidoSheet` a dos columnas, sin paso «datos» (FR-019/020) + `VentaRapidaPanel` (FR-021).
+- [ ] **T9** — `pnpm typecheck` + suite + build; verificar en vivo con rol real (encargado, no service_role).
+
+## Verify
+
+- Un turno simulado completo en `/admin/operacion` con rol **encargado**: mesa libre → cargar → enviar → agregar → entregar → cobrar, todo sin salir del panel y sin mouse.
+- Que la mesa abierta por envío tenga mozo asignado en el plano (FR-012).
+- Que el panel **no cambie de ancho** al pasar por los seis modos (FR-002).
+- Que las personas queden guardadas en la orden, cargadas por cualquiera de los tres caminos (chips, walk-in con formulario, ⋯).
