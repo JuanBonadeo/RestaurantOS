@@ -7,6 +7,8 @@ import { toast } from "sonner";
 import { formatCurrency } from "@/lib/currency";
 import { composeItemNotes } from "@/lib/mozo/item-notes";
 import { useEscapeToClose } from "@/lib/ui/use-escape-to-close";
+import { indexFromDigit } from "@/lib/ui/roving";
+import { useRovingList } from "@/lib/ui/use-roving-list";
 import type {
   CatalogProduct,
   CatalogModifier,
@@ -90,20 +92,52 @@ export function ProductModal({
   // Esc cierra; foco inicial al abrir; Tab atrapado dentro del modal. En modo
   // embebido el foco vuelve al buscador al cerrar/agregar (lo hace el padre).
   const panelRef = useRef<HTMLDivElement>(null);
-  const firstFieldRef = useRef<HTMLButtonElement>(null);
   const submitRef = useRef<HTMLButtonElement>(null);
 
   useEscapeToClose(onClose, open);
+
+  // ── Los modificadores son una zona más del panel (spec 110) ──────────────
+  //
+  // Hasta acá este modal era la única superficie de carga sin flechas: para
+  // llegar a la tercera salsa había que tabular tres veces, y el resto del
+  // sidebar —resultados, carrito, filas de mesa, métodos de pago, y el propio
+  // wizard del menú del día en su paso de modificadores— se recorre con ↑/↓
+  // desde la spec 075. Se cortaba justo en el paso que más se repite.
+  //
+  // Todos los grupos van en **una sola** zona, aplanados: al que carga no le
+  // importa dónde termina "Punto de cocción" y empieza "Guarnición" — baja con
+  // ↓ hasta lo que busca, igual que baja del buscador al carrito.
+  const opciones = useMemo(
+    () =>
+      (product?.modifier_groups ?? []).flatMap((g) =>
+        g.modifiers.map((m) => ({ group: g, modifier: m })),
+      ),
+    [product],
+  );
+  const mods = useRovingList<HTMLButtonElement>({
+    length: opciones.length,
+    // El borde de abajo entrega el foco a "Agregar", que es a dónde va el que
+    // ya eligió: la zona no se come la última flecha.
+    onExitDown: () => submitRef.current?.focus(),
+  });
+  // Índice plano del primer modificador de cada grupo, para numerar sin
+  // recalcular en cada opción.
+  const offsetDeGrupo = useMemo(() => {
+    const offsets: number[] = [];
+    let acc = 0;
+    for (const g of product?.modifier_groups ?? []) {
+      offsets.push(acc);
+      acc += g.modifiers.length;
+    }
+    return offsets;
+  }, [product]);
 
   useEffect(() => {
     if (!open || !product) return;
     // Foco inicial: primer modificador si hay, si no el botón "Agregar". FR-010.
     const t = setTimeout(() => {
-      if (product.modifier_groups.length > 0) {
-        firstFieldRef.current?.focus();
-      } else {
-        submitRef.current?.focus();
-      }
+      if (opciones.length > 0) mods.focusFirst();
+      else submitRef.current?.focus();
     }, 0);
     return () => clearTimeout(t);
   }, [open, product?.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -248,7 +282,22 @@ export function ProductModal({
         </div>
 
         {product.modifier_groups.length > 0 && (
-          <div className="mt-5 space-y-3 px-5">
+          <div
+            className="mt-5 space-y-3 px-5"
+            onKeyDown={(e) => {
+              // Las flechas primero (la zona las consume y avisa).
+              if (mods.handleKeyDown(e)) return;
+              // 1-9 elige directo, igual que el paso de modificadores del
+              // wizard del menú del día.
+              const porDigito = indexFromDigit(e.key, opciones.length);
+              if (porDigito !== null) {
+                e.preventDefault();
+                const o = opciones[porDigito];
+                toggle(o.group, o.modifier.id);
+                mods.focusIndex(porDigito);
+              }
+            }}
+          >
             {product.modifier_groups.map((g, gi) => (
               <div key={g.id} className="rounded-2xl border border-zinc-200 p-3">
                 <div className="flex items-center justify-between gap-2">
@@ -271,14 +320,28 @@ export function ProductModal({
                     </span>
                   </div>
                 </div>
-                <div className="mt-2 space-y-1.5">
+                {/* El contenedor del grupo, igual que el wizard del menú del
+                    día: un `role="radio"` sin `radiogroup` arriba es ARIA
+                    inválida, y sin él el lector nunca dice "1 de 3" ni de qué
+                    grupo es la opción. Importa el doble por la zona aplanada:
+                    cruzar de "Punto de cocción" a "Guarnición" con ↓ es
+                    invisible salvo que cambie el ancestro con nombre. */}
+                <div
+                  role={g.max_selection === 1 ? "radiogroup" : "group"}
+                  aria-label={`${g.name}${g.is_required ? " (obligatorio)" : ""}${
+                    g.max_selection > 1 ? ` · hasta ${g.max_selection}` : ""
+                  }`}
+                  className="mt-2 space-y-1.5"
+                >
                   {g.modifiers.map((m, mi) => {
                     const selected = (selection[g.id] ?? []).includes(m.id);
                     return (
                       <button
                         key={m.id}
-                        ref={gi === 0 && mi === 0 ? firstFieldRef : undefined}
+                        {...mods.itemProps(offsetDeGrupo[gi] + mi)}
                         type="button"
+                        role={g.max_selection === 1 ? "radio" : "checkbox"}
+                        aria-checked={selected}
                         onClick={() => toggle(g, m.id)}
                         className={`flex w-full items-center justify-between rounded-xl px-3 py-3 text-left text-sm transition active:scale-[0.99] ${
                           selected
