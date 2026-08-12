@@ -2,7 +2,15 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { SalonDesktop, type SalonOrderRef, type SalonReservationRef } from "./salon-desktop";
+import {
+  SalonDesktop,
+  type SalonOrderRef,
+  type SalonReservationRef,
+} from "./salon-desktop";
+import {
+  loadPedirCatalog,
+  loadTableComandas,
+} from "@/lib/mozo/pedir-panel-data";
 import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
 
 // El panel se prueba aislado del server y del realtime: acá lo que se verifica
@@ -22,7 +30,10 @@ vi.mock("@/lib/mozo/pedir-panel-data", () => ({
 }));
 vi.mock("@/lib/billing/cobro-panel-data", () => ({
   loadCobroForTable: vi.fn(async () => ({ ok: false as const, error: "test" })),
-  loadCuentaForTable: vi.fn(async () => ({ ok: false as const, error: "test" })),
+  loadCuentaForTable: vi.fn(async () => ({
+    ok: false as const,
+    error: "test",
+  })),
 }));
 
 function mesa(id: string, label: string, estado: string, extra = {}) {
@@ -154,11 +165,13 @@ describe("SalonDesktop · teclado del panel lateral (spec 075)", () => {
     ).toBeInTheDocument();
   });
 
+  // La mesa es **ocupada** a propósito: desde la spec 111 una libre no abre el
+  // detalle, entra directo a cargar (ver el test de abajo).
   it("Esc cierra el detalle y devuelve el foco a la fila de donde vino", async () => {
     const user = userEvent.setup();
     renderPanel();
 
-    pararseEn(filaMesa("3"));
+    pararseEn(filaMesa("1"));
     await user.keyboard("{Enter}");
     expect(
       screen.getByRole("button", { name: "Cerrar detalle" }),
@@ -168,10 +181,54 @@ describe("SalonDesktop · teclado del panel lateral (spec 075)", () => {
     expect(
       screen.queryByRole("button", { name: "Cerrar detalle" }),
     ).not.toBeInTheDocument();
-    // Vuelve a la mesa 3, no al principio de la lista.
+    // Vuelve a la mesa 1, no al principio de la lista.
     await waitFor(() => {
-      expect(filaMesa("3")).toHaveFocus();
+      expect(filaMesa("1")).toHaveFocus();
     });
+  });
+
+  it("Enter en una mesa libre entra a cargar con el foco en el buscador (spec 111)", async () => {
+    const user = userEvent.setup();
+    // Este test sí necesita que el panel de carga llegue a montarse.
+    vi.mocked(loadPedirCatalog).mockResolvedValue({
+      ok: true,
+      data: {
+        businessName: "Golf",
+        catalog: { superCategories: [], categories: [] },
+        stationNameById: {},
+        topProductIds: [],
+        dailyMenus: [],
+      },
+    } as never);
+    vi.mocked(loadTableComandas).mockResolvedValue({
+      ok: true,
+      data: { comandas: [], loPedido: null },
+    } as never);
+    renderPanel();
+
+    pararseEn(filaMesa("3")); // libre
+    await user.keyboard("{Enter}");
+
+    // Antes eran tres clicks y un formulario hasta poder tipear un producto:
+    // detalle → «Sentar walk-in» → «Abrir mesa». Ahora se entra derecho.
+    await waitFor(() => {
+      expect(screen.getByLabelText("Buscar producto")).toHaveFocus();
+    });
+    expect(
+      screen.queryByRole("button", { name: "Cerrar detalle" }),
+    ).not.toBeInTheDocument();
+    expect(loadTableComandas).toHaveBeenCalledWith(expect.any(String), "t3");
+  });
+
+  it("Enter en una mesa ocupada sigue abriendo el detalle", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    pararseEn(filaMesa("1")); // ocupada
+    await user.keyboard("{Enter}");
+    expect(
+      screen.getByRole("button", { name: "Cerrar detalle" }),
+    ).toBeInTheDocument();
   });
 
   it("solo la fila activa queda en el orden de tabulación", async () => {

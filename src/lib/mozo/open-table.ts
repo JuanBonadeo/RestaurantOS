@@ -29,6 +29,9 @@ export type OpenTableOpts = {
   customerPhone: string;
   customerId: string | null;
   notes: string | null;
+  /** Cuántas personas se sentaron (spec 111). Hasta la migración 0045 este
+   *  dato llegaba hasta acá y se perdía: no había dónde guardarlo. */
+  partySize?: number | null;
 };
 
 export type OpenTableResult = {
@@ -39,7 +42,17 @@ export type OpenTableResult = {
 export async function openTable(
   opts: OpenTableOpts,
 ): Promise<ActionResult<OpenTableResult>> {
-  const { service, businessId, table, actorUserId, customerName, customerPhone, customerId, notes } = opts;
+  const {
+    service,
+    businessId,
+    table,
+    actorUserId,
+    customerName,
+    customerPhone,
+    customerId,
+    notes,
+    partySize,
+  } = opts;
 
   // Guard: solo mesas libres.
   if (table.operational_status !== "libre") {
@@ -96,6 +109,7 @@ export async function openTable(
         delivery_fee_cents: 0,
         total_cents: 0,
         delivery_notes: notes || null,
+        party_size: partySize ?? null,
         payment_method: "cash",
       } as any)
       .select("id")

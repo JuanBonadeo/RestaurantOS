@@ -2423,6 +2423,7 @@ export type Database = {
           mp_payment_id: string | null
           mp_preference_id: string | null
           order_number: number
+          party_size: number | null
           payment_method: string
           payment_status: string
           promo_code_id: string | null
@@ -2463,6 +2464,7 @@ export type Database = {
           mp_payment_id?: string | null
           mp_preference_id?: string | null
           order_number: number
+          party_size?: number | null
           payment_method?: string
           payment_status?: string
           promo_code_id?: string | null
@@ -2503,6 +2505,7 @@ export type Database = {
           mp_payment_id?: string | null
           mp_preference_id?: string | null
           order_number?: number
+          party_size?: number | null
           payment_method?: string
           payment_status?: string
           promo_code_id?: string | null

@@ -47,7 +47,9 @@ export async function getLoPedido(
 
   const { data: order, error: orderErr } = await service
     .from("orders")
-    .select("id, subtotal_cents, discount_cents, tip_cents, total_cents")
+    .select(
+      "id, subtotal_cents, discount_cents, tip_cents, total_cents, party_size",
+    )
     .eq("id", orderId)
     .eq("business_id", businessId)
     .maybeSingle();
@@ -108,10 +110,12 @@ export async function getLoPedido(
     discount_cents: number | null;
     tip_cents: number | null;
     total_cents: number;
+    party_size: number | null;
   };
   return {
     order_id: o.id,
     items,
+    party_size: o.party_size,
     subtotal_cents: Number(o.subtotal_cents),
     discount_cents: Number(o.discount_cents ?? 0),
     tip_cents: Number(o.tip_cents ?? 0),

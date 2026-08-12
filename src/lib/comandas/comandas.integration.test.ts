@@ -361,13 +361,18 @@ describe.skipIf(!dbAvailable)("comandas (integration)", () => {
 
     const { data: tableRow } = await supabase
       .from("tables")
-      .select("operational_status, current_order_id, opened_at")
+      .select("operational_status, current_order_id, opened_at, mozo_id")
       .eq("id", tableId)
       .single();
     expect(tableRow!.operational_status).toBe("ocupada");
     expect(tableRow!.current_order_id).toBe(result.data.order_id);
     expect(tableRow!.opened_at).not.toBeNull();
+    // Spec 111 · FR-012 — este envío es el que abre la mesa (se entra a cargar
+    // sin pasar por el walk-in), así que también tiene que dejarla asignada:
+    // sin mozo no aparece en el plano, la distribución ni la rendición.
+    expect(tableRow!.mozo_id).toBe(TEST_USER_ID);
   });
+
 
   it("dos envíos sucesivos a la misma mesa: misma order, batch incrementa por sector", async () => {
     const second = await enviarComanda({
@@ -769,5 +774,31 @@ describe.skipIf(!dbAvailable)("comandas (integration)", () => {
       });
     expect(error).not.toBeNull();
     expect(error!.code).toBe("23505");
+  });
+
+  // Va al final a propósito: manda una comanda más y los tests de arriba
+  // cuentan tandas sobre esta misma mesa.
+  it("mesa que ya tenía mozo: el envío NO se la reasigna (spec 111)", async () => {
+    // La asignación es del que abre la mesa. Una vez asignada sólo la mueve
+    // «Transferir mozo»: si no, cualquier encargado que cargue un ítem de paso
+    // se quedaría con la mesa —y con la propina— del que la está atendiendo.
+    await supabase
+      .from("tables")
+      .update({ mozo_id: TEST_ENCARGADO_ID })
+      .eq("id", tableId);
+
+    const r = await enviarComanda({
+      tableId,
+      slug: businessSlug,
+      items: [{ product_id: prodPapasId, quantity: 1 }],
+    });
+    expect(r.ok).toBe(true);
+
+    const { data: tableRow } = await supabase
+      .from("tables")
+      .select("mozo_id")
+      .eq("id", tableId)
+      .single();
+    expect(tableRow!.mozo_id).toBe(TEST_ENCARGADO_ID);
   });
 });

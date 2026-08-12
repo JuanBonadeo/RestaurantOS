@@ -97,9 +97,9 @@ Ese paso 2-3 es un formulario de tres campos —Personas, Cliente, Notas— del 
 - [x] **T2** — Fase 2a: datos de «Lo pedido» — `getLoPedido` + `TableOrderState` en el mismo viaje que las comandas, y `unit_price_cents`/`subtotal_cents`/`seat_number` en `ComandaItemSnapshot`.
 - [x] **T3** — Fase 2b: `lo-pedido.ts` (agrupación por tanda, puro, 10 tests) + `LoPedidoColumn`.
 - [x] **T4** — Fase 2c: `LoPedidoColumn` cableada, dos columnas a partir de `@3xl` (768px **de panel**) y carrito que crece con el ancho.
-- [ ] **T5** — Fase 3a: `enviarComanda` auto-asigna mozo al abrir mesa libre (FR-012) + test.
-- [ ] **T6** — Fase 3b: tap en mesa libre → modo de carga con foco en el buscador (FR-010/011).
-- [ ] **T7** — Fase 3c: migración `orders.party_size` + chips de Personas en el panel (FR-013/014) y «Cargar cliente» en el ⋯ (FR-015).
+- [x] **T5** — Fase 3a: `enviarComanda` auto-asigna mozo al abrir mesa libre (FR-012) + 2 tests de integración.
+- [x] **T6** — Fase 3b: tap/Enter en mesa libre → carga con foco en el buscador (FR-010/011), en el plano y en la lista. Test nuevo; el de «Esc devuelve el foco» pasó a mesa ocupada porque codificaba el camino viejo.
+- [x] **T7** — Fase 3c: migración 0045 `orders.party_size` (aplicada al cloud) escrita por los tres caminos, chips de Personas arriba del buscador (FR-013/014) y «Cargar cliente» en el panel y en el ⋯ del detalle (FR-015).
 - [ ] **T8** — Fase 4: `CargarPedidoSheet` a dos columnas, sin paso «datos» (FR-019/020) + `VentaRapidaPanel` (FR-021).
 - [ ] **T9** — `pnpm typecheck` + suite + build; verificar en vivo con rol real (encargado, no service_role).
 

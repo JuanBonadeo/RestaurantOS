@@ -37,6 +37,7 @@ import {
   Star,
   Tag,
   Trash2,
+  UserPlus,
   Users,
   UtensilsCrossed,
   Wine,
@@ -56,6 +57,10 @@ import {
 import type { ComandaConItems } from "@/lib/comandas/queries";
 import { contarItemsVivos, type LoPedido } from "@/lib/mozo/lo-pedido";
 import { LoPedidoColumn } from "@/components/mozo/lo-pedido-column";
+import {
+  CargarClienteModal,
+  PersonasChips,
+} from "@/components/mozo/datos-mesa";
 import type { ComandaStatus } from "@/lib/comandas/types";
 import { useOptimisticAction } from "@/lib/ui/use-optimistic-action";
 import { useCartZone } from "@/lib/mozo/use-cart-zone";
@@ -816,7 +821,15 @@ export function MozoPedirClient({
     startTransition(async () => {
       let r: Awaited<ReturnType<typeof enviarComanda>>;
       try {
-        r = await enviarComanda({ tableId: table.id, items, slug });
+        // `partySize` sólo lo usa el server si **este** envío crea la orden
+        // (mesa que se abre cargando, spec 111): es la única oportunidad de
+        // guardarlo, porque no hubo walk-in. Si la orden ya existe, lo ignora.
+        r = await enviarComanda({
+          tableId: table.id,
+          items,
+          slug,
+          partySize: personas,
+        });
       } catch (e) {
         // Fallo de red / respuesta perdida: no sabemos si el server procesó el
         // envío. El server ahora es idempotente por `client_line_key` (spec 42),
@@ -899,6 +912,12 @@ export function MozoPedirClient({
   // panel es angosto— si la hoja está abierta sobre el catálogo.
   const itemsPedidos = contarItemsVivos(loPedido?.items ?? []);
   const [verLoPedido, setVerLoPedido] = useState(false);
+
+  // Personas (FR-013/014) y cliente (FR-015). Con la mesa ya abierta el chip
+  // persiste solo; sin orden todavía, viaja con el primer envío —que es el que
+  // la crea— así que vive acá hasta entonces.
+  const [personas, setPersonas] = useState(loPedido?.party_size ?? 2);
+  const [clienteOpen, setClienteOpen] = useState(false);
 
   // Mostramos la nav de tabs (anterior/siguiente) en el footer sticky solo si
   // estamos en catálogo, no estamos buscando, y al menos hay un vecino al
@@ -1101,6 +1120,16 @@ export function MozoPedirClient({
                 Mesa {table.label}
               </h1>
             </div>
+            {/* Cliente: opcional y fuera del camino (spec 111, FR-015). Antes
+                había que pasar por nombre y teléfono para sentar a alguien. */}
+            <button
+              type="button"
+              onClick={() => setClienteOpen(true)}
+              className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1.5 text-[11px] font-semibold text-zinc-600 ring-1 ring-zinc-200 transition active:scale-95"
+            >
+              <UserPlus className="h-3.5 w-3.5" />
+              Cliente
+            </button>
             {/* Abajo de @3xl «Lo pedido» no entra al lado (serían dos columnas
                 de ~280px): se abre como hoja sobre el catálogo. Arriba de @3xl
                 está siempre a la vista y el botón sobra. */}
@@ -1153,6 +1182,15 @@ export function MozoPedirClient({
           <div className="flex min-h-0 flex-1 flex-col">
             {/* Buscador fijo + categorías secundarias. FR-001/003/014. */}
             <div className="shrink-0 space-y-2 border-b border-zinc-200 bg-white px-3 py-2.5">
+              {/* Personas primero (spec 111, FR-013): es el dato de la mesa y
+                  se resuelve con un tap, sin sacarle el foco al buscador. */}
+              <PersonasChips
+                slug={slug}
+                tableId={table.id}
+                value={personas}
+                onChange={setPersonas}
+                persistir={loPedido != null}
+              />
               <ProductSearchInput api={searchApi} inputRef={searchRef} />
               {!isSearching && tabs.length > 1 && (
                 <div className="flex items-center gap-2">
@@ -1344,6 +1382,19 @@ export function MozoPedirClient({
             </div>
           </div>
         </div>
+
+        {clienteOpen && (
+          <CargarClienteModal
+            slug={slug}
+            tableId={table.id}
+            tableLabel={`Mesa ${table.label}`}
+            overlay="absolute"
+            onClose={() => {
+              setClienteOpen(false);
+              searchRef.current?.focus();
+            }}
+          />
+        )}
 
         {modalsEl}
       </div>

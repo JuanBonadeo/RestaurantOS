@@ -6,8 +6,8 @@ import { z } from "zod";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { requireMozoActionContext } from "@/lib/mozo/auth";
+import { upsertCustomerByPhone } from "@/lib/mozo/customer-upsert";
 import { openTable } from "@/lib/mozo/open-table";
-import { customerPhoneKey } from "@/lib/phone";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
@@ -80,45 +80,17 @@ export async function sentarWalkIn(
     mozo_id: string | null;
   };
 
-  // Customer upsert por (business_id, phone). Idempotente.
-  // La clave va normalizada (issue #114) para que el mismo número tipeado en
-  // otro formato acá, en el checkout o en una reserva sea el mismo cliente.
-  const phoneKey = customerPhoneKey(input.phone);
-  let customerId: string | null = null;
-  if (phoneKey) {
-    const { data: existing } = await service
-      .from("customers")
-      .select("id, name")
-      .eq("business_id", business.id)
-      .eq("phone", phoneKey)
-      .maybeSingle();
-    const existingRow = existing as { id: string; name: string | null } | null;
-    if (existingRow) {
-      customerId = existingRow.id;
-      if (input.name && input.name !== existingRow.name) {
-        const { error: updErr } = await service
-          .from("customers")
-          .update({ name: input.name })
-          .eq("id", existingRow.id);
-        if (updErr) console.error("walk-in customer name update", updErr);
-      }
-    } else {
-      const { data: created, error: insErr } = await service
-        .from("customers")
-        .insert({
-          business_id: business.id,
-          phone: phoneKey,
-          name: input.name ?? null,
-        })
-        .select("id")
-        .single();
-      if (insErr) {
-        console.error("walk-in customer insert", insErr);
-        return actionError("No pudimos guardar el cliente.");
-      }
-      customerId = (created as { id: string }).id;
-    }
-  }
+  // Customer upsert por (business_id, phone). Idempotente. La lógica es la
+  // misma que usa «Datos de la mesa» (spec 111), así que vive en un módulo
+  // compartido en vez de estar escrita dos veces.
+  const upsert = await upsertCustomerByPhone(
+    service,
+    business.id,
+    input.phone,
+    input.name,
+  );
+  if (!upsert.ok) return actionError("No pudimos guardar el cliente.");
+  const customerId = upsert.customerId;
 
   // Delegar a openTable() la lógica de abrir mesa + crear order.
   const openResult = await openTable({
@@ -130,6 +102,9 @@ export async function sentarWalkIn(
     customerPhone: input.phone?.trim() || "-",
     customerId,
     notes: input.notes?.trim() || null,
+    // Spec 111: hasta acá llegaba y se perdía — la acción lo validaba y no lo
+    // guardaba en ningún lado.
+    partySize: input.partySize,
   });
   if (!openResult.ok) return openResult;
 

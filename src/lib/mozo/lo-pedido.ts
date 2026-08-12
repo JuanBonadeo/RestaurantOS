@@ -42,6 +42,8 @@ export type LoPedidoItem = {
 export type LoPedido = {
   order_id: string;
   items: LoPedidoItem[];
+  /** Personas de la visita (spec 111). `null` = no se cargó. */
+  party_size: number | null;
   /** Totales **de la orden**, no sumados a mano: los recalcula el server en
    *  cada envío (`recomputeOrderTotals`) y ya traen descuento y propina. */
   subtotal_cents: number;

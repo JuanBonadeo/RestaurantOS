@@ -103,6 +103,15 @@ export type EnviarComandaInput = {
   tableId: string;
   items: (EnviarComandaItem | EnviarComandaDailyMenuItem)[];
   slug: string;
+  /**
+   * Cuántas personas se sentaron (spec 111, FR-013/014).
+   *
+   * Viaja con el envío porque desde la 111 **este envío es el que abre la
+   * mesa**: se entra a cargar sin pasar por el walk-in, así que cuando el
+   * panel manda la primera comanda todavía no hay orden donde escribirlo.
+   * Sólo se aplica al crearla; después la mueve «Datos de la mesa».
+   */
+  partySize?: number | null;
 };
 
 export type EnviarComandaResult = {
@@ -214,12 +223,14 @@ export async function enviarComanda(
   // Cross-tenant: la mesa debe pertenecer a un floor_plan de este business.
   const { data: table } = await service
     .from("tables")
-    .select("id, operational_status, opened_at, floor_plans!inner(business_id)")
+    .select(
+      "id, operational_status, opened_at, mozo_id, floor_plans!inner(business_id)",
+    )
     .eq("id", input.tableId)
     .maybeSingle();
-  const tableBusinessId =
-    (table as { floor_plans?: { business_id: string } } | null)?.floor_plans
-      ?.business_id;
+  const tableBusinessId = (
+    table as { floor_plans?: { business_id: string } } | null
+  )?.floor_plans?.business_id;
   if (!table || tableBusinessId !== business.id) {
     return actionError("Mesa no encontrada.");
   }
@@ -321,7 +332,8 @@ export async function enviarComanda(
       return actionError("Algún adicional no existe.");
     }
     for (const m of rows) {
-      if (!m.is_available) return actionError("Algún adicional no está disponible.");
+      if (!m.is_available)
+        return actionError("Algún adicional no está disponible.");
       modifierById.set(m.id, m);
     }
   }
@@ -399,6 +411,12 @@ export async function enviarComanda(
         subtotal_cents: 0,
         delivery_fee_cents: 0,
         total_cents: 0,
+        // Spec 111: cuando el envío es el que abre la mesa, es la única
+        // oportunidad de guardar las personas (no hubo walk-in).
+        party_size:
+          input.partySize != null && input.partySize > 0
+            ? input.partySize
+            : null,
         payment_method: "cash",
       } as any)
       .select("id")
@@ -438,7 +456,8 @@ export async function enviarComanda(
       station_id: string | null;
       comanda_items: { comanda_id: string }[] | null;
     }[]) {
-      if (row.client_line_key) dispatchedKeyToItemId.set(row.client_line_key, row.id);
+      if (row.client_line_key)
+        dispatchedKeyToItemId.set(row.client_line_key, row.id);
       // `station_id` null (bebidas / stock) nunca genera comanda: no es huérfano.
       if (row.station_id && (row.comanda_items ?? []).length === 0) {
         huerfanos.push({ id: row.id, station_id: row.station_id });
@@ -660,27 +679,36 @@ export async function enviarComanda(
     const choiceCompByKey = new Map<string, any>(
       components
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .filter((c: any) => c.kind === "choice" && c.choice_group_id && c.product_id)
+        .filter(
+          (c: any) => c.kind === "choice" && c.choice_group_id && c.product_id,
+        )
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .map((c: any) => [`${c.choice_group_id}::${c.product_id}`, c]),
     );
     // El nombre del grupo vive en su fila, no repetido en cada opción (spec 087).
     const nombreDeGrupo = new Map<string, string>(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ((menu.daily_menu_choice_groups ?? []) as any[]).map((g) => [g.id, g.name]),
+      ((menu.daily_menu_choice_groups ?? []) as any[]).map((g) => [
+        g.id,
+        g.name,
+      ]),
     );
     const snapshotChoices = (menuItem.selected_choices ?? []).map((sc) => {
-      const comp = choiceCompByKey.get(`${sc.choice_group_id}::${sc.product_id}`);
+      const comp = choiceCompByKey.get(
+        `${sc.choice_group_id}::${sc.product_id}`,
+      );
       return {
         choice_group_label: nombreDeGrupo.get(sc.choice_group_id) ?? "Opción",
         product_name: comp?.label ?? "",
         extra_price_cents: Number(comp?.extra_price_cents ?? 0),
         // Con nombre y adicional: es lo que después explica en la cuenta por qué
         // el menú salió $28.500 y no $24.000 (spec 083, FR-008).
-        modifiers: (modifiersByGroup.get(sc.choice_group_id) ?? []).map((m) => ({
-          name: m.name,
-          price_delta_cents: Math.max(0, m.price_delta_cents),
-        })),
+        modifiers: (modifiersByGroup.get(sc.choice_group_id) ?? []).map(
+          (m) => ({
+            name: m.name,
+            price_delta_cents: Math.max(0, m.price_delta_cents),
+          }),
+        ),
       };
     });
 
@@ -727,12 +755,16 @@ export async function enviarComanda(
 
     const childProductIds: string[] = [];
     for (const c of components) {
-      if (c.kind === "product" && c.product_id) childProductIds.push(c.product_id);
+      if (c.kind === "product" && c.product_id)
+        childProductIds.push(c.product_id);
     }
     // Los modificadores van pegados al hijo de SU opción, así que el product_id
     // no alcanza como clave: el mismo producto puede aparecer en dos grupos.
     const modifiersForChild: (ComboModifier[] | null)[] = components
-      .filter((c: { kind?: string; product_id?: string | null }) => c.kind === "product" && c.product_id)
+      .filter(
+        (c: { kind?: string; product_id?: string | null }) =>
+          c.kind === "product" && c.product_id,
+      )
       .map(() => null);
     for (const sc of menuItem.selected_choices ?? []) {
       childProductIds.push(sc.product_id);
@@ -764,7 +796,10 @@ export async function enviarComanda(
         const childProduct = productById.get(pid);
         if (!childProduct) continue;
         const childStation = resolveStation(
-          { station_id: childProduct.station_id, category: childProduct.category },
+          {
+            station_id: childProduct.station_id,
+            category: childProduct.category,
+          },
           null,
         );
 
@@ -803,7 +838,10 @@ export async function enviarComanda(
               })),
             );
           if (modErr) {
-            console.error("enviarComanda · combo child modifier insert", modErr);
+            console.error(
+              "enviarComanda · combo child modifier insert",
+              modErr,
+            );
           }
         }
 
@@ -817,7 +855,11 @@ export async function enviarComanda(
   }
 
   // Una comanda por sector con batch autoincremental dentro de (order, station).
-  const routeResult = await createComandasForItems(service, orderId, itemsByStation);
+  const routeResult = await createComandasForItems(
+    service,
+    orderId,
+    itemsByStation,
+  );
   if (!routeResult.ok) {
     // spec 096 · H-38 — el `return` estaba **antes** del recompute de totales,
     // y para este punto los ítems ya están persistidos y el stock ya se
@@ -869,7 +911,8 @@ export async function enviarComanda(
   // Mesa queda `ocupada` al enviar comanda. Si estaba libre, fijamos
   // opened_at. Si estaba pidio_cuenta y vuelven a pedir, pasa a ocupada
   // y limpiamos bill_requested_at (cliente se arrepintió, quiere más).
-  const tableStatus = (table as { operational_status: string }).operational_status;
+  const tableStatus = (table as { operational_status: string })
+    .operational_status;
   const tableOpenedAt = (table as { opened_at: string | null }).opened_at;
   const tablePatch: Record<string, unknown> = {
     operational_status: "ocupada",
@@ -877,6 +920,16 @@ export async function enviarComanda(
   };
   if (tableStatus === "libre" || !tableOpenedAt) {
     tablePatch.opened_at = tableOpenedAt ?? new Date().toISOString();
+  }
+  // Auto-asignación del mozo (spec 111, FR-012). Es la regla que `openTable`
+  // aplica desde siempre al sentar: si la mesa no tenía mozo, queda el que la
+  // abrió. Acá faltaba, y no se notaba porque hasta ahora a una mesa se entraba
+  // por el walk-in —que pasa por `openTable`— y el envío siempre encontraba la
+  // mesa ya abierta y asignada. Desde que tocar una mesa libre entra directo a
+  // cargar (FR-010/011), **este envío es el que la abre**: sin esto la mesa
+  // quedaría sin mozo en el plano, en la distribución y en la rendición.
+  if ((table as { mozo_id: string | null }).mozo_id === null) {
+    tablePatch.mozo_id = ctx.userId;
   }
   await service.from("tables").update(tablePatch).eq("id", input.tableId);
 
@@ -975,21 +1028,28 @@ export async function marcarComandaEntregada(
       .select("station_id, order_id")
       .eq("id", comandaId)
       .maybeSingle();
-    const cRow = comandaRow as { station_id: string | null; order_id: string } | null;
+    const cRow = comandaRow as {
+      station_id: string | null;
+      order_id: string;
+    } | null;
     if (cRow) {
       const { data: orderRow } = await service
         .from("orders")
         .select("table_id")
         .eq("id", cRow.order_id)
         .maybeSingle();
-      const tableId = (orderRow as { table_id: string | null } | null)?.table_id;
+      const tableId = (orderRow as { table_id: string | null } | null)
+        ?.table_id;
       if (tableId) {
         const { data: tableRow } = await service
           .from("tables")
           .select("mozo_id, label")
           .eq("id", tableId)
           .maybeSingle();
-        const tbl = tableRow as { mozo_id: string | null; label: string } | null;
+        const tbl = tableRow as {
+          mozo_id: string | null;
+          label: string;
+        } | null;
 
         let stationName = "Cocina";
         if (cRow.station_id) {
@@ -1048,8 +1108,8 @@ export async function advanceComandaStatus(
     .select("id, status, orders!inner(business_id)")
     .eq("id", comandaId)
     .maybeSingle();
-  const ownerBusinessId =
-    (row as { orders?: { business_id: string } } | null)?.orders?.business_id;
+  const ownerBusinessId = (row as { orders?: { business_id: string } } | null)
+    ?.orders?.business_id;
   if (!row || ownerBusinessId !== business.id) {
     return actionError("Comanda no encontrada.");
   }
@@ -1084,9 +1144,9 @@ export async function advanceComandaStatus(
     .from("comanda_items")
     .select("order_item_id")
     .eq("comanda_id", comandaId);
-  const itemIds = (
-    (links ?? []) as { order_item_id: string }[]
-  ).map((l) => l.order_item_id);
+  const itemIds = ((links ?? []) as { order_item_id: string }[]).map(
+    (l) => l.order_item_id,
+  );
   if (itemIds.length > 0) {
     await service
       .from("order_items")
@@ -1121,12 +1181,13 @@ export async function advanceItemKitchenStatus(
     .select("id, kitchen_status, orders!inner(business_id)")
     .eq("id", orderItemId)
     .maybeSingle();
-  const itemBusinessId =
-    (item as { orders?: { business_id: string } } | null)?.orders?.business_id;
+  const itemBusinessId = (item as { orders?: { business_id: string } } | null)
+    ?.orders?.business_id;
   if (!item || itemBusinessId !== business.id) {
     return actionError("Item no encontrado.");
   }
-  const current = (item as { kitchen_status: KitchenItemStatus }).kitchen_status;
+  const current = (item as { kitchen_status: KitchenItemStatus })
+    .kitchen_status;
   const next = NEXT_ITEM_STATUS[current];
   if (next === current) return actionOk({ kitchen_status: current });
 
@@ -1147,7 +1208,9 @@ export async function advanceItemKitchenStatus(
       .select("comanda_id")
       .eq("order_item_id", orderItemId);
     const comandaIds = [
-      ...new Set(((links ?? []) as { comanda_id: string }[]).map((l) => l.comanda_id)),
+      ...new Set(
+        ((links ?? []) as { comanda_id: string }[]).map((l) => l.comanda_id),
+      ),
     ];
     for (const cid of comandaIds) {
       const { data: siblings } = await service
@@ -1155,13 +1218,17 @@ export async function advanceItemKitchenStatus(
         .select("order_items!inner(kitchen_status, cancelled_at)")
         .eq("comanda_id", cid);
       type Sibling = {
-        order_items: { kitchen_status: KitchenItemStatus; cancelled_at: string | null };
+        order_items: {
+          kitchen_status: KitchenItemStatus;
+          cancelled_at: string | null;
+        };
       };
       const live = ((siblings ?? []) as unknown as Sibling[]).filter(
         (s) => !s.order_items.cancelled_at,
       );
       const allDelivered =
-        live.length > 0 && live.every((s) => s.order_items.kitchen_status === "delivered");
+        live.length > 0 &&
+        live.every((s) => s.order_items.kitchen_status === "delivered");
       if (allDelivered) {
         await service
           .from("comandas")
@@ -1182,8 +1249,6 @@ export async function advanceItemKitchenStatus(
   revalidatePath(`/${slug}/admin/operacion`);
   return actionOk({ kitchen_status: next });
 }
-
-
 
 /**
  * Cancela un item (flow de "86" / rotura). Marca cancelled_at + reason; la
@@ -1254,7 +1319,9 @@ export async function cancelarItem(
     .from("order_items")
     .select("subtotal_cents, cancelled_at")
     .eq("order_id", orderId);
-  const newSubtotal = ((items ?? []) as { subtotal_cents: number; cancelled_at: string | null }[])
+  const newSubtotal = (
+    (items ?? []) as { subtotal_cents: number; cancelled_at: string | null }[]
+  )
     .filter((it) => !it.cancelled_at)
     .reduce((a, it) => a + Number(it.subtotal_cents), 0);
 
@@ -1264,9 +1331,16 @@ export async function cancelarItem(
     .select("tip_cents, discount_cents, delivery_fee_cents")
     .eq("id", orderId)
     .single();
-  const tip = Number((orderRow as { tip_cents: number } | null)?.tip_cents ?? 0);
-  const discount = Number((orderRow as { discount_cents: number } | null)?.discount_cents ?? 0);
-  const fee = Number((orderRow as { delivery_fee_cents: number } | null)?.delivery_fee_cents ?? 0);
+  const tip = Number(
+    (orderRow as { tip_cents: number } | null)?.tip_cents ?? 0,
+  );
+  const discount = Number(
+    (orderRow as { discount_cents: number } | null)?.discount_cents ?? 0,
+  );
+  const fee = Number(
+    (orderRow as { delivery_fee_cents: number } | null)?.delivery_fee_cents ??
+      0,
+  );
   const newTotal = Math.max(0, newSubtotal + tip + fee - discount);
 
   await service
@@ -1698,7 +1772,11 @@ export async function editarItemComanda(
   return actionOk(undefined);
 }
 
-export type SwappableProduct = { id: string; name: string; price_cents: number };
+export type SwappableProduct = {
+  id: string;
+  name: string;
+  price_cents: number;
+};
 
 /**
  * Productos que rutean a un sector dado (spec 049), para el picker de "cambiar
@@ -1723,7 +1801,9 @@ export async function getSwappableProducts(
   const service = createSupabaseServiceClient() as unknown as GenericClient;
   const { data: rows } = await service
     .from("products")
-    .select("id, name, price_cents, station_id, category:categories(station_id)")
+    .select(
+      "id, name, price_cents, station_id, category:categories(station_id)",
+    )
     .eq("business_id", business.id)
     .eq("is_active", true)
     .eq("is_available", true)
@@ -1744,7 +1824,11 @@ export async function getSwappableProducts(
           null,
         ) === stationId,
     )
-    .map((p) => ({ id: p.id, name: p.name, price_cents: Number(p.price_cents) }));
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      price_cents: Number(p.price_cents),
+    }));
 
   return actionOk(out);
 }

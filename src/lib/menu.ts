@@ -80,6 +80,8 @@ export type MenuDailyMenu = {
   description: string | null;
   price_cents: number;
   image_url: string | null;
+  /** Días de la semana en que se ofrece (0=domingo). La carta los muestra. */
+  available_days: number[];
   components: MenuDailyMenuComponent[];
   choice_groups: MenuDailyMenuChoiceGroup[];
   has_choices: boolean;
@@ -290,6 +292,7 @@ export const getMenu = cache(
       description: m.description,
       price_cents: Number(m.price_cents),
       image_url: m.image_url,
+      available_days: (m.available_days ?? []) as number[],
       components,
       choice_groups: [...groupMap.values()],
       has_choices: groupMap.size > 0,

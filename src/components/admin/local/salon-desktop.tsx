@@ -37,6 +37,7 @@ import { ReservationsPanel } from "@/components/admin/local/reservations-panel";
 import { SegmentedSelector } from "@/components/admin/local/segmented-selector";
 import { VentaRapidaPanel } from "@/components/admin/local/venta-rapida-panel";
 import { AsignarMozosPanel } from "@/components/mozo/asignar-mozos-panel";
+import { CargarClienteModal } from "@/components/mozo/datos-mesa";
 import {
   FloorPlanViewer,
   type TableExtra,
@@ -371,6 +372,9 @@ export function SalonDesktop({
   } | null>(null);
   const [transferTableId, setTransferTableId] = useState<string | null>(null);
   const [trasladarTableId, setTrasladarTableId] = useState<string | null>(null);
+  // «Cargar cliente» (spec 111, FR-015): el bloque de nombre y teléfono que
+  // antes había que pasar para sentar a alguien, ahora detrás del ⋯.
+  const [clienteTableId, setClienteTableId] = useState<string | null>(null);
   const [anularPrompt, setAnularPrompt] = useState<{
     tableId: string;
     label: string;
@@ -1151,10 +1155,42 @@ export function SalonDesktop({
     setVolverAFila(null);
   }, [volverAFila, listaRowIndex, listaFocusIndex]);
 
-  const seleccionarMesa = useCallback((id: string) => {
-    setVentaRapidaOpen(false);
-    setSelectedId(id);
-  }, []);
+  /**
+   * ¿Tocar esta mesa tiene que entrar directo a cargar? (spec 111, FR-010)
+   *
+   * Sólo la mesa **libre**: la ocupada sigue abriendo su detalle (D2), que es
+   * desde donde se cobra, se transfiere y se anula.
+   *
+   * Con reserva encima **no** (FR-016): ahí el movimiento correcto es «Sentar
+   * reserva» —el detalle lo ofrece como acción primaria—, no abrirla como
+   * walk-in y dejar la reserva colgada.
+   *
+   * Sin permiso de carga tampoco: el detalle es lo único que ese rol puede
+   * hacer con la mesa.
+   */
+  const abreCargaDirecto = useCallback(
+    (t: FloorTable) =>
+      (t.operational_status ?? "libre") === "libre" &&
+      canCargarPedido(role) &&
+      !reservationByTable[t.id],
+    [role, reservationByTable],
+  );
+
+  const seleccionarMesa = useCallback(
+    (id: string) => {
+      setVentaRapidaOpen(false);
+      // Mismo criterio que el tap en el plano: desde la lista (y desde Enter
+      // con el teclado) una mesa libre también entra directo a cargar.
+      const t = tables.find((x) => x.id === id);
+      if (t && abreCargaDirecto(t)) {
+        setSelectedId(null);
+        openPedir(t);
+        return;
+      }
+      setSelectedId(id);
+    },
+    [tables, abreCargaDirecto, openPedir],
+  );
 
   /**
    * Esc / Backspace suben **un** nivel de la cadena de modos, en el mismo orden
@@ -1508,6 +1544,16 @@ export function SalonDesktop({
                   // Tocar una mesa manda al detalle: la venta de mostrador no
                   // es de ninguna mesa, así que cede el panel.
                   setVentaRapidaOpen(false);
+                  // Mesa libre → directo a cargar, con el foco en el buscador
+                  // (spec 111, FR-010). Antes eran tres clicks y un formulario
+                  // —detalle → «Sentar walk-in» → «Abrir mesa»— para llegar al
+                  // mismo lugar. La mesa la abre el primer envío (FR-011), así
+                  // que un tap de más no deja una mesa abierta en el salón.
+                  if (abreCargaDirecto(t)) {
+                    setSelectedId(null);
+                    openPedir(t);
+                    return;
+                  }
                   setSelectedId(t.id);
                 }}
                 onBackgroundClick={cerrarDesdePlano}
@@ -1755,6 +1801,7 @@ export function SalonDesktop({
               }}
               onTransfer={() => setTransferTableId(selected.id)}
               onTrasladar={() => setTrasladarTableId(selected.id)}
+              onCargarCliente={() => setClienteTableId(selected.id)}
               onAnular={() => pedirAnular(selected.id, selected.label)}
             />
           ) : (
@@ -1846,6 +1893,18 @@ export function SalonDesktop({
           }}
         />
       )}
+      {clienteTableId && (
+        <CargarClienteModal
+          slug={slug}
+          tableId={clienteTableId}
+          tableLabel={
+            tables.find((t) => t.id === clienteTableId)?.label ?? "la mesa"
+          }
+          onClose={() => setClienteTableId(null)}
+          onSaved={() => void refetchSalon()}
+        />
+      )}
+
       {trasladarTableId && (
         <TrasladarMesaModal
           fromTableId={trasladarTableId}
@@ -2609,6 +2668,7 @@ function TableDetail({
   onSentarReserva,
   onTransfer,
   onTrasladar,
+  onCargarCliente,
   onAnular,
   onChanged,
 }: {
@@ -2632,6 +2692,8 @@ function TableDetail({
   onSentarReserva: () => void;
   onTransfer: () => void;
   onTrasladar: () => void;
+  /** Abre «Cargar cliente» (spec 111, FR-015). */
+  onCargarCliente: () => void;
   onAnular: () => void;
 }) {
   const status = (table.operational_status ?? "libre") as OperationalStatus;
@@ -2952,6 +3014,16 @@ function TableDetail({
               icon: MoveRight,
               label: "Trasladar mesa",
               onClick: onTrasladar,
+            });
+          // Spec 111, FR-015: cargar el cliente dejó de ser un paso obligado
+          // para sentar y pasó a ser esto — una opción, cuando hace falta.
+          // Sólo con la mesa abierta: sin orden no hay dónde guardarlo.
+          if (status !== "libre" && canPedir)
+            menuItems.push({
+              key: "cliente",
+              icon: UserPlus,
+              label: "Cargar cliente",
+              onClick: onCargarCliente,
             });
 
           const hasMenu = menuItems.length > 0 || canAnular;
