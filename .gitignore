@@ -57,3 +57,6 @@ supabase/.clone
 
 # Backups locales de baseline (no versionar)
 backups/
+
+# Build aislado cuando hay un `next dev` abierto (NEXT_BUILD_DIR)
+.next-build/

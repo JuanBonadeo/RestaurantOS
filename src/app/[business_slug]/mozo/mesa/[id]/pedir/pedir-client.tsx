@@ -1012,7 +1012,11 @@ export function MozoPedirClient({
   // ── Modales, compartidos por ambos layouts (full-screen y embebido) ──
   // Al cerrar/agregar devolvemos el foco al buscador (solo embebido) para
   // encadenar cargas sin mouse (spec 055 FR-013).
-  const modalsEl = (
+  // Los que nacen de **la columna de carga** (tocar un producto o un menú del
+  // día). En el sidebar se renderizan adentro de esa columna, así el overlay
+  // tapa lo que estás cargando y **no** la mesa: mientras elegís el punto de
+  // cocción se sigue viendo qué pidió, qué falta y cuánto va.
+  const modalsCargaEl = (
     <>
       {/* ─── Modal: agregar producto ─── */}
       <ProductModal
@@ -1065,7 +1069,14 @@ export function MozoPedirClient({
           focusSearch();
         }}
       />
+    </>
+  );
 
+  // Los que nacen de **la mesa** (pisar un precio del carrito, anular algo ya
+  // enviado). Siguen a nivel del panel: son diálogos de confirmación y en una
+  // columna de 46% quedarían apretados.
+  const modalsMesaEl = (
+    <>
       {/* ─── Modal: cancelar item ─── */}
       {priceTarget && (
         <PriceOverrideModal
@@ -1141,6 +1152,13 @@ export function MozoPedirClient({
           </div>
         </div>
       )}
+    </>
+  );
+
+  const modalsEl = (
+    <>
+      {modalsCargaEl}
+      {modalsMesaEl}
     </>
   );
 
@@ -1254,8 +1272,9 @@ export function MozoPedirClient({
           />
 
           {/* Derecha: la carga. Es la columna del camino feliz —buscador,
-              catálogo, carrito, enviar— y se queda con el resto del ancho. */}
-          <div className="flex min-h-0 flex-1 flex-col">
+              catálogo, enviar— y se queda con el resto del ancho.
+              `relative`: los modales de carga se scopean acá adentro. */}
+          <div className="relative flex min-h-0 flex-1 flex-col">
             {/* Buscador fijo + categorías secundarias. FR-001/003/014. */}
             <div className="shrink-0 space-y-2 border-b border-zinc-200 bg-white px-3 py-2.5">
               {/* Personas primero (spec 111, FR-013): es el dato de la mesa y
@@ -1313,6 +1332,9 @@ export function MozoPedirClient({
                 />
               )}
             </div>
+
+            {/* Elegir modificadores tapa la carga, no la mesa. */}
+            {modalsCargaEl}
           </div>
         </div>
 
@@ -1329,7 +1351,7 @@ export function MozoPedirClient({
           />
         )}
 
-        {modalsEl}
+        {modalsMesaEl}
       </div>
     );
   }

@@ -122,6 +122,27 @@ describe("panel del salón · qué se ve sin buscar (spec 111)", () => {
     expect(screen.getByLabelText("Buscar producto")).toBeInTheDocument();
   });
 
+  it("el modal del producto tapa la carga, no la mesa", async () => {
+    const user = userEvent.setup();
+    renderPanel(["p1"]);
+
+    await user.click(screen.getByText("Asado de Tira"));
+
+    // El modal se abre adentro de la columna de carga: mientras elegís
+    // modificadores se sigue viendo qué pidió la mesa y cuánto va.
+    const titulo = screen.getByRole("heading", { name: "Asado de Tira" });
+    const overlay = titulo.closest("div.absolute.inset-0");
+    expect(overlay).not.toBeNull();
+
+    const mesa = screen.getByRole("region", { name: /^Mesa 5$/ });
+    expect(overlay!.contains(mesa)).toBe(false);
+    expect(
+      overlay!.parentElement!.contains(
+        screen.getByLabelText("Buscar producto"),
+      ),
+    ).toBe(true);
+  });
+
   it("el filtro de la carta online es un desplegable y puede dejar sólo lo del local", async () => {
     const user = userEvent.setup();
     renderPanel(["p1", "p3"]);

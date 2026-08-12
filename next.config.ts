@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Permite construir sin pelear con un `next dev` abierto en la misma carpeta
+  // (comparten `.next` y el build muere en "Cannot find module for page: /").
+  // Vacío en Vercel y en el flujo normal.
+  ...(process.env.NEXT_BUILD_DIR ? { distDir: process.env.NEXT_BUILD_DIR } : {}),
   experimental: {
     // Barrels pesados: sin esto se importa el paquete entero para usar tres
     // símbolos (spec 108). `lucide-react` ya viene en la lista default de Next.
