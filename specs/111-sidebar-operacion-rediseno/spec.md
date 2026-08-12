@@ -69,8 +69,8 @@ Ese paso 2-3 es un formulario de tres campos —Personas, Cliente, Notas— del 
 
 ### Fase 4 — El sidebar de los pedidos
 
-- **FR-019**: `CargarPedidoSheet` (mostrador/delivery) hereda ancho y dos columnas: izquierda **el pedido en armado + cliente y entrega**, derecha buscador + catálogo. Ahí no hay comandas previas, así que la izquierda es el carrito, no lo enviado.
-- **FR-020**: **Se elimina el paso «datos»** (`view: "carga" | "datos"`, [cargar-pedido-sheet.tsx:65](../../src/components/admin/cargar-pedido-sheet.tsx#L65)): con dos columnas, cliente + entrega + cuándo entran a la vista sin un segundo paso. Es el mismo click de menos que la fase 3, en la otra superficie.
+- **FR-019**: `CargarPedidoSheet` (mostrador/delivery) hereda ancho (`max-w-md` → `xl:max-w-[900px]`) y dos columnas. *(Al implementarlo: izquierda **cliente y entrega**, derecha **buscador + catálogo + carrito**. El carrito se quedó pegado al catálogo del que se carga —igual que en el salón— en vez de irse a la izquierda: moverlo hubiera dejado dos totales en pantalla o un carrito lejos de donde se agrega. La izquierda es el contexto del pedido, que es el análogo de «Lo pedido» en una superficie sin comandas previas.)*
+- **FR-020**: **Se elimina el paso «datos»** (`view: "carga" | "datos"`): con dos columnas, cliente + entrega + cuándo entran a la vista sin un segundo paso. Es el mismo click de menos que la fase 3, en la otra superficie. *(Al implementarlo: el paso sigue existiendo **debajo de `xl`**, donde las dos columnas no entran; ahí sacarlo dejaría el formulario sin lugar. `⌘Enter` lo sabe: ancho confirma, angosto encadena los dos pasos como antes.)*
 - **FR-021**: `VentaRapidaPanel` queda alineado en ancho y densidad (no necesita las dos columnas: no tiene cliente ni comandas previas).
 - **NFR-001**: Nada de esto toca el kanban de comandas ni el flujo de cobro más allá de que respiren con el ancho nuevo.
 
@@ -100,8 +100,8 @@ Ese paso 2-3 es un formulario de tres campos —Personas, Cliente, Notas— del 
 - [x] **T5** — Fase 3a: `enviarComanda` auto-asigna mozo al abrir mesa libre (FR-012) + 2 tests de integración.
 - [x] **T6** — Fase 3b: tap/Enter en mesa libre → carga con foco en el buscador (FR-010/011), en el plano y en la lista. Test nuevo; el de «Esc devuelve el foco» pasó a mesa ocupada porque codificaba el camino viejo.
 - [x] **T7** — Fase 3c: migración 0045 `orders.party_size` (aplicada al cloud) escrita por los tres caminos, chips de Personas arriba del buscador (FR-013/014) y «Cargar cliente» en el panel y en el ⋯ del detalle (FR-015).
-- [ ] **T8** — Fase 4: `CargarPedidoSheet` a dos columnas, sin paso «datos» (FR-019/020) + `VentaRapidaPanel` (FR-021).
-- [ ] **T9** — `pnpm typecheck` + suite + build; verificar en vivo con rol real (encargado, no service_role).
+- [x] **T8** — Fase 4: `CargarPedidoSheet` a dos columnas desde `xl`, sin paso «datos» (FR-019/020). `VentaRapidaPanel` ya había quedado alineado en T1 (FR-021).
+- [ ] **T9** — `pnpm typecheck` + suite + build; **verificar en vivo con rol real** (encargado, no service_role).
 
 ## Verify
 

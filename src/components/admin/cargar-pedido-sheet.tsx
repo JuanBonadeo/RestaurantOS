@@ -29,6 +29,7 @@ import {
   type ClienteMatch,
 } from "@/lib/admin/customers-actions";
 import { formatCurrency } from "@/lib/currency";
+import { cn } from "@/lib/utils";
 import type { CatalogForMozo, CatalogProduct } from "@/lib/mozo/catalog-query";
 import { loadPedirCatalog } from "@/lib/mozo/pedir-panel-data";
 import { confirmarPedido } from "@/lib/orders/confirm-order";
@@ -38,7 +39,10 @@ import {
   SCHEDULED_MIN_LEAD_MIN,
 } from "@/lib/orders/scheduled";
 import { cargarPedidoStaff } from "@/lib/orders/staff-order";
-import { ProductModal, type AddToCartItem } from "@/components/mozo/product-modal";
+import {
+  ProductModal,
+  type AddToCartItem,
+} from "@/components/mozo/product-modal";
 import { CustomerFields } from "@/components/shared/customer-fields";
 import { PriceOverrideModal } from "@/components/shared/price-override-modal";
 import { ProductResultsList } from "@/components/mozo/product-results-list";
@@ -82,6 +86,23 @@ function formatDireccion(a: ClienteDireccion): string {
  * pedido de mesa no necesita. Arma el pedido con `cargarPedidoStaff` →
  * `persistOrder` (sin `table_id`).
  */
+/**
+ * `true` a partir de `xl`, que es donde el sheet muestra las dos columnas y el
+ * paso «datos» deja de existir (spec 111). El layout lo resuelve CSS; esto es
+ * sólo para ⌘Enter, que sin saberlo mandaría a un paso invisible.
+ */
+function useSheetAncho(): boolean {
+  const [ancho, setAncho] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1280px)");
+    const sync = () => setAncho(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+  return ancho;
+}
+
 export function CargarPedidoSheet({
   slug,
   open,
@@ -108,6 +129,7 @@ export function CargarPedidoSheet({
   const [catalogError, setCatalogError] = useState<string | null>(null);
 
   const [view, setView] = useState<View>("carga");
+  const sheetAncho = useSheetAncho();
   const [activeCategory, setActiveCategory] = useState<string>("");
   const [openProduct, setOpenProduct] = useState<CatalogProduct | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -427,9 +449,13 @@ export function CargarPedidoSheet({
       } else if (marchar) {
         const c = await confirmarPedido(r.data.order_id, slug);
         if (!c.ok) {
-          toast.warning(`Pedido #${r.data.order_number} cargado, pero no marchó: ${c.error}`);
+          toast.warning(
+            `Pedido #${r.data.order_number} cargado, pero no marchó: ${c.error}`,
+          );
         } else {
-          toast.success(`Pedido #${r.data.order_number} cargado y enviado a cocina`);
+          toast.success(
+            `Pedido #${r.data.order_number} cargado y enviado a cocina`,
+          );
         }
       } else {
         toast.success(`Pedido #${r.data.order_number} cargado`);
@@ -452,11 +478,16 @@ export function CargarPedidoSheet({
           // (o programar, que nunca marcha al toque).
           if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !openProduct) {
             e.preventDefault();
-            if (view === "carga" && cart.length > 0) setView("datos");
+            // Ancho: las dos columnas están a la vista, así que ⌘Enter
+            // confirma. Angosto: el primer ⌘Enter pasa a «datos» y el
+            // segundo confirma, como venía siendo.
+            if (sheetAncho) {
+              if (canSubmit) submit(!isScheduled);
+            } else if (view === "carga" && cart.length > 0) setView("datos");
             else if (view === "datos" && canSubmit) submit(!isScheduled);
           }
         }}
-        className="relative flex h-full w-full max-w-md flex-col overflow-hidden bg-zinc-50 shadow-2xl"
+        className="relative flex h-full w-full max-w-md flex-col overflow-hidden bg-zinc-50 shadow-2xl xl:max-w-[900px]"
       >
         {/* ─── Header ─── */}
         <header className="shrink-0 border-b border-zinc-200 bg-white px-3 py-2.5">
@@ -464,7 +495,7 @@ export function CargarPedidoSheet({
             {view === "datos" ? (
               <button
                 onClick={() => setView("carga")}
-                className="-ml-1 rounded-full p-2 text-zinc-700 active:bg-zinc-100"
+                className="-ml-1 rounded-full p-2 text-zinc-700 active:bg-zinc-100 xl:hidden"
                 aria-label="Volver a la carga"
               >
                 <ArrowLeft className="h-5 w-5" />
@@ -475,10 +506,10 @@ export function CargarPedidoSheet({
               </span>
             )}
             <div className="min-w-0 flex-1">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+              <p className="text-[10px] font-semibold tracking-[0.18em] text-zinc-500 uppercase">
                 Cargar pedido
               </p>
-              <h2 className="font-heading text-base font-bold leading-tight text-zinc-900">
+              <h2 className="font-heading text-base leading-tight font-bold text-zinc-900">
                 {view === "carga" ? "Elegí los productos" : "Cliente y entrega"}
               </h2>
             </div>
@@ -514,8 +545,18 @@ export function CargarPedidoSheet({
           </div>
         </header>
 
-        {view === "carga" ? (
-          <>
+        {/* ── Cuerpo ──
+            Angosto: una vista por vez (carga → «Continuar» → datos), como
+            siempre. Ancho (xl, spec 111): las dos a la vez, sin ese paso —
+            cliente y entrega a la izquierda, la carga a la derecha. Es el
+            mismo click de menos que en el salón, en la otra superficie. */}
+        <div className="flex min-h-0 flex-1 flex-col xl:flex-row">
+          <div
+            className={cn(
+              "flex min-h-0 flex-1 flex-col xl:order-2",
+              view === "carga" ? "" : "hidden xl:flex",
+            )}
+          >
             {/* ─── Buscador fijo + categorías (spec 055) ─── */}
             <div className="shrink-0 space-y-2 border-b border-zinc-200 bg-white px-3 py-2.5">
               <ProductSearchInput api={searchApi} inputRef={searchRef} />
@@ -523,7 +564,7 @@ export function CargarPedidoSheet({
                 <div className="flex items-center gap-2">
                   <label
                     htmlFor="cargar-cat"
-                    className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-zinc-500"
+                    className="shrink-0 text-[11px] font-semibold tracking-wide text-zinc-500 uppercase"
                   >
                     Categoría
                   </label>
@@ -587,7 +628,7 @@ export function CargarPedidoSheet({
             {/* ─── Pedido en armado (siempre visible) ─── */}
             <div className="shrink-0 border-t border-zinc-200 bg-white">
               <div className="flex items-center justify-between px-3 pt-2.5">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                <p className="text-[10px] font-semibold tracking-[0.18em] text-zinc-500 uppercase">
                   Tu pedido
                 </p>
                 <span className="text-[11px] font-semibold text-zinc-500 tabular-nums">
@@ -597,7 +638,7 @@ export function CargarPedidoSheet({
                 </span>
               </div>
               {cart.length === 0 ? (
-                <p className="px-3 pb-2.5 pt-1 text-xs text-zinc-500">
+                <p className="px-3 pt-1 pb-2.5 text-xs text-zinc-500">
                   Todavía no cargaste nada. Buscá arriba y agregá con Enter.
                 </p>
               ) : (
@@ -610,14 +651,14 @@ export function CargarPedidoSheet({
                       key={c._key}
                       {...carrito.itemProps(i)}
                       aria-label={`${c.product_name}, cantidad ${c.quantity}. ← y → cambian la cantidad, Supr la quita.`}
-                      className="flex items-center gap-2 rounded-xl bg-zinc-50 px-2.5 py-1.5 outline-none ring-1 ring-zinc-100 focus-visible:ring-2 focus-visible:ring-emerald-500"
+                      className="flex items-center gap-2 rounded-xl bg-zinc-50 px-2.5 py-1.5 ring-1 ring-zinc-100 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
                     >
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-semibold text-zinc-900">
                           {c.product_name}
                         </p>
                         {c.notes && (
-                          <p className="truncate text-[11px] italic text-zinc-500">
+                          <p className="truncate text-[11px] text-zinc-500 italic">
                             &quot;{c.notes}&quot;
                           </p>
                         )}
@@ -680,14 +721,16 @@ export function CargarPedidoSheet({
               <div className="flex items-center gap-2 border-t border-zinc-100 px-3 py-2.5">
                 <div className="min-w-0 flex-1">
                   <p className="text-[11px] text-zinc-500">Total</p>
-                  <p className="text-lg font-bold tabular-nums text-zinc-900">
+                  <p className="text-lg font-bold text-zinc-900 tabular-nums">
                     {formatCurrency(cartTotal)}
                   </p>
                 </div>
                 <button
                   onClick={() => setView("datos")}
                   disabled={cart.length === 0}
-                  className="flex h-11 items-center gap-2 rounded-2xl bg-zinc-900 px-5 text-sm font-semibold text-white transition active:scale-[0.98] disabled:opacity-40"
+                  // A partir de xl no hay a dónde continuar: cliente y entrega
+                  // están a la izquierda y el pedido se confirma desde ahí.
+                  className="flex h-11 items-center gap-2 rounded-2xl bg-zinc-900 px-5 text-sm font-semibold text-white transition active:scale-[0.98] disabled:opacity-40 xl:hidden"
                 >
                   Continuar
                   <span className="ml-1 hidden rounded bg-white/20 px-1.5 py-0.5 text-[10px] sm:inline">
@@ -696,10 +739,15 @@ export function CargarPedidoSheet({
                 </button>
               </div>
             </div>
-          </>
-        ) : (
-          /* ─── Vista datos: cliente + entrega ─── */
-          <>
+          </div>
+
+          {/* ─── Cliente + entrega ─── */}
+          <div
+            className={cn(
+              "flex min-h-0 flex-col xl:order-1 xl:w-[38%] xl:max-w-[360px] xl:shrink-0 xl:border-r xl:border-zinc-200",
+              view === "datos" ? "" : "hidden xl:flex",
+            )}
+          >
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3 py-3">
               {/* Spec 068: mismo bloque de cliente que abrir mesa y nueva
                   reserva — un solo buscador, y la regla del teléfono bloqueado
@@ -758,7 +806,7 @@ export function CargarPedidoSheet({
                       value={deliveryAddress}
                       onChange={(e) => setDeliveryAddress(e.target.value)}
                       placeholder="Av. del Golf 123"
-                      className="mt-1 block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+                      className="mt-1 block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none"
                     />
                     {clienteDirecciones.length > 0 && (
                       <p className="mt-1 text-[11px] text-zinc-500">
@@ -776,7 +824,7 @@ export function CargarPedidoSheet({
                     value={deliveryNotes}
                     onChange={(e) => setDeliveryNotes(e.target.value)}
                     placeholder="ej: sin cebolla, tocar timbre…"
-                    className="mt-1 block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+                    className="mt-1 block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none"
                   />
                   <p className="mt-1 text-[11px] text-zinc-500">
                     Va en el ticket de control, con los datos de la entrega.
@@ -792,7 +840,7 @@ export function CargarPedidoSheet({
                     onChange={(e) => setKitchenNotes(e.target.value)}
                     maxLength={120}
                     placeholder="ej: 21:30, junto con la mesa 5…"
-                    className="mt-1 block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+                    className="mt-1 block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none"
                   />
                   <p className="mt-1 text-[11px] text-zinc-500">
                     Sale arriba de la comanda como «ENTREGAR …», para cocina.
@@ -805,7 +853,7 @@ export function CargarPedidoSheet({
                   sólo hoy. Al programar, la comanda no sale ahora — la manda el
                   cron con el lead del negocio. */}
               <section className="space-y-2.5 rounded-2xl bg-white p-3 ring-1 ring-zinc-200">
-                <h3 className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">
+                <h3 className="text-[11px] font-bold tracking-wide text-zinc-500 uppercase">
                   ¿Para cuándo?
                 </h3>
                 <div className="flex gap-2">
@@ -876,7 +924,7 @@ export function CargarPedidoSheet({
                 <span className="text-sm font-medium text-zinc-600">
                   {cartCount} {cartCount === 1 ? "ítem" : "ítems"}
                 </span>
-                <span className="text-lg font-bold tabular-nums text-zinc-900">
+                <span className="text-lg font-bold text-zinc-900 tabular-nums">
                   {formatCurrency(cartTotal)}
                 </span>
               </div>
@@ -920,8 +968,8 @@ export function CargarPedidoSheet({
                 </>
               )}
             </footer>
-          </>
-        )}
+          </div>
+        </div>
 
         {priceTarget && (
           <PriceOverrideModal

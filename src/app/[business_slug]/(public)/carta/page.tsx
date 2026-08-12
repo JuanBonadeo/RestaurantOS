@@ -1,6 +1,4 @@
 import { notFound } from "next/navigation";
-import { formatInTimeZone } from "date-fns-tz";
-import { es } from "date-fns/locale";
 
 import { CartaClient } from "@/components/menu/carta-client";
 import { computeIsOpen } from "@/lib/business-hours";
@@ -21,12 +19,6 @@ export default async function CartaPage({
   if (!business) notFound();
 
   const todayDow = currentDayOfWeek(business.timezone);
-  const todayLabel = formatInTimeZone(
-    new Date(),
-    business.timezone,
-    "EEEE d 'de' MMMM",
-    { locale: es },
-  );
 
   // Contexto `salon`: quien escanea el QR está sentado en la mesa, así que ve
   // los menús del día del salón — no los de pedidos online.
@@ -47,7 +39,6 @@ export default async function CartaPage({
       categories={menu.categories}
       beverageSuperCategoryId={menu.beverageSuperCategoryId}
       todaysMenus={menu.todaysMenus}
-      todayLabel={todayLabel}
       hours={menu.hours}
       timezone={business.timezone}
       isOpenInitial={isOpen}

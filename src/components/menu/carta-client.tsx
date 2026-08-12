@@ -5,6 +5,7 @@ import Image from "next/image";
 
 import { computeIsOpen, type BusinessHour } from "@/lib/business-hours";
 import { formatCurrency } from "@/lib/currency";
+import { disponibilidadTexto, pasosDelMenu } from "@/lib/daily-menus/carta-resumen";
 import type { MenuCategory, MenuDailyMenu, MenuProduct } from "@/lib/menu";
 
 // Carta SOLO VISUAL (read-only) para el QR de la mesa. El comensal mira y le
@@ -164,6 +165,11 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   );
 }
 
+// El menú del día, con la misma fila que un plato (nombre ··· precio) en vez de
+// la caja dorada de antes. Debajo, en lugar de la descripción, cuándo se ofrece;
+// y los pasos del menú —sólo el nombre del grupo— apilados con un «+» dorado.
+// Listar las opciones una por una tapaba media carta: el «Menú» de golf-jcr
+// tiene 57 componentes (spec 112).
 function DailyMenuCard({
   menu,
   isSuggestion,
@@ -171,78 +177,114 @@ function DailyMenuCard({
   menu: MenuDailyMenu;
   isSuggestion?: boolean;
 }) {
+  const pasos = pasosDelMenu(menu);
+  const disponibilidad = disponibilidadTexto(menu.available_days);
+
   return (
-    <div
-      style={{
-        padding: "14px 16px",
-        marginTop: 12,
-        borderRadius: 12,
-        border: "1px solid color-mix(in srgb, var(--carta-gold) 40%, transparent)",
-        background: "color-mix(in srgb, var(--carta-gold) 6%, transparent)",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-        <span style={{ fontSize: 16, fontWeight: 700, color: "var(--carta-ink)" }}>
+    <li style={{ listStyle: "none", padding: "11px 0" }}>
+      {/* Nombre ······ Precio */}
+      <div style={{ display: "flex", alignItems: "flex-end" }}>
+        <span
+          style={{
+            fontWeight: 600,
+            fontSize: 15.5,
+            lineHeight: 1.25,
+            color: "var(--carta-ink)",
+          }}
+        >
           {menu.name}
         </span>
         {isSuggestion && (
           <span
             style={{
+              marginLeft: 7,
               fontSize: 10,
               fontWeight: 700,
               textTransform: "uppercase",
               letterSpacing: 0.5,
               color: "var(--carta-gold)",
+              flexShrink: 0,
             }}
           >
             Sugerencia
           </span>
         )}
+        <span
+          aria-hidden
+          style={{
+            flex: 1,
+            margin: "0 8px 5px",
+            borderBottom: "1px dotted var(--carta-gold)",
+            minWidth: 16,
+          }}
+        />
+        <span
+          style={{
+            fontWeight: 600,
+            fontSize: 15.5,
+            color: "var(--carta-ink)",
+            whiteSpace: "nowrap",
+            flexShrink: 0,
+          }}
+        >
+          {formatCurrency(menu.price_cents)}
+        </span>
       </div>
-      {menu.description && (
+
+      {disponibilidad && (
         <div
           style={{
             fontSize: 13,
             color: "var(--carta-ink-2)",
             lineHeight: 1.4,
-            marginTop: 4,
+            marginTop: 3,
           }}
         >
-          {menu.description}
+          {disponibilidad}
         </div>
       )}
-      {menu.components.length > 0 && (
+
+      {pasos.length > 0 && (
         <ul
           style={{
             listStyle: "none",
-            margin: "8px 0 0",
+            margin: "10px 0 2px",
             padding: 0,
-            fontSize: 13,
-            color: "var(--carta-ink-2)",
-            lineHeight: 1.5,
+            textAlign: "center",
           }}
         >
-          {menu.components.map((c) => (
-            <li key={c.id}>· {c.label}</li>
+          {pasos.map((paso, i) => (
+            <li
+              key={`${paso}-${i}`}
+              style={{
+                fontSize: 13.5,
+                lineHeight: 1.45,
+                color: "var(--carta-ink)",
+              }}
+            >
+              {i > 0 && (
+                <span
+                  aria-hidden
+                  style={{
+                    display: "block",
+                    fontSize: 11,
+                    lineHeight: 1.4,
+                    color: "var(--carta-gold)",
+                  }}
+                >
+                  +
+                </span>
+              )}
+              {paso}
+            </li>
           ))}
         </ul>
       )}
-      <div
-        style={{ marginTop: 10, fontWeight: 700, color: "var(--carta-ink)", fontSize: 16 }}
-      >
-        {formatCurrency(menu.price_cents)}
-      </div>
-    </div>
+    </li>
   );
 }
 
-function DailyMenu({
-  menus,
-  todayLabel,
-}: {
-  menus: MenuDailyMenu[];
-  todayLabel: string;
-}) {
+function DailyMenu({ menus }: { menus: MenuDailyMenu[] }) {
   const regular = menus.filter((m) => !m.is_suggestion);
   const suggestions = menus.filter((m) => m.is_suggestion);
   if (menus.length === 0) return null;
@@ -250,25 +292,14 @@ function DailyMenu({
   return (
     <section>
       <SectionTitle>Menú del día</SectionTitle>
-      <div
-        style={{
-          textAlign: "center",
-          fontSize: 11,
-          fontWeight: 600,
-          textTransform: "uppercase",
-          letterSpacing: 2,
-          color: "var(--carta-gold)",
-          marginTop: -2,
-        }}
-      >
-        {todayLabel}
-      </div>
-      {regular.map((m) => (
-        <DailyMenuCard key={m.id} menu={m} />
-      ))}
-      {suggestions.map((m) => (
-        <DailyMenuCard key={m.id} menu={m} isSuggestion />
-      ))}
+      <ul style={{ margin: 0, padding: 0 }}>
+        {regular.map((m) => (
+          <DailyMenuCard key={m.id} menu={m} />
+        ))}
+        {suggestions.map((m) => (
+          <DailyMenuCard key={m.id} menu={m} isSuggestion />
+        ))}
+      </ul>
     </section>
   );
 }
@@ -383,7 +414,6 @@ export function CartaClient({
   categories,
   beverageSuperCategoryId,
   todaysMenus,
-  todayLabel,
   hours,
   timezone,
   isOpenInitial,
@@ -395,7 +425,6 @@ export function CartaClient({
   categories: MenuCategory[];
   beverageSuperCategoryId: string | null;
   todaysMenus: MenuDailyMenu[];
-  todayLabel: string;
   hours: BusinessHour[];
   timezone: string;
   isOpenInitial: boolean;
@@ -471,7 +500,7 @@ export function CartaClient({
           </span>
         </div>
 
-        <DailyMenu menus={todaysMenus} todayLabel={todayLabel} />
+        <DailyMenu menus={todaysMenus} />
 
         {sections.map((s) => (
           <section key={s.key}>
