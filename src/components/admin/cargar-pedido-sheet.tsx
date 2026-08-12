@@ -17,6 +17,7 @@ import {
   Minus,
   Plus,
   ShoppingBag,
+  Star,
   Tag,
   Trash2,
   X,
@@ -85,21 +86,14 @@ function formatDireccion(a: ClienteDireccion): string {
  * Spec 054 (fase 2) — «Cargar pedido» para llevar/delivery SIN mesa desde el
  * board. Alineado con el sidebar keyboard-first del salón (spec 055): buscador
  * fijo con foco, resultados navegables por ↓/↑/Enter, pedido siempre visible,
- * categorías en un `<select>` compacto, reusando `ProductModal` (ya operable por
- * teclado) y la lógica de índice de `product-search.ts`. Suma un paso de datos
+ * reusando `ProductModal` (ya operable por teclado) y la lógica de índice de
+ * `product-search.ts`. Desde la spec 115 comparte el shell de dos columnas con
+ * el panel del salón (`panel-de-carga.tsx`) y, desde la 116, también lo que
+ * muestra sin buscar: los más pedidos. Suma un paso de datos
  * con selector de **cliente existente** (`buscarClientes`) + entrega, que el
  * pedido de mesa no necesita. Arma el pedido con `cargarPedidoStaff` →
  * `persistOrder` (sin `table_id`).
  */
-/**
- * `true` a partir de `xl`, que es donde el sheet muestra las dos columnas y el
- * paso «datos» deja de existir (spec 111). El layout lo resuelve CSS; esto es
- * sólo para ⌘Enter, que sin saberlo mandaría a un paso invisible.
- */
-/* `useSheetAncho` (media query de viewport a 1280 px) se fue en la spec 115: el
-   layout lo decide el ancho **de la hoja**, no el de la pantalla, y ahora JS y
-   CSS miden lo mismo con `useAnchoDePanel`. */
-
 export function CargarPedidoSheet({
   slug,
   open,
@@ -128,7 +122,7 @@ export function CargarPedidoSheet({
   const [view, setView] = useState<View>("carga");
   const hojaRef = useRef<HTMLDivElement>(null);
   const sheetAncho = useAnchoDePanel(hojaRef);
-  const [activeCategory, setActiveCategory] = useState<string>("");
+  const [topProductIds, setTopProductIds] = useState<string[]>([]);
   const [openProduct, setOpenProduct] = useState<CatalogProduct | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
   // ── Precio por ítem (spec 069) ──
@@ -166,10 +160,7 @@ export function CargarPedidoSheet({
     loadPedirCatalog(slug).then((r) => {
       if (r.ok) {
         setCatalog(r.data.catalog);
-        const firstCat = r.data.catalog.categories.find(
-          (c) => c.products.length > 0,
-        );
-        setActiveCategory(firstCat?.id ?? "");
+        setTopProductIds(r.data.topProductIds);
       } else {
         setCatalogError(r.error);
       }
@@ -183,19 +174,26 @@ export function CargarPedidoSheet({
     () => catalog?.categories.flatMap((c) => c.products) ?? [],
     [catalog],
   );
-  const categoriesWithProducts = useMemo(
-    () => (catalog?.categories ?? []).filter((c) => c.products.length > 0),
-    [catalog],
-  );
-  // Lo que se ve sin búsqueda: la categoría activa. Va al hook, que decide
-  // entre esto y los resultados y le da índice de teclado a los dos (spec 073).
-  const browseProducts: CatalogProduct[] = useMemo(
-    () =>
-      categoriesWithProducts.find((c) => c.id === activeCategory)?.products ??
-      categoriesWithProducts[0]?.products ??
-      [],
-    [categoriesWithProducts, activeCategory],
-  );
+  // Lo que se ve sin búsqueda: los más pedidos, igual que el panel de la mesa
+  // (spec 111, fase 5 · spec 116). El selector de categorías se fue: con el
+  // buscador tolerante a acentos, elegir categoría era un rodeo, y lo que se
+  // quiere ver al abrir es lo que más sale. Va al hook, que decide entre esto y
+  // los resultados y le da índice de teclado a los dos (spec 073).
+  const topProducts: CatalogProduct[] = useMemo(() => {
+    const porId = new Map(allProducts.map((p) => [p.id, p]));
+    const vistos = new Set<string>();
+    const out: CatalogProduct[] = [];
+    for (const id of topProductIds) {
+      if (vistos.has(id)) continue;
+      vistos.add(id);
+      const p = porId.get(id);
+      if (p) out.push(p);
+    }
+    return out;
+  }, [topProductIds, allProducts]);
+  // Negocio sin historial: mostrar todo antes que una pantalla en blanco.
+  const browseProducts: CatalogProduct[] =
+    topProducts.length > 0 ? topProducts : allProducts;
   const searchApi = useProductSearch({
     products: allProducts,
     browse: browseProducts,
@@ -558,32 +556,6 @@ export function CargarPedidoSheet({
             encabezado={
               <>
                 <ProductSearchInput api={searchApi} inputRef={searchRef} />
-                {/* El selector se queda —a diferencia del salón, que lo sacó en
-                    la 111— porque acá no hay catálogo entero abajo: sin
-                    búsqueda, la lista ES la categoría elegida. Sacarlo sin
-                    portar el catálogo completo obligaría a buscar todo. */}
-                {!isSearching && categoriesWithProducts.length > 1 && (
-                  <div className="flex items-center gap-2">
-                    <label
-                      htmlFor="cargar-cat"
-                      className="shrink-0 text-[11px] font-semibold tracking-wide text-zinc-500 uppercase"
-                    >
-                      Categoría
-                    </label>
-                    <select
-                      id="cargar-cat"
-                      value={activeCategory}
-                      onChange={(e) => setActiveCategory(e.target.value)}
-                      className="min-w-0 flex-1 rounded-xl border border-zinc-200 bg-white px-2.5 py-1.5 text-sm font-semibold text-zinc-800 focus:border-emerald-400 focus:outline-none"
-                    >
-                      {categoriesWithProducts.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
               </>
             }
             onKeyDownResultados={(e) => {
@@ -641,16 +613,35 @@ export function CargarPedidoSheet({
                 </p>
               </div>
             ) : (
-              // Buscando o no, la misma lista navegable por ↓/↑. Spec 073.
-              <ProductResultsList
-                products={catalogProducts}
-                onPick={setOpenProduct}
-                enterTargetId={enterTargetId}
-                itemProps={(id) => {
-                  const i = catalogProducts.findIndex((p) => p.id === id);
-                  return i < 0 ? {} : catalogo.itemProps(i);
-                }}
-              />
+              <div className="space-y-5">
+                {/* Mismo encabezado que el panel de la mesa: sin búsqueda, lo
+                    que se ve son los más pedidos y hay que decirlo. */}
+                {!isSearching && topProducts.length > 0 && (
+                  <div className="flex items-center gap-2 rounded-2xl bg-amber-50 p-3 ring-1 ring-amber-100">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100">
+                      <Star className="h-4 w-4 text-amber-600" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-amber-900">
+                        Principales más pedidos
+                      </p>
+                      <p className="text-xs text-amber-800/80">
+                        Lo que más sale en los últimos 30 días.
+                      </p>
+                    </div>
+                  </div>
+                )}
+                {/* Buscando o no, la misma lista navegable por ↓/↑. Spec 073. */}
+                <ProductResultsList
+                  products={catalogProducts}
+                  onPick={setOpenProduct}
+                  enterTargetId={enterTargetId}
+                  itemProps={(id) => {
+                    const i = catalogProducts.findIndex((p) => p.id === id);
+                    return i < 0 ? {} : catalogo.itemProps(i);
+                  }}
+                />
+              </div>
             )}
           </ColumnaDeCarga>
 
