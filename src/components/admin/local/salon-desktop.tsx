@@ -1688,7 +1688,7 @@ export function SalonDesktop({
                   </button>
                 </div>
               </div>
-            ) : catalogBundle && pedirState ? (
+            ) : catalogBundle ? (
               <MozoPedirClient
                 slug={slug}
                 businessName={catalogBundle.businessName}
@@ -1700,8 +1700,9 @@ export function SalonDesktop({
                 }}
                 catalog={catalogBundle.catalog}
                 stationNameById={catalogBundle.stationNameById}
-                existingComandas={pedirState.comandas}
-                loPedido={pedirState.loPedido}
+                existingComandas={pedirState?.comandas ?? []}
+                mesaCargando={pedirState == null}
+                loPedido={pedirState?.loPedido ?? null}
                 // Las acciones de la mesa viven en la columna izquierda del
                 // panel de carga (spec 111, fase 5): es la que reemplazó al
                 // detalle como modo aparte.

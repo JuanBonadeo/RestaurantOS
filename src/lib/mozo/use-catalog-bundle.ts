@@ -49,6 +49,19 @@ type Guardado = { guardadoEn: number; bundle: PedirCatalogBundle };
 /** Cache a nivel módulo, por slug. Vive lo que vive la pestaña. */
 const enMemoria = new Map<string, Guardado>();
 
+/**
+ * Vacía el cache de módulo. **Sólo para tests.**
+ *
+ * Vive lo que vive la pestaña, que en producción es exactamente lo que se
+ * busca, pero en un archivo de tests significa que un caso que cargó el
+ * catálogo se lo deja puesto al siguiente: el que quería probar "el catálogo
+ * nunca llega" se encontraba con el panel montado, y el orden de los casos
+ * pasaba a ser load-bearing.
+ */
+export function limpiarCacheDeCatalogo() {
+  enMemoria.clear();
+}
+
 const claveStorage = (slug: string) => `pedir-catalog:${slug}`;
 
 function leerDelStorage(slug: string): Guardado | null {

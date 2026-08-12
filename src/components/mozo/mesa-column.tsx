@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { ComandaConItems } from "@/lib/comandas/queries";
 import type { KitchenItemStatus } from "@/lib/comandas/types";
+import { Skeleton } from "@/components/ui/skeleton";
 import { formatCurrency } from "@/lib/currency";
 import {
   agruparPorTanda,
@@ -104,10 +105,18 @@ export function MesaColumn({
   onEnviar,
   acciones,
   cartZone,
+  cargando = false,
   className = "",
 }: {
   /** Sólo para el `aria-label` de la región: el título lo pone el panel. */
   tableLabel: string;
+  /**
+   * El estado de la mesa todavía viaja (spec 115). La columna de carga —la
+   * derecha— ya se pinta con el catálogo cacheado, así que ésta es la única
+   * que espera. Sin esto mostraría "la mesa no tiene nada cargado", que con
+   * una mesa ocupada es directamente falso.
+   */
+  cargando?: boolean;
   loPedido: LoPedido | null;
   /** Sólo para «Entregar» y el estado de la comanda: los ítems salen de
    *  `loPedido`, que también trae los que no fueron a cocina. */
@@ -186,7 +195,26 @@ export function MesaColumn({
       className={`flex min-h-0 flex-col border-zinc-200 @2xl:border-r ${className}`}
     >
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
-        {tandas.length === 0 && !haySinEnviar && (
+        {cargando && (
+          <div role="status" aria-label="Cargando lo pedido" className="space-y-3">
+            {Array.from({ length: 2 }).map((_, i) => (
+              <div
+                key={i}
+                className="overflow-hidden rounded-2xl bg-white ring-1 ring-zinc-200"
+              >
+                <div className="border-b border-zinc-100 bg-zinc-50/60 px-3 py-2">
+                  <Skeleton className="h-3 w-24 rounded" />
+                </div>
+                <div className="space-y-2 p-3">
+                  <Skeleton className="h-4 w-full rounded" />
+                  <Skeleton className="h-4 w-2/3 rounded" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!cargando && tandas.length === 0 && !haySinEnviar && (
           <p className="px-1 py-8 text-center text-xs text-zinc-500">
             La mesa todavía no tiene nada cargado. Buscá un producto a la
             derecha y agregalo con Enter.

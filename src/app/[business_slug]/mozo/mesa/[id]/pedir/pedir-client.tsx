@@ -150,6 +150,13 @@ type Props = {
    *  ancho (spec 111). `null` = mesa sin orden abierta todavía. Sólo lo usa el
    *  modo `embedded`: el full-screen del mozo tiene su paso «resumen». */
   loPedido?: LoPedido | null;
+  /**
+   * El estado de la mesa todavía viaja (spec 115). El panel se pinta igual: la
+   * columna de carga sólo necesita el catálogo, que en el sidebar del salón
+   * está cacheado, así que esperar el round-trip de la mesa para mostrar el
+   * buscador era regalar medio segundo en el gesto más repetido del turno.
+   */
+  mesaCargando?: boolean;
   /** Acciones de la mesa que vive el salón (cobrar, transferir, trasladar,
    *  anular). Sólo llegan en el sidebar: en el full-screen del mozo la mesa se
    *  maneja desde su propia pantalla. */
@@ -297,6 +304,7 @@ export function MozoPedirClient({
   stationNameById,
   existingComandas,
   loPedido,
+  mesaCargando = false,
   mesaAcciones,
   onMesaActualizada,
   topProductIds,
@@ -958,6 +966,16 @@ export function MozoPedirClient({
   // persiste solo; sin orden todavía, viaja con el primer envío —que es el que
   // la crea— así que vive acá hasta entonces.
   const [personas, setPersonas] = useState(loPedido?.party_size ?? 2);
+  // `loPedido` puede llegar DESPUÉS del primer render (spec 115). Sin esto el
+  // contador se quedaba en 2 con una mesa de 5, y el encargado "corregía" un
+  // número que ya estaba bien. Se seedea una sola vez: después manda lo que él
+  // haya elegido.
+  const personasSeedeadas = useRef(loPedido != null);
+  useEffect(() => {
+    if (personasSeedeadas.current || loPedido?.party_size == null) return;
+    personasSeedeadas.current = true;
+    setPersonas(loPedido.party_size);
+  }, [loPedido]);
 
   // El carrito, aplanado para la columna de la mesa (spec 111, fase 5): ahí se
   // muestra pegado a lo enviado, en verde, en vez de en la otra columna bajo
@@ -1264,6 +1282,7 @@ export function MozoPedirClient({
           <MesaColumn
             tableLabel={table.label}
             loPedido={loPedido ?? null}
+            cargando={mesaCargando}
             comandas={comandas}
             stationNameById={stationNameById}
             cart={cartParaColumna}

@@ -38,31 +38,57 @@ function MesaHeaderSkeleton({ variant }: { variant: MesaRouteVariant }) {
 }
 
 /**
- * Skeleton del panel de carga **embebido** en el sidebar del salón (spec 114).
+ * Skeleton del panel de carga **embebido** en el sidebar del salón (spec 115).
  *
- * Antes ahí había una línea de texto que decía "Cargando catálogo…" — y mentía
- * dos veces: el catálogo ya está en memoria (cache de la spec 105) y lo que se
- * espera es el estado de esa mesa. Un renglón centrado tampoco dice nada de lo
- * que viene; esto calca el buscador, los chips y la grilla, que es lo que el
- * que carga está por usar.
+ * Sólo se ve la primera vez que se abre el operativo en un dispositivo: desde
+ * que el catálogo está cacheado, el panel monta con la columna de carga ya
+ * pintada y esta pantalla no aparece más.
+ *
+ * Calca el panel de dos columnas de la spec 111 —la mesa a la izquierda (46 %),
+ * la carga a la derecha— y no una lista suelta: si el esqueleto no tiene la
+ * forma de lo que viene, no sirve de nada. El corte es por ancho **del panel**
+ * (container query), igual que el real.
  */
 export function PedirPanelSkeleton() {
   return (
-    // `role="status"` con nombre: el resto de los skeletons son `aria-hidden`
-    // porque acompañan a un contenido que ya se anuncia, pero acá el panel
-    // entero es esto — sin nombre, quien no ve la pantalla no se entera de que
-    // hay algo cargando.
-    <div role="status" aria-label="Cargando la mesa" className="space-y-4 p-4">
-      <Skeleton className="h-11 w-full rounded-2xl" />
-      <div className="flex gap-2 overflow-hidden">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Skeleton key={i} className="h-7 w-20 shrink-0 rounded-full" />
+    <div
+      role="status"
+      aria-label="Cargando la mesa"
+      className="flex min-h-0 flex-1 flex-col @2xl:flex-row"
+    >
+      {/* Izquierda: lo que la mesa ya tiene cargado. */}
+      <div className="hidden space-y-3 border-zinc-200 px-3 py-3 @2xl:flex @2xl:w-[46%] @2xl:max-w-[520px] @2xl:shrink-0 @2xl:flex-col @2xl:border-r">
+        {Array.from({ length: 2 }).map((_, i) => (
+          <div
+            key={i}
+            className="overflow-hidden rounded-2xl bg-white ring-1 ring-zinc-200"
+          >
+            <div className="border-b border-zinc-100 bg-zinc-50/60 px-3 py-2">
+              <Skeleton className="h-3 w-24 rounded" />
+            </div>
+            <div className="space-y-2 p-3">
+              <Skeleton className="h-4 w-full rounded" />
+              <Skeleton className="h-4 w-2/3 rounded" />
+            </div>
+          </div>
         ))}
       </div>
-      <div className="space-y-2">
-        {Array.from({ length: 7 }).map((_, i) => (
-          <Skeleton key={i} className="h-12 w-full rounded-xl" />
-        ))}
+
+      {/* Derecha: el buscador fijo y la lista de productos. */}
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="shrink-0 space-y-2 border-b border-zinc-200 bg-white px-3 py-2.5">
+          <Skeleton className="h-11 w-full rounded-2xl" />
+          <div className="flex gap-2 overflow-hidden">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-7 w-20 shrink-0 rounded-full" />
+            ))}
+          </div>
+        </div>
+        <div className="min-h-0 flex-1 space-y-2 px-3 py-3">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <Skeleton key={i} className="h-14 w-full rounded-2xl" />
+          ))}
+        </div>
       </div>
     </div>
   );

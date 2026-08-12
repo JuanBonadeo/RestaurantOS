@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import { limpiarCacheDeCatalogo } from "@/lib/mozo/use-catalog-bundle";
 import { SalonDesktop } from "./salon-desktop";
 import {
   loadPedirCatalog,
@@ -106,6 +107,7 @@ async function abrirPedidoDeMesa1(container: HTMLElement) {
   await act(async () => {
     fireEvent.click(mesaEnPlano(container, "1"));
   });
+  // eslint-disable-next-line no-console
   expect(await screen.findByRole("status", { name: /Cargando la mesa/ })).toBeInTheDocument();
 }
 
@@ -146,6 +148,9 @@ function conPanelQueMonta() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // El cache del catálogo es de módulo: sin esto, el caso que lo carga se lo
+  // deja puesto al que necesita que nunca llegue.
+  limpiarCacheDeCatalogo();
 });
 
 describe("SalonDesktop · el plano manda sobre el panel", () => {
