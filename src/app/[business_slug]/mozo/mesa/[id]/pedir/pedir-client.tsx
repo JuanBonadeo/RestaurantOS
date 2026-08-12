@@ -524,10 +524,31 @@ export function MozoPedirClient({
     // que desde la 110 aguanta acentos, plural y palabras en cualquier orden.
     // Elegir categoría era un rodeo de dos taps para llegar a lo mismo.
     if (embedded) {
-      // Un negocio recién arrancado no tiene «más pedidos» todavía: ahí se
-      // muestra el catálogo entero antes que una pantalla vacía.
-      const base = topProducts.length > 0 ? topProducts : allProducts;
-      return base.length > 0 ? [{ category: null, products: base }] : [];
+      // «Más pedidos» arriba y **el catálogo entero** abajo, por categoría, en
+      // un scroll continuo.
+      //
+      // Mostrar sólo los más pedidos no alcanza: golf-jcr tiene 482 productos
+      // visibles y **3** con historial de 30 días, así que el panel abría con
+      // tres ítems y el resto de la carta —las bebidas entre ellas— sólo
+      // existía si sabías qué tipear. Y con un catálogo migrado de MaxiRest eso
+      // es la norma, no el arranque.
+      //
+      // Los que ya están en «Más pedidos» no se repiten abajo: el índice de
+      // teclado es un `Map` por id y un producto en dos lugares se pisa a sí
+      // mismo, dejando el foco corrido.
+      const topIds = new Set(topProducts.map((p) => p.id));
+      const secciones: {
+        category: CatalogCategory | null;
+        products: CatalogProduct[];
+      }[] = [];
+      if (topProducts.length > 0) {
+        secciones.push({ category: null, products: topProducts });
+      }
+      for (const c of catalog.categories) {
+        const resto = c.products.filter((p) => !topIds.has(p.id));
+        if (resto.length > 0) secciones.push({ category: c, products: resto });
+      }
+      return secciones;
     }
     if (activeTab === TOP_TAB_ID) {
       return topProducts.length > 0
@@ -536,7 +557,7 @@ export function MozoPedirClient({
     }
     const cats = categoriesBySuper[activeTab] ?? [];
     return cats.map((c) => ({ category: c, products: c.products }));
-  }, [embedded, activeTab, topProducts, allProducts, categoriesBySuper]);
+  }, [embedded, activeTab, topProducts, catalog, categoriesBySuper]);
 
   // ── Búsqueda (spec 068: el mismo buscador que cargar pedido y venta rápida) ──
   // `browse` es lo visible sin búsqueda, aplanado en el orden en que se ve: el
@@ -1299,8 +1320,8 @@ export function MozoPedirClient({
               ) : (
                 <TabView
                   tabSections={visibleSections}
-                  activeTabLabel="Más pedidos"
-                  isTopTab
+                  activeTabLabel="el catálogo"
+                  isTopTab={topProducts.length > 0}
                   dailyMenus={menusVisibles}
                   onPick={setOpenProduct}
                   onPickDailyMenu={setOpenDailyMenu}

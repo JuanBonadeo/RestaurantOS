@@ -1,12 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search, X } from "lucide-react";
+import { BookOpen, ChevronDown, Search, X } from "lucide-react";
 
 import type { CatalogProduct } from "@/lib/mozo/catalog-query";
 import { filterProductsByQuery } from "@/lib/mozo/product-search";
 import { useStickyFilter } from "@/lib/ui/use-sticky-filter";
-import { SegmentedSelector } from "@/components/admin/local/segmented-selector";
 
 export const CARTA_ALL = "all";
 /**
@@ -156,6 +155,12 @@ export function useProductSearch({
 
 export type ProductSearchApi = ReturnType<typeof useProductSearch>;
 
+const CARTA_LABEL: Record<string, string> = {
+  [CARTA_ALL]: "Toda la carta",
+  [CARTA_EN_LINEA]: "En la carta online",
+  [CARTA_SOLO_LOCAL]: "Solo para el local",
+};
+
 /**
  * El filtro de la carta online, arriba del panel y con la misma cara que el
  * selector de salones (spec 111).
@@ -170,19 +175,79 @@ export type ProductSearchApi = ReturnType<typeof useProductSearch>;
  */
 export function CartaOnlineSelector({ api }: { api: ProductSearchApi }) {
   const { showCartaFilter, cartaFilter, setCartaFilter } = api;
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  // Cerrar al tocar afuera / con Escape. Sin librería, igual que el de salones.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!boxRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
   if (!showCartaFilter) return null;
 
+  const filtrando = cartaFilter !== CARTA_ALL;
+
   return (
-    <SegmentedSelector
-      ariaLabel="Carta online"
-      activeId={cartaFilter}
-      onSelect={setCartaFilter}
-      items={[
-        { id: CARTA_ALL, label: "Toda la carta" },
-        { id: CARTA_EN_LINEA, label: "En la carta online" },
-        { id: CARTA_SOLO_LOCAL, label: "Solo para el local" },
-      ]}
-    />
+    <div ref={boxRef} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-label="Filtrar por carta online"
+        className={`inline-flex items-center gap-1.5 rounded-xl px-2.5 py-2 text-sm font-semibold ring-1 transition ${
+          // Filtrando = «no estás viendo toda la carta»: tiene que cantar.
+          // Con el catálogo de golf-jcr, que tiene casi todas las bebidas fuera
+          // de la carta online, un filtro puesto y mudo esconde media carta.
+          filtrando
+            ? "bg-amber-50 text-amber-900 ring-amber-300"
+            : "bg-white text-zinc-500 ring-zinc-200/70 hover:text-zinc-900"
+        }`}
+      >
+        <BookOpen className="size-4 shrink-0" strokeWidth={2.5} />
+        <span className="whitespace-nowrap">{CARTA_LABEL[cartaFilter]}</span>
+        <ChevronDown className="size-3.5 shrink-0 opacity-60" strokeWidth={3} />
+      </button>
+
+      {open && (
+        <div className="absolute top-full left-0 z-50 mt-1.5 min-w-56 rounded-xl bg-white p-1 shadow-lg ring-1 ring-zinc-200">
+          {[CARTA_ALL, CARTA_EN_LINEA, CARTA_SOLO_LOCAL].map((id) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => {
+                setCartaFilter(id);
+                setOpen(false);
+              }}
+              aria-pressed={cartaFilter === id}
+              className={`flex w-full flex-col items-start rounded-lg px-2.5 py-2 text-left transition ${
+                cartaFilter === id
+                  ? "bg-zinc-100 text-zinc-900"
+                  : "text-zinc-700 hover:bg-zinc-50"
+              }`}
+            >
+              <span className="text-sm font-semibold">{CARTA_LABEL[id]}</span>
+              {CARTA_HINT[id] && (
+                <span className="mt-0.5 text-[11px] leading-snug text-zinc-500">
+                  {CARTA_HINT[id]}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
