@@ -217,9 +217,7 @@ export function OrdersRealtimeBoard({
               const id = (payload.new as { id: string }).id;
               const full = await fetchOrder(id);
               if (!full) return;
-              setOrders((prev) =>
-                prev.map((o) => (o.id === id ? full : o)),
-              );
+              setOrders((prev) => prev.map((o) => (o.id === id ? full : o)));
             } else if (payload.eventType === "DELETE") {
               const id = (payload.old as { id: string }).id;
               setOrders((prev) => prev.filter((o) => o.id !== id));
@@ -284,7 +282,9 @@ export function OrdersRealtimeBoard({
         items_without_station > 0
           ? ` · ${items_without_station} ítem${items_without_station === 1 ? "" : "s"} va${items_without_station === 1 ? "" : "n"} directo (sin imprimir)`
           : "";
-      toast.success(`Pedido #${order.order_number} confirmado · ${cocinaPart}${directPart}`);
+      toast.success(
+        `Pedido #${order.order_number} confirmado · ${cocinaPart}${directPart}`,
+      );
     },
     [slug],
   );
@@ -371,20 +371,17 @@ export function OrdersRealtimeBoard({
 
   return (
     <div className="flex flex-col gap-5">
-      {/* Toolbar: cargar un pedido a mano (spec 054) + toggle de sonido. El
-          contador total vive en la pill del tab. */}
-      <div className="flex items-center justify-between gap-3">
-        <Button size="sm" onClick={() => setCargarOpen(true)}>
-          <Plus className="size-4" />
-          Cargar pedido
-        </Button>
-        {!soundUnlocked && (
+      {/* Toolbar: sólo el toggle de sonido, y sólo mientras haga falta. Cargar
+          un pedido a mano (spec 054) se fue a la cabecera de «Nuevos» (spec
+          121): ahí es donde el pedido va a aparecer. */}
+      {!soundUnlocked && (
+        <div className="flex items-center justify-end gap-3">
           <Button size="sm" variant="outline" onClick={unlockSound}>
             <Bell className="size-4" />
             Activar sonido
           </Button>
-        )}
-      </div>
+        </div>
+      )}
 
       <CargarPedidoSheet
         slug={slug}
@@ -405,7 +402,7 @@ export function OrdersRealtimeBoard({
             <h2 className="text-foreground text-base font-bold tracking-tight">
               Próximos
             </h2>
-            <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-violet-100 px-2 text-xs font-bold tabular-nums text-violet-700">
+            <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-violet-100 px-2 text-xs font-bold text-violet-700 tabular-nums">
               {agendados.length}
             </span>
             <span className="text-muted-foreground text-xs">
@@ -448,6 +445,22 @@ export function OrdersRealtimeBoard({
                 </div>
               </div>
 
+              {/* Cargar a mano vive en «Nuevos» (spec 121), arriba de todo y
+                  del ancho de la columna: es la acción más frecuente del
+                  board y estaba perdida en una barra chica arriba de todo. El
+                  pedido que cargás aparece justo abajo, así que el botón está
+                  donde va a salir el resultado. */}
+              {col.key === "new" && (
+                <button
+                  type="button"
+                  onClick={() => setCargarOpen(true)}
+                  className="flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 text-base font-bold text-white shadow-sm transition hover:bg-blue-700 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:outline-none active:scale-[0.99]"
+                >
+                  <Plus className="size-5 shrink-0" strokeWidth={2.75} />
+                  Cargar pedido
+                </button>
+              )}
+
               <div className="flex flex-col gap-3">
                 {items.map((order) => (
                   <OrderCard
@@ -474,12 +487,12 @@ export function OrdersRealtimeBoard({
 
       {cancelledOrders.length > 0 && (
         <details className="group mt-2">
-          <summary className="text-muted-foreground hover:text-foreground flex cursor-pointer items-center gap-2 text-xs font-semibold uppercase tracking-wider transition-colors">
+          <summary className="text-muted-foreground hover:text-foreground flex cursor-pointer items-center gap-2 text-xs font-semibold tracking-wider uppercase transition-colors">
             <span>Cancelados</span>
-            <span className="bg-rose-50 text-rose-700 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[0.65rem] font-bold tabular-nums">
+            <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-50 px-1.5 text-[0.65rem] font-bold text-rose-700 tabular-nums">
               {cancelledOrders.length}
             </span>
-            <span className="text-muted-foreground/60 normal-case tracking-normal">
+            <span className="text-muted-foreground/60 tracking-normal normal-case">
               · tocá para ver
             </span>
           </summary>
@@ -548,7 +561,9 @@ function ScheduledOrderCard({
       <div className="flex items-center justify-between gap-2">
         <span className="inline-flex items-center gap-1.5 text-sm font-bold text-violet-700">
           <Clock className="size-3.5" />
-          {order.scheduled_at ? formatScheduled(order.scheduled_at, timezone) : ""}
+          {order.scheduled_at
+            ? formatScheduled(order.scheduled_at, timezone)
+            : ""}
         </span>
         <span className="text-muted-foreground text-xs font-medium tabular-nums">
           #{order.order_number}
