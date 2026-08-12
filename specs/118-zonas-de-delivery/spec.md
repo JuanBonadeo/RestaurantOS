@@ -43,6 +43,8 @@ La dirección es texto libre y nada más: `delivery_address: z.string().max(200)
 
 **D5 — v1 es sólo cobertura.** Adentro/afuera y nada más. La tabla nace con `fee_cents` y `min_order_cents` en `NULL` (= "usá el del negocio") para que cobrar distinto por zona sea después una feature de UI y de `totals-recompute`, no una migración. Eso toca plata y va con su `design.md` propio — ver §Fuera de alcance.
 
+**D6 — El proveedor de tiles se elige en la fase B, no antes.** Los *tiles* son las imágenes de fondo del mapa (Leaflet trae el motor, no el dibujo del mundo) y necesitan un proveedor con key: MapTiler, Stadia, Geoapify o Carto, todos con free tier del orden de 100k tiles/mes — de sobra, a ~15-20 tiles por vista. Queda **sin decidir a propósito**: la fase A no lo toca, y el veredicto adentro/afuera **nunca** depende de los tiles (el polígono está en la base y el ray casting corre local). Sin fondo, el mapa queda gris con las zonas igual dibujadas y el checkout sigue decidiendo bien. Al elegirlo, la key va en `NEXT_PUBLIC_` → **restringir por dominio en el proveedor** es parte de la tarea, no un extra.
+
 ## Modelo de datos
 
 ```sql
