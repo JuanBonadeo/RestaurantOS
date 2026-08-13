@@ -565,6 +565,32 @@ export function SalonDesktop({
     })();
   }, [slug, cuentaTable]);
 
+  /**
+   * Relee el estado de la mesa abierta en el panel: comandas + «Lo pedido».
+   *
+   * issue #188 — el panel embebido no se enteraba de sus propias acciones. El
+   * estado se cargaba una sola vez al abrir la mesa y `revalidatePath` no lo
+   * toca (es un `useState` del cliente, no datos de la page), así que anular un
+   * ítem lo dejaba en pantalla —vivo y sumando al total— y entregar una tanda
+   * la dejaba en «Pendiente» hasta cerrar y volver a abrir la mesa.
+   *
+   * Sin `setPedirState(null)`: esto es un refresco, no una apertura. Poner el
+   * skeleton haría parpadear la columna entera por anular un ítem.
+   */
+  const recargarPedirState = useCallback(
+    async (tableId: string) => {
+      try {
+        const tr = await loadTableComandas(slug, tableId);
+        if (tr.ok) setPedirState(tr.data);
+      } catch {
+        // Silencioso a propósito: la acción que disparó esto ya mostró su
+        // toast y su resultado está en la DB. Lo único que falla acá es el
+        // refresco, y el próximo (o reabrir la mesa) lo arregla.
+      }
+    },
+    [slug],
+  );
+
   const openPedir = useCallback(
     (table: FloorTable) => {
       // Cerramos cobro y cuenta si estaban abiertos (excluyentes por mesa).
@@ -1741,7 +1767,12 @@ export function SalonDesktop({
                 // Las acciones de la mesa viven en la columna izquierda del
                 // panel de carga (spec 111, fase 5): es la que reemplazó al
                 // detalle como modo aparte.
-                onMesaActualizada={() => void refetchSalon()}
+                onMesaActualizada={() => {
+                  // El plano (totales, estado de la mesa) y **el panel mismo**:
+                  // anular un ítem o entregar una tanda cambia las dos cosas.
+                  void refetchSalon();
+                  void recargarPedirState(pedirTable.id);
+                }}
                 mesaAcciones={{
                   onCobrar: () => openCuenta(pedirTable),
                   onCargarCliente: () => setClienteTableId(pedirTable.id),
