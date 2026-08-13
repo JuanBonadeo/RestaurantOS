@@ -31,28 +31,81 @@ describe("agruparPorTanda", () => {
     const tandas = agruparPorTanda([
       item({
         product_name: "Postre",
+        comanda_id: "c2",
         batch: 2,
         emitted_at: "2026-08-11T22:00:00Z",
       }),
+      // Las dos del primer envío viajan en el mismo papel: misma comanda.
       item({ product_name: "Milanesa", batch: 1 }),
       item({ product_name: "Papas", batch: 1 }),
     ]);
-    expect(tandas.map((t) => t.batch)).toEqual([1, 2]);
+    expect(tandas.map((t) => t.numero)).toEqual([1, 2]);
     expect(tandas[0].items.map((i) => i.product_name)).toEqual([
       "Milanesa",
       "Papas",
     ]);
   });
 
+  it("dos envíos a sectores distintos son dos tandas, cada una con su hora", () => {
+    // El bug #188: `batch` es autoincremental dentro de (orden, sector), así
+    // que la primera comanda de parrilla también es la 1 aunque salga en la
+    // segunda vuelta. Agrupando por ese número, la vuelta de las 22 aparecía
+    // adentro de la Tanda 1 y con la hora de las 21.
+    const tandas = agruparPorTanda([
+      item({
+        product_name: "Milanesa",
+        station_id: "fritera",
+        comanda_id: "c1",
+        batch: 1,
+        emitted_at: "2026-08-11T21:00:00Z",
+      }),
+      item({
+        product_name: "Asado",
+        station_id: "parrilla",
+        comanda_id: "c2",
+        batch: 1,
+        emitted_at: "2026-08-11T21:40:00Z",
+      }),
+    ]);
+    expect(tandas.map((t) => t.numero)).toEqual([1, 2]);
+    expect(tandas.map((t) => t.emitted_at)).toEqual([
+      "2026-08-11T21:00:00Z",
+      "2026-08-11T21:40:00Z",
+    ]);
+  });
+
+  it("dos vueltas al mismo sector son dos tandas aunque salgan seguidas", () => {
+    // Repetir sector es la señal dura: un envío crea a lo sumo una comanda por
+    // sector, así que ver fritera dos veces es sí o sí otra vuelta.
+    const tandas = agruparPorTanda([
+      item({
+        product_name: "Milanesa",
+        station_id: "fritera",
+        comanda_id: "c1",
+        emitted_at: "2026-08-11T21:00:00Z",
+      }),
+      item({
+        product_name: "Papas",
+        station_id: "fritera",
+        comanda_id: "c2",
+        batch: 2,
+        emitted_at: "2026-08-11T21:00:02Z",
+      }),
+    ]);
+    expect(tandas.map((t) => t.numero)).toEqual([1, 2]);
+  });
+
   it("la tanda toma la hora del envío más viejo (una por sector)", () => {
     const tandas = agruparPorTanda([
       item({
         product_name: "Parrilla",
+        station_id: "parrilla",
         comanda_id: "c2",
         emitted_at: "2026-08-11T21:00:05Z",
       }),
       item({
         product_name: "Cocina",
+        station_id: "cocina",
         comanda_id: "c1",
         emitted_at: "2026-08-11T21:00:01Z",
       }),
@@ -74,7 +127,7 @@ describe("agruparPorTanda", () => {
       }),
       item({ product_name: "Milanesa", batch: 1 }),
     ]);
-    expect(tandas.map((t) => t.batch)).toEqual([1, null]);
+    expect(tandas.map((t) => t.numero)).toEqual([1, null]);
     expect(tandas[1].items.map((i) => i.product_name)).toEqual(["Coca"]);
     expect(tandas[1].emitted_at).toBeNull();
   });
@@ -94,7 +147,7 @@ describe("agruparPorTanda", () => {
       }),
     ]);
     expect(tandas).toHaveLength(1);
-    expect(tandas[0].batch).toBeNull();
+    expect(tandas[0].numero).toBeNull();
   });
 });
 

@@ -103,16 +103,21 @@ describe("<CobroForm /> — las reglas de dinero, una sola vez", () => {
     expect(screen.getByText(/no se puede cobrar menos/i)).toBeInTheDocument();
   });
 
-  it("en efectivo deja confirmar de más y lo muestra como vuelto", async () => {
+  it("en efectivo deja confirmar de más, muestra el vuelto y cobra lo que se debe", async () => {
+    // issue #188 — antes registraba los $150 que entraron a la mano, y la caja
+    // quedaba esperando un vuelto que ya se había ido con el cliente.
     const { onSubmit } = setup();
     pick(/efectivo/i);
     fireEvent.change(screen.getByLabelText(/monto/i), {
       target: { value: "150" },
     });
     expect(screen.getByText(/vuelto/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /confirmar/i }),
+    ).toHaveTextContent("100");
     confirm();
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
-    expect(onSubmit.mock.calls[0][0].amountCents).toBe(15_000);
+    expect(onSubmit.mock.calls[0][0].amountCents).toBe(10_000);
   });
 
   it("la guarda de efectivo no aplica a los otros métodos", () => {

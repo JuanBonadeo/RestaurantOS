@@ -237,15 +237,15 @@ export function MesaColumn({
 
           return (
             <article
-              key={tanda.batch ?? "sin-comanda"}
+              key={tanda.numero ?? "sin-comanda"}
               className="overflow-hidden rounded-2xl bg-white ring-1 ring-zinc-200"
             >
               <header className="flex items-baseline justify-between gap-2 border-b border-zinc-100 bg-zinc-50/60 px-3 py-1.5">
                 <span className="text-[11px] font-semibold text-zinc-700">
-                  {tanda.batch == null ? "Sin comanda" : `Tanda ${tanda.batch}`}
+                  {tanda.numero == null ? "Sin comanda" : `Tanda ${tanda.numero}`}
                 </span>
                 <span className="text-[11px] text-zinc-500">
-                  {tanda.batch == null ? "no va a cocina" : (hora ?? "")}
+                  {tanda.numero == null ? "no va a cocina" : (hora ?? "")}
                 </span>
               </header>
 

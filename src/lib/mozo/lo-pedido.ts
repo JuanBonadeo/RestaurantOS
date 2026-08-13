@@ -56,8 +56,17 @@ export type LoPedido = {
 
 /** Una tanda: lo que se mandó junto en un envío. */
 export type TandaLoPedido = {
-  /** `batch` de la comanda, o `null` para el grupo de lo que no fue a cocina. */
-  batch: number | null;
+  /**
+   * La vuelta de la mesa: 1 es lo primero que se mandó. `null` = el grupo de lo
+   * que no fue a cocina.
+   *
+   * No es el `batch` de la comanda (issue #188). `batch` es autoincremental
+   * dentro de **(orden, sector)**, a propósito: es el número de ticket de esa
+   * cocina. Como número de vuelta no sirve —la primera comanda de parrilla es
+   * la 1 aunque salga en la tercera vuelta— y agrupar por él metía envíos
+   * distintos en la misma tanda, con la hora del más viejo.
+   */
+  numero: number | null;
   /** El envío más viejo de la tanda; `null` en el grupo sin comanda. */
   emitted_at: string | null;
   items: LoPedidoItem[];
@@ -71,36 +80,81 @@ export type TandaLoPedido = {
  * de inventarle una posición. Es lo que hoy el mozo no ve en ningún lado sin
  * salir a la cuenta.
  */
+/**
+ * Cuánto puede tardar un envío en terminar de escribir sus comandas.
+ *
+ * `enviarComanda` inserta una comanda por sector, una atrás de otra: con cuatro
+ * sectores y la base en la nube son un par de segundos entre la primera y la
+ * última. Todo lo que caiga adentro de esta ventana se lee como el mismo envío.
+ */
+const VENTANA_DE_ENVIO_MS = 10_000;
+
 export function agruparPorTanda(items: LoPedidoItem[]): TandaLoPedido[] {
-  const porBatch = new Map<number, LoPedidoItem[]>();
   const sinComanda: LoPedidoItem[] = [];
+  const enviados: LoPedidoItem[] = [];
 
   for (const item of items) {
-    if (item.batch == null) {
-      sinComanda.push(item);
-      continue;
-    }
-    const bucket = porBatch.get(item.batch);
-    if (bucket) bucket.push(item);
-    else porBatch.set(item.batch, [item]);
+    if (item.emitted_at == null) sinComanda.push(item);
+    else enviados.push(item);
   }
 
-  const tandas: TandaLoPedido[] = [...porBatch.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([batch, grupo]) => ({
-      batch,
-      // Una tanda puede tener varias comandas (una por sector) emitidas con
-      // milisegundos de diferencia: vale la más vieja.
-      emitted_at: grupo.reduce<string | null>(
-        (min, i) =>
-          i.emitted_at && (!min || i.emitted_at < min) ? i.emitted_at : min,
-        null,
-      ),
-      items: grupo,
-    }));
+  // La unidad no es el ítem sino la **comanda**: dos milanesas del mismo envío
+  // viajan en el mismo papel, y es el papel el que tiene hora y sector.
+  const porComanda = new Map<
+    string,
+    { stationId: string | null; emitted: string; items: LoPedidoItem[] }
+  >();
+  for (const item of enviados) {
+    const clave = item.comanda_id ?? `sin-comanda:${item.emitted_at}`;
+    const grupo = porComanda.get(clave);
+    if (grupo) grupo.items.push(item);
+    else
+      porComanda.set(clave, {
+        stationId: item.station_id,
+        emitted: item.emitted_at!,
+        items: [item],
+      });
+  }
+
+  // Por hora de emisión: es lo único que dice cuándo salió cada cosa.
+  const comandas = [...porComanda.values()].sort((a, b) =>
+    a.emitted < b.emitted ? -1 : 1,
+  );
+
+  const grupos: (typeof comandas)[] = [];
+  let arranque: number | null = null;
+  let sectoresDeLaTanda = new Set<string | null>();
+
+  for (const comanda of comandas) {
+    const t = new Date(comanda.emitted).getTime();
+    // Dos señales de que empezó otra vuelta:
+    //  1. pasó demasiado tiempo desde que arrancó esta;
+    //  2. se repite un sector — un envío crea a lo sumo una comanda por sector,
+    //     así que ver fritera dos veces es sí o sí otra vuelta.
+    const otraVuelta =
+      arranque == null ||
+      t - arranque > VENTANA_DE_ENVIO_MS ||
+      sectoresDeLaTanda.has(comanda.stationId);
+
+    if (otraVuelta) {
+      grupos.push([comanda]);
+      arranque = t;
+      sectoresDeLaTanda = new Set([comanda.stationId]);
+    } else {
+      grupos[grupos.length - 1].push(comanda);
+      sectoresDeLaTanda.add(comanda.stationId);
+    }
+  }
+
+  const tandas: TandaLoPedido[] = grupos.map((grupo, i) => ({
+    numero: i + 1,
+    // La tanda arranca cuando salió su primera comanda.
+    emitted_at: grupo[0].emitted,
+    items: grupo.flatMap((c) => c.items),
+  }));
 
   if (sinComanda.length > 0) {
-    tandas.push({ batch: null, emitted_at: null, items: sinComanda });
+    tandas.push({ numero: null, emitted_at: null, items: sinComanda });
   }
   return tandas;
 }
