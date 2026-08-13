@@ -462,6 +462,7 @@ function CajaCard({
         description="Sacar efectivo de la caja (depósito en banco, pago a proveedor, etc.)."
         requiereMotivo
         ctaLabel="Registrar sangría"
+        disponibleCents={expected}
         onSubmit={(amount, reason) =>
           startTransition(async () => {
             const r = await registrarSangria(caja.id, amount, reason ?? "", slug);
@@ -775,6 +776,7 @@ function MovimientoModal({
   description,
   requiereMotivo,
   ctaLabel,
+  disponibleCents,
   onSubmit,
 }: {
   open: boolean;
@@ -783,10 +785,19 @@ function MovimientoModal({
   description: string;
   requiereMotivo: boolean;
   ctaLabel: string;
+  /**
+   * Efectivo que la caja debería tener ahora. Sólo lo pasa la sangría: sacar
+   * más de lo que hay no es una operación, es un cero de más (issue #188 —
+   * $100.000 sobre una caja de $55.800 entraban sin chistar y la dejaban en
+   * −$44.200). No se bloquea, porque puede haber plata que no pasó por el
+   * sistema; se hace pisar el freno una vez.
+   */
+  disponibleCents?: number;
   onSubmit: (amountCents: number, reason: string | null) => void;
 }) {
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
+  const [confirmando, setConfirmando] = useState(false);
 
   useEffect(() => {
     if (!open) { setAmount(""); setReason(""); }
@@ -794,6 +805,13 @@ function MovimientoModal({
 
   const cents = Math.max(0, Math.round(Number(amount) * 100));
   const canSubmit = cents > 0 && (!requiereMotivo || reason.trim() !== "");
+  const excede = disponibleCents != null && cents > disponibleCents;
+
+  // Cambiar el monto vuelve a pedir la confirmación: si corregiste el cero de
+  // más, no querés que el botón siga armado para el número viejo.
+  useEffect(() => {
+    setConfirmando(false);
+  }, [amount, open]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -807,6 +825,12 @@ function MovimientoModal({
               <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base font-semibold text-zinc-400">$</span>
               <Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" autoFocus inputMode="decimal" className="pl-7 text-base tabular-nums" />
             </div>
+            {excede && (
+              <p className="text-xs font-semibold text-amber-700">
+                En la caja hay {formatCurrency(disponibleCents!)}. Con esta
+                sangría queda en {formatCurrency(disponibleCents! - cents)}.
+              </p>
+            )}
           </div>
           <div className="grid gap-1.5">
             <Label>Motivo{requiereMotivo && <span className="ml-1 text-rose-600">*</span>}</Label>
@@ -815,7 +839,20 @@ function MovimientoModal({
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button disabled={!canSubmit} onClick={() => onSubmit(cents, reason.trim() || null)}>{ctaLabel}</Button>
+          <Button
+            disabled={!canSubmit}
+            onClick={() => {
+              if (excede && !confirmando) {
+                setConfirmando(true);
+                return;
+              }
+              onSubmit(cents, reason.trim() || null);
+            }}
+          >
+            {excede && confirmando
+              ? `Sacar igual ${formatCurrency(cents)}`
+              : ctaLabel}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
