@@ -30,10 +30,14 @@ Así que lo que se arregla ahora es **el salto**, no el ancho.
 - **`transition-[grid-template-columns]` de 300ms**, que es lo que faltaba la
   primera vez: el panel crece en vez de pegar un tirón. Con
   `motion-reduce:transition-none`.
-- La curva es la de la casa — `cubic-bezier(0.32,0.72,0,1)`, la misma que el
-  sidebar del admin, el shell del local y el super. Importa que sea *esa* y no
-  un `ease-out` cualquiera: el sidebar del admin puede estar animando al mismo
-  tiempo, y dos curvas distintas en pantalla se leen como que algo va atrasado.
+- **Abrir y cerrar no usan la misma curva.**
+
+  | | Duración | Curva | Por qué |
+  |---|---|---|---|
+  | Abrir | 300ms | `cubic-bezier(0.32,0.72,0,1)` | La de la casa —el sidebar del admin, el shell, el super—. Arranca rápido y frena largo: el panel «llega». Importa que sea ésa porque los dos sidebars pueden animar juntos, y dos curvas distintas se leen como que una va atrasada. |
+  | Cerrar | 180ms | `cubic-bezier(0.4,0,1,1)` | Acelera y se va. Con la curva de entrada, salir se arrastraba: el panel suelta su contenido en el mismo commit —vuelve la lista— y te quedabas 300ms mirando cómo esa lista se reacomoda mientras la columna se achica. En 180ms el reflujo pasa antes de que lo leas. |
+
+  Es la asimetría de siempre en motion: entrar se acompaña, salir se despacha.
 
 ## Qué NO cambia
 

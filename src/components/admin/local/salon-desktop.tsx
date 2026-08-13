@@ -1476,13 +1476,23 @@ export function SalonDesktop({
             : // En reposo el panel es una regleta: la lista de mesas y las
               // reservas entran, y el plano se queda con todo lo demás.
               "lg:grid-cols-[minmax(0,1fr)_340px]",
-          // Sin esto vuelve el salto que motivó el ancho único. La curva es la
-          // de la casa —la misma que el sidebar del admin, el shell y el super
-          // (`cubic-bezier(0.32,0.72,0,1)`, 300ms)—: arranca rápido y frena
-          // largo. Importa que sea *esa*: el sidebar del admin puede estar
-          // animando al mismo tiempo, y dos curvas distintas en pantalla se ven
-          // como que algo va atrasado.
-          "transition-[grid-template-columns] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none",
+          // Sin esto vuelve el salto que motivó el ancho único.
+          "transition-[grid-template-columns] motion-reduce:transition-none",
+          // Abrir y cerrar **no** usan la misma curva, que es donde se veía
+          // feo. Abrir: la de la casa (`cubic-bezier(0.32,0.72,0,1)`, 300ms),
+          // la misma que el sidebar del admin y el shell — arranca rápido y
+          // frena largo, así el panel "llega". Importa que sea ésa: los dos
+          // sidebars pueden estar animando juntos.
+          //
+          // Cerrar: más corto y acelerando (`cubic-bezier(0.4,0,1,1)`). Con la
+          // curva de entrada, salir se arrastraba: el panel ya había soltado su
+          // contenido —vuelve la lista en el mismo commit— y te quedabas
+          // mirando 300ms cómo esa lista se reacomoda mientras la columna se
+          // achica. Yéndose en 180ms el reflujo pasa antes de que lo leas, que
+          // es lo que se espera de una salida: irse, no despedirse.
+          panelExpandido
+            ? "duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
+            : "duration-[180ms] ease-[cubic-bezier(0.4,0,1,1)]",
         )}
       >
         {/* Columna del plano: viewer arriba + stats al pie */}
