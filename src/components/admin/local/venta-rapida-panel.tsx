@@ -8,19 +8,19 @@ import {
   useState,
   useTransition,
 } from "react";
-import {
-  Loader2,
-  Minus,
-  Plus,
-  Receipt,
-  Store,
-  Trash2,
-  X,
-} from "lucide-react";
+import { Loader2, Minus, Plus, Receipt, Store, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
-import { ProductModal, type AddToCartItem } from "@/components/mozo/product-modal";
+import {
+  ProductModal,
+  type AddToCartItem,
+} from "@/components/mozo/product-modal";
 import { ProductResultsList } from "@/components/mozo/product-results-list";
+import {
+  ColumnaDeCarga,
+  ColumnaLateral,
+  PanelDeCarga,
+} from "@/components/mozo/panel-de-carga";
 import { useCartZone } from "@/lib/mozo/use-cart-zone";
 import { isPrintableKey } from "@/lib/ui/roving";
 import { useRovingList } from "@/lib/ui/use-roving-list";
@@ -30,7 +30,11 @@ import {
 } from "@/components/mozo/product-search-box";
 import { emitInvoice } from "@/lib/afip/emit-invoice";
 import { calculateAdjustment } from "@/lib/billing/adjustment";
-import type { Caja, PaymentMethod, PaymentMethodConfig } from "@/lib/caja/types";
+import type {
+  Caja,
+  PaymentMethod,
+  PaymentMethodConfig,
+} from "@/lib/caja/types";
 import { useCajaPreferida } from "@/lib/caja/use-caja-preferida";
 import { formatCurrency } from "@/lib/currency";
 import type { CatalogForMozo, CatalogProduct } from "@/lib/mozo/catalog-query";
@@ -79,7 +83,7 @@ export function VentaRapidaPanel({
   const [methodConfigs, setMethodConfigs] = useState<PaymentMethodConfig[]>([]);
   const [initError, setInitError] = useState<string | null>(null);
 
-  const [activeCategory, setActiveCategory] = useState<string>("");
+  const [topProductIds, setTopProductIds] = useState<string[]>([]);
   const [openProduct, setOpenProduct] = useState<CatalogProduct | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
 
@@ -100,10 +104,7 @@ export function VentaRapidaPanel({
       if (!alive) return;
       if (r.ok) {
         setCatalog(r.data.catalog);
-        const firstCat = r.data.catalog.categories.find(
-          (c) => c.products.length > 0,
-        );
-        setActiveCategory(firstCat?.id ?? "");
+        setTopProductIds(r.data.topProductIds);
       } else {
         setCatalogError(r.error);
       }
@@ -143,13 +144,24 @@ export function VentaRapidaPanel({
   );
   // Lo que se ve sin búsqueda: la categoría activa. Va al hook, que decide
   // entre esto y los resultados y le da índice de teclado a los dos (spec 073).
-  const browseProducts: CatalogProduct[] = useMemo(
-    () =>
-      categoriesWithProducts.find((c) => c.id === activeCategory)?.products ??
-      categoriesWithProducts[0]?.products ??
-      [],
-    [categoriesWithProducts, activeCategory],
-  );
+  // Sin búsqueda: los más pedidos, igual que la mesa y los pedidos online
+  // (spec 111 fase 5 · 117 · 123). Las tres pantallas de carga abren mostrando
+  // lo mismo.
+  const topProducts: CatalogProduct[] = useMemo(() => {
+    const porId = new Map(allProducts.map((p) => [p.id, p]));
+    const vistos = new Set<string>();
+    const out: CatalogProduct[] = [];
+    for (const id of topProductIds) {
+      if (vistos.has(id)) continue;
+      vistos.add(id);
+      const p = porId.get(id);
+      if (p) out.push(p);
+    }
+    return out;
+  }, [topProductIds, allProducts]);
+  // Negocio sin historial: la carta entera antes que una pantalla en blanco.
+  const browseProducts: CatalogProduct[] =
+    topProducts.length > 0 ? topProducts : allProducts;
   const searchApi = useProductSearch({
     products: allProducts,
     browse: browseProducts,
@@ -336,10 +348,10 @@ export function VentaRapidaPanel({
           <Store className="h-4 w-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+          <p className="text-[10px] font-semibold tracking-[0.18em] text-zinc-500 uppercase">
             Venta rápida
           </p>
-          <h3 className="font-heading text-base font-bold leading-tight text-zinc-900">
+          <h3 className="font-heading text-base leading-tight font-bold text-zinc-900">
             Kiosko / barra · sin mesa
           </h3>
         </div>
@@ -358,267 +370,263 @@ export function VentaRapidaPanel({
         </div>
       )}
 
-      {/* ─── Buscador + categorías ─── */}
-      <div className="shrink-0 space-y-2 border-b border-zinc-200 bg-white px-3 py-2.5">
-        <ProductSearchInput api={searchApi} inputRef={searchRef} autoFocus />
-        {!isSearching && categoriesWithProducts.length > 1 && (
-          <div className="flex items-center gap-2">
-            <label
-              htmlFor="venta-cat"
-              className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-zinc-500"
-            >
-              Categoría
-            </label>
-            <select
-              id="venta-cat"
-              value={activeCategory}
-              onChange={(e) => setActiveCategory(e.target.value)}
-              className="min-w-0 flex-1 rounded-xl border border-zinc-200 bg-white px-2.5 py-1.5 text-sm font-semibold text-zinc-800 focus:border-emerald-400 focus:outline-none @lg:max-w-sm"
-            >
-              {categoriesWithProducts.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-      </div>
-
-      {/* ─── Productos ─── */}
-      <div
-        onKeyDown={(e) => {
-          if (catalogo.handleKeyDown(e)) return;
-          if (isPrintableKey(e)) {
-            e.preventDefault();
-            escribirEnBuscador(e.key);
+      {/* Mismo shell que la mesa y los pedidos online (spec 115 · 123): la venta
+          a la izquierda, buscar y agregar a la derecha. Cargar un ítem acá es
+          el mismo gesto que cargarlo en una mesa. */}
+      <PanelDeCarga>
+        <ColumnaDeCarga
+          className="@2xl:order-2"
+          encabezado={
+            <ProductSearchInput
+              api={searchApi}
+              inputRef={searchRef}
+              autoFocus
+            />
           }
-        }}
-        className="min-h-0 flex-1 overflow-y-auto px-3 py-3"
-      >
-        {loadingCatalog ? (
-          <div className="flex h-40 items-center justify-center text-zinc-400">
-            <Loader2 className="h-6 w-6 animate-spin" />
-          </div>
-        ) : catalogError ? (
-          <div className="rounded-2xl border border-dashed border-red-200 bg-red-50 py-10 text-center">
-            <p className="text-sm font-semibold text-red-700">{catalogError}</p>
-          </div>
-        ) : visibleProducts.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-zinc-200 bg-white py-10 text-center">
-            <p className="text-sm font-semibold text-zinc-700">
-              {isSearching ? "Sin resultados" : "Sin productos"}
-            </p>
-          </div>
-        ) : (
-          // Buscando o no, la misma lista navegable por ↓/↑. Spec 073.
-          <ProductResultsList
-            products={visibleProducts}
-            onPick={setOpenProduct}
-            enterTargetId={enterTargetId}
-            itemProps={(id) => {
-              const i = visibleProducts.findIndex((p) => p.id === id);
-              return i < 0 ? {} : catalogo.itemProps(i);
-            }}
-          />
-        )}
-      </div>
+          onKeyDownResultados={(e) => {
+            if (catalogo.handleKeyDown(e)) return;
+            if (isPrintableKey(e)) {
+              e.preventDefault();
+              escribirEnBuscador(e.key);
+            }
+          }}
+        >
+          {loadingCatalog ? (
+            <div className="flex h-40 items-center justify-center text-zinc-400">
+              <Loader2 className="h-6 w-6 animate-spin" />
+            </div>
+          ) : catalogError ? (
+            <div className="rounded-2xl border border-dashed border-red-200 bg-red-50 py-10 text-center">
+              <p className="text-sm font-semibold text-red-700">
+                {catalogError}
+              </p>
+            </div>
+          ) : visibleProducts.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-zinc-200 bg-white py-10 text-center">
+              <p className="text-sm font-semibold text-zinc-700">
+                {isSearching ? "Sin resultados" : "Sin productos"}
+              </p>
+            </div>
+          ) : (
+            // Buscando o no, la misma lista navegable por ↓/↑. Spec 073.
+            <ProductResultsList
+              products={visibleProducts}
+              onPick={setOpenProduct}
+              enterTargetId={enterTargetId}
+              itemProps={(id) => {
+                const i = visibleProducts.findIndex((p) => p.id === id);
+                return i < 0 ? {} : catalogo.itemProps(i);
+              }}
+            />
+          )}
+        </ColumnaDeCarga>
 
-      {/* ─── Carrito + cobro (siempre visible) ─── */}
-      <div className="shrink-0 border-t border-zinc-200 bg-white">
-        <div className="flex items-center justify-between px-3 pt-2.5">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-            La venta
-          </p>
-          <span className="text-[11px] font-semibold tabular-nums text-zinc-500">
-            {cartCount > 0
-              ? `${cartCount} ${cartCount === 1 ? "ítem" : "ítems"}`
-              : "vacía"}
-          </span>
-        </div>
+        {/* La venta y el cobro. `apilada`: con el panel angosto va **debajo**
+            del catálogo, como venía — el total y «Cobrar» no pueden depender de
+            que te acuerdes de abrir otra vista. */}
+        <ColumnaLateral
+          abierta
+          modoAngosto="apilada"
+          className="@2xl:order-1 @2xl:border-r @2xl:border-zinc-200"
+        >
+          <div className="flex min-h-0 flex-col overflow-y-auto border-t border-zinc-200 bg-white @2xl:border-t-0">
+            <div className="flex items-center justify-between px-3 pt-2.5">
+              <p className="text-[10px] font-semibold tracking-[0.18em] text-zinc-500 uppercase">
+                La venta
+              </p>
+              <span className="text-[11px] font-semibold text-zinc-500 tabular-nums">
+                {cartCount > 0
+                  ? `${cartCount} ${cartCount === 1 ? "ítem" : "ítems"}`
+                  : "vacía"}
+              </span>
+            </div>
 
-        {cart.length === 0 ? (
-          <p className="px-3 pb-2 pt-1 text-xs text-zinc-500">
-            Buscá arriba y agregá con Enter. Se cobra sin abrir mesa.
-          </p>
-        ) : (
-          <ul
-            onKeyDown={carrito.handleKeyDown}
-            className="max-h-32 space-y-1 overflow-y-auto px-3 py-2 @2xl:max-h-56"
-          >
-            {cart.map((c, i) => (
-              <li
-                key={c._key}
-                {...carrito.itemProps(i)}
-                aria-label={`${c.product_name}, cantidad ${c.quantity}. ← y → cambian la cantidad, Supr la quita.`}
-                className="flex items-center gap-2 rounded-xl bg-zinc-50 px-2.5 py-1.5 outline-none ring-1 ring-zinc-100 focus-visible:ring-2 focus-visible:ring-emerald-500"
+            {cart.length === 0 ? (
+              <p className="px-3 pt-1 pb-2 text-xs text-zinc-500">
+                Buscá arriba y agregá con Enter. Se cobra sin abrir mesa.
+              </p>
+            ) : (
+              <ul
+                onKeyDown={carrito.handleKeyDown}
+                className="max-h-32 space-y-1 overflow-y-auto px-3 py-2 @2xl:max-h-56"
               >
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-zinc-900">
-                    {c.product_name}
-                  </p>
-                  {c.notes && (
-                    <p className="truncate text-[11px] italic text-zinc-500">
-                      &quot;{c.notes}&quot;
-                    </p>
-                  )}
-                </div>
-                <span className="shrink-0 text-xs font-semibold tabular-nums text-emerald-700">
-                  {formatCurrency(c.line_subtotal_cents)}
+                {cart.map((c, i) => (
+                  <li
+                    key={c._key}
+                    {...carrito.itemProps(i)}
+                    aria-label={`${c.product_name}, cantidad ${c.quantity}. ← y → cambian la cantidad, Supr la quita.`}
+                    className="flex items-center gap-2 rounded-xl bg-zinc-50 px-2.5 py-1.5 ring-1 ring-zinc-100 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-zinc-900">
+                        {c.product_name}
+                      </p>
+                      {c.notes && (
+                        <p className="truncate text-[11px] text-zinc-500 italic">
+                          &quot;{c.notes}&quot;
+                        </p>
+                      )}
+                    </div>
+                    <span className="shrink-0 text-xs font-semibold text-emerald-700 tabular-nums">
+                      {formatCurrency(c.line_subtotal_cents)}
+                    </span>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <button
+                        onClick={() => changeQty(c._key, -1)}
+                        disabled={c.quantity <= 1}
+                        className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100 disabled:opacity-40"
+                        aria-label="Menos"
+                      >
+                        <Minus className="h-3.5 w-3.5" />
+                      </button>
+                      <span className="w-5 text-center text-sm font-bold tabular-nums">
+                        {c.quantity}
+                      </span>
+                      <button
+                        onClick={() => changeQty(c._key, 1)}
+                        disabled={c.quantity >= 99}
+                        className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100 disabled:opacity-40"
+                        aria-label="Más"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={() => removeFromCart(c._key)}
+                        className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-400 active:bg-zinc-100"
+                        aria-label={`Quitar ${c.product_name}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {/* Caja — sólo si hay más de una que elegir. */}
+            {cajas.length > 1 && (
+              <div className="flex flex-wrap items-center gap-1.5 border-t border-zinc-100 px-3 py-2">
+                <span className="text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
+                  Caja
                 </span>
-                <div className="flex shrink-0 items-center gap-1">
+                {cajas.map((c) => (
                   <button
-                    onClick={() => changeQty(c._key, -1)}
-                    disabled={c.quantity <= 1}
-                    className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100 disabled:opacity-40"
-                    aria-label="Menos"
-                  >
-                    <Minus className="h-3.5 w-3.5" />
-                  </button>
-                  <span className="w-5 text-center text-sm font-bold tabular-nums">
-                    {c.quantity}
-                  </span>
-                  <button
-                    onClick={() => changeQty(c._key, 1)}
-                    disabled={c.quantity >= 99}
-                    className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100 disabled:opacity-40"
-                    aria-label="Más"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    onClick={() => removeFromCart(c._key)}
-                    className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-400 active:bg-zinc-100"
-                    aria-label={`Quitar ${c.product_name}`}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {/* Caja — sólo si hay más de una que elegir. */}
-        {cajas.length > 1 && (
-          <div className="flex flex-wrap items-center gap-1.5 border-t border-zinc-100 px-3 py-2">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
-              Caja
-            </span>
-            {cajas.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => setCajaId(c.id)}
-                className={`rounded-full px-2.5 py-1 text-xs font-semibold transition ${
-                  cajaId === c.id
-                    ? "bg-zinc-900 text-white"
-                    : "bg-white text-zinc-700 ring-1 ring-zinc-200"
-                }`}
-              >
-                {c.name}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Método de pago, con su recargo/descuento a la vista. */}
-        <div className="grid grid-cols-3 gap-1.5 border-t border-zinc-100 px-3 py-2">
-          {METODOS.map((m) => {
-            const pct =
-              methodConfigs.find((c) => c.method === m.value)
-                ?.adjustment_percent ?? 0;
-            return (
-              <button
-                key={m.value}
-                onClick={() => setMethod(m.value)}
-                className={`rounded-xl py-2 text-sm font-semibold transition ${
-                  method === m.value
-                    ? "bg-zinc-900 text-white"
-                    : "bg-white text-zinc-700 ring-1 ring-zinc-200"
-                }`}
-              >
-                {m.label}
-                {pct !== 0 && (
-                  <span
-                    className={`ml-1 text-[10px] font-bold ${
-                      method === m.value
-                        ? "text-white/70"
-                        : pct < 0
-                          ? "text-emerald-600"
-                          : "text-rose-600"
+                    key={c.id}
+                    onClick={() => setCajaId(c.id)}
+                    className={`rounded-full px-2.5 py-1 text-xs font-semibold transition ${
+                      cajaId === c.id
+                        ? "bg-zinc-900 text-white"
+                        : "bg-white text-zinc-700 ring-1 ring-zinc-200"
                     }`}
                   >
-                    {pct > 0 ? "+" : ""}
-                    {pct}%
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="flex items-center gap-2 border-t border-zinc-100 px-3 py-2.5">
-          <div className="min-w-0 flex-1">
-            <p className="text-[11px] text-zinc-500">
-              {ajustePercent !== 0 ? (
-                <>
-                  {formatCurrency(subtotal)}{" "}
-                  <span
-                    className={
-                      ajustePercent < 0 ? "text-emerald-700" : "text-rose-600"
-                    }
-                  >
-                    {ajustePercent < 0 ? "−" : "+"}
-                    {formatCurrency(Math.abs(ajusteCents))}
-                  </span>
-                </>
-              ) : (
-                "Total"
-              )}
-            </p>
-            <p className="text-lg font-bold tabular-nums text-zinc-900">
-              {formatCurrency(totalACobrar)}
-            </p>
-          </div>
-          <button
-            onClick={cobrar}
-            ref={cobrarRef}
-            disabled={!canCobrar}
-            className="flex h-11 items-center gap-2 rounded-2xl bg-emerald-600 px-5 text-sm font-semibold text-white transition active:scale-[0.98] disabled:opacity-40"
-          >
-            {pending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Receipt className="h-4 w-4" />
+                    {c.name}
+                  </button>
+                ))}
+              </div>
             )}
-            Cobrar {formatCurrency(totalACobrar)}
-          </button>
-        </div>
 
-        {/* Factura de la última venta — opcional, nunca frena la siguiente. */}
-        {ultima && (
-          <div className="flex items-center gap-2 border-t border-zinc-100 bg-zinc-50 px-3 py-2">
-            <p className="min-w-0 flex-1 truncate text-[11px] text-zinc-600">
-              Venta #{ultima.orderNumber} cobrada ·{" "}
-              {formatCurrency(ultima.totalCents)}
-            </p>
-            <button
-              onClick={facturarUltima}
-              disabled={facturando}
-              className="shrink-0 rounded-full bg-white px-3 py-1 text-[11px] font-semibold text-zinc-700 ring-1 ring-zinc-200 transition active:bg-zinc-100 disabled:opacity-40"
-            >
-              {facturando ? "Facturando…" : "Facturar"}
-            </button>
-            <button
-              onClick={() => setUltima(null)}
-              className="shrink-0 rounded-full p-1 text-zinc-400 active:bg-zinc-100"
-              aria-label="Descartar aviso"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
+            {/* Método de pago, con su recargo/descuento a la vista. */}
+            <div className="grid grid-cols-3 gap-1.5 border-t border-zinc-100 px-3 py-2">
+              {METODOS.map((m) => {
+                const pct =
+                  methodConfigs.find((c) => c.method === m.value)
+                    ?.adjustment_percent ?? 0;
+                return (
+                  <button
+                    key={m.value}
+                    onClick={() => setMethod(m.value)}
+                    className={`rounded-xl py-2 text-sm font-semibold transition ${
+                      method === m.value
+                        ? "bg-zinc-900 text-white"
+                        : "bg-white text-zinc-700 ring-1 ring-zinc-200"
+                    }`}
+                  >
+                    {m.label}
+                    {pct !== 0 && (
+                      <span
+                        className={`ml-1 text-[10px] font-bold ${
+                          method === m.value
+                            ? "text-white/70"
+                            : pct < 0
+                              ? "text-emerald-600"
+                              : "text-rose-600"
+                        }`}
+                      >
+                        {pct > 0 ? "+" : ""}
+                        {pct}%
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex items-center gap-2 border-t border-zinc-100 px-3 py-2.5">
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] text-zinc-500">
+                  {ajustePercent !== 0 ? (
+                    <>
+                      {formatCurrency(subtotal)}{" "}
+                      <span
+                        className={
+                          ajustePercent < 0
+                            ? "text-emerald-700"
+                            : "text-rose-600"
+                        }
+                      >
+                        {ajustePercent < 0 ? "−" : "+"}
+                        {formatCurrency(Math.abs(ajusteCents))}
+                      </span>
+                    </>
+                  ) : (
+                    "Total"
+                  )}
+                </p>
+                <p className="text-lg font-bold text-zinc-900 tabular-nums">
+                  {formatCurrency(totalACobrar)}
+                </p>
+              </div>
+              <button
+                onClick={cobrar}
+                ref={cobrarRef}
+                disabled={!canCobrar}
+                className="flex h-11 items-center gap-2 rounded-2xl bg-emerald-600 px-5 text-sm font-semibold text-white transition active:scale-[0.98] disabled:opacity-40"
+              >
+                {pending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Receipt className="h-4 w-4" />
+                )}
+                Cobrar {formatCurrency(totalACobrar)}
+              </button>
+            </div>
+
+            {/* Factura de la última venta — opcional, nunca frena la siguiente. */}
+            {ultima && (
+              <div className="flex items-center gap-2 border-t border-zinc-100 bg-zinc-50 px-3 py-2">
+                <p className="min-w-0 flex-1 truncate text-[11px] text-zinc-600">
+                  Venta #{ultima.orderNumber} cobrada ·{" "}
+                  {formatCurrency(ultima.totalCents)}
+                </p>
+                <button
+                  onClick={facturarUltima}
+                  disabled={facturando}
+                  className="shrink-0 rounded-full bg-white px-3 py-1 text-[11px] font-semibold text-zinc-700 ring-1 ring-zinc-200 transition active:bg-zinc-100 disabled:opacity-40"
+                >
+                  {facturando ? "Facturando…" : "Facturar"}
+                </button>
+                <button
+                  onClick={() => setUltima(null)}
+                  className="shrink-0 rounded-full p-1 text-zinc-400 active:bg-zinc-100"
+                  aria-label="Descartar aviso"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </ColumnaLateral>
+      </PanelDeCarga>
 
       <ProductModal
         product={openProduct}

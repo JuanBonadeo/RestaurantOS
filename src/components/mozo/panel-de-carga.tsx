@@ -92,14 +92,39 @@ export function PanelDeCarga({
  */
 export function ColumnaLateral({
   abierta,
+  modoAngosto = "encima",
   children,
   className,
 }: {
   abierta: boolean;
+  /**
+   * Qué hace cuando el panel es angosto y no entran las dos columnas.
+   *
+   * - `"encima"` (default) — se abre tapando la carga, y `abierta` la controla.
+   *   Es lo que quieren la mesa y la hoja online: son dos vistas de lo mismo y
+   *   se alterna entre ellas.
+   * - `"apilada"` — se queda en el flujo, debajo de la carga, como una franja.
+   *   Es lo que quiere la venta rápida: el total y el botón de cobrar no pueden
+   *   depender de que te acuerdes de abrir otra vista.
+   */
+  modoAngosto?: "encima" | "apilada";
   children: ReactNode;
   className?: string;
 }) {
   const anchoDeColumna = "@2xl:w-[46%] @2xl:max-w-[520px] @2xl:shrink-0";
+  if (modoAngosto === "apilada") {
+    return (
+      <div
+        className={cn(
+          "flex min-h-0 shrink-0 flex-col @2xl:min-h-0 @2xl:flex-1",
+          anchoDeColumna,
+          className,
+        )}
+      >
+        {children}
+      </div>
+    );
+  }
   return (
     <div
       className={cn(
