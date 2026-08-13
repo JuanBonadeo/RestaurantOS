@@ -1476,8 +1476,13 @@ export function SalonDesktop({
             : // En reposo el panel es una regleta: la lista de mesas y las
               // reservas entran, y el plano se queda con todo lo demás.
               "lg:grid-cols-[minmax(0,1fr)_340px]",
-          // Sin esto vuelve el salto que motivó el ancho único.
-          "transition-[grid-template-columns] duration-300 ease-out motion-reduce:transition-none",
+          // Sin esto vuelve el salto que motivó el ancho único. La curva es la
+          // de la casa —la misma que el sidebar del admin, el shell y el super
+          // (`cubic-bezier(0.32,0.72,0,1)`, 300ms)—: arranca rápido y frena
+          // largo. Importa que sea *esa*: el sidebar del admin puede estar
+          // animando al mismo tiempo, y dos curvas distintas en pantalla se ven
+          // como que algo va atrasado.
+          "transition-[grid-template-columns] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none",
         )}
       >
         {/* Columna del plano: viewer arriba + stats al pie */}

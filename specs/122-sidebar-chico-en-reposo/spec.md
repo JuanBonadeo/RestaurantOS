@@ -30,6 +30,10 @@ Así que lo que se arregla ahora es **el salto**, no el ancho.
 - **`transition-[grid-template-columns]` de 300ms**, que es lo que faltaba la
   primera vez: el panel crece en vez de pegar un tirón. Con
   `motion-reduce:transition-none`.
+- La curva es la de la casa — `cubic-bezier(0.32,0.72,0,1)`, la misma que el
+  sidebar del admin, el shell del local y el super. Importa que sea *esa* y no
+  un `ease-out` cualquiera: el sidebar del admin puede estar animando al mismo
+  tiempo, y dos curvas distintas en pantalla se leen como que algo va atrasado.
 
 ## Qué NO cambia
 
