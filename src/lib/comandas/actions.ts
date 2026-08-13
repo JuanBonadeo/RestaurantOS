@@ -1009,8 +1009,12 @@ export async function marcarComandaEntregada(
   const itemIds = ((links ?? []) as { order_item_id: string }[]).map(
     (l) => l.order_item_id,
   );
+  // Los platos que se van a servir de verdad: el mozo levanta unidades, no
+  // renglones. Con `itemIds.length` una comanda de «2× Milanesa» le avisaba
+  // "1 plato para servir" y volvía a la cocina por el segundo (issue #188).
+  let platosParaServir = 0;
   if (itemIds.length > 0) {
-    await service
+    const { data: actualizados } = await service
       .from("order_items")
       .update({ kitchen_status: "delivered" })
       .in("id", itemIds)
@@ -1018,7 +1022,12 @@ export async function marcarComandaEntregada(
       // `advanceItemKitchenStatus` sí excluye los cancelados. Sin esto, en el
       // kanban un ítem aparece tachado con motivo **y** entregado, y cualquier
       // métrica de tiempos por sector se contamina.
-      .is("cancelled_at", null);
+      .is("cancelled_at", null)
+      .select("quantity");
+    platosParaServir = ((actualizados ?? []) as { quantity: number }[]).reduce(
+      (n, i) => n + i.quantity,
+      0,
+    );
   }
 
   // Notify the mozo that the comanda is ready to serve.
@@ -1069,7 +1078,7 @@ export async function marcarComandaEntregada(
             payload: {
               tableLabel: tbl.label,
               stationName,
-              itemCount: itemIds.length,
+              itemCount: platosParaServir,
             },
           });
         }

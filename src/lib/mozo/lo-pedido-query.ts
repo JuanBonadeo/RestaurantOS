@@ -48,7 +48,10 @@ export async function getLoPedido(
   const { data: order, error: orderErr } = await service
     .from("orders")
     .select(
-      "id, subtotal_cents, discount_cents, tip_cents, total_cents, party_size",
+      // `order_number` es el número que el local canta en voz alta («la 25»).
+      // Faltaba acá y el objeto se devuelve con un cast, así que el header de
+      // la mesa mostraba "Orden #" a secas sin que el compilador dijera nada.
+      "id, order_number, subtotal_cents, discount_cents, tip_cents, total_cents, party_size",
     )
     .eq("id", orderId)
     .eq("business_id", businessId)

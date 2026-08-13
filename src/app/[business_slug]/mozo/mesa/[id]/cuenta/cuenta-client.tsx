@@ -207,6 +207,11 @@ export function CuentaClient({
   const tramoDescuento =
     role === "mozo" ? "10%" : role === "encargado" ? "25%" : "sin límite";
 
+  // A quién hay que ir a buscar cuando el descuento se pasa del tramo. Estaba
+  // escrito «pedile al encargado» para todos, así que la encargada leía que se
+  // pidiera permiso a sí misma (issue #188). Arriba del encargado está el dueño.
+  const quienAutoriza = role === "mozo" ? "l encargado" : "l dueño";
+
   // ↑/↓ recorren los controles de la cuenta —líneas, dividir, propina,
   // descuento, Cobrar— sin cambiar a Tab (spec 075, FR-017). Sólo en el panel
   // del salón: la versión full-screen del mozo es táctil.
@@ -490,7 +495,7 @@ export function CuentaClient({
               {cantApplyDiscount && (
                 <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-2.5 py-1 text-[0.65rem] font-semibold text-rose-700">
                   <Lock className="size-3" />
-                  Excede tu autorización · pedile al encargado
+                  Excede tu autorización · pedile a{quienAutoriza}
                 </div>
               )}
               {discountCents > 0 && (

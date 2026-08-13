@@ -122,7 +122,7 @@ export function viewForNotification(n: Notification): NotiView {
       tone: "success",
       icon: CheckCircle2,
       title: `Comanda lista · Mesa ${tableLabel}`,
-      body: `${stationName} — ${itemCount} plato(s) para servir`,
+      body: `${stationName} — ${itemCount} ${itemCount === 1 ? "plato" : "platos"} para servir`,
     };
   }
   // ── spec 27 ───────────────────────────────────────────────────────
