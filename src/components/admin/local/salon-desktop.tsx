@@ -93,9 +93,7 @@ import {
 } from "@/lib/mozo/salon-table-order";
 import { useArrowFocus } from "@/lib/ui/use-arrow-focus";
 import { useRovingList } from "@/lib/ui/use-roving-list";
-import {
-  loadTableComandas,
-} from "@/lib/mozo/pedir-panel-data";
+import { loadTableComandas } from "@/lib/mozo/pedir-panel-data";
 import {
   sentarReserva,
   updateReservationDetails,
@@ -1293,6 +1291,19 @@ export function SalonDesktop({
                 ? "detalle"
                 : "lista";
 
+  /**
+   * ¿El panel está en modo trabajo? (spec 122)
+   *
+   * En reposo —sin ninguna mesa tocada y sin nada abierto— el panel sólo lista,
+   * y el ancho de trabajo le come el plano al pedo. Cualquier cosa que se abra
+   * ahí adentro lo agranda: cargar, cobrar, la cuenta, el walk-in, la venta
+   * rápida, una reserva nueva o distribuir mozos.
+   *
+   * `distribuirOpen` va aparte porque no está en `modoPanel`: se maneja desde
+   * afuera (lo abre la barra del salón), pero ocupa el panel igual que el resto.
+   */
+  const panelExpandido = modoPanel !== "lista" || distribuirOpen;
+
   // Cambiar de modo desmonta un panel y monta otro. Si el que entra no enfoca
   // nada suyo (la cuenta y el cobro tardan en traer sus datos), el foco queda
   // en el `<body>` y ni las flechas ni Esc llegan al panel. El `<aside>` es
@@ -1443,21 +1454,30 @@ export function SalonDesktop({
       <div
         className={cn(
           "grid min-h-0 flex-1 grid-cols-1 gap-4",
-          // Ancho **único para todos los modos** (invariante desde que la base
-          // era 360 y crecía por modo: el sidebar "saltaba" al entrar a cobrar).
-          // Lo que cambia con la spec 111 es cuánto: el panel es donde se
-          // trabaja el turno entero, y 480px fijos eran el 25% de un monitor de
-          // 1920 para la tarea y el 75% para un plano que no cambia.
-          //
-          // De 1024 a 1279 se conserva 480: con el piso de 560 el plano
-          // quedaría en ~450px y en una notebook eso es peor negocio.
-          "lg:grid-cols-[minmax(0,1fr)_480px]",
-          // De 1280 para arriba, **la mitad** del split con piso 620 y techo
-          // 1100 (fase 5: el panel pasó a tener dos columnas de verdad —la
-          // mesa y la carga—, y con 44% la de la mesa quedaba angosta para el
-          // detalle por ítem). El techo es para que en un ultrawide el plano no
-          // termine en una franja.
-          "xl:grid-cols-[minmax(0,1fr)_minmax(620px,min(50%,1100px))]",
+          // El ancho **cambia con el modo** (spec 122). Antes era único para
+          // todos, y era a propósito: cuando la base medía 360 y crecía por
+          // modo, el sidebar *saltaba* al entrar a cobrar. Pero congelarlo en
+          // ancho de trabajo le cobra al plano todo el turno — el plano es
+          // donde el encargado mira, y sin ninguna mesa tocada el panel sólo
+          // lista. Lo que se arregla ahora es el salto, no el ancho: la
+          // transición de abajo hace que crezca, no que pegue un tirón.
+          panelExpandido
+            ? cn(
+                // De 1024 a 1279, 480: con el piso de 560 el plano quedaría en
+                // ~450px y en una notebook eso es peor negocio.
+                "lg:grid-cols-[minmax(0,1fr)_480px]",
+                // De 1280 para arriba, **la mitad** del split con piso 620 y
+                // techo 1100 (spec 111 fase 5: el panel pasó a tener dos
+                // columnas de verdad —la mesa y la carga— y con 44% la de la
+                // mesa quedaba angosta para el detalle por ítem). El techo es
+                // para que en un ultrawide el plano no termine en una franja.
+                "xl:grid-cols-[minmax(0,1fr)_minmax(620px,min(50%,1100px))]",
+              )
+            : // En reposo el panel es una regleta: la lista de mesas y las
+              // reservas entran, y el plano se queda con todo lo demás.
+              "lg:grid-cols-[minmax(0,1fr)_340px]",
+          // Sin esto vuelve el salto que motivó el ancho único.
+          "transition-[grid-template-columns] duration-300 ease-out motion-reduce:transition-none",
         )}
       >
         {/* Columna del plano: viewer arriba + stats al pie */}
