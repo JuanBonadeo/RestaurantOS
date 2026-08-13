@@ -136,6 +136,18 @@ export type CajaLiveStats = {
   cobros_count: number;
   expected_cash_cents: number;
   periodo_desde: string;
+  /**
+   * Los cuatro sumandos de `expected_cash_cents`, para poder mostrar de dónde
+   * sale (issue #188): el arqueo decía "cobros + propinas" cuando la cuenta es
+   * apertura + efectivo **sin** propina + ingresos − sangrías, y los números no
+   * cerraban justo en la pantalla donde se decide si falta plata.
+   */
+  desglose_esperado: {
+    apertura_cents: number;
+    efectivo_cents: number;
+    ingresos_cents: number;
+    sangrias_cents: number;
+  };
 };
 
 export type CajaConEstado = Caja & {

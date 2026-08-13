@@ -497,8 +497,7 @@ function CajaCard({
         open={corteOpen}
         onOpenChange={setCorteOpen}
         cajaName={caja.name}
-        ventas={ventas}
-        propinas={propinas}
+        desglose={stats?.desglose_esperado ?? null}
         expected={expected}
         onSubmit={(closing, notes) =>
           startTransition(async () => {
@@ -827,16 +826,14 @@ function CorteModal({
   open,
   onOpenChange,
   cajaName,
-  ventas,
-  propinas,
+  desglose,
   expected,
   onSubmit,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   cajaName: string;
-  ventas: number;
-  propinas: number;
+  desglose: CajaLiveStats["desglose_esperado"] | null;
   expected: number;
   onSubmit: (closingCents: number, notes: string | null) => void;
 }) {
@@ -868,10 +865,45 @@ function CorteModal({
           <p className="mt-1 text-2xl font-semibold tabular-nums text-zinc-900">
             {formatCurrency(expected)}
           </p>
-          <p className="mt-1 text-xs text-zinc-600">
-            Cobros en efectivo ({formatCurrency(ventas)})
-            {propinas > 0 && ` + propinas (${formatCurrency(propinas)})`}
-          </p>
+          {/* De dónde sale ese número. Antes decía "cobros + propinas", que no
+              es la cuenta que hace el arqueo: la propina entró al cajón pero es
+              del mozo (spec 098) y los movimientos del período no aparecían por
+              ningún lado. Con un ingreso cargado, el desglose no daba el total
+              que estaba arriba — justo acá, donde se decide si falta plata. */}
+          {desglose && (
+            <dl className="mt-2 grid gap-0.5 text-xs text-zinc-600">
+              {desglose.apertura_cents > 0 && (
+                <div className="flex justify-between gap-3">
+                  <dt>Del corte anterior</dt>
+                  <dd className="tabular-nums">
+                    {formatCurrency(desglose.apertura_cents)}
+                  </dd>
+                </div>
+              )}
+              <div className="flex justify-between gap-3">
+                <dt>Cobros en efectivo, sin propinas</dt>
+                <dd className="tabular-nums">
+                  {formatCurrency(desglose.efectivo_cents)}
+                </dd>
+              </div>
+              {desglose.ingresos_cents > 0 && (
+                <div className="flex justify-between gap-3">
+                  <dt>Ingresos</dt>
+                  <dd className="tabular-nums">
+                    +{formatCurrency(desglose.ingresos_cents)}
+                  </dd>
+                </div>
+              )}
+              {desglose.sangrias_cents > 0 && (
+                <div className="flex justify-between gap-3">
+                  <dt>Sangrías</dt>
+                  <dd className="tabular-nums">
+                    −{formatCurrency(desglose.sangrias_cents)}
+                  </dd>
+                </div>
+              )}
+            </dl>
+          )}
         </div>
 
         <div className="mt-4 grid gap-1.5">

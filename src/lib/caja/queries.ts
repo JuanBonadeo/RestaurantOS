@@ -344,11 +344,29 @@ export async function getCajaLiveStats(
     total_propinas_cents += p.tip_cents;
   }
 
+  const apertura_cents = ultimoCorte?.closing_cash_cents ?? 0;
   const expected_cash_cents = calculateExpectedCash({
-    last_closing_cash_cents: ultimoCorte?.closing_cash_cents ?? 0,
+    last_closing_cash_cents: apertura_cents,
     payments,
     movimientos,
   });
+
+  // El mismo desglose que usa `calculateExpectedCash`, expuesto para poder
+  // mostrarlo (issue #188). Efectivo **sin** propina: la propina entró al cajón
+  // pero es del mozo, no del negocio (spec 098).
+  const vivos = movimientos.filter((m) => !m.cancelled_at);
+  const desglose_esperado = {
+    apertura_cents,
+    efectivo_cents: payments
+      .filter((p) => p.method === "cash")
+      .reduce((acc, p) => acc + p.amount_cents - p.tip_cents, 0),
+    ingresos_cents: vivos
+      .filter((m) => m.kind === "ingreso")
+      .reduce((acc, m) => acc + m.amount_cents, 0),
+    sangrias_cents: vivos
+      .filter((m) => m.kind === "sangria")
+      .reduce((acc, m) => acc + m.amount_cents, 0),
+  };
 
   return {
     caja_id: cajaId,
@@ -359,6 +377,7 @@ export async function getCajaLiveStats(
     cobros_count: payments.length,
     expected_cash_cents,
     periodo_desde: periodoDesdeFecha,
+    desglose_esperado,
   };
 }
 
