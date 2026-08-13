@@ -14,7 +14,7 @@ import { toast } from "sonner";
 
 import type { ActionResult } from "@/lib/actions";
 import { calculateAdjustment } from "@/lib/billing/adjustment";
-import { isCashShortPayment } from "@/lib/billing/totals";
+import { cashCharge, isCashShortPayment } from "@/lib/billing/totals";
 import type { Caja, PaymentMethod, PaymentMethodConfig } from "@/lib/caja/types";
 import { formatCurrency } from "@/lib/currency";
 import { indexFromDigit } from "@/lib/ui/roving";
@@ -173,6 +173,17 @@ export function CobroForm<T = unknown>({
     remaining_cents: amountDueCents,
   });
 
+  // De más es vuelto, y el vuelto no se cobra: lo que se registra —y lo que
+  // dice el botón— es `chargeCents`, no el billete que entró (issue #188). El
+  // server vuelve a acotarlo; acá es para que el cajero vea lo mismo que la
+  // caja va a contar.
+  const { chargeCents, changeCents } = cashCharge({
+    method: method ?? "",
+    amount_cents: amount,
+    adjustment_cents: adjustmentCents,
+    remaining_cents: amountDueCents,
+  });
+
   const methods = METHODS.filter((m) => {
     if (allowedMethods && !allowedMethods.includes(m.value)) return false;
     if (isMpMethod(m.value) && !mp) return false;
@@ -280,7 +291,7 @@ export function CobroForm<T = unknown>({
     startTransition(async () => {
       const r = await onSubmit({
         method,
-        amountCents: amount,
+        amountCents: chargeCents,
         tipCents: effectiveTip,
         cajaId,
         lastFour:
@@ -530,9 +541,12 @@ export function CobroForm<T = unknown>({
             </span>
           </p>
         )}
-        {method === "cash" && amount > finalCents && (
+        {changeCents > 0 && (
           <p className="text-xs font-semibold text-emerald-700">
-            Vuelto: {formatCurrency(amount - finalCents)}
+            Vuelto: {formatCurrency(changeCents)}
+            <span className="ml-1 font-medium text-zinc-500">
+              — se cobra {formatCurrency(chargeCents)}
+            </span>
           </p>
         )}
         {cashShort && (
@@ -653,7 +667,7 @@ export function CobroForm<T = unknown>({
         ) : (
           <>
             <Check className="size-5" />
-            Confirmar {formatCurrency(amount)}
+            Confirmar {formatCurrency(chargeCents)}
           </>
         )}
       </button>

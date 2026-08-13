@@ -73,6 +73,39 @@ export function isCashShortPayment(input: {
   return base < input.remaining_cents;
 }
 
+/**
+ * La contracara de `isCashShortPayment`: **el vuelto no es plata del local**.
+ *
+ * En efectivo el cajero tipea lo que le dan —es lo natural, y la pantalla se lo
+ * pide mostrando el vuelto— pero lo que se registra tiene que ser lo que se
+ * cobró. Registrando el billete entero, una cuenta de $42.000 pagada con
+ * $50.000 dejaba la caja esperando $8.000 que ya volvieron al bolsillo del
+ * cliente: arqueo con faltante fantasma, rendición inflada y `total_paid_cents`
+ * por encima del total de la orden (issue #188).
+ *
+ * `amount_cents` viaja con el ajuste del método ya aplicado, igual que en
+ * `isCashShortPayment`, así que el tope es `remaining_cents + adjustment_cents`.
+ *
+ * De menos no se arregla acá: eso lo rechaza `isCashShortPayment` antes.
+ * Los otros métodos pasan derecho — dos tarjetas sobre una cuenta o una
+ * transferencia parcial son casos reales, y ahí no hay vuelto que dar.
+ */
+export function cashCharge(input: {
+  method: string;
+  amount_cents: number;
+  adjustment_cents: number;
+  remaining_cents: number;
+}): { chargeCents: number; changeCents: number } {
+  if (input.method !== "cash") {
+    return { chargeCents: input.amount_cents, changeCents: 0 };
+  }
+  const tope = input.remaining_cents + input.adjustment_cents;
+  if (input.amount_cents <= tope) {
+    return { chargeCents: input.amount_cents, changeCents: 0 };
+  }
+  return { chargeCents: tope, changeCents: input.amount_cents - tope };
+}
+
 export type ExpectedByAmountsResult =
   | { ok: true; expecteds: number[] }
   | { ok: false; error: string };

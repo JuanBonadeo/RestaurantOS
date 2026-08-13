@@ -18,7 +18,7 @@ import { formatInvoiceNumber, tipoLabel } from "@/lib/afip/format";
 import type { TipoComprobante } from "@/lib/afip/types";
 
 import { restitucionMesa, type OperationalStatus } from "./restitucion-mesa";
-import { isCashShortPayment, sumActiveItems } from "./totals";
+import { cashCharge, isCashShortPayment, sumActiveItems } from "./totals";
 import type { OrderSplit, Payment } from "./types";
 
 type GenericClient = SupabaseClient;
@@ -480,6 +480,17 @@ export async function registrarPago(
     );
   }
 
+  // …y de más se registra lo que se cobró, no el billete: el vuelto vuelve al
+  // cliente y no puede quedar contado en la caja (issue #188). El tope lo
+  // decide el server aunque la pantalla ya mande el monto acotado: es plata, y
+  // esta action la llaman tres superficies distintas.
+  const { chargeCents } = cashCharge({
+    method: input.method,
+    amount_cents: input.amount_cents,
+    adjustment_cents: input.adjustment_cents ?? 0,
+    remaining_cents: remainingCents,
+  });
+
   const attributed = await deriveAttributedMozo(service, order.id);
 
   // El registro del pago va por una RPC transaccional (migración 0007): lock
@@ -495,7 +506,7 @@ export async function registrarPago(
     p_operated_by: ctx.userId,
     p_attributed_mozo_id: attributed,
     p_method: input.method,
-    p_amount_cents: input.amount_cents,
+    p_amount_cents: chargeCents,
     p_tip_cents: input.tip_cents,
     p_last_four: input.last_four ?? null,
     p_card_brand: input.card_brand ?? null,
@@ -958,6 +969,26 @@ export async function anularCobro(
     .neq("status", "cancelled");
 
   // (La reapertura de la orden se movió arriba — ver H-08.)
+
+  // issue #188 — la cuenta que sigue abierta también quedó en cero.
+  //
+  // El reset de `total_paid_cents` vivía sólo adentro de la rama de reapertura,
+  // así que anular el cobro **parcial** de una sub-cuenta reembolsaba los pagos
+  // y reseteaba los splits pero dejaba la orden diciendo que ya había cobrado
+  // esa plata. El panel de cobro se salvaba porque recalcula, pero el ticket de
+  // cuenta lo lee crudo (`cuenta-ticket.ts`) e imprimía "Pagado / RESTA" sobre
+  // una mesa que no pagó un peso, y el guard de "en efectivo no se cobra de
+  // menos" comparaba contra un resto de menos.
+  //
+  // Acá se refundaron **todos** los pagos de la orden, así que el cero es el
+  // número correcto en las dos ramas.
+  if (order.lifecycle_status !== "closed") {
+    const { error: resetErr } = await service
+      .from("orders")
+      .update({ total_paid_cents: 0, payment_status: "pending" })
+      .eq("id", orderId);
+    if (resetErr) console.error("anularCobro · reset total_paid", resetErr);
+  }
 
   // spec 100 — la mesa vuelve al plano tal como estaba, con sus ítems.
   //

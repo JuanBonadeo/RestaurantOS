@@ -331,6 +331,75 @@ describe.skipIf(!dbAvailable)("billing/cobro (integration)", () => {
     expect(payments!.every((p) => p.payment_status === "refunded")).toBe(true);
   });
 
+  it("anularCobro: el parcial de una cuenta abierta también vuelve a cero (#188)", { timeout: 30_000 }, async () => {
+    // El reset de `total_paid_cents` vivía adentro de la rama de reapertura, así
+    // que anular un cobro parcial —la orden nunca se cerró— dejaba la cuenta
+    // diciendo que ya había cobrado esa plata. El ticket lo imprime crudo:
+    // "Pagado / RESTA" sobre una mesa que no pagó un peso.
+    const { orderId } = await newOrder("E5", 20_000);
+    CURRENT_USER_ID = mozoId;
+    await registrarPago({
+      orderId,
+      splitId: null,
+      method: "card_manual",
+      amount_cents: 8_000,
+      tip_cents: 0,
+      caja_id: cajaId,
+      slug: businessSlug,
+    });
+
+    const { data: antes } = await supabase
+      .from("orders")
+      .select("lifecycle_status, total_paid_cents")
+      .eq("id", orderId)
+      .single();
+    expect(antes!.lifecycle_status).toBe("open");
+    expect(antes!.total_paid_cents).toBe(8_000);
+
+    CURRENT_USER_ID = encargadoId;
+    const r = await anularCobro(orderId, "se equivocó de mesa", businessSlug);
+    expect(r.ok).toBe(true);
+
+    const { data: ord } = await supabase
+      .from("orders")
+      .select("lifecycle_status, total_paid_cents, payment_status")
+      .eq("id", orderId)
+      .single();
+    expect(ord!.lifecycle_status).toBe("open");
+    expect(ord!.total_paid_cents).toBe(0);
+    expect(ord!.payment_status).toBe("pending");
+  });
+
+  it("registrarPago: en efectivo se cobra lo que se debe, no el billete (#188)", { timeout: 30_000 }, async () => {
+    // Cuenta de $200, el cliente paga con $500: la caja tiene que esperar $200.
+    const { orderId } = await newOrder("E6", 20_000);
+    CURRENT_USER_ID = mozoId;
+    const r = await registrarPago({
+      orderId,
+      splitId: null,
+      method: "cash",
+      amount_cents: 50_000,
+      tip_cents: 0,
+      caja_id: cajaId,
+      slug: businessSlug,
+    });
+    expect(r.ok).toBe(true);
+
+    const { data: pagos } = await supabase
+      .from("payments")
+      .select("amount_cents")
+      .eq("order_id", orderId);
+    expect(pagos!.map((p) => p.amount_cents)).toEqual([20_000]);
+
+    const { data: ord } = await supabase
+      .from("orders")
+      .select("total_paid_cents, lifecycle_status")
+      .eq("id", orderId)
+      .single();
+    expect(ord!.total_paid_cents).toBe(20_000);
+    expect(ord!.lifecycle_status).toBe("closed");
+  });
+
   it("anularCobro: si la cuenta ya se había pedido, vuelve a pidio_cuenta", { timeout: 30_000 }, async () => {
     const { tableId: tid, orderId } = await newOrder("E2");
     const pedidaAt = new Date(Date.now() - 20 * 60_000).toISOString();
