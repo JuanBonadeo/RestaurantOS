@@ -174,6 +174,19 @@ export function CuentaClient({
   const cantApplyDiscount =
     discountPercent > 0 && !canApplyDiscount(role, discountPercent);
 
+  // El motivo del descuento es obligatorio (lo valida `handleConfirmar` y de
+  // nuevo el server), pero el botón se veía habilitado y el requisito recién
+  // aparecía como toast al apretarlo: el encargado tocaba «Cobrar» y no pasaba
+  // nada visible (issue #189). Ahora el gate está a la vista, en el mismo lugar
+  // donde se elige.
+  const faltaMotivo = discountCents > 0 && discountReasonText.trim() === "";
+
+  // Las sub-cuentas canceladas siguen en la fila para auditoría, pero la mesa
+  // no está dividida por ellas: contándolas, después de limpiar la división el
+  // banner seguía anunciando una sub-cuenta y el botón ofrecía «Volver a
+  // dividir (1)» sobre una cuenta entera (issue #189).
+  const splitsVivos = cuenta.splits.filter((s) => s.status !== "cancelled");
+
   const handleConfirmar = () => {
     if (cantApplyDiscount) {
       toast.error("Tu rol no permite ese descuento.");
@@ -283,7 +296,7 @@ export function CuentaClient({
       >
         <PageShell width="narrow" className="!py-4 sm:!py-6">
           {/* Banner: división activa */}
-          {cuenta.splits.length > 0 && (
+          {splitsVivos.length > 0 && (
             <SplitsBanner
               splits={cuenta.splits}
               onLimpiar={() =>
@@ -480,7 +493,11 @@ export function CuentaClient({
               <div className="mt-3 flex items-center gap-3">
                 <Input
                   type="number"
-                  value={discountPercent}
+                  // Vacío en vez de un `0` precargado: tipear «30» sobre el cero
+                  // dejaba «030» en pantalla (issue #189), y encima obligaba a
+                  // borrarlo antes de escribir. El placeholder dice lo mismo sin
+                  // estorbar.
+                  value={discountPercent === 0 ? "" : discountPercent}
                   onChange={(e) =>
                     setDiscountPercent(
                       Math.max(0, Math.min(100, Number(e.target.value))),
@@ -500,6 +517,15 @@ export function CuentaClient({
               )}
               {discountCents > 0 && (
                 <div className="mt-3 grid gap-2">
+                  <p className="text-xs font-medium text-zinc-700">
+                    Motivo
+                    <span className="ml-1 text-rose-600">*</span>
+                    {faltaMotivo && (
+                      <span className="ml-2 font-normal text-zinc-500">
+                        elegí uno para poder cobrar
+                      </span>
+                    )}
+                  </p>
                   {/* `@md` = ancho del panel; con `sm:` (viewport) esto estaba
                   congelado en 3 columnas y el `grid-cols-2` era código muerto. */}
                   <div className="grid grid-cols-2 gap-2 @md:grid-cols-3">
@@ -572,8 +598,8 @@ export function CuentaClient({
                 className="inline-flex w-full items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold text-zinc-700 ring-1 ring-zinc-200 transition hover:bg-zinc-50 disabled:opacity-50"
               >
                 <Scissors className="size-4" />
-                {cuenta.splits.length > 0
-                  ? `Volver a dividir (${cuenta.splits.length})`
+                {splitsVivos.length > 0
+                  ? `Volver a dividir (${splitsVivos.length})`
                   : "Dividir cuenta"}
               </button>
             </div>
@@ -593,7 +619,9 @@ export function CuentaClient({
           <button
             type="button"
             onClick={handleConfirmar}
-            disabled={cantApplyDiscount || total === 0 || isPending}
+            disabled={
+              cantApplyDiscount || faltaMotivo || total === 0 || isPending
+            }
             className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full text-base font-semibold transition hover:brightness-95 disabled:opacity-50"
             style={{
               background: "var(--brand, #18181B)",

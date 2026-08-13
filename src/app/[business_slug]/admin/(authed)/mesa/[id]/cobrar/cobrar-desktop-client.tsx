@@ -233,12 +233,14 @@ export function CobrarDesktopClient({
           {!orderClosed && (
             <section className="space-y-2.5">
               <p className="px-1 text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                {splits.length === 1
+                {splitsActivos.length === 1
                   ? "Pago único"
-                  : `${splits.length} sub-cuentas`}
+                  : `${splitsActivos.length} sub-cuentas`}
               </p>
+              {/* Las canceladas no se listan: no se pueden cobrar y ocupaban el
+                  lugar de la fila que sí (issue #189). Siguen en la DB. */}
               <ul className="space-y-2.5">
-                {splits.map((s) => (
+                {splitsActivos.map((s) => (
                   <li key={s.id}>
                     <SplitRow
                       split={s}

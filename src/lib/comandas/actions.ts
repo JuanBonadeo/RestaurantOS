@@ -534,7 +534,11 @@ export async function enviarComanda(
         subtotal_cents: subtotal,
         station_id: isStockItem ? null : stationId,
         loaded_by: ctx.userId,
-        kitchen_status: isStockItem ? "delivered" : "pending",
+        // Lo que no va a cocina no espera a cocina: sin sector no hay comanda y
+        // nadie lo va a marcar nunca. Cubre los de stock (que quedan sin sector
+        // por la línea de arriba) y también el plato al que no se le pudo
+        // resolver sector, que antes quedaba `pending` para siempre (#189).
+        kitchen_status: isStockItem || !stationId ? "delivered" : "pending",
         seat_number: seatNum,
         client_line_key: inputItem.client_line_key ?? null,
       } as any)

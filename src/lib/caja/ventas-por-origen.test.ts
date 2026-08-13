@@ -45,25 +45,27 @@ describe("agruparVentasPorOrigen", () => {
     });
   });
 
-  it("la suma de los orígenes cierra con el total de ventas", () => {
+  it("la suma de los orígenes cierra con el total de ventas, con propinas de por medio", () => {
+    // El mismo criterio que `total_ventas_cents`: venta = amount − tip.
     const cobros = [
-      { delivery_type: "dine_in", amount_cents: 12_345 },
-      { delivery_type: "delivery", amount_cents: 6_789 },
-      { delivery_type: "pickup", amount_cents: 1_000 },
-      { delivery_type: "loquesea", amount_cents: 500 },
+      { delivery_type: "dine_in", amount_cents: 12_345, tip_cents: 1_000 },
+      { delivery_type: "delivery", amount_cents: 6_789, tip_cents: 0 },
+      { delivery_type: "pickup", amount_cents: 1_000, tip_cents: 100 },
+      { delivery_type: "loquesea", amount_cents: 500, tip_cents: 0 },
     ];
     const porOrigen = agruparVentasPorOrigen(cobros);
     const suma = Object.values(porOrigen).reduce((a, b) => a + b, 0);
-    expect(suma).toBe(cobros.reduce((a, c) => a + c.amount_cents, 0));
+    expect(suma).toBe(
+      cobros.reduce((a, c) => a + c.amount_cents - c.tip_cents, 0),
+    );
   });
 
-  it("no suma propinas — solo el monto de la venta", () => {
+  it("no suma propinas — la propina viaja adentro de amount_cents", () => {
     // Igual que las filas que arma `getCajaLiveStats`: traen tip_cents al lado.
-    const cobros: Array<{
-      delivery_type: string;
-      amount_cents: number;
-      tip_cents: number;
-    }> = [{ delivery_type: "dine_in", amount_cents: 10_000, tip_cents: 2_000 }];
+    // El cliente pagó $120 por una cuenta de $100: la venta es $100.
+    const cobros = [
+      { delivery_type: "dine_in", amount_cents: 12_000, tip_cents: 2_000 },
+    ];
     expect(agruparVentasPorOrigen(cobros).salon).toBe(10_000);
   });
 });

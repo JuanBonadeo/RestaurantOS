@@ -157,7 +157,12 @@ export async function routeOrderToCocina(
       .from("order_items")
       .update({
         station_id: stationId,
-        kitchen_status: "pending",
+        // Sin sector no hay comanda, y sin comanda nadie lo va a marcar nunca:
+        // dejarlo `pending` es una cola de cocina que no existe. La gaseosa y
+        // el alfajor salen con la venta. Es la misma regla que aplica
+        // `enviarComanda` en el salón (issue #189 — ahí un ítem sin sector
+        // quedaba `delivered` y por mostrador quedaba `pending` para siempre).
+        kitchen_status: stationId ? "pending" : "delivered",
       })
       .eq("id", item.id);
     if (updErr) {

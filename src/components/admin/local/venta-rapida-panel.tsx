@@ -637,6 +637,9 @@ export function VentaRapidaPanel({
         }}
         onAdd={addToCart}
         embedded
+        // Kiosko/barra: no hay mesa ni tiempos que ordenar, así que «Como
+        // entrada» no aplica (issue #189).
+        permiteComoEntrada={false}
       />
     </div>
   );

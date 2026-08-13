@@ -167,7 +167,11 @@ export async function loadCobroForTable(
       discount_cents: cuenta.order.discount_cents,
     },
     splits: cuenta.splits,
-    hasImplicitSplit: cuenta.splits.length === 0,
+    // Una división cancelada no divide nada: su `expected` ya volvió a las
+    // vivas (o a la mesa entera). Contándola, una mesa a la que le limpiaron la
+    // división llegaba al cobro con una sub-cuenta «Cancelado», sin fila para
+    // cobrar y sin «Mesa completa» — no se podía cobrar (issue #189).
+    hasImplicitSplit: cuenta.splits.every((s) => s.status === "cancelled"),
     cajas,
     methodConfigs,
   };

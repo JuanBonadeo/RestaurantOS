@@ -23,13 +23,17 @@ const MILANESA = {
   modifier_groups: [],
 } as unknown as CatalogProduct;
 
-function abrir(onAdd = vi.fn()) {
+function abrir(
+  onAdd = vi.fn(),
+  props: Partial<React.ComponentProps<typeof ProductModal>> = {},
+) {
   render(
     <ProductModal
       open
       product={MILANESA}
       onClose={vi.fn()}
       onAdd={onAdd}
+      {...props}
     />,
   );
   return { onAdd };
@@ -88,5 +92,21 @@ describe("<ProductModal /> — atajos de teclado", () => {
     await user.keyboard("+++");
     await user.click(agregar());
     expect(onAdd.mock.calls[0][0].quantity).toBe(4);
+  });
+});
+
+describe("<ProductModal /> — «Como entrada» sólo donde hay tiempos que ordenar", () => {
+  it("en el mostrador no aparece ni responde al atajo", async () => {
+    const user = userEvent.setup();
+    const { onAdd } = abrir(vi.fn(), { permiteComoEntrada: false });
+
+    expect(
+      screen.queryByRole("button", { name: /Como entrada/ }),
+    ).not.toBeInTheDocument();
+
+    // La barra no marca nada: la nota sale sin el marcador.
+    await user.keyboard("/");
+    await user.click(agregar());
+    expect(onAdd.mock.calls[0][0].notes).not.toMatch(/Como entrada/);
   });
 });

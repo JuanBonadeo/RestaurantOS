@@ -286,6 +286,11 @@ function CajaCard({
   const [ingresoOpen, setIngresoOpen] = useState(false);
   const [corteOpen, setCorteOpen] = useState(false);
 
+  // Los stats llegan por poll, no con la page. Hasta que caen, los montos no
+  // son cero: **no se saben**. Mostrar «$0» hacía que por medio segundo el
+  // encargado leyera «en la caja deberías tener $0» con la caja llena
+  // (issue #189).
+  const cargandoStats = stats == null;
   const expected = stats?.expected_cash_cents ?? 0;
   const ventas = stats?.total_ventas_cents ?? 0;
   const propinas = stats?.total_propinas_cents ?? 0;
@@ -377,7 +382,11 @@ function CajaCard({
             En la caja deberías tener
           </p>
           <p className="mt-1 text-3xl font-bold tracking-tight text-zinc-900 tabular-nums">
-            {formatCurrency(expected)}
+            {cargandoStats ? (
+              <span className="inline-block h-8 w-32 animate-pulse rounded-lg bg-zinc-900/10 align-middle" />
+            ) : (
+              formatCurrency(expected)
+            )}
           </p>
           <p className="mt-1 text-xs text-zinc-600">
             {caja.ultimo_corte
@@ -391,11 +400,23 @@ function CajaCard({
             Cobrado en el período
           </p>
           <p className="mt-1 text-3xl font-bold tracking-tight text-zinc-900 tabular-nums">
-            {formatCurrency(ventas)}
+            {cargandoStats ? (
+              <span className="inline-block h-8 w-32 animate-pulse rounded-lg bg-zinc-900/10 align-middle" />
+            ) : (
+              formatCurrency(ventas)
+            )}
           </p>
           <p className="mt-1 text-xs text-zinc-600">
-            {cobros} {cobros === 1 ? "cobro" : "cobros"}
-            {propinas > 0 && ` · ${formatCurrency(propinas)} en propinas`}
+            {cargandoStats ? (
+              " "
+            ) : (
+              <>
+                {cobros} {cobros === 1 ? "cobro" : "cobros"}
+                {/* Las propinas no están adentro de este número —es venta, no
+                    lo que entró— así que se dicen aparte y con esa palabra. */}
+                {propinas > 0 && ` · más ${formatCurrency(propinas)} de propina`}
+              </>
+            )}
           </p>
         </div>
       </div>

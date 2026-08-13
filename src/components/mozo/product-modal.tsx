@@ -65,6 +65,7 @@ export function ProductModal({
   onClose,
   onAdd,
   embedded = false,
+  permiteComoEntrada = true,
 }: {
   product: CatalogProduct | null;
   open: boolean;
@@ -73,6 +74,12 @@ export function ProductModal({
   /** Embebido en un panel: el overlay se scopea al contenedor (`absolute`)
    *  en vez de cubrir todo el viewport (`fixed`). */
   embedded?: boolean;
+  /**
+   * «Como entrada» ordena los tiempos de una mesa: que ese plato salga antes,
+   * con las entradas. En el mostrador no hay tiempos que ordenar —se cobra y se
+   * lleva— así que la venta rápida lo apaga (issue #189). El atajo `/` también.
+   */
+  permiteComoEntrada?: boolean;
 }) {
   const [selection, setSelection] = useState<Selection>({});
   const [quantity, setQuantity] = useState(1);
@@ -213,7 +220,7 @@ export function ProductModal({
           // `/` marca el ítem como entrada (spec 050 · atajo agregado en la 075).
           // Es la tecla que la mano ya tiene abajo a la derecha, y en Observaciones
           // no aplica: ahí una barra es una barra.
-          if (!typing && e.key === "/") {
+          if (!typing && permiteComoEntrada && e.key === "/") {
             e.preventDefault();
             setAsEntrada((v) => !v);
             return;
@@ -382,6 +389,7 @@ export function ProductModal({
           <label className="block text-xs font-bold uppercase tracking-wide text-zinc-700">
             Observaciones
           </label>
+          {permiteComoEntrada && (
           <button
             type="button"
             onClick={() => setAsEntrada((v) => !v)}
@@ -413,6 +421,7 @@ export function ProductModal({
               /
             </kbd>
           </button>
+          )}
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value.slice(0, 200))}

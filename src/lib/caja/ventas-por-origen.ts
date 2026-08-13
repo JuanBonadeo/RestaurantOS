@@ -30,13 +30,28 @@ export function origenDeDeliveryType(deliveryType: string): VentaOrigen {
   }
 }
 
+/**
+ * La venta es `amount_cents − tip_cents`, igual que `total_ventas_cents`
+ * (spec 098): la propina viaja **adentro** de `amount_cents` —es la plata que
+ * efectivamente entró— pero no es venta del negocio.
+ *
+ * Esto sumaba `amount_cents` pelado, así que la misma pantalla mostraba
+ * «Cobrado en el período $45.800» y «Salón $50.000» para el mismo único cobro,
+ * sin nada que dijera cuál era cuál (issue #189). El contrato de arriba —los
+ * orígenes cierran con `total_ventas_cents`— quedaba roto en cuanto había una
+ * propina.
+ */
 export function agruparVentasPorOrigen(
-  payments: Array<{ delivery_type: string; amount_cents: number }>,
+  payments: Array<{
+    delivery_type: string;
+    amount_cents: number;
+    tip_cents?: number;
+  }>,
 ): Record<VentaOrigen, number> {
   const acc: Record<VentaOrigen, number> = { ...EMPTY_BY_ORIGEN };
   for (const p of payments) {
     const origen = origenDeDeliveryType(p.delivery_type);
-    acc[origen] += p.amount_cents;
+    acc[origen] += p.amount_cents - (p.tip_cents ?? 0);
   }
   return acc;
 }

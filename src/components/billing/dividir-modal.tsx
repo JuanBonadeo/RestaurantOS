@@ -34,7 +34,12 @@ export function SplitsBanner({
   splits: CuentaState["splits"];
   onLimpiar: () => void;
 }) {
-  const totalAsignado = splits.reduce(
+  // Una sub-cuenta cancelada no está asignada a nadie: su `expected` ya se
+  // redistribuyó entre las vivas (spec 36 · R-C4). Contándolas, después de
+  // limpiar una división quedaba «Cuenta dividida en 1 sub-cuenta · Total
+  // asignado $24.667» sobre una mesa sin dividir (issue #189).
+  const vivos = splits.filter((s) => s.status !== "cancelled");
+  const totalAsignado = vivos.reduce(
     (acc, s) => acc + s.expected_amount_cents,
     0,
   );
@@ -48,8 +53,8 @@ export function SplitsBanner({
       </div>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold text-zinc-900">
-          Cuenta dividida en {splits.length}{" "}
-          {splits.length === 1 ? "sub-cuenta" : "sub-cuentas"}
+          Cuenta dividida en {vivos.length}{" "}
+          {vivos.length === 1 ? "sub-cuenta" : "sub-cuentas"}
         </p>
         <p className="text-xs text-zinc-600 tabular-nums">
           Total asignado: {formatCurrency(totalAsignado)}
