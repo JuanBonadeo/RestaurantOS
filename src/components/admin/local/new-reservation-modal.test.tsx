@@ -150,6 +150,11 @@ describe("nueva reserva · teclado (spec 075)", () => {
 
     const almuerzo = await screen.findByRole("button", { name: "Almuerzo" });
     await esperarAutofocus();
+    // Igual que sus dos hermanos: sin mover la fecha, este test elegía Cena
+    // (20:00–23:00) **para hoy** y esperaba horarios, así que a partir de las 23
+    // la grilla venía vacía y el test se ponía rojo por la hora del reloj, no
+    // por el código (issue #190).
+    await fechaManana();
     almuerzo.focus();
     await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("button", { name: "Cena" })).toHaveFocus();
