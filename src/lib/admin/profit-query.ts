@@ -37,7 +37,13 @@ export async function getProfitMetrics(
       .gte("orders.created_at", startIso)
       .lt("orders.created_at", endIso)
       .neq("orders.status", "cancelled")
-      .neq("orders.lifecycle_status", "cancelled"),
+      .neq("orders.lifecycle_status", "cancelled")
+      // issue #190 — el ítem anulado tampoco es venta. Se filtraba la orden
+      // cancelada pero no la línea anulada adentro de una orden viva, así que
+      // cada plato que el encargado dio de baja seguía sumando al numerador
+      // mientras su costo **sí** se restaba por la reversión de la 089: ventas
+      // arriba, costo abajo, margen mejor que el real.
+      .is("cancelled_at", null),
     supabase
       .from("ingredient_consumptions")
       .select("cost_cents_snapshot, kind")
@@ -147,7 +153,11 @@ export async function getMenuEngineering(
       .gte("orders.created_at", startIso)
       .lt("orders.created_at", endIso)
       .neq("orders.status", "cancelled")
-      .neq("orders.lifecycle_status", "cancelled"),
+      .neq("orders.lifecycle_status", "cancelled")
+      // issue #190 — un plato anulado no se vendió: no cuenta ni en unidades ni
+      // en facturado. Con él adentro, la ingeniería de menú mandaba al cuadrante
+      // «estrella» productos que se dieron de baja.
+      .is("cancelled_at", null),
     getCosteoOverview(businessId),
   ]);
 

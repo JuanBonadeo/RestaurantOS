@@ -96,7 +96,10 @@ export async function getDashboardOverview(
       // spec 091 — los dos ejes. Con uno solo, Top productos seguía mostrando
       // las 6 cervezas de una mesa anulada al día siguiente.
       .neq("orders.status", "cancelled")
-      .neq("orders.lifecycle_status", "cancelled"),
+      .neq("orders.lifecycle_status", "cancelled")
+      // issue #190 — y el tercer eje: la **línea** anulada adentro de una mesa
+      // viva. Las dos milanesas que se cayeron al piso seguían en Top productos.
+      .is("cancelled_at", null),
     supabase
       .from("customers")
       .select("created_at")

@@ -200,6 +200,8 @@ type OrderRowFull = {
     product_name: string;
     quantity: number;
     subtotal_cents: number | string;
+    /** issue #190 — la línea anulada no es venta, aunque la orden esté viva. */
+    cancelled_at: string | null;
   }>;
 };
 
@@ -214,7 +216,7 @@ export async function getReportData(
 
   // 1. Pedidos del rango (con items para top y categorías)
   const ordersSel =
-    "id, created_at, total_cents, tip_cents, status, lifecycle_status, delivery_type, customer_id, customer_name, customer_phone, order_items(product_id, product_name, quantity, subtotal_cents)";
+    "id, created_at, total_cents, tip_cents, status, lifecycle_status, delivery_type, customer_id, customer_name, customer_phone, order_items(product_id, product_name, quantity, subtotal_cents, cancelled_at)";
 
   const [
     ordersRes,
@@ -320,6 +322,7 @@ export async function getReportData(
     }
 
     for (const item of o.order_items ?? []) {
+      if (item.cancelled_at) continue;
       const existing = productMap.get(item.product_name) ?? {
         product_name: item.product_name,
         quantity: 0,
@@ -389,6 +392,7 @@ export async function getReportData(
   for (const o of orders) {
     if (isOrderDead(o)) continue;
     for (const item of o.order_items ?? []) {
+      if (item.cancelled_at) continue;
       const catId = item.product_id
         ? productToCategory.get(item.product_id) ?? null
         : null;

@@ -315,7 +315,7 @@ export async function getCustomerDetail(
     supabase
       .from("orders")
       .select(
-        "id, order_number, created_at, status, delivery_type, total_cents, payment_method, payment_status, order_items(product_name, quantity, subtotal_cents)",
+        "id, order_number, created_at, status, delivery_type, total_cents, payment_method, payment_status, order_items(product_name, quantity, subtotal_cents, cancelled_at)",
       )
       .eq("business_id", businessId)
       .eq("customer_id", customer.id)
@@ -359,6 +359,8 @@ export async function getCustomerDetail(
   >();
   for (const o of nonCancelled) {
     for (const it of o.order_items ?? []) {
+      // issue #190 — lo que el cliente pidió y se anuló no es lo que consume.
+      if (it.cancelled_at) continue;
       const cur = productMap.get(it.product_name) ?? {
         product_name: it.product_name,
         quantity: 0,
