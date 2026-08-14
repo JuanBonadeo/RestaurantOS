@@ -1006,6 +1006,9 @@ export function CargarPedidoSheet({
         <ProductModal
           product={openProduct}
           open={!!openProduct}
+          // Delivery y para llevar tampoco tienen tiempos que ordenar: va todo
+          // en la misma bolsa (issue #190, misma razón que la venta rápida).
+          permiteComoEntrada={false}
           onClose={() => {
             setOpenProduct(null);
             focusSearch();
