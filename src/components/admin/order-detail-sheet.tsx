@@ -108,6 +108,7 @@ export function OrderDetailSheet({
   timezone,
   onAdvance,
   onConfirm,
+  abrirCobro = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -116,6 +117,9 @@ export function OrderDetailSheet({
   timezone: string;
   onAdvance: (order: AdminOrder, next: OrderStatus) => void;
   onConfirm?: (order: AdminOrder, kitchenNotes: string) => void;
+  /** Abrir directo en el cobro: lo usa el botón «Cobrar» de la tarjeta de un
+   *  pedido entregado e impago (issue #190). */
+  abrirCobro?: boolean;
 }) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -126,6 +130,13 @@ export function OrderDetailSheet({
   const [cobrarOpen, setCobrarOpen] = useState(false);
   // Indicación para cocina que se escribe al marchar («ENTREGAR x»).
   const [kitchenNotes, setKitchenNotes] = useState("");
+
+  // El botón «Cobrar» de la tarjeta abre el detalle con el cobro ya arriba: es
+  // lo único que le falta a ese pedido, y hacerlo pasar por el detalle era el
+  // paso donde se olvidaba (issue #190).
+  useEffect(() => {
+    if (open && abrirCobro) setCobrarOpen(true);
+  }, [open, abrirCobro]);
 
   useEffect(() => {
     if (!open) return;

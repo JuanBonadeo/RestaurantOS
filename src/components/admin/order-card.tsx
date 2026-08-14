@@ -80,6 +80,8 @@ export function OrderCard({
   columnRing?: string;
 }) {
   const [sheetOpen, setSheetOpen] = useState(false);
+  /** Abrir el detalle ya con el cobro arriba (botón «Cobrar» de la tarjeta). */
+  const [cobrarDirecto, setCobrarDirecto] = useState(false);
   const elapsed = useElapsedMinutes(order.created_at);
 
   // Decide qué botón mostrar.
@@ -124,11 +126,27 @@ export function OrderCard({
   // en efectivo ya cobrado decía "Paga en efectivo" para siempre — el board no
   // distinguía lo cobrado de lo que falta cobrar, que es lo único que el
   // encargado necesita saber de un vistazo.
+  // issue #190 — el pedido que ya se fue y no se cobró.
+  //
+  // «Paga en efectivo» describe el método, y mientras el pedido está en la
+  // cocina alcanza: se va a cobrar cuando se entregue. Una vez entregado deja de
+  // ser una promesa y pasa a ser plata que falta, pero la tarjeta seguía igual —
+  // en la columna «Entregados» un pedido cobrado y uno impago se veían idénticos
+  // y la única forma de darse cuenta era abrir el detalle.
+  const entregadoImpago =
+    order.status === "delivered" && order.payment_status !== "paid";
+
   const paymentBadge = (() => {
     if (order.payment_status === "paid")
       return {
         label: "Cobrado",
         className: "bg-emerald-100 text-emerald-800",
+        Icon: order.payment_method === "mp" ? CreditCard : Banknote,
+      };
+    if (entregadoImpago)
+      return {
+        label: "Sin cobrar",
+        className: "bg-rose-100 text-rose-800",
         Icon: order.payment_method === "mp" ? CreditCard : Banknote,
       };
     if (order.payment_method === "cash")
@@ -223,6 +241,22 @@ export function OrderCard({
             <span className="text-muted-foreground/70 text-[11px] italic">
               Lo carga el mozo
             </span>
+          ) : entregadoImpago ? (
+            /* El cobro estaba sólo adentro del detalle: el pedido se iba
+               entregado e impago y la plata dependía de que alguien se acordara
+               de abrir la tarjeta. Acá abre el detalle **con el cobro puesto**,
+               que es lo único que falta hacer con este pedido. */
+            <Button
+              size="sm"
+              className="h-8 font-semibold"
+              onClick={(e) => {
+                e.stopPropagation();
+                setCobrarDirecto(true);
+                setSheetOpen(true);
+              }}
+            >
+              Cobrar
+            </Button>
           ) : isPendingOnline && onConfirm ? (
             <Button
               size="sm"
@@ -254,12 +288,16 @@ export function OrderCard({
 
       <OrderDetailSheet
         open={sheetOpen}
-        onOpenChange={setSheetOpen}
+        onOpenChange={(o) => {
+          setSheetOpen(o);
+          if (!o) setCobrarDirecto(false);
+        }}
         order={order}
         slug={slug}
         timezone={timezone}
         onAdvance={onAdvance}
         onConfirm={onConfirm}
+        abrirCobro={cobrarDirecto}
       />
     </>
   );
