@@ -101,7 +101,7 @@ export function renderShiftSummaryEmail(summary: ShiftSummary): {
     ${sectionTitle("Recaudación")}
     <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:8px 0;width:100%;">
       <tr>
-        ${kpi("Total recaudado", summary.recaudacion.total)}
+        ${kpi("Ventas", summary.recaudacion.total)}
         ${kpi("Propinas", summary.recaudacion.propinas)}
         ${kpi("Cobros", String(summary.recaudacion.cobros))}
       </tr>
@@ -179,7 +179,7 @@ function renderText(s: ShiftSummary): string {
     return lines.join("\n");
   }
   lines.push("RECAUDACIÓN");
-  lines.push(`  Total: ${s.recaudacion.total}  ·  Propinas: ${s.recaudacion.propinas}  ·  Cobros: ${s.recaudacion.cobros}`);
+  lines.push(`  Ventas: ${s.recaudacion.total}  ·  Propinas: ${s.recaudacion.propinas}  ·  Cobros: ${s.recaudacion.cobros}`);
   for (const m of s.recaudacion.porMetodo) lines.push(`  - ${m.label}: ${m.value}`);
   lines.push("");
   lines.push("FACTURACIÓN AFIP");

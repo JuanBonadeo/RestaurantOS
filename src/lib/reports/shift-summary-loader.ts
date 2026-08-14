@@ -127,8 +127,14 @@ export async function loadShiftSummaryData(
     { ventas: number; propinas: number; count: number }
   >();
   for (const p of payments) {
-    por_metodo[p.method] = (por_metodo[p.method] ?? 0) + p.amount_cents;
-    total_cents += p.amount_cents;
+    // issue #190 — venta = `amount − tip`, el mismo criterio que la caja
+    // (spec 098) y el dashboard. La propina viaja adentro de `amount_cents`
+    // porque es plata que entró, pero no es del negocio: sumándola, la fila del
+    // mozo decía «ventas $71.500 · propinas $6.500» por una venta de $65.000, y
+    // dos pantallas del mismo negocio daban números distintos para lo mismo.
+    const venta = p.amount_cents - p.tip_cents;
+    por_metodo[p.method] = (por_metodo[p.method] ?? 0) + venta;
+    total_cents += venta;
     propinas_cents += p.tip_cents;
     if (p.attributed_mozo_id) {
       const cur = mozoAgg.get(p.attributed_mozo_id) ?? {
@@ -136,7 +142,7 @@ export async function loadShiftSummaryData(
         propinas: 0,
         count: 0,
       };
-      cur.ventas += p.amount_cents;
+      cur.ventas += venta;
       cur.propinas += p.tip_cents;
       cur.count += 1;
       mozoAgg.set(p.attributed_mozo_id, cur);
