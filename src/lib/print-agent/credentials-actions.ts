@@ -219,9 +219,22 @@ export async function createPrintAgent(
     .single();
 
   if (error) {
-    // El único de (business_id, label) es lo que evita dos «Caja principal».
+    // Hay DOS únicos que pueden tirar 23505 acá, y confundirlos manda al que
+    // configura a renombrar en loop sin enterarse de qué pasa. Se discrimina por
+    // el texto del error porque `PostgrestError` no expone `constraint`.
     if (error.code === "23505") {
-      return actionError(`Ya hay un agente que se llama «${label}».`);
+      const detalle = `${error.message} ${error.details ?? ""}`;
+      // El único de `business_id` lo repone la 0047 a propósito, para que no se
+      // pueda crear la segunda credencial mientras el código viejo siga vivo.
+      if (detalle.includes("print_agent_credentials_business_id_key")) {
+        return actionError(
+          "Todavía no se puede agregar una segunda PC: falta aplicar la migración 0048 (cierre del modelo).",
+        );
+      }
+      // El único de (business_id, label) —desde la 0048— evita dos «Caja principal».
+      if (detalle.includes("business_label")) {
+        return actionError(`Ya hay un agente que se llama «${label}».`);
+      }
     }
     return actionError(`Error creando el agente: ${error.message}`);
   }
@@ -306,6 +319,11 @@ export async function getPrintAgentInstaller(
     .createSignedUrl(ZIP_PATH, 3600, { download: "print-agent.zip" });
   zipUrl = data?.signedUrl ?? null;
 
+  // `resolverAgente` pudo haber creado la primera credencial recién ahora (alta
+  // lazy de la spec 046). Sin esto la card se queda en «todavía no hay ningún
+  // agente instalado» hasta que alguien recargue a mano: ninguna otra cosa marca
+  // la página como stale, porque el resto de las actions revalidan y ésta no.
+  revalidatePath(`/${slug}/admin/configuracion/local`);
   return actionOk({ configJson, zipUrl, label: agente.label });
 }
 

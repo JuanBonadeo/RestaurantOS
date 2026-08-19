@@ -19,13 +19,14 @@
 --   2. `print_agent_status` pasa a una fila por agente → un agente caído se ve,
 --      aunque el otro esté latiendo.
 --
--- ⚠️ POR QUÉ ESTÁ PARTIDA EN DOS (0046 expand / 0047 contract)
+-- ⚠️ POR QUÉ ESTÁ PARTIDA EN TRES (0046 expand / 0047 índices / 0048 contract)
 -- Golf está imprimiendo en vivo. Si el cambio de PK de `print_agent_status`
 -- entrara ANTES del deploy, el heartbeat del código viejo —que upsertea con
 -- `onConflict: business_id`— fallaría contra una PK que ya no existe y el local
 -- se vería "sin conexión" hasta que Vercel termine de deployar. Esta fase es
 -- **aditiva y compatible con el código viejo**: se aplica cuando quieras. La
--- 0047 cierra el modelo y va DESPUÉS del deploy.
+-- 0047 agrega los dos índices que sostienen esa compatibilidad y se aplica
+-- pegada a ésta; la 0048 cierra el modelo y va DESPUÉS del deploy.
 --
 -- El alcance (`printer_scope`) es la lista de IPs/CIDR que ese agente puede
 -- tocar; el GET filtra por el `printer_ip` que cada trabajo ya trae resuelto, así
@@ -42,7 +43,7 @@ alter table "public"."print_agent_credentials"
 
 -- La fila que ya existe (golf) se queda con su key y estrena id. `label` queda
 -- NULLABLE en esta fase: el código viejo todavía puede insertar una credencial
--- sin label y no queremos que le explote en la cara. La 0047 lo cierra.
+-- sin label y no queremos que le explote en la cara. La 0048 lo cierra.
 update "public"."print_agent_credentials"
    set "label" = 'Agente principal'
  where "label" is null;
@@ -58,6 +59,9 @@ alter table "public"."print_agent_credentials"
 alter table "public"."print_agent_credentials"
   add constraint "print_agent_credentials_pkey" primary key ("id");
 
+-- Índice común acá; la 0047 lo reemplaza por uno ÚNICO mientras dure la ventana
+-- (el `upsert onConflict: "business_id"` del código viejo lo necesita), y la
+-- 0048 vuelve a éste cuando el negocio ya puede tener varios agentes.
 create index if not exists "print_agent_credentials_business_id_idx"
   on "public"."print_agent_credentials" ("business_id");
 
@@ -72,7 +76,7 @@ comment on column "public"."print_agent_credentials"."id" is
   'Spec 124: identidad del agente. La key resuelve a esta fila, así que el agente ya instalado no cambia nada de su lado.';
 
 comment on column "public"."print_agent_credentials"."label" is
-  'Spec 124: cómo se llama esta PC en el panel («Caja principal», «Caja bar»). Único por negocio desde la 0047.';
+  'Spec 124: cómo se llama esta PC en el panel («Caja principal», «Caja bar»). Único por negocio desde la 0048.';
 
 comment on column "public"."print_agent_credentials"."printer_scope" is
   'Spec 124: IPs/CIDR que este agente alcanza (ej: {192.168.100.0/24}). El GET filtra los trabajos por printer_ip contra esta lista. NULL = sin restricción (negocio de un solo agente, comportamiento previo a la 124). Se valida en la app (normalizarScope); el matcher degrada sin romper ante una entrada inválida.';
@@ -94,4 +98,4 @@ update "public"."print_agent_status" s
    and s."agent_id" is null;
 
 comment on column "public"."print_agent_status"."agent_id" is
-  'Spec 124: qué agente latió. Antes la PK era sólo business_id, así que dos PCs se pisaban la fila y un agente caído se veía conectado porque el otro seguía latiendo. Se vuelve NOT NULL y parte de la PK en la 0047.';
+  'Spec 124: qué agente latió. Antes la PK era sólo business_id, así que dos PCs se pisaban la fila y un agente caído se veía conectado porque el otro seguía latiendo. Se vuelve NOT NULL y parte de la PK en la 0048.';
