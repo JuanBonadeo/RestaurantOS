@@ -793,7 +793,12 @@ function TabsInner({
           contenedor que scrollea en X establece un contexto de recorte también
           en Y, y con la barra entera scrolleando el desplegable del selector
           quedaba cortado (no tapado — por eso subirle el z-index no servía). */}
-      <div className="border-border/60 flex items-center gap-3 border-b bg-white/95 px-3 py-3 pr-16 backdrop-blur sm:px-4 sm:pr-20">
+      {/* `relative z-40` es lo que mantiene el desplegable del selector por
+          ENCIMA del panel de la mesa. El `backdrop-blur` de esta barra crea un
+          contexto de apilamiento propio: sin posicionarla, el `z-50` del menú
+          sólo compite adentro de la barra, y el `<aside>` del panel (que es
+          `relative`) pinta por arriba de todo el bloque. */}
+      <div className="border-border/60 relative z-40 flex items-center gap-3 border-b bg-white/95 px-3 py-3 pr-16 backdrop-blur sm:px-4 sm:pr-20">
         <div className="min-w-0 overflow-x-auto">{tabsBar}</div>
         {showSalonFilter && (
           <SalonSelector
