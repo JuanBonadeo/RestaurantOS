@@ -242,12 +242,22 @@ export type PrintAgentHealth = {
 };
 
 /**
- * Salud del print agent on-site (spec 35). Devuelve el último `last_seen_at`
- * del heartbeat; el cliente deriva "conectada" / "sin conexión hace X" con un
- * reloj vivo (para no depender del tiempo del server render) usando su propio
- * umbral (`PRINT_AGENT_OFFLINE_THRESHOLD_MS`, definido en `comandas-kanban.tsx`
- * para no arrastrar `server-only` al bundle). `null` = nunca reportó (agente
- * viejo sin heartbeat o nunca levantado).
+ * Salud del print agent on-site (spec 35). Devuelve el `last_seen_at` que manda
+ * la pill de operación; el cliente deriva "conectada" / "sin conexión hace X"
+ * con un reloj vivo (para no depender del tiempo del server render) usando su
+ * propio umbral (`PRINT_AGENT_OFFLINE_THRESHOLD_MS`, definido en
+ * `comandas-kanban.tsx` para no arrastrar `server-only` al bundle). `null` =
+ * nunca reportó (agente viejo sin heartbeat o nunca levantado).
+ *
+ * Spec 124: puede haber varias filas, una por agente. Se devuelve **el latido
+ * más VIEJO**, no el más nuevo: la pill contesta "¿está saliendo el papel?", y
+ * si una de las dos PCs está muerta la mitad de los tickets no se imprimen —
+ * eso es rojo. Quedarse con el más nuevo era justo el bug que esta spec vino a
+ * arreglar, sólo que corrido a la otra punta.
+ *
+ * Un agente recién creado que todavía no latió no tiene fila y por lo tanto no
+ * cuenta: `print_agent_credentials` es service-role-only y esta query corre con
+ * el cliente del usuario. El detalle por agente vive en Configuración → Local.
  */
 export async function getPrintAgentHealth(
   businessId: string,
@@ -257,12 +267,14 @@ export async function getPrintAgentHealth(
     .from("print_agent_status")
     .select("last_seen_at")
     .eq("business_id", businessId)
-    .maybeSingle();
+    .order("last_seen_at", { ascending: true })
+    .limit(1);
   if (error) {
     console.error("getPrintAgentHealth", error);
     return { lastSeenAt: null };
   }
-  return { lastSeenAt: (data as { last_seen_at: string } | null)?.last_seen_at ?? null };
+  const filas = (data ?? []) as { last_seen_at: string }[];
+  return { lastSeenAt: filas[0]?.last_seen_at ?? null };
 }
 
 export async function getStationsForLocal(

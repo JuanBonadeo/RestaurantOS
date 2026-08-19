@@ -11,6 +11,7 @@ let itemRows: Row[]; // `order_items` del pedido → bloque «COMBINA CON» del 
 let postRow: Row | null; // fila del select del POST (maybeSingle)
 let captured: { updates: Record<string, unknown>[]; orFilters: string[] };
 let notifyCalls: { businessId: string; comandaId: string }[];
+let scopeDelAgente: string[] | null; // `printer_scope` del agente de biz1 (spec 124)
 
 vi.mock("@/lib/notifications/events", () => ({
   notifyPrintFailed: async (p: { businessId: string; comandaId: string }) => {
@@ -18,12 +19,25 @@ vi.mock("@/lib/notifications/events", () => ({
   },
 }));
 
-// Key por-negocio (la global se retiró, security review #4): biz1 usa "test-key".
+// Key por-agente (la global se retiró, security review #4): biz1 usa "test-key".
+// El alcance sale de `scopeDelAgente` (mutable, como `rows`/`postRow`): default
+// `null` = sin restricción (spec 124), que es el negocio de un solo agente y el
+// comportamiento previo a esa spec.
 vi.mock("@/lib/print-agent/credentials", () => ({
-  getPrintAgentKey: async (businessId: string) =>
-    ((({ biz1: "test-key", biz2: "key-biz2" }) as Record<string, string>)[
-      businessId
-    ]) ?? null,
+  listPrintAgentCredentials: async (businessId: string) => {
+    const keys: Record<string, string> = { biz1: "test-key", biz2: "key-biz2" };
+    const apiKey = keys[businessId];
+    return apiKey
+      ? [
+          {
+            id: `agente-${businessId}`,
+            apiKey,
+            label: null,
+            printerScope: scopeDelAgente,
+          },
+        ]
+      : [];
+  },
 }));
 
 vi.mock("@/lib/supabase/service", () => ({
@@ -168,6 +182,7 @@ beforeEach(() => {
   postRow = null;
   captured = { updates: [], orFilters: [] };
   notifyCalls = [];
+  scopeDelAgente = null;
 });
 
 describe("GET /api/print-agent — printer_ip por comanda (spec 28)", () => {
@@ -404,6 +419,62 @@ describe("GET /api/print-agent — printer_ip por comanda (spec 28)", () => {
   it("sin Bearer válido → 401", async () => {
     const res = await GET(getReq(""));
     expect(res.status).toBe(401);
+  });
+});
+
+describe("GET /api/print-agent — alcance del agente (spec 124)", () => {
+  // Un negocio puede tener varias PCs con print-agent, en LANs distintas (golf:
+  // una por caja). Cada una recibe sólo los trabajos cuya impresora alcanza.
+
+  it("sin scope → no se filtra nada (el negocio de un solo agente)", async () => {
+    // Es el default y lo que deja a la PC ya instalada de golf recibiendo todo
+    // exactamente como antes de esta spec: si esto se rompe, el local se queda
+    // sin papel sin que nadie haya tocado esa máquina.
+    rows = [
+      makeRow("Cocina", "192.168.1.50"),
+      makeRow("Bar", "192.168.2.50"),
+      makeRow("Postres", null),
+    ];
+    const res = await GET(getReq());
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { comandas: { station_name: string }[] };
+    expect(body.comandas.map((c) => c.station_name)).toEqual([
+      "Cocina",
+      "Bar",
+      "Postres",
+    ]);
+  });
+
+  it("scope por rango → sólo las comandas de impresoras de esa LAN", async () => {
+    scopeDelAgente = ["192.168.1.0/24"];
+    rows = [makeRow("Cocina", "192.168.1.50"), makeRow("Bar", "192.168.2.50")];
+    const res = await GET(getReq());
+    const body = (await res.json()) as { comandas: { station_name: string }[] };
+    expect(body.comandas.map((c) => c.station_name)).toEqual(["Cocina"]);
+  });
+
+  it("comanda sin printer_ip → se sirve igual aunque el agente tenga scope", async () => {
+    // Sin IP no se la puede atribuir a ninguna LAN, y filtrarla la haría
+    // desaparecer del pull sin que nadie la vea. Papel de más es ruido; papel
+    // de menos es un pedido que no llega a cocina.
+    scopeDelAgente = ["192.168.1.0/24"];
+    rows = [makeRow("Cocina", "192.168.1.50"), makeRow("Bar", null)];
+    const res = await GET(getReq());
+    const body = (await res.json()) as { comandas: { station_name: string }[] };
+    expect(body.comandas.map((c) => c.station_name)).toEqual(["Cocina", "Bar"]);
+  });
+
+  it("scope con basura → responde 200 igual, no se lleva puesto el pull", async () => {
+    // El filtro corre FUERA de `safePrintables`, así que un matcher que tirara
+    // con una entrada mal cargada dejaría a cocina sin comandas, no sólo sin
+    // los papeles de la otra caja.
+    scopeDelAgente = ["no-es-una-ip"];
+    rows = [makeRow("Cocina", "192.168.1.50"), makeRow("Bar", null)];
+    const res = await GET(getReq());
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { comandas: { station_name: string }[] };
+    // La entrada inválida no matchea nada, pero la comanda sin IP sale igual.
+    expect(body.comandas.map((c) => c.station_name)).toEqual(["Bar"]);
   });
 });
 

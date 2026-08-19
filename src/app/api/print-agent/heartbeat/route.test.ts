@@ -18,8 +18,17 @@ vi.mock("@/lib/supabase/service", () => ({
 
 // Key por-negocio (la global se retiró, security review #4): biz1 usa "test-key".
 vi.mock("@/lib/print-agent/credentials", () => ({
-  getPrintAgentKey: async (businessId: string) =>
-    businessId === "biz1" ? "test-key" : null,
+  listPrintAgentCredentials: async (businessId: string) =>
+    businessId === "biz1"
+      ? [
+          {
+            id: "agente-biz1",
+            apiKey: "test-key",
+            label: null,
+            printerScope: null,
+          },
+        ]
+      : [],
 }));
 
 const { POST } = await import("./route");
@@ -40,15 +49,23 @@ beforeEach(() => {
 });
 
 describe("POST /api/print-agent/heartbeat (spec 35)", () => {
-  it("con Bearer válido → upsertea last_seen_at por negocio", async () => {
+  it("con Bearer válido → upsertea last_seen_at POR AGENTE (spec 124)", async () => {
+    // El agente no manda nada nuevo: quién latió sale de su key. Antes el
+    // upsert era por `business_id` a secas y dos PCs se pisaban la fila, así
+    // que una caída se tapaba con el latido de la otra.
     const res = await POST(postReq({ business_id: "biz1" }));
     expect(res.status).toBe(200);
     const body = (await res.json()) as { ok: boolean };
     expect(body.ok).toBe(true);
     expect(upsertCalls).toHaveLength(1);
-    expect(upsertCalls[0].vals).toMatchObject({ business_id: "biz1" });
+    expect(upsertCalls[0].vals).toMatchObject({
+      business_id: "biz1",
+      agent_id: "agente-biz1",
+    });
     expect(upsertCalls[0].vals).toHaveProperty("last_seen_at");
-    expect(upsertCalls[0].opts).toMatchObject({ onConflict: "business_id" });
+    expect(upsertCalls[0].opts).toMatchObject({
+      onConflict: "business_id,agent_id",
+    });
   });
 
   it("sin Bearer válido → 401, no upsertea", async () => {

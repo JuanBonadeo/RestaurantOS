@@ -12,7 +12,9 @@ type Row = Record<string, unknown>;
 
 let businessRow: Row | null;
 let controlRows: Row[];
+let cuentaRows: Row[];
 let controlPostRow: Row | null;
+let agentScope: string[] | null;
 let captured: { updates: { table: string; vals: Record<string, unknown> }[] };
 
 vi.mock("@/lib/notifications/events", () => ({
@@ -20,8 +22,19 @@ vi.mock("@/lib/notifications/events", () => ({
 }));
 
 vi.mock("@/lib/print-agent/credentials", () => ({
-  getPrintAgentKey: async (businessId: string) =>
-    businessId === "biz1" ? "test-key" : null,
+  listPrintAgentCredentials: async (businessId: string) =>
+    businessId === "biz1"
+      ? [
+          {
+            id: "agente-biz1",
+            apiKey: "test-key",
+            label: null,
+            // Se lee en cada llamada, así que un test puede angostar el alcance
+            // del agente sin rearmar el mock (spec 124).
+            printerScope: agentScope,
+          },
+        ]
+      : [],
 }));
 
 // Mock consciente de la tabla: las comandas de cocina quedan vacías para aislar
@@ -54,7 +67,13 @@ vi.mock("@/lib/supabase/service", () => ({
           then: (resolve: (v: { data: Row[]; error: null }) => unknown) =>
             resolve({
               data:
-                table === "print_jobs" && kind === "control" ? controlRows : [],
+                table !== "print_jobs"
+                  ? []
+                  : kind === "control"
+                    ? controlRows
+                    : kind === "cuenta"
+                      ? cuentaRows
+                      : [],
               error: null,
             }),
         };
@@ -123,6 +142,43 @@ function ticket(over: Row = {}): Row {
   };
 }
 
+/** Una cuenta de mesa pendiente, con su comandera en OTRA LAN que el control. */
+function cuentaJob(): Row {
+  return {
+    id: "cta1",
+    status: "pendiente",
+    emitted_at: "2026-07-28T19:16:00-03:00",
+    reprint_requested_at: null,
+    orders: {
+      order_number: 77,
+      subtotal_cents: 100000,
+      discount_cents: 0,
+      discount_reason: null,
+      tip_cents: 0,
+      total_cents: 100000,
+      total_paid_cents: 0,
+      tables: {
+        label: "12",
+        floor_plans: {
+          name: "Terraza",
+          cuenta_printer_ip: "192.168.20.70",
+          cuenta_printer_port: 9100,
+          cuenta_printer_enabled: true,
+        },
+      },
+      order_items: [
+        {
+          quantity: 1,
+          unit_price_cents: 100000,
+          notes: null,
+          cancelled_at: null,
+          products: { name: "Cafe" },
+        },
+      ],
+    },
+  };
+}
+
 beforeEach(() => {
   businessRow = {
     name: "Restaurant del Golf",
@@ -133,7 +189,9 @@ beforeEach(() => {
     control_printer_enabled: true,
   };
   controlRows = [ticket()];
+  cuentaRows = [];
   controlPostRow = null;
+  agentScope = null;
   captured = { updates: [] };
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -186,6 +244,44 @@ describe("GET · controles de pedido", () => {
     const body = await (await GET(getReq())).json();
     expect(body.comandas[0].content_plain).not.toContain("Anulado");
     expect(body.comandas[0].content_plain).toContain("(sin items)");
+  });
+});
+
+describe("GET · alcance del agente (spec 124)", () => {
+  // El `?station_id=` viejo filtraba sólo comandas de cocina: control, cuenta y
+  // factura se arman por `business_id` y se las llevaban los dos agentes. Estos
+  // tests están acá porque este archivo es el único con un mock que distingue
+  // tablas, o sea el único donde se puede ver una familia que no es comanda.
+  it("un control fuera del alcance no se le entrega al agente", async () => {
+    agentScope = ["192.168.99.0/24"];
+    const body = await (await GET(getReq())).json();
+    expect(body.comandas).toEqual([]);
+  });
+
+  it("el mismo control sale entero si el agente no declara alcance", async () => {
+    agentScope = null;
+    const body = await (await GET(getReq())).json();
+    expect(body.comandas).toHaveLength(1);
+    expect(body.comandas[0].comanda_id).toBe("ct1");
+  });
+
+  it("con dos familias, cada una se mide contra su propia impresora", async () => {
+    // El agente llega a la comandera de control (…10.60) pero no a la de la
+    // terraza (…20.70): sin el filtro reportaría `failed` por la cuenta del
+    // otro local y le pisaría el papel al agente que sí la imprimió.
+    cuentaRows = [cuentaJob()];
+    agentScope = ["192.168.10.0/24"];
+    const body = await (await GET(getReq())).json();
+    expect(body.comandas.map((c: Row) => c.comanda_id)).toEqual(["ct1"]);
+  });
+
+  it("sin alcance el agente se lleva el control y la cuenta", async () => {
+    cuentaRows = [cuentaJob()];
+    const body = await (await GET(getReq())).json();
+    expect(body.comandas.map((c: Row) => c.station_name)).toEqual([
+      "CONTROL",
+      "CUENTA",
+    ]);
   });
 });
 

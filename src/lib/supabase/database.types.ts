@@ -2765,25 +2765,34 @@ export type Database = {
           api_key: string
           business_id: string
           created_at: string
+          id: string
+          label: string | null
+          printer_scope: string[] | null
           updated_at: string
         }
         Insert: {
           api_key: string
           business_id: string
           created_at?: string
+          id?: string
+          label?: string | null
+          printer_scope?: string[] | null
           updated_at?: string
         }
         Update: {
           api_key?: string
           business_id?: string
           created_at?: string
+          id?: string
+          label?: string | null
+          printer_scope?: string[] | null
           updated_at?: string
         }
         Relationships: [
           {
             foreignKeyName: "print_agent_credentials_business_id_fkey"
             columns: ["business_id"]
-            isOneToOne: true
+            isOneToOne: false
             referencedRelation: "businesses"
             referencedColumns: ["id"]
           },
@@ -2791,14 +2800,17 @@ export type Database = {
       }
       print_agent_status: {
         Row: {
+          agent_id: string | null
           business_id: string
           last_seen_at: string
         }
         Insert: {
+          agent_id?: string | null
           business_id: string
           last_seen_at?: string
         }
         Update: {
+          agent_id?: string | null
           business_id?: string
           last_seen_at?: string
         }

@@ -2,16 +2,20 @@ import { NextResponse } from "next/server";
 
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
-import { unauthorized, verifyAgentKey } from "../agent-auth";
+import { unauthorized, autenticarAgente } from "../agent-auth";
 
 /**
  * POST /api/print-agent/heartbeat
  * Body: { business_id: string }
  *
- * Latido del print agent on-site (spec 35). El agente lo llama cada ~15s con la
- * misma `PRINT_AGENT_KEY`. Upsertea `print_agent_status.last_seen_at`; operación
- * deriva "conectada" (now - last_seen < 60s) vs "sin conexión hace X". Desacopla
- * la señal de salud del ritmo del poll del GET.
+ * Latido del print agent on-site (spec 35). El agente lo llama cada ~15s con su
+ * key. Upsertea `print_agent_status.last_seen_at`; operación deriva "conectada"
+ * (now - last_seen < 60s) vs "sin conexión hace X". Desacopla la señal de salud
+ * del ritmo del poll del GET.
+ *
+ * Spec 124: una fila POR AGENTE. Antes la PK era sólo `business_id`, así que dos
+ * PCs se pisaban el latido y un agente caído se veía conectado porque el otro
+ * seguía latiendo. El agente no manda nada nuevo: quién latió sale de su key.
  */
 export async function POST(req: Request) {
   let body: { business_id?: string };
@@ -22,8 +26,10 @@ export async function POST(req: Request) {
   }
 
   const businessId = body.business_id;
-  // Auth con el business_id ya parseado (spec 046): acepta key global o del negocio.
-  if (!(await verifyAgentKey(req, businessId))) return unauthorized();
+  // Auth con el business_id ya parseado (spec 046). Spec 124: la key identifica
+  // al agente, que es lo que se latea.
+  const agente = await autenticarAgente(req, businessId);
+  if (!agente) return unauthorized();
   if (!businessId) {
     return NextResponse.json({ error: "missing business_id" }, { status: 400 });
   }
@@ -32,8 +38,12 @@ export async function POST(req: Request) {
   const { error } = await service
     .from("print_agent_status")
     .upsert(
-      { business_id: businessId, last_seen_at: new Date().toISOString() },
-      { onConflict: "business_id" },
+      {
+        business_id: businessId,
+        agent_id: agente.id,
+        last_seen_at: new Date().toISOString(),
+      },
+      { onConflict: "business_id,agent_id" },
     );
 
   if (error) {

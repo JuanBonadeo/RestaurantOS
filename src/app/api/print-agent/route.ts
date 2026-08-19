@@ -18,7 +18,9 @@ import { resolveFiscalPrinter } from "@/lib/print/fiscal-printer";
 import { buildComandaContent } from "@/lib/print/ticket";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
-import { unauthorized, verifyAgentKey } from "./agent-auth";
+import { alcanzaLaImpresora } from "@/lib/print/agent-scope";
+
+import { unauthorized, autenticarAgente } from "./agent-auth";
 
 /**
  * Sanea texto que va al stream ESC/POS de la comandera: quita bytes de control
@@ -45,8 +47,10 @@ function sanitizeTicketText(s: string | null | undefined): string | null {
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const businessId = url.searchParams.get("business_id");
-  // Auth con el business_id ya parseado (spec 046): acepta key global o del negocio.
-  if (!(await verifyAgentKey(req, businessId))) return unauthorized();
+  // Auth con el business_id ya parseado (spec 046). Spec 124: la key dice QUÉ
+  // agente es, y de ahí sale su alcance de impresoras.
+  const agente = await autenticarAgente(req, businessId);
+  if (!agente) return unauthorized();
   if (!businessId) {
     return NextResponse.json(
       { error: "missing business_id" },
@@ -240,9 +244,22 @@ export async function GET(req: Request) {
     ),
   ]);
 
-  return NextResponse.json({
-    comandas: [...printable, ...controls, ...cuentas, ...facturas],
-  });
+  // ── Alcance del agente (spec 124) ─────────────────────────────────────────
+  // Un negocio puede tener varias PCs con print-agent, en LANs distintas: cada
+  // una recibe sólo los trabajos cuya impresora puede tocar. El filtro va acá,
+  // sobre el `printer_ip` que las cuatro familias ya traen resuelto, en vez de
+  // declarar sectores + salones + cajas por separado.
+  //
+  // Sin esto los dos agentes verían todo y el que no llega reportaría `failed`
+  // por cada papel del otro local: `print_failed_at` + aviso a cocina, y encima
+  // pisando comandas que el otro ya imprimió bien.
+  //
+  // Un negocio de un solo agente tiene `printerScope` null y no filtra nada.
+  const trabajos = [...printable, ...controls, ...cuentas, ...facturas].filter(
+    (t) => alcanzaLaImpresora(agente.printerScope, t.printer_ip),
+  );
+
+  return NextResponse.json({ comandas: trabajos });
 }
 
 /** Item de un pedido con su sector, para el bloque «COMBINA CON» de los tickets. */
@@ -567,7 +584,7 @@ export async function POST(req: Request) {
   }
 
   // Auth con el business_id ya parseado (spec 046): acepta key global o del negocio.
-  if (!(await verifyAgentKey(req, body.business_id))) return unauthorized();
+  if (!(await autenticarAgente(req, body.business_id))) return unauthorized();
 
   // `business_id` obligatorio: es la base del check de ownership de abajo. Antes
   // era opcional y el check se salteaba al omitirlo, dejando transicionar

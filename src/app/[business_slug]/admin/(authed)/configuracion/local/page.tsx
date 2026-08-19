@@ -29,6 +29,7 @@ import {
   StationPrintersForm,
   type StationPrinterRow,
 } from "@/components/admin/settings/station-printers-form";
+import { listPrintAgents } from "@/lib/print-agent/credentials-actions";
 import { listClockOrigins } from "@/lib/rrhh/clock-origin-actions";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
@@ -51,7 +52,7 @@ export default async function ConfiguracionLocalPage({
     { data: bizFlag },
     { data: floorPlans },
     { data: cajas },
-    { data: agentStatus },
+    agentes,
   ] =
     await Promise.all([
       listClockOrigins(business.id),
@@ -82,11 +83,7 @@ export default async function ConfiguracionLocalPage({
         .eq("business_id", business.id)
         .eq("is_active", true)
         .order("sort_order"),
-      service
-        .from("print_agent_status")
-        .select("last_seen_at")
-        .eq("business_id", business.id)
-        .maybeSingle(),
+      listPrintAgents(business_slug),
     ]);
 
   const printAgentKeySet = Boolean(
@@ -108,8 +105,38 @@ export default async function ConfiguracionLocalPage({
     cuenta_printer_enabled:
       (bizFlag as CuentaPrinterConfig | null)?.cuenta_printer_enabled ?? true,
   };
-  const printAgentLastSeenAt =
-    (agentStatus as { last_seen_at?: string } | null)?.last_seen_at ?? null;
+  // Spec 124: un negocio puede tener varias PCs con print-agent (golf: una por
+  // caja, en LANs distintas). Si la lectura falla, la card cae al camino de
+  // "todavía no hay ninguno" en vez de romper la página entera de configuración.
+  const printAgents = agentes.ok ? agentes.data : [];
+
+  // Las impresoras configuradas del local, para que la card pueda avisar si
+  // alguna quedó fuera del alcance de TODOS los agentes. Ése es el modo de
+  // fallar más caro de la spec: el papel no sale y nadie reporta nada, porque el
+  // agente que no la alcanza directamente no la recibe.
+  const impresorasDelLocal: { label: string; ip: string }[] = [
+    ...((stations ?? []) as StationPrinterRow[])
+      .filter((st) => st.printer_ip && st.printer_enabled !== false)
+      .map((st) => ({ label: st.name, ip: st.printer_ip as string })),
+    ...(controlPrinter.control_printer_ip && controlPrinter.control_printer_enabled !== false
+      ? [{ label: "Control de pedido", ip: controlPrinter.control_printer_ip }]
+      : []),
+    ...(cuentaPrinter.cuenta_printer_ip && cuentaPrinter.cuenta_printer_enabled !== false
+      ? [{ label: "Cuenta (por defecto)", ip: cuentaPrinter.cuenta_printer_ip }]
+      : []),
+    ...((floorPlans ?? []) as FloorPlanPrinterRow[])
+      .filter((fp) => fp.cuenta_printer_ip && fp.cuenta_printer_enabled !== false)
+      .map((fp) => ({
+        label: `Cuenta · ${fp.name}`,
+        ip: fp.cuenta_printer_ip as string,
+      })),
+    ...((cajas ?? []) as CajaFiscalPrinterRow[])
+      .filter((c) => c.fiscal_printer_ip && c.fiscal_printer_enabled !== false)
+      .map((c) => ({
+        label: `Factura · ${c.name}`,
+        ip: c.fiscal_printer_ip as string,
+      })),
+  ];
 
   return (
     <>
@@ -158,12 +185,13 @@ export default async function ConfiguracionLocalPage({
       <SettingsSection
         icon={<MonitorDown className="size-5" />}
         title="Agente de impresión"
-        description="Descargá el agente ya configurado para este negocio e instalalo en UNA PC del local (la que quede siempre prendida). Hace de puente entre el sistema y las comanderas de la red."
+        description="Descargá el agente ya configurado e instalalo en una PC del local que quede siempre prendida. Hace de puente entre el sistema y las comanderas de la red. Si el local tiene impresoras en redes separadas, agregá un agente por red y decile a cada uno cuáles alcanza."
       >
         <PrintAgentCard
           slug={business_slug}
           keySet={printAgentKeySet}
-          lastSeenAt={printAgentLastSeenAt}
+          agents={printAgents}
+          impresoras={impresorasDelLocal}
         />
       </SettingsSection>
 

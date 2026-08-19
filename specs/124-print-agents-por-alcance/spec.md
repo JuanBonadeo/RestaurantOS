@@ -63,7 +63,16 @@ ya está en el payload, y es literalmente la pregunta física: *¿este agente ll
 a esta impresora?*
 
 **Default `null` = todo**, así que un negocio con un solo agente no configura
-nada y queda exactamente como hoy.
+nada y queda exactamente como hoy. Un `[]` se lee igual que `null`: sólo puede
+llegar por una config a medio hacer, y leerlo como «no alcanza ninguna» apagaría
+el local en silencio.
+
+Dos destinos se le sirven **a todos** los agentes en vez de filtrarse: el que no
+tiene impresora resoluble (hoy también se sirve, y el agente lo saltea) y el que
+no es una IPv4. Este último importa: `isValidPrinterHost` acepta hostnames
+(`comandera-cocina.local`) y desde el server no hay forma de saber en qué subred
+vive un nombre — sólo el agente, que lo resuelve en su LAN. Descartarlo dejaría
+esa comandera huérfana sin una sola traza.
 
 ⚠️ Esto asume que las dos LANs no comparten subred. Si las dos fueran
 `192.168.1.x` el rango no alcanza para distinguirlas y hay que listar IPs
@@ -73,9 +82,21 @@ configurar.
 ### 3. Heartbeat por agente
 
 `print_agent_status` pasa a PK `(business_id, agent_id)`. `getPrintAgentHealth`
-hoy hace `.maybeSingle()` (`src/lib/admin/local-query.ts`) y con dos filas
-rompería: pasa a devolver la lista, y Configuración → Local muestra un renglón
-por agente con su label. Un agente caído se ve, aunque el otro esté vivo.
+hacía `.maybeSingle()` (`src/lib/admin/local-query.ts`) y con dos filas rompería;
+ahora devuelve **el latido más viejo**, no el más nuevo. La pill de Operación
+contesta «¿está saliendo el papel?», y si una de las dos PCs está muerta la mitad
+de los tickets no se imprimen: eso es rojo. Quedarse con el más nuevo sería el
+mismo bug de origen, corrido a la otra punta. El detalle por agente vive en
+Configuración → Local, un renglón por PC con su label y su alcance.
+
+### 4. El aviso de las impresoras que no alcanza nadie
+
+Configuración → Local cruza el alcance de todos los agentes contra las impresoras
+configuradas (sectores, control, cuenta por salón, factura por caja) y marca las
+que **ningún** agente alcanza. Es la contracara del modo de fallar más caro que
+introduce esta spec: un typo en un CIDR no produce un error ni un `failed` —
+produce silencio, porque el agente que no alcanza esa impresora directamente no
+recibe el trabajo.
 
 ## Qué NO cambia
 
@@ -88,18 +109,33 @@ por agente con su label. Un agente caído se ve, aunque el otro esté vivo.
   reporta lo suyo, así que `failed` vuelve a significar «esta impresora no
   respondió» — que es lo que la spec 33 quiso decir.
 
+## Puesta en producción — el orden importa
+
+Golf está imprimiendo en vivo y hace GET + heartbeat **cada segundo**, así que la
+migración va partida en tres para que no haya ni una ventana rota:
+
+| Migración | Cuándo | Qué hace |
+|---|---|---|
+| **0046** | ya | Aditiva: columnas (`id`, `label`, `printer_scope`, `agent_id`), PK de credenciales a `id`, único de `api_key`. El código viejo sigue andando. |
+| **0047** | ya, pegada a la 0046 | Los dos índices que sostienen la ventana: repone el **único** de `business_id` (sin él, el `upsert onConflict:"business_id"` del código viejo rompe con 42P10 y **rotar la key deja de andar**) y crea el único de `(business_id, agent_id)` que el heartbeat nuevo necesita apenas se deploye. |
+| **0048** | **después del deploy** | Cierra el modelo: afloja el único de `business_id`, `label` obligatorio y único por negocio, PK del heartbeat a `(business_id, agent_id)` + FK con cascade. |
+
+La segunda key **no se crea hasta la 0048**: mientras el código viejo esté vivo,
+un segundo agente rompería su `.maybeSingle()` y golf se quedaría sin autenticar.
+
 ## Riesgo
 
 La key sigue siendo un secreto compartido dentro del negocio hasta que se rote;
-esto no lo empeora, pero ahora son dos copias en dos máquinas. Rotar una key
-tiene que poder hacerse sin voltear al otro agente — sale gratis con las filas
-separadas.
+esto no lo empeora, pero ahora son dos copias en dos máquinas. Rotar una key se
+hace sin voltear al otro agente: el `upsert onConflict: business_id` que le
+pisaba la fila al vecino pasó a ser un `update … where id = <agente>`.
 
 ## Verificación
 
 1. `pnpm typecheck` + `pnpm test` en verde.
-2. Migración aplicada al cloud, y **el agente de golf sigue imprimiendo sin que
-   nadie toque esa PC** — es la condición de éxito de todo esto.
+2. Migraciones aplicadas al cloud, y **el agente de golf sigue imprimiendo sin
+   que nadie toque esa PC** — es la condición de éxito de todo esto.
+   Verificable: `git status print-agent/` limpio al terminar.
 3. Con dos keys y alcances disjuntos: cada agente recibe sólo sus trabajos, y
    ninguno reporta `failed` sobre papel del otro.
 4. Con una sola key y `printer_scope` null: idéntico a hoy.
