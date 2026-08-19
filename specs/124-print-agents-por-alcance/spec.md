@@ -118,10 +118,16 @@ migración va partida en tres para que no haya ni una ventana rota:
 |---|---|---|
 | **0046** | ya | Aditiva: columnas (`id`, `label`, `printer_scope`, `agent_id`), PK de credenciales a `id`, único de `api_key`. El código viejo sigue andando. |
 | **0047** | ya, pegada a la 0046 | Los dos índices que sostienen la ventana: repone el **único** de `business_id` (sin él, el `upsert onConflict:"business_id"` del código viejo rompe con 42P10 y **rotar la key deja de andar**) y crea el único de `(business_id, agent_id)` que el heartbeat nuevo necesita apenas se deploye. |
-| **0048** | **después del deploy** | Cierra el modelo: afloja el único de `business_id`, `label` obligatorio y único por negocio, PK del heartbeat a `(business_id, agent_id)` + FK con cascade. |
+| **0048** | después del deploy | Cierra el modelo: afloja el único de `business_id`, `label` obligatorio y único por negocio, PK del heartbeat a `(business_id, agent_id)` + FK con cascade. |
 
-La segunda key **no se crea hasta la 0048**: mientras el código viejo esté vivo,
-un segundo agente rompería su `.maybeSingle()` y golf se quedaría sin autenticar.
+**Las tres están aplicadas** (2026-08-19). El deploy de Vercel salió automático con
+el push a `master`; la 0048 se aplicó recién después de confirmar que el agente de
+golf seguía latiendo contra el código nuevo. Siguió latiendo también después de
+ella, sin que nadie tocara esa PC.
+
+La segunda key no se podía crear hasta la 0048: mientras el código viejo estuvo
+vivo, un segundo agente habría roto su `.maybeSingle()` y golf se quedaba sin
+autenticar. Ya se puede.
 
 ## Riesgo
 
