@@ -37,7 +37,9 @@ export type ControlTicketData = {
   business_name: string;
   business_address?: string | null;
   business_phone?: string | null;
-  order_number: number | string;
+  /** `orders.daily_number`: el número del pedido del día, el mismo que canta
+   * la comanda de cocina. Arranca en 1 cada jornada (corte 6 AM). */
+  daily_number: number | string;
   delivery_type: "delivery" | "pickup";
   emitted_at: string;
   /**
@@ -144,7 +146,7 @@ export function buildControlTicketLines(c: ControlTicketData): Line[] {
 
   // ── Qué es y de qué pedido ────────────────────────────────────────────────
   push("Control de Pedido", { align: "center" });
-  banner(`${isDelivery ? "DELIVERY" : "RETIRO"} #${c.order_number}`);
+  banner(`${isDelivery ? "DELIVERY" : "RETIRO"} #${c.daily_number}`);
   push(RULE, { size: "sm" });
 
   // ── Cuándo ────────────────────────────────────────────────────────────────

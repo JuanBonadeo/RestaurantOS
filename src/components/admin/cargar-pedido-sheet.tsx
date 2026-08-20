@@ -448,26 +448,26 @@ export function CargarPedidoSheet({
         // desde «Próximos»). Si el aval falló, avisamos que hay que aceptarlo.
         if (r.data.needs_accept) {
           toast.warning(
-            `Pedido #${r.data.order_number} programado para las ${schedSlot}, pero quedó sin aceptar — aceptalo desde «Próximos» para que salga solo`,
+            `Pedido #${r.data.daily_number} programado para las ${schedSlot}, pero quedó sin aceptar — aceptalo desde «Próximos» para que salga solo`,
           );
         } else {
           toast.success(
-            `Pedido #${r.data.order_number} programado para las ${schedSlot} · la comanda sale sola ${marchLeadMin} min antes`,
+            `Pedido #${r.data.daily_number} programado para las ${schedSlot} · la comanda sale sola ${marchLeadMin} min antes`,
           );
         }
       } else if (marchar) {
         const c = await confirmarPedido(r.data.order_id, slug);
         if (!c.ok) {
           toast.warning(
-            `Pedido #${r.data.order_number} cargado, pero no marchó: ${c.error}`,
+            `Pedido #${r.data.daily_number} cargado, pero no marchó: ${c.error}`,
           );
         } else {
           toast.success(
-            `Pedido #${r.data.order_number} cargado y enviado a cocina`,
+            `Pedido #${r.data.daily_number} cargado y enviado a cocina`,
           );
         }
       } else {
-        toast.success(`Pedido #${r.data.order_number} cargado`);
+        toast.success(`Pedido #${r.data.daily_number} cargado`);
       }
       reset();
       onCreated?.();

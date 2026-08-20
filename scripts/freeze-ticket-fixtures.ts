@@ -13,6 +13,7 @@ import { buildComandaContent, type TicketComanda } from "../src/lib/print/ticket
 
 const base: TicketComanda = {
   comanda_id: "ab12cd34-0000-0000-0000-000000000000",
+  daily_number: 123,
   station_name: "Cocina",
   table_label: "5",
   batch: 2,
@@ -32,6 +33,9 @@ const cases: Record<string, TicketComanda> = {
   anulada: { ...base, cancelled: true, cancelled_reason: "cliente se fue" },
   reimpresion: { ...base, reprint: true },
   sinItems: { ...base, items: [] },
+  // Payload de un server anterior al número de pedido: el ticket cae al id de
+  // la comanda, como imprimía antes.
+  sinNumeroDePedido: { ...base, daily_number: null },
 };
 
 const out: Record<string, { escpos_b64: string; plain: string }> = {};

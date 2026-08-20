@@ -110,7 +110,7 @@ export function CobrarPedidoSheet({
         className="flex w-full flex-col gap-0 p-0 sm:max-w-md"
       >
         <SheetTitle className="border-border/60 border-b px-5 py-4 text-lg font-bold">
-          Cobrar pedido #{order.order_number}
+          Cobrar pedido #{order.daily_number}
         </SheetTitle>
 
         <div className="flex-1 overflow-y-auto px-5 py-4">
@@ -165,7 +165,7 @@ export function CobrarPedidoSheet({
                 }
                 onPaid={async () => {
                   await facturar();
-                  toast.success(`Pedido #${order.order_number} cobrado.`);
+                  toast.success(`Pedido #${order.daily_number} cobrado.`);
                   onDone?.();
                   onClose();
                 }}

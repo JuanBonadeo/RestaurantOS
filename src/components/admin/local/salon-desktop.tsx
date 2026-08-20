@@ -122,6 +122,8 @@ import { getSalonTabData } from "@/app/[business_slug]/admin/(authed)/operacion/
 export type SalonOrderRef = {
   id: string;
   order_number: number;
+  /** El número del día, el mismo que sale impreso en la comanda. */
+  daily_number: number;
   table_id: string | null;
   total_cents: number;
   created_at: string;
@@ -1406,6 +1408,7 @@ export function SalonDesktop({
         order: order
           ? {
               order_number: order.order_number,
+              daily_number: order.daily_number,
               total_cents: order.total_cents,
               delivery_type: "dine_in",
             }

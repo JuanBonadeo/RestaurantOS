@@ -2398,6 +2398,7 @@ export type Database = {
       orders: {
         Row: {
           bill_requested_at: string | null
+          business_day: string
           business_id: string
           cancelled_at: string | null
           cancelled_by: string | null
@@ -2408,6 +2409,7 @@ export type Database = {
           customer_id: string | null
           customer_name: string
           customer_phone: string
+          daily_number: number
           delivery_address: string | null
           delivery_fee_cents: number
           delivery_lat: number | null
@@ -2439,6 +2441,7 @@ export type Database = {
         }
         Insert: {
           bill_requested_at?: string | null
+          business_day?: string
           business_id: string
           cancelled_at?: string | null
           cancelled_by?: string | null
@@ -2449,6 +2452,7 @@ export type Database = {
           customer_id?: string | null
           customer_name: string
           customer_phone: string
+          daily_number?: number
           delivery_address?: string | null
           delivery_fee_cents?: number
           delivery_lat?: number | null
@@ -2480,6 +2484,7 @@ export type Database = {
         }
         Update: {
           bill_requested_at?: string | null
+          business_day?: string
           business_id?: string
           cancelled_at?: string | null
           cancelled_by?: string | null
@@ -2490,6 +2495,7 @@ export type Database = {
           customer_id?: string | null
           customer_name?: string
           customer_phone?: string
+          daily_number?: number
           delivery_address?: string | null
           delivery_fee_cents?: number
           delivery_lat?: number | null
@@ -3997,6 +4003,10 @@ export type Database = {
           fully_paid: boolean
           payment: Json
         }[]
+      }
+      operating_day: {
+        Args: { ts: string }
+        Returns: string
       }
       fn_explode_ingredient: {
         Args: { p_ingredient_id: string; p_quantity: number }

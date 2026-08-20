@@ -198,7 +198,7 @@ export function OrderCard({
         <header className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
             <span className="text-foreground text-xl font-extrabold leading-none tracking-tight tabular-nums">
-              #{order.order_number}
+              #{order.daily_number}
             </span>
             {entrega ? (
               <span

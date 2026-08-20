@@ -42,7 +42,7 @@ describe.skipIf(!dbAvailable)(
       const { data, error } = await supabase
         .from("orders")
         .insert({
-          order_number: 0,
+          order_number: 0, // 0 → lo asigna el trigger
           business_id: businessId,
           customer_name: "Control test",
           customer_phone: "-",

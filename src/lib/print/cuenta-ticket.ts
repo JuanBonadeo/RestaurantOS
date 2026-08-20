@@ -34,7 +34,9 @@ export type CuentaTicketData = {
   business_phone?: string | null;
   table_label: string;
   floor_plan_name?: string | null;
-  order_number: number | string;
+  /** `orders.daily_number`: el número del pedido del día, el mismo que canta
+   * la comanda de cocina. Arranca en 1 cada jornada (corte 6 AM). */
+  daily_number: number | string;
   emitted_at: string;
   subtotal_cents: number;
   discount_cents: number;
@@ -106,7 +108,7 @@ export function buildCuentaTicketLines(c: CuentaTicketData): Line[] {
   push("CUENTA", { align: "center" });
   push(`MESA ${c.table_label}`, { size: "tall", bold: true, align: "center" });
   if (c.floor_plan_name) push(c.floor_plan_name, { align: "center" });
-  push(row(`Pedido #${c.order_number}`, stamp(c.emitted_at)));
+  push(row(`Pedido #${c.daily_number}`, stamp(c.emitted_at)));
   push(RULE);
 
   // ── Lo consumido ──────────────────────────────────────────────────────────

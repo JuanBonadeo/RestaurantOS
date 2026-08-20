@@ -48,10 +48,11 @@ export async function getLoPedido(
   const { data: order, error: orderErr } = await service
     .from("orders")
     .select(
-      // `order_number` es el número que el local canta en voz alta («la 25»).
-      // Faltaba acá y el objeto se devuelve con un cast, así que el header de
-      // la mesa mostraba "Orden #" a secas sin que el compilador dijera nada.
-      "id, order_number, subtotal_cents, discount_cents, tip_cents, total_cents, party_size",
+      // `daily_number` es el número que el local canta en voz alta («la 7») y
+      // el que sale impreso en la comanda. Ojo con el cast del final: el objeto
+      // se devuelve con `as`, así que un campo que falte acá no lo marca el
+      // compilador — el header de la mesa mostraba "Orden #" a secas.
+      "id, order_number, daily_number, subtotal_cents, discount_cents, tip_cents, total_cents, party_size",
     )
     .eq("id", orderId)
     .eq("business_id", businessId)
@@ -110,6 +111,7 @@ export async function getLoPedido(
   const o = order as unknown as {
     id: string;
     order_number: number;
+    daily_number: number;
     subtotal_cents: number;
     discount_cents: number | null;
     tip_cents: number | null;
@@ -119,6 +121,7 @@ export async function getLoPedido(
   return {
     order_id: o.id,
     order_number: o.order_number,
+    daily_number: o.daily_number,
     items,
     party_size: o.party_size,
     subtotal_cents: Number(o.subtotal_cents),

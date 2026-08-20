@@ -41,8 +41,11 @@ export type LoPedidoItem = {
 
 export type LoPedido = {
   order_id: string;
-  /** El número que ve el local («Orden #25»). */
+  /** El correlativo global del pedido, que no se reinicia nunca. */
   order_number: number;
+  /** El número que ve el local y canta en voz alta («Orden #7»): arranca en 1
+   *  cada jornada y es el que sale impreso en la comanda. */
+  daily_number: number;
   items: LoPedidoItem[];
   /** Personas de la visita (spec 111). `null` = no se cargó. */
   party_size: number | null;

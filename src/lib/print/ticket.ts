@@ -13,11 +13,10 @@
 // + necesario para que el server, que corre en UTC, produzca la MISMA hora local
 // que la PC de golf; en golf, que ya está en AR, el resultado es idéntico).
 //
-// NOTA (bug pre-existente, follow-up): `toLocaleString("es-AR")` usa reloj de
-// 12h y muestra 18:30 como "06:30" (ambiguo). Se preserva por paridad; el fix
-// (`hour12: false`) es un cambio server-only trivial una vez desacoplado — el
-// payoff de esta spec. No se toca acá para no mezclar arreglo de formato con el
-// desacople.
+// 2026-08-20: `toLocaleString("es-AR")` usa reloj de 12h y mostraba las 18:30
+// como "06:30" — en una comanda de cocina, a la hora de la cena, eso es
+// directamente una hora equivocada. Va con `hour12: false`. El fallback del
+// agente se actualizó en el mismo commit para no romper la paridad.
 
 const ESC = "\x1b";
 const GS = "\x1d";
@@ -94,6 +93,15 @@ export type TicketComanda = {
    * sólo en el ticket de control. Campo aditivo.
    */
   kitchen_notes?: string | null;
+  /**
+   * `orders.daily_number`: el número de pedido DEL DÍA — arranca en 1 cada
+   * jornada (corte 6 AM) y es el mismo que el mozo y el encargado ven en
+   * pantalla. Es lo que la cocina usa para juntar los tickets del MISMO pedido
+   * que salieron por sectores distintos; el `comanda_id` no sirve para eso,
+   * porque es distinto en cada sector. Campo aditivo: sin él se cae al
+   * identificador de la comanda.
+   */
+  daily_number?: number | null;
 };
 
 export type Size = "sm" | "tall" | "xl";
@@ -261,15 +269,33 @@ export function buildTicketLines(c: TicketComanda): Line[] {
   } else {
     banner(`MESA ${c.table_label}`);
   }
+
+  // El número del pedido, en el mismo cuerpo grande que la mesa: es lo que la
+  // cocina lee para armar el pedido. Un pedido se parte en una comanda por
+  // sector (parrilla, fritera, postres) y las tres tienen que volver a
+  // encontrarse en el pase; el `comanda_id` no sirve —es distinto en cada
+  // sector— y salía como un código alfanumérico que en cocina no significaba
+  // nada. Se reinicia en 1 cada jornada (`orders.daily_number`): un correlativo
+  // que no se reinicia nunca termina en números largos, incómodos de cantar en
+  // el pase. Va sin `#`: «PEDIDO 9999» entra justo en el renglón de doble ancho
+  // (11 col) y con el `#` se partía en dos.
+  if (c.daily_number != null) banner(`PEDIDO ${c.daily_number}`);
   push(`Tanda ${c.batch}`, { size: "tall", bold: true, align: "center" });
 
   // Metadata de referencia (no operativa): la más chica del ticket, pero igual
   // en doble alto — nada sale en cuerpo normal salvo las líneas separadoras.
-  push(`Comanda #${String(c.comanda_id).slice(0, 8)}`, { size: "tall" });
+  // El id de la comanda queda SOLO como fallback de un payload sin
+  // `daily_number`: con el número de pedido arriba, el hash es ruido.
+  if (c.daily_number == null)
+    push(`Comanda #${String(c.comanda_id).slice(0, 8)}`, { size: "tall" });
   try {
-    push(new Date(c.emitted_at).toLocaleString("es-AR", { timeZone: TIMEZONE }), {
-      size: "tall",
-    });
+    push(
+      new Date(c.emitted_at).toLocaleString("es-AR", {
+        timeZone: TIMEZONE,
+        hour12: false, // 18:30, no "06:30": en el pase la hora se lee de un vistazo
+      }),
+      { size: "tall" },
+    );
   } catch {
     /* fecha opcional */
   }

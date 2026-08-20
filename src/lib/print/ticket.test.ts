@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildComandaContent,
   buildTicketLines,
+  COLS,
   renderEscPos,
   type TicketComanda,
 } from "./ticket";
@@ -25,6 +26,7 @@ import fixtures from "./__fixtures__/tickets.json";
 
 const base: TicketComanda = {
   comanda_id: "ab12cd34-0000-0000-0000-000000000000",
+  daily_number: 123,
   station_name: "Cocina",
   table_label: "5",
   batch: 2,
@@ -47,6 +49,9 @@ const cases: Record<keyof typeof fixtures, TicketComanda> = {
   anulada: { ...base, cancelled: true, cancelled_reason: "cliente se fue" },
   reimpresion: { ...base, reprint: true },
   sinItems: { ...base, items: [] },
+  // Payload de un server anterior al número de pedido: el ticket cae al id de
+  // la comanda, como imprimía antes.
+  sinNumeroDePedido: { ...base, daily_number: null },
 };
 
 describe("buildComandaContent · paridad byte-a-byte con el agente", () => {
@@ -134,6 +139,84 @@ describe("buildTicketLines · todo en cuerpo grande", () => {
     const lines = buildTicketLines({ ...base, station_name: "Postres y cafe" });
     const head = lines.filter((l) => l.size === "xl" && l.align === "center");
     expect(head.slice(0, 2).map((l) => l.text)).toEqual(["POSTRES Y", "CAFE"]);
+  });
+});
+
+describe("buildTicketLines · número de pedido (con qué arma la cocina)", () => {
+  // El ticket identificaba la comanda con los primeros 8 caracteres de su UUID
+  // («Comanda #ab12cd34»): un código alfanumérico que en cocina no sirve para
+  // nada y, peor, es DISTINTO en cada sector del mismo pedido — así que no
+  // había forma de juntar la parrilla con la fritera. `orders.daily_number` es
+  // el correlativo por negocio que ya ven el mozo y el encargado en pantalla.
+  it("imprime «PEDIDO n» en el cuerpo grande, no el hash de la comanda", () => {
+    const lines = buildTicketLines({ ...base, daily_number: 123 });
+    expect(lines.find((l) => l.text === "PEDIDO 123")).toMatchObject({
+      size: "xl",
+      bold: true,
+      align: "center",
+    });
+    expect(lines.some((l) => l.text.startsWith("Comanda #"))).toBe(false);
+  });
+
+  it("el mismo pedido lleva el mismo número en todos sus sectores", () => {
+    const parrilla = buildTicketLines({
+      ...base,
+      daily_number: 123,
+      comanda_id: "ffffffff-1111-0000-0000-000000000000",
+      station_name: "Parrilla",
+    });
+    const cocina = buildTicketLines({ ...base, daily_number: 123 });
+    const numero = (ls: ReturnType<typeof buildTicketLines>) =>
+      ls.find((l) => l.text.startsWith("PEDIDO"))?.text;
+    expect(numero(parrilla)).toBe("PEDIDO 123");
+    expect(numero(cocina)).toBe(numero(parrilla));
+  });
+
+  it("hasta 4 dígitos entra en un renglón de doble ancho (sin `#`, que sobraba)", () => {
+    const linea = buildTicketLines({ ...base, daily_number: 9999 }).find((l) =>
+      l.text.startsWith("PEDIDO"),
+    );
+    expect(linea?.text).toBe("PEDIDO 9999");
+    expect(linea!.text.length).toBeLessThanOrEqual(COLS.xl);
+  });
+
+  it("el número va junto al destino, arriba de la tanda", () => {
+    const texts = buildTicketLines({ ...base, daily_number: 123 }).map((l) => l.text);
+    expect(texts.indexOf("PEDIDO 123")).toBeGreaterThan(texts.indexOf("MESA 5"));
+    expect(texts.indexOf("PEDIDO 123")).toBeLessThan(texts.indexOf("Tanda 2"));
+  });
+
+  it("un delivery también lo lleva: sin mesa, es lo único que identifica al pedido", () => {
+    const texts = buildTicketLines({
+      ...base,
+      table_label: "—",
+      delivery_type: "delivery",
+      daily_number: 77,
+    }).map((l) => l.text);
+    expect(texts).toContain("DELIVERY");
+    expect(texts).toContain("PEDIDO 77");
+  });
+
+  it("sin `daily_number` (payload de un server viejo) cae al id de la comanda", () => {
+    const texts = buildTicketLines({ ...base, daily_number: null }).map((l) => l.text);
+    expect(texts.some((t) => t.startsWith("PEDIDO"))).toBe(false);
+    expect(texts).toContain("Comanda #ab12cd34");
+  });
+});
+
+describe("buildTicketLines · la hora de emisión", () => {
+  it("va en reloj de 24h: las 18:30 no pueden salir como «06:30»", () => {
+    const texts = buildTicketLines(base).map((l) => l.text);
+    expect(texts.some((t) => t.includes("18:30"))).toBe(true);
+    expect(texts.some((t) => t.includes("06:30"))).toBe(false);
+  });
+
+  it("en hora de Buenos Aires, aunque el server corra en UTC", () => {
+    const texts = buildTicketLines({
+      ...base,
+      emitted_at: "2026-07-20T23:00:00Z", // 20:00 en AR
+    }).map((l) => l.text);
+    expect(texts.some((t) => t.includes("20:00"))).toBe(true);
   });
 });
 

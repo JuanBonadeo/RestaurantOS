@@ -15,7 +15,7 @@ function base(over: Partial<ControlTicketData> = {}): ControlTicketData {
     business_name: "Restaurant del Golf",
     business_address: "Bv. Wilde y Eva Perón",
     business_phone: "0341-153276804",
-    order_number: 123,
+    daily_number: 123,
     delivery_type: "delivery",
     emitted_at: "2026-07-28T19:16:00-03:00",
     scheduled_at: null,

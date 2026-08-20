@@ -18,6 +18,7 @@ function order(overrides: Partial<AdminOrder> = {}): AdminOrder {
   return {
     id: "o1",
     order_number: 42,
+    daily_number: 8,
     // Hace rato: sin nota, la tarjeta muestra el transcurrido.
     created_at: new Date(Date.now() - 90 * 60_000).toISOString(),
     customer_name: "Juan",

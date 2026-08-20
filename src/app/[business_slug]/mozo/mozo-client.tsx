@@ -90,6 +90,14 @@ export type ComandaForMozo = {
 export type OrderForMozo = {
   id: string;
   order_number: number;
+  /**
+   * El número del pedido DEL DÍA (`orders.daily_number`): arranca en 1 cada
+   * jornada y es el que sale impreso en la comanda. Es el que se muestra, para
+   * que lo que el mozo canta sea lo mismo que la cocina tiene en el papel;
+   * `order_number` (correlativo global, no se reinicia) queda para el
+   * historial.
+   */
+  daily_number: number;
   table_id: string | null;
   delivery_type: string;
   total_cents: number;
@@ -1636,7 +1644,7 @@ function ActiveTableCard({
           {/* Total */}
           <div className="mt-3 flex items-center justify-between rounded-xl bg-zinc-50 px-3 py-2">
             <span className="text-xs text-zinc-500">
-              Orden #{order.order_number}
+              Orden #{order.daily_number}
             </span>
             <span className="text-base font-bold tabular-nums text-zinc-900">
               {formatMoney(order.total_cents)}

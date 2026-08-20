@@ -21,6 +21,7 @@ export type TableExtra = {
   };
   order?: {
     order_number: number;
+    daily_number: number;
     total_cents: number;
     delivery_type: string;
   };

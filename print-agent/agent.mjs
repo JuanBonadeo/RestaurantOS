@@ -223,13 +223,25 @@ function ticketLines(c) {
   } else {
     banner(`MESA ${c.table_label}`);
   }
+
+  // El número del pedido, en el mismo cuerpo grande que la mesa: es lo que la
+  // cocina lee para armar el pedido (un pedido se parte en una comanda por
+  // sector y las tres tienen que reencontrarse en el pase). Es el número del
+  // día: arranca en 1 cada jornada. Sin `#`: «PEDIDO 9999» entra justo en el
+  // renglón de doble ancho.
+  if (c.daily_number != null) banner(`PEDIDO ${c.daily_number}`);
   push(`Tanda ${c.batch}`, { size: "tall", bold: true, align: "center" });
 
   // Metadata de referencia: lo más chico del ticket, pero igual en doble alto
-  // (nada sale en cuerpo normal salvo las líneas separadoras).
-  push(`Comanda #${String(c.comanda_id).slice(0, 8)}`, { size: "tall" });
+  // (nada sale en cuerpo normal salvo las líneas separadoras). El id de la
+  // comanda queda SOLO como fallback de un payload sin `daily_number`.
+  if (c.daily_number == null)
+    push(`Comanda #${String(c.comanda_id).slice(0, 8)}`, { size: "tall" });
   try {
-    push(new Date(c.emitted_at).toLocaleString("es-AR"), { size: "tall" });
+    // `hour12: false`: 18:30 y no "06:30" (paridad con `src/lib/print/ticket.ts`).
+    push(new Date(c.emitted_at).toLocaleString("es-AR", { hour12: false }), {
+      size: "tall",
+    });
   } catch {
     /* fecha opcional */
   }

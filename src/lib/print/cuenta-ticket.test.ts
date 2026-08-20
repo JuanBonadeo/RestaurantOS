@@ -17,7 +17,7 @@ function base(over: Partial<CuentaTicketData> = {}): CuentaTicketData {
     business_phone: "0341-153276804",
     table_label: "12",
     floor_plan_name: "Terraza",
-    order_number: 456,
+    daily_number: 456,
     emitted_at: "2026-07-28T21:40:00-03:00",
     subtotal_cents: 11050000,
     discount_cents: 0,

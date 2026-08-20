@@ -119,6 +119,7 @@ function makeRow(
     orders: extra.orders ?? {
       id: "o1",
       business_id: "biz1",
+      daily_number: 7,
       table_id: "t1",
       delivery_type: "dine_in",
       tables: { label: "Mesa 1" },
@@ -233,7 +234,9 @@ describe("GET /api/print-agent — printer_ip por comanda (spec 28)", () => {
     };
     const cocina = body.comandas.find((c) => c.station_name === "Cocina");
     expect(cocina?.cancelled).toBe(true);
-    expect(cocina?.cancelled_reason).toBe("Mesa se levantó");
+    // Sin tilde: el texto crudo del payload sale en ASCII imprimible para que
+    // un agente viejo, que renderiza con estos campos, no escupa basura.
+    expect(cocina?.cancelled_reason).toBe("Mesa se levanto");
     const bar = body.comandas.find((c) => c.station_name === "Bar");
     expect(bar?.cancelled).toBe(false);
   });
@@ -419,6 +422,58 @@ describe("GET /api/print-agent — printer_ip por comanda (spec 28)", () => {
   it("sin Bearer válido → 401", async () => {
     const res = await GET(getReq(""));
     expect(res.status).toBe(401);
+  });
+});
+
+describe("GET /api/print-agent — con qué arma la cocina el pedido", () => {
+  it("cada comanda viaja con el número de pedido, el mismo para todos los sectores", async () => {
+    const res = await GET(getReq());
+    const body = (await res.json()) as {
+      comandas: { station_name: string; daily_number: number | null }[];
+    };
+    expect(body.comandas.map((c) => c.daily_number)).toEqual([7, 7]);
+  });
+
+  it("el ticket renderizado dice «PEDIDO 7», no el hash de la comanda", async () => {
+    const res = await GET(getReq());
+    const body = (await res.json()) as { comandas: { content_plain: string }[] };
+    expect(body.comandas[0]?.content_plain).toContain("PEDIDO 7");
+    expect(body.comandas[0]?.content_plain).not.toContain("Comanda #");
+  });
+
+  it("saca los acentos del texto crudo: un agente viejo renderiza con esos campos", async () => {
+    // El contenido pre-renderizado ya sale en ASCII, pero un agente anterior a
+    // 2026-07-28 arma el ticket con estos campos y la térmica, sin codepage,
+    // imprime cualquier byte > 0x7e como basura.
+    rows = [
+      makeRow("Café y Postres", "192.168.10.50", {
+        comanda_items: [
+          {
+            order_item_id: "oi-1",
+            order_items: {
+              id: "oi-1",
+              quantity: 2,
+              notes: "sin cebolla, ¡ojo!",
+              unit_price_cents: 1000,
+              products: { name: "Ñoquis" },
+              order_item_modifiers: [{ modifiers: { name: "con crema — extra" } }],
+            },
+          },
+        ],
+      }),
+    ];
+    const res = await GET(getReq());
+    const body = (await res.json()) as {
+      comandas: {
+        station_name: string;
+        items: { product_name: string; notes: string | null; modifiers: string[] }[];
+      }[];
+    };
+    const c = body.comandas[0];
+    expect(c?.station_name).toBe("Cafe y Postres");
+    expect(c?.items[0]?.product_name).toBe("Noquis");
+    expect(c?.items[0]?.notes).toBe("sin cebolla, ojo!");
+    expect(c?.items[0]?.modifiers).toEqual(["con crema - extra"]);
   });
 });
 

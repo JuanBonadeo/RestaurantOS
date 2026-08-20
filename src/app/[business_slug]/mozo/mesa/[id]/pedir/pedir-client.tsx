@@ -1273,7 +1273,7 @@ export function MozoPedirClient({
                       : "Ocupada"}
                 </span>
                 {tableMinutes != null && <span>{tableMinutes} min</span>}
-                {loPedido && <span>Orden #{loPedido.order_number}</span>}
+                {loPedido && <span>Orden #{loPedido.daily_number}</span>}
                 {loPedido?.party_size != null && (
                   <span>
                     {loPedido.party_size}{" "}

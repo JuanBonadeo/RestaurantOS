@@ -35,6 +35,9 @@ export type LocalComanda = {
   id: string;
   order_id: string;
   order_number: number;
+  /** El número del pedido del día (`orders.daily_number`), el mismo que sale
+   *  impreso en la comanda: es con el que el pase la busca. */
+  daily_number: number;
   station_id: string;
   station_name: string;
   /** Color slug del super_category (lime/orange/sky/...) si la categoría
@@ -102,7 +105,7 @@ export async function getActiveComandas(
     print_failed_at, reprint_requested_at, cancelled_at,
     stations!inner ( name ),
     orders!inner (
-      id, business_id, order_number, delivery_type, customer_name, mozo_id,
+      id, business_id, order_number, daily_number, delivery_type, customer_name, mozo_id,
       tables!orders_table_id_fkey ( label, floor_plan_id )
     ),
     comanda_items (
@@ -166,6 +169,7 @@ export async function getActiveComandas(
     orders: {
       id: string;
       order_number: number;
+      daily_number: number;
       delivery_type: string;
       customer_name: string;
       mozo_id: string | null;
@@ -196,6 +200,7 @@ export async function getActiveComandas(
     id: c.id,
     order_id: c.order_id,
     order_number: c.orders.order_number,
+    daily_number: c.orders.daily_number,
     station_id: c.station_id,
     station_name: c.stations.name,
     station_color_hint: null,

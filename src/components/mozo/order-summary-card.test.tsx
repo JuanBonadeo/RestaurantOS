@@ -44,6 +44,7 @@ function renderCard(
     <OrderSummaryCard
       order={{
         order_number: 42,
+        daily_number: 7,
         total_cents: 120_000,
         items: [
           { product_name: "Bife de chorizo", quantity: 2, cancelled_at: null },

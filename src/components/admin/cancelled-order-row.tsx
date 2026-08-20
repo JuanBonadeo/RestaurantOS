@@ -52,7 +52,7 @@ export function CancelledOrderRow({
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-sm">
             <span className="text-muted-foreground font-semibold">
-              #{order.order_number}
+              #{order.daily_number}
             </span>
             <span className="text-muted-foreground text-xs">
               {formatInTimeZone(order.created_at, timezone, "HH:mm")}
@@ -95,7 +95,7 @@ export function CancelledOrderRow({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              Eliminar pedido #{order.order_number}
+              Eliminar pedido #{order.daily_number}
             </DialogTitle>
           </DialogHeader>
           <p className="text-muted-foreground text-sm">

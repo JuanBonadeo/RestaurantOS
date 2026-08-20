@@ -30,6 +30,8 @@ export type ComandaSummary = {
 
 export type OrderSummaryData = {
   order_number: number;
+  /** El número del día, el mismo que sale en la comanda. */
+  daily_number: number;
   total_cents: number;
   items: {
     product_name: string;
@@ -132,7 +134,7 @@ export function OrderSummaryCard({
       <div className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4">
         <div className="flex items-baseline justify-between">
           <p className="text-[10px] font-semibold tracking-wide text-emerald-700 uppercase">
-            Orden #{order.order_number}
+            Orden #{order.daily_number}
           </p>
           <p className="inline-flex items-center gap-1.5 text-lg font-bold text-zinc-900 tabular-nums">
             <Receipt className="h-4 w-4" />

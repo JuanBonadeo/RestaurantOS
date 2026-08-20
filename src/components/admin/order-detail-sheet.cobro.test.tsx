@@ -34,6 +34,7 @@ function order(overrides: Partial<AdminOrder> = {}): AdminOrder {
   return {
     id: "o1",
     order_number: 42,
+    daily_number: 8,
     created_at: "2026-08-11T20:00:00-03:00",
     customer_name: "Juan",
     customer_phone: "3415551234",

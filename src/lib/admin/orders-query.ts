@@ -6,7 +6,13 @@ import type { OrderStatus } from "@/lib/orders/status";
 
 export type AdminOrder = {
   id: string;
+  /** Correlativo global del negocio: no se reinicia nunca, sirve para buscar
+   *  un pedido en el historial. */
   order_number: number;
+  /** Número del pedido DEL DÍA (`orders.daily_number`): arranca en 1 cada
+   *  jornada y es el que sale impreso en la comanda. Es el que se muestra en
+   *  la operación en vivo, para que coincida con el papel de cocina. */
+  daily_number: number;
   created_at: string;
   customer_name: string;
   customer_phone: string;
@@ -67,7 +73,7 @@ export async function getTodayOrders(
   const { data } = await supabase
     .from("orders")
     .select(
-      "id, order_number, created_at, customer_name, customer_phone, delivery_type, total_cents, status, payment_method, payment_status, cancelled_reason, scheduled_at, kitchen_notes, order_items(product_name, quantity, is_combo_component)",
+      "id, order_number, daily_number, created_at, customer_name, customer_phone, delivery_type, total_cents, status, payment_method, payment_status, cancelled_reason, scheduled_at, kitchen_notes, order_items(product_name, quantity, is_combo_component)",
     )
     .eq("business_id", businessId)
     .neq("delivery_type", "dine_in")
@@ -78,6 +84,7 @@ export async function getTodayOrders(
   return (data ?? []).map((o: any) => ({
     id: o.id,
     order_number: o.order_number,
+    daily_number: o.daily_number,
     created_at: o.created_at,
     customer_name: o.customer_name,
     customer_phone: o.customer_phone,
@@ -173,7 +180,7 @@ export async function getOrdersList(
   let query = supabase
     .from("orders")
     .select(
-      "id, order_number, created_at, customer_name, customer_phone, delivery_type, total_cents, status, payment_method, payment_status, cancelled_reason, scheduled_at, kitchen_notes, order_items(product_name, quantity, is_combo_component)",
+      "id, order_number, daily_number, created_at, customer_name, customer_phone, delivery_type, total_cents, status, payment_method, payment_status, cancelled_reason, scheduled_at, kitchen_notes, order_items(product_name, quantity, is_combo_component)",
       { count: "exact" },
     )
     .eq("business_id", businessId);
@@ -214,6 +221,7 @@ export async function getOrdersList(
   const orders: AdminOrder[] = (data ?? []).map((o: any) => ({
     id: o.id,
     order_number: o.order_number,
+    daily_number: o.daily_number,
     created_at: o.created_at,
     customer_name: o.customer_name,
     customer_phone: o.customer_phone,
@@ -244,7 +252,7 @@ export async function getOrderDetail(orderId: string) {
   const { data } = await supabase
     .from("orders")
     .select(
-      `id, order_number, created_at, updated_at,
+      `id, order_number, daily_number, created_at, updated_at,
        customer_name, customer_phone,
        delivery_type, delivery_address, delivery_notes,
        subtotal_cents, delivery_fee_cents, total_cents,

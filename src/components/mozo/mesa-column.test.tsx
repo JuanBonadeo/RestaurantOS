@@ -8,6 +8,7 @@ import type { LoPedido } from "@/lib/mozo/lo-pedido";
 const enviado: LoPedido = {
   order_id: "o1",
   order_number: 25,
+  daily_number: 4,
   party_size: 2,
   subtotal_cents: 700000,
   discount_cents: 0,

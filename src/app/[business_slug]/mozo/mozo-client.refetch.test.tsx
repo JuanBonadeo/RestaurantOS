@@ -79,6 +79,7 @@ const orden = (estado: "pendiente" | "entregado") =>
     {
       id: "o1",
       order_number: 12,
+      daily_number: 3,
       table_id: "t1",
       delivery_type: "dine_in",
       total_cents: 10000,

@@ -314,13 +314,13 @@ export function OrderDetailSheet({
 
         <div className="flex-1 overflow-y-auto">
           <SheetTitle className="sr-only">
-            Pedido #{order.order_number}
+            Pedido #{order.daily_number}
           </SheetTitle>
 
           <section className="px-5 pt-5 pb-4">
             <div className="flex items-baseline gap-2">
               <h2 className="text-foreground text-3xl font-extrabold tracking-tight tabular-nums">
-                #{order.order_number}
+                #{order.daily_number}
               </h2>
               <span className="text-muted-foreground text-sm tabular-nums">
                 · {formatInTimeZone(order.created_at, timezone, "HH:mm")} ·{" "}

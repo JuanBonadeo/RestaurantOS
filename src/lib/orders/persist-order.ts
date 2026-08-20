@@ -27,6 +27,9 @@ import type { PersistableOrderInput } from "./schema";
 export type CreateOrderResult = {
   order_id: string;
   order_number: number;
+  /** El número del pedido del día (arranca en 1 cada jornada): el que sale
+   *  impreso en la comanda y el que el local canta. */
+  daily_number: number;
   /**
    * Present when the order was placed with MP as payment method and the
    * business has MP configured. Client should redirect to this URL to
@@ -568,7 +571,7 @@ export async function persistOrder(
     .from("orders")
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     .insert(orderInsert as any)
-    .select("id, order_number")
+    .select("id, order_number, daily_number")
     .single();
   if (orderErr || !order) {
     console.error("order insert", orderErr);
@@ -844,6 +847,7 @@ export async function persistOrder(
   return actionOk({
     order_id: order.id,
     order_number: order.order_number,
+    daily_number: order.daily_number,
     mp_init_point: mpInitPoint,
   });
 }

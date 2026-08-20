@@ -142,7 +142,7 @@ export function OrdersRealtimeBoard({
       const { data } = await supabase
         .from("orders")
         .select(
-          "id, order_number, created_at, customer_name, customer_phone, delivery_type, total_cents, status, payment_method, payment_status, cancelled_reason, scheduled_at, kitchen_notes, order_items(product_name, quantity)",
+          "id, order_number, daily_number, created_at, customer_name, customer_phone, delivery_type, total_cents, status, payment_method, payment_status, cancelled_reason, scheduled_at, kitchen_notes, order_items(product_name, quantity)",
         )
         .eq("id", orderId)
         .maybeSingle();
@@ -153,6 +153,7 @@ export function OrdersRealtimeBoard({
       return {
         id: data.id,
         order_number: data.order_number,
+        daily_number: data.daily_number,
         created_at: data.created_at,
         customer_name: data.customer_name,
         customer_phone: data.customer_phone,
@@ -284,7 +285,7 @@ export function OrdersRealtimeBoard({
           ? ` · ${items_without_station} ítem${items_without_station === 1 ? "" : "s"} va${items_without_station === 1 ? "" : "n"} directo (sin imprimir)`
           : "";
       toast.success(
-        `Pedido #${order.order_number} confirmado · ${cocinaPart}${directPart}`,
+        `Pedido #${order.daily_number} confirmado · ${cocinaPart}${directPart}`,
       );
     },
     [slug],
@@ -310,7 +311,7 @@ export function OrdersRealtimeBoard({
         return;
       }
       toast.success(
-        `Pedido #${order.order_number} aceptado · la comanda sale sola antes de la hora`,
+        `Pedido #${order.daily_number} aceptado · la comanda sale sola antes de la hora`,
       );
     },
     [slug],
@@ -567,7 +568,7 @@ function ScheduledOrderCard({
             : ""}
         </span>
         <span className="text-muted-foreground text-xs font-medium tabular-nums">
-          #{order.order_number}
+          #{order.daily_number}
         </span>
       </div>
       <div className="text-foreground text-sm font-semibold">

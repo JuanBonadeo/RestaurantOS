@@ -22,6 +22,8 @@ type GenericClient = SupabaseClient;
 export type VentaMostradorResult = {
   order_id: string;
   order_number: number;
+  /** El número del día: el que sale impreso en la comanda. */
+  daily_number: number;
   /** Lo que efectivamente pagó el cliente (total + ajuste del método). */
   cobrado_cents: number;
   /** Comandas creadas por el ruteo — 0 si nada de lo vendido tiene sector. */
@@ -248,6 +250,7 @@ export async function venderMostrador(
   return actionOk({
     order_id: orderId,
     order_number: created.data.order_number,
+    daily_number: created.data.daily_number,
     cobrado_cents: finalCents,
     comandas_creadas: comandasCreadas,
     items_sin_sector: itemsSinSector,

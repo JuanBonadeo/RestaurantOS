@@ -114,7 +114,7 @@ function ticket(over: Row = {}): Row {
     emitted_at: "2026-07-28T19:16:00-03:00",
     reprint_requested_at: null,
     orders: {
-      order_number: 123,
+      daily_number: 123,
       delivery_type: "delivery",
       customer_name: "Rodrigo",
       customer_phone: "341 555 1234",
@@ -150,7 +150,7 @@ function cuentaJob(): Row {
     emitted_at: "2026-07-28T19:16:00-03:00",
     reprint_requested_at: null,
     orders: {
-      order_number: 77,
+      daily_number: 77,
       subtotal_cents: 100000,
       discount_cents: 0,
       discount_reason: null,

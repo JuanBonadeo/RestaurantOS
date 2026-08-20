@@ -56,7 +56,7 @@ export default async function OrderDetailPage({
     <PageShell width="narrow">
       <PageHeader
         eyebrow={formatInTimeZone(order.created_at, tz, "dd MMM yyyy · HH:mm")}
-        title={`Pedido #${order.order_number}`}
+        title={`Pedido #${order.daily_number}`}
         back={{ href: `/${business_slug}/admin/pedidos`, label: "Volver a pedidos" }}
         action={
           <span

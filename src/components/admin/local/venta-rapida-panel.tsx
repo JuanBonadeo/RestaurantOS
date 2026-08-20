@@ -299,21 +299,21 @@ export function VentaRapidaPanel({
 
       if (r.data.ruteo_error) {
         toast.warning(
-          `Venta #${r.data.order_number} cobrada, pero la comanda no salió: ${r.data.ruteo_error}`,
+          `Venta #${r.data.daily_number} cobrada, pero la comanda no salió: ${r.data.ruteo_error}`,
         );
       } else if (r.data.comandas_creadas > 0) {
         toast.success(
-          `Venta #${r.data.order_number} cobrada · ${r.data.comandas_creadas} comanda${r.data.comandas_creadas === 1 ? "" : "s"} a cocina`,
+          `Venta #${r.data.daily_number} cobrada · ${r.data.comandas_creadas} comanda${r.data.comandas_creadas === 1 ? "" : "s"} a cocina`,
         );
       } else {
         toast.success(
-          `Venta #${r.data.order_number} cobrada · ${formatCurrency(r.data.cobrado_cents)}`,
+          `Venta #${r.data.daily_number} cobrada · ${formatCurrency(r.data.cobrado_cents)}`,
         );
       }
 
       setUltima({
         orderId: r.data.order_id,
-        orderNumber: r.data.order_number,
+        orderNumber: r.data.daily_number,
         totalCents: r.data.cobrado_cents,
       });
       // Listo para el próximo cliente: carrito limpio, foco en el buscador.

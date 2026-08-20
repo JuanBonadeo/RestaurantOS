@@ -15,7 +15,7 @@ import {
   type FacturaTicketData,
 } from "@/lib/print/factura-ticket";
 import { resolveFiscalPrinter } from "@/lib/print/fiscal-printer";
-import { buildComandaContent } from "@/lib/print/ticket";
+import { buildComandaContent, toAscii } from "@/lib/print/ticket";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 import { alcanzaLaImpresora } from "@/lib/print/agent-scope";
@@ -31,7 +31,14 @@ import { unauthorized, autenticarAgente } from "./agent-auth";
 function sanitizeTicketText(s: string | null | undefined): string | null {
   if (s == null) return null;
   // eslint-disable-next-line no-control-regex
-  return s.replace(/[\x00-\x08\x0B-\x1F\x7F]/g, "");
+  const sinControl = s.replace(/[\x00-\x08\x0B-\x1F\x7F]/g, "");
+  // …y a ASCII imprimible. El contenido pre-renderizado ya sale en ASCII
+  // (`toAscii` en el builder), pero estos campos crudos viajan igual en el
+  // payload y un agente anterior a 2026-07-28 renderiza con ellos: sin
+  // codepage, la térmica imprime cualquier byte > 0x7e como el símbolo que
+  // tenga en su tabla — «Ñoquis» salía como basura. Saneado acá, cualquier
+  // versión del agente imprime bien sin recompilar el .exe del local.
+  return toAscii(sinControl);
 }
 
 /**
@@ -76,6 +83,7 @@ export async function GET(req: Request) {
       orders!inner(
         id,
         business_id,
+        daily_number,
         table_id,
         delivery_type,
         kitchen_notes,
@@ -144,6 +152,7 @@ export async function GET(req: Request) {
     const order = c.orders as unknown as {
       id: string;
       business_id: string;
+      daily_number: number | null;
       table_id: string | null;
       delivery_type: string | null;
       kitchen_notes: string | null;
@@ -175,6 +184,9 @@ export async function GET(req: Request) {
       // comanda. El agente imprime un ticket «REIMPRESIÓN» para que cocina sepa
       // que reemplaza a uno anterior. Campo aditivo (un agente viejo lo ignora).
       reprint: Boolean(c.reprint_requested_at),
+      // El número del pedido del día: lo que cocina usa para juntar los
+      // tickets del mismo pedido que salieron por sectores distintos.
+      daily_number: order?.daily_number ?? null,
       table_label: sanitizeTicketText(order?.tables?.label) ?? "—",
       // Destino del pedido: delivery / retiro no tienen mesa (salía «MESA —»).
       delivery_type: (order?.delivery_type ?? null) as
@@ -440,7 +452,7 @@ async function buildPrintableControlTickets(
       emitted_at,
       reprint_requested_at,
       orders!inner(
-        order_number,
+        daily_number,
         delivery_type,
         customer_name,
         customer_phone,
@@ -477,7 +489,7 @@ async function buildPrintableControlTickets(
 
   return (tickets ?? []).map((t) => {
     const order = t.orders as unknown as {
-      order_number: number;
+      daily_number: number;
       delivery_type: string;
       customer_name: string | null;
       customer_phone: string | null;
@@ -505,7 +517,7 @@ async function buildPrintableControlTickets(
       business_name: sanitizeTicketText(biz.name) ?? "—",
       business_address: sanitizeTicketText(biz.address),
       business_phone: sanitizeTicketText(biz.phone),
-      order_number: order.order_number,
+      daily_number: order.daily_number,
       delivery_type: order.delivery_type === "delivery" ? "delivery" : "pickup",
       emitted_at: t.emitted_at,
       scheduled_at: order.scheduled_at,
@@ -549,7 +561,7 @@ async function buildPrintableControlTickets(
       cancelled: false,
       cancelled_reason: null,
       reprint: Boolean(t.reprint_requested_at),
-      table_label: `#${order.order_number}`,
+      table_label: `#${order.daily_number}`,
       items: data.items ?? [],
       content_escpos_b64: content.escpos_b64,
       content_plain: content.plain,
@@ -815,7 +827,7 @@ async function buildPrintableCuentaTickets(
       emitted_at,
       reprint_requested_at,
       orders!inner(
-        order_number,
+        daily_number,
         subtotal_cents,
         discount_cents,
         discount_reason,
@@ -861,7 +873,7 @@ async function buildPrintableCuentaTickets(
   const out = [];
   for (const j of jobs ?? []) {
     const order = j.orders as unknown as {
-      order_number: number;
+      daily_number: number;
       subtotal_cents: number;
       discount_cents: number;
       discount_reason: string | null;
@@ -898,7 +910,7 @@ async function buildPrintableCuentaTickets(
       business_phone: sanitizeTicketText(biz.phone),
       table_label: sanitizeTicketText(order.tables?.label) ?? "—",
       floor_plan_name: sanitizeTicketText(floorPlan?.name),
-      order_number: order.order_number,
+      daily_number: order.daily_number,
       emitted_at: j.emitted_at,
       subtotal_cents: order.subtotal_cents,
       discount_cents: order.discount_cents,

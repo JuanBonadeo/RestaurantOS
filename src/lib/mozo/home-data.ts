@@ -61,6 +61,7 @@ function mapActiveOrders(rows: unknown[]): OrderForMozo[] {
     return {
       id: o.id as string,
       order_number: o.order_number as number,
+      daily_number: o.daily_number as number,
       table_id: o.table_id as string | null,
       delivery_type: o.delivery_type as string,
       total_cents: Number(o.total_cents),
@@ -143,7 +144,7 @@ export async function loadMozoHome(
       service
         .from("orders")
         .select(
-          "id, order_number, table_id, delivery_type, total_cents, created_at, status, customer_name, order_items(product_name, quantity, cancelled_at), comandas(id, batch, status, station_id, emitted_at, delivered_at, cancelled_at, stations(name), comanda_items(order_items(product_name, quantity, cancelled_at, products(prep_time_minutes))))",
+          "id, order_number, daily_number, table_id, delivery_type, total_cents, created_at, status, customer_name, order_items(product_name, quantity, cancelled_at), comandas(id, batch, status, station_id, emitted_at, delivered_at, cancelled_at, stations(name), comanda_items(order_items(product_name, quantity, cancelled_at, products(prep_time_minutes))))",
         )
         .eq("business_id", businessId)
         .eq("delivery_type", "dine_in")
