@@ -18,6 +18,10 @@ export type AdminOrder = {
   cancelled_reason: string | null;
   /** Pedido diferido (spec 31): instante de retiro futuro. Null = para ahora. */
   scheduled_at: string | null;
+  /** Indicación del encargado para cocina («21:30», «junto con la mesa 5»).
+   *  Es el «para cuándo» real del encargue telefónico: sale en la comanda como
+   *  «ENTREGAR …» y el board la muestra en lugar del tiempo transcurrido. */
+  kitchen_notes: string | null;
   items: { product_name: string; quantity: number }[];
 };
 
@@ -63,7 +67,7 @@ export async function getTodayOrders(
   const { data } = await supabase
     .from("orders")
     .select(
-      "id, order_number, created_at, customer_name, customer_phone, delivery_type, total_cents, status, payment_method, payment_status, cancelled_reason, scheduled_at, order_items(product_name, quantity, is_combo_component)",
+      "id, order_number, created_at, customer_name, customer_phone, delivery_type, total_cents, status, payment_method, payment_status, cancelled_reason, scheduled_at, kitchen_notes, order_items(product_name, quantity, is_combo_component)",
     )
     .eq("business_id", businessId)
     .neq("delivery_type", "dine_in")
@@ -84,6 +88,7 @@ export async function getTodayOrders(
     payment_status: o.payment_status,
     cancelled_reason: o.cancelled_reason,
     scheduled_at: o.scheduled_at,
+    kitchen_notes: o.kitchen_notes,
     items: (o.order_items ?? [])
       .filter((i: any) => !i.is_combo_component)
       .map((i: any) => ({
@@ -168,7 +173,7 @@ export async function getOrdersList(
   let query = supabase
     .from("orders")
     .select(
-      "id, order_number, created_at, customer_name, customer_phone, delivery_type, total_cents, status, payment_method, payment_status, cancelled_reason, scheduled_at, order_items(product_name, quantity, is_combo_component)",
+      "id, order_number, created_at, customer_name, customer_phone, delivery_type, total_cents, status, payment_method, payment_status, cancelled_reason, scheduled_at, kitchen_notes, order_items(product_name, quantity, is_combo_component)",
       { count: "exact" },
     )
     .eq("business_id", businessId);
@@ -219,6 +224,7 @@ export async function getOrdersList(
     payment_status: o.payment_status,
     cancelled_reason: o.cancelled_reason,
     scheduled_at: o.scheduled_at,
+    kitchen_notes: o.kitchen_notes,
     items: (o.order_items ?? [])
       .filter((i: any) => !i.is_combo_component)
       .map((i: any) => ({

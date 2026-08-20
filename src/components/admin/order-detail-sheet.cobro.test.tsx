@@ -44,6 +44,7 @@ function order(overrides: Partial<AdminOrder> = {}): AdminOrder {
     payment_status: "pending",
     cancelled_reason: null,
     scheduled_at: null,
+    kitchen_notes: null,
     items: [{ product_name: "Milanesa", quantity: 1 }],
     ...overrides,
   };

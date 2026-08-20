@@ -142,7 +142,7 @@ export function OrdersRealtimeBoard({
       const { data } = await supabase
         .from("orders")
         .select(
-          "id, order_number, created_at, customer_name, customer_phone, delivery_type, total_cents, status, payment_method, payment_status, cancelled_reason, scheduled_at, order_items(product_name, quantity)",
+          "id, order_number, created_at, customer_name, customer_phone, delivery_type, total_cents, status, payment_method, payment_status, cancelled_reason, scheduled_at, kitchen_notes, order_items(product_name, quantity)",
         )
         .eq("id", orderId)
         .maybeSingle();
@@ -163,6 +163,7 @@ export function OrdersRealtimeBoard({
         payment_status: data.payment_status,
         cancelled_reason: data.cancelled_reason,
         scheduled_at: data.scheduled_at,
+        kitchen_notes: data.kitchen_notes,
         items: (data.order_items ?? []).map((i) => ({
           product_name: i.product_name,
           quantity: i.quantity,

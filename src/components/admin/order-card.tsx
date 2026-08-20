@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bike, ShoppingBag, Sparkles, CreditCard, Banknote } from "lucide-react";
+import {
+  Bike,
+  ShoppingBag,
+  Sparkles,
+  CreditCard,
+  Banknote,
+  Clock,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/currency";
@@ -52,6 +59,33 @@ function formatElapsed(minutes: number): string {
   return `${days} d`;
 }
 
+/**
+ * Para cuándo es el pedido, que es lo que el encargado necesita del encargue
+ * telefónico: no hace cuánto entró, sino a qué hora hay que entregarlo.
+ *
+ * Manda la nota para cocina (`kitchen_notes`) — el campo libre que el encargado
+ * escribe al cargar el pedido y que sale en la comanda como «ENTREGAR …»; hoy
+ * es la única forma de decir «para las 21:30» porque el selector de programados
+ * está apagado (spec 120). Si el pedido sí viene agendado (`scheduled_at`, spec
+ * 31) usamos esa hora. Sin ninguna de las dos, el pedido es para ahora y la
+ * tarjeta vuelve al tiempo transcurrido.
+ */
+function entregaLabel(
+  order: AdminOrder,
+  timezone: string,
+): string | null {
+  const nota = order.kitchen_notes?.trim();
+  if (nota) return nota;
+  if (!order.scheduled_at) return null;
+  const hora = new Intl.DateTimeFormat("es-AR", {
+    timeZone: timezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(order.scheduled_at));
+  return `${hora} hs`;
+}
+
 function elapsedTone(min: number, isTerminal: boolean): string {
   if (isTerminal) return "text-muted-foreground";
   if (min >= 30) return "text-rose-700";
@@ -83,6 +117,7 @@ export function OrderCard({
   /** Abrir el detalle ya con el cobro arriba (botón «Cobrar» de la tarjeta). */
   const [cobrarDirecto, setCobrarDirecto] = useState(false);
   const elapsed = useElapsedMinutes(order.created_at);
+  const entrega = entregaLabel(order, timezone);
 
   // Decide qué botón mostrar.
   // Caso 1 · pending + delivery/take-away → "Confirmar pedido" (crea comandas).
@@ -191,11 +226,21 @@ export function OrderCard({
             <span className="text-foreground text-xl font-extrabold leading-none tracking-tight tabular-nums">
               #{order.order_number}
             </span>
-            <span
-              className={`text-xs font-medium tabular-nums ${elapsedTone(elapsed, isTerminal)}`}
-            >
-              {formatElapsed(elapsed)}
-            </span>
+            {entrega ? (
+              <span
+                className="inline-flex min-w-0 items-center gap-1 text-xs font-semibold text-violet-700"
+                title={entrega}
+              >
+                <Clock className="size-3 shrink-0" aria-hidden />
+                <span className="truncate">{entrega}</span>
+              </span>
+            ) : (
+              <span
+                className={`text-xs font-medium tabular-nums ${elapsedTone(elapsed, isTerminal)}`}
+              >
+                {formatElapsed(elapsed)}
+              </span>
+            )}
           </div>
           <ChannelIcon
             className="text-muted-foreground size-4 shrink-0"
