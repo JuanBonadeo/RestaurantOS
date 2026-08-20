@@ -12,6 +12,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/currency";
+import { entregaLabel } from "@/lib/orders/entrega";
 import type { OrderStatus } from "@/lib/orders/status";
 
 import type { AdminOrder } from "@/lib/admin/orders-query";
@@ -57,33 +58,6 @@ function formatElapsed(minutes: number): string {
   }
   const days = Math.floor(hours / 24);
   return `${days} d`;
-}
-
-/**
- * Para cuándo es el pedido, que es lo que el encargado necesita del encargue
- * telefónico: no hace cuánto entró, sino a qué hora hay que entregarlo.
- *
- * Manda la nota para cocina (`kitchen_notes`) — el campo libre que el encargado
- * escribe al cargar el pedido y que sale en la comanda como «ENTREGAR …»; hoy
- * es la única forma de decir «para las 21:30» porque el selector de programados
- * está apagado (spec 120). Si el pedido sí viene agendado (`scheduled_at`, spec
- * 31) usamos esa hora. Sin ninguna de las dos, el pedido es para ahora y la
- * tarjeta vuelve al tiempo transcurrido.
- */
-function entregaLabel(
-  order: AdminOrder,
-  timezone: string,
-): string | null {
-  const nota = order.kitchen_notes?.trim();
-  if (nota) return nota;
-  if (!order.scheduled_at) return null;
-  const hora = new Intl.DateTimeFormat("es-AR", {
-    timeZone: timezone,
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date(order.scheduled_at));
-  return `${hora} hs`;
 }
 
 function elapsedTone(min: number, isTerminal: boolean): string {

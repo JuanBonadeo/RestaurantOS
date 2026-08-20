@@ -4,6 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import { formatInTimeZone } from "date-fns-tz";
 import {
   Bike,
+  Clock,
   Phone,
   Receipt,
   ShoppingBag,
@@ -22,6 +23,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import type { AdminOrder } from "@/lib/admin/orders-query";
 import { formatCurrency } from "@/lib/currency";
+import { entregaLabel } from "@/lib/orders/entrega";
 import type { OrderStatus } from "@/lib/orders/status";
 import { updateOrderStatus } from "@/lib/orders/update-status";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -129,7 +131,17 @@ export function OrderDetailSheet({
   // Spec 054 — cobrar/facturar el pedido sin mesa desde el detalle.
   const [cobrarOpen, setCobrarOpen] = useState(false);
   // Indicación para cocina que se escribe al marchar («ENTREGAR x»).
-  const [kitchenNotes, setKitchenNotes] = useState("");
+  //
+  // Arranca con la que YA tiene el pedido: si el encargado la cargó al levantar
+  // el teléfono («21:30»), abrir el detalle y confirmar la borraba —
+  // `confirmarPedido` pisa `kitchen_notes` con lo que venga del input, y venía
+  // siempre vacío. Se resincroniza al abrir y al cambiar de pedido, no en cada
+  // update de realtime: si no, le comería lo tipeado al encargado.
+  const [kitchenNotes, setKitchenNotes] = useState(order.kitchen_notes ?? "");
+  useEffect(() => {
+    if (open) setKitchenNotes(order.kitchen_notes ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, order.id]);
 
   // El botón «Cobrar» de la tarjeta abre el detalle con el cobro ya arriba: es
   // lo único que le falta a ese pedido, y hacerlo pasar por el detalle era el
@@ -265,6 +277,9 @@ export function OrderDetailSheet({
   };
 
   const ChannelIcon = order.delivery_type === "delivery" ? Bike : ShoppingBag;
+  // Para cuándo es (#192). En el detalle convive con el «hace tanto» del
+  // encabezado —acá hay lugar para las dos— pero se lee primero.
+  const entrega = entregaLabel(order, timezone);
   const elapsedMin = Math.max(
     0,
     Math.floor((Date.now() - new Date(order.created_at).getTime()) / 60_000),
@@ -316,6 +331,12 @@ export function OrderDetailSheet({
               {order.customer_name}
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
+              {entrega && (
+                <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-violet-100 px-3 py-1.5 text-xs font-semibold text-violet-800">
+                  <Clock className="size-3.5 shrink-0" aria-hidden />
+                  <span className="truncate">Entregar {entrega}</span>
+                </span>
+              )}
               <a
                 href={`tel:${order.customer_phone}`}
                 className="bg-muted hover:bg-muted/80 inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors"
