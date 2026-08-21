@@ -116,9 +116,11 @@ describe("caja / validarCorreccion", () => {
     ).toBe(true);
   });
 
-  it("exige nota en transferencia y en otro", () => {
+  it("exige nota en otro, no en transferencia (spec 126)", () => {
+    // La corrección ya pide `motivo` obligatorio: el rastro de auditoría no
+    // colgaba de este campo. Misma regla que el cobro.
     expect(validarCorreccion(PAGO, { method: "transfer" }, MOTIVO).ok).toBe(
-      false,
+      true,
     );
     expect(
       validarCorreccion(

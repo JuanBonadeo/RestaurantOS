@@ -17,7 +17,6 @@ import type { AdminOrder } from "@/lib/admin/orders-query";
 import { emitInvoice } from "@/lib/afip/emit-invoice";
 import {
   iniciarCobro,
-  iniciarPagoMp,
   registrarPago,
   type IniciarCobroResult,
 } from "@/lib/billing/cobro-actions";
@@ -37,6 +36,13 @@ import { formatCurrency } from "@/lib/currency";
  * Lo que queda propio de este caller: de dónde sale lo que hay que cobrar
  * (`iniciarCobro` sobre una orden sin `table_id`), qué action registra el pago
  * y cuándo se emite el comprobante.
+ *
+ * **Sin MP link/QR** (spec 126). Sin el prop `mp`, el `CobroForm` no ofrece esos
+ * métodos, y acá es lo correcto: generar una preference nueva no cobra nada —
+ * deja el pedido abierto esperando que alguien pague *ese* link, y un pago
+ * `pending` colgado para siempre. El cliente que paga con MP lo hace en el
+ * checkout; el que ya pagó por un link mandado a mano se asienta por el método
+ * que corresponda. Generar link con el cliente delante sigue estando en la mesa.
  */
 export function CobrarPedidoSheet({
   order,
@@ -168,32 +174,6 @@ export function CobrarPedidoSheet({
                   toast.success(`Pedido #${order.daily_number} cobrado.`);
                   onDone?.();
                   onClose();
-                }}
-                mp={{
-                  start: (input) =>
-                    iniciarPagoMp({
-                      orderId: order.id,
-                      splitId: null,
-                      method: input.method,
-                      amount_cents: input.amountCents,
-                      tip_cents: input.tipCents,
-                      caja_id: input.cajaId,
-                      slug,
-                    }).then((r) =>
-                      r.ok
-                        ? {
-                            ok: true as const,
-                            data: {
-                              paymentId: r.data.paymentId,
-                              initPoint: r.data.initPoint,
-                            },
-                          }
-                        : r,
-                    ),
-                  onConfirmed: () => {
-                    onDone?.();
-                    onClose();
-                  },
                 }}
               />
 

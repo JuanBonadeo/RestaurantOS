@@ -444,15 +444,10 @@ export async function registrarPago(
       return actionError("Los últimos 4 dígitos deben ser 4.");
     }
   }
-  if (
-    (input.method === "other" || input.method === "transfer") &&
-    (!input.notes || input.notes.trim() === "")
-  ) {
-    return actionError(
-      input.method === "transfer"
-        ? "Para transferencia, anotá el alias o referencia."
-        : 'Para método "otro", se requiere una nota.',
-    );
+  // Sólo «otro» exige nota (spec 126). Transferencia la pedía y no servía de
+  // auditoría: se contestaba con una letra para poder cerrar el pedido.
+  if (input.method === "other" && (!input.notes || input.notes.trim() === "")) {
+    return actionError('Para método "otro", se requiere una nota.');
   }
 
   if (input.method === "mp_link" || input.method === "mp_qr") {

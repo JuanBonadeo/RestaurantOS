@@ -129,14 +129,39 @@ describe("<CobroForm /> — las reglas de dinero, una sola vez", () => {
     expect(screen.getByRole("button", { name: /confirmar/i })).toBeEnabled();
   });
 
-  it("transferencia exige nota", () => {
-    setup();
+  it("transferencia cobra sin nota, y la nota viaja si la escriben (spec 126)", async () => {
+    // Antes la exigía. Lo que llegaba eran referencias como "T" o "a": el que
+    // cierra el pedido no tiene el comprobante de la transferencia a mano.
+    const { onSubmit } = setup();
     pick(/transferencia/i);
-    expect(screen.getByRole("button", { name: /confirmar/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /confirmar/i })).toBeEnabled();
     fireEvent.change(screen.getByLabelText(/notas/i), {
       target: { value: "alias juan.mp" },
     });
+    confirm();
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({
+      method: "transfer",
+      notes: "alias juan.mp",
+    });
+  });
+
+  it('«otro» sigue exigiendo nota: es lo único que dice qué fue el cobro', () => {
+    setup();
+    pick(/otro/i);
+    expect(screen.getByRole("button", { name: /confirmar/i })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/notas/i), {
+      target: { value: "cheque 1234" },
+    });
     expect(screen.getByRole("button", { name: /confirmar/i })).toBeEnabled();
+  });
+
+  it("sin el prop `mp` no se ofrecen link ni QR de Mercado Pago", () => {
+    // Es la palanca con la que el cobro del pedido online los saca (spec 126):
+    // generar una preference no cobra nada, deja el pedido abierto.
+    setup();
+    expect(screen.queryByRole("button", { name: /link mercado pago/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /qr mercado pago/i })).toBeNull();
   });
 
   it("los últimos 4 dígitos son opcionales, pero si van tienen que ser 4", async () => {

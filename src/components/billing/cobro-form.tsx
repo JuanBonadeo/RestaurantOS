@@ -255,7 +255,11 @@ export function CobroForm<T = unknown>({
     return () => clearInterval(interval);
   }, [mpPaymentId, mp]);
 
-  const notesRequired = method === "other" || method === "transfer";
+  // La nota la exige sólo «otro»: ahí es lo único que dice qué fue ese cobro.
+  // En transferencia era fricción que se pagaba con basura — las referencias
+  // que quedaron en los pedidos reales son "T", "a", "transfirio" (spec 126).
+  // El alias se anota si sirve para conciliar, no porque el botón no deje pasar.
+  const notesRequired = method === "other";
   const showNotes =
     method === "other" || method === "transfer" || method === "card_manual";
 

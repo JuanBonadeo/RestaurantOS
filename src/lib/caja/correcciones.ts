@@ -148,15 +148,12 @@ export function validarCorreccion(
     return { ok: false, error: "Los últimos 4 dígitos deben ser 4 números." };
   }
 
+  // Misma regla que el cobro (spec 126): sólo «otro» exige nota. La corrección
+  // ya pide `motivo` obligatorio aparte, así que el rastro de auditoría no
+  // dependía de este campo.
   const notes = (cambios.notes ?? actual.notes)?.trim() ?? "";
-  if ((method === "transfer" || method === "other") && notes === "") {
-    return {
-      ok: false,
-      error:
-        method === "transfer"
-          ? "Para transferencia, anotá el alias o referencia."
-          : 'Para método "otro", se requiere una nota.',
-    };
+  if (method === "other" && notes === "") {
+    return { ok: false, error: 'Para método "otro", se requiere una nota.' };
   }
 
   return { ok: true };
