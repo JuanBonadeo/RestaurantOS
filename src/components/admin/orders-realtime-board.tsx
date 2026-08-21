@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bell, Clock, Plus } from "lucide-react";
 import { toast } from "sonner";
 
+import { getPedidosTabOrders } from "@/app/[business_slug]/admin/(authed)/operacion/actions";
 import { Button } from "@/components/ui/button";
 import type { AdminOrder } from "@/lib/admin/orders-query";
 import {
@@ -14,6 +15,7 @@ import { isScheduledForLater } from "@/lib/orders/scheduled";
 import type { OrderStatus } from "@/lib/orders/status";
 import { updateOrderStatus } from "@/lib/orders/update-status";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { useOnActivate } from "@/lib/ui/use-tab-param";
 
 import { CancelledOrderRow } from "./cancelled-order-row";
 import { CargarPedidoSheet } from "./cargar-pedido-sheet";
@@ -116,6 +118,7 @@ export function OrdersRealtimeBoard({
   scheduledSlots,
   marchLeadPickupMin,
   marchLeadDeliveryMin,
+  active,
 }: {
   businessId: string;
   slug: string;
@@ -125,6 +128,9 @@ export function OrdersRealtimeBoard({
   scheduledSlots: string[];
   marchLeadPickupMin: number;
   marchLeadDeliveryMin: number;
+  /** Si la tab «Pedidos online» está a la vista. El panel no se desmonta al
+   *  cambiar de tab, así que es la señal para revalidar al volver. */
+  active: boolean;
 }) {
   const [orders, setOrders] = useState<AdminOrder[]>(initialOrders);
   const [newlyArrived, setNewlyArrived] = useState<Set<string>>(new Set());
@@ -135,6 +141,44 @@ export function OrdersRealtimeBoard({
   // Keep a ref for realtime handler (avoids stale closure).
   const soundUnlockedRef = useRef(soundUnlocked);
   soundUnlockedRef.current = soundUnlocked;
+
+  /**
+   * Traer la verdad del server y pisar el estado local.
+   *
+   * Esta pantalla vivía **sólo** del stream de realtime: se seedeaba con el SSR
+   * del page-load y ya. Un evento perdido —el canal que se cae, el token que
+   * vence en una pantalla abierta hace horas, la máquina que se suspende— la
+   * dejaba congelada sin forma de recuperarse: los pedidos seguían avanzando en
+   * la base y las tarjetas quedaban en la columna vieja, con el botón de un
+   * estado que ya pasó. Al tocarlo, el server contestaba «No se puede pasar de
+   * "delivered" a "ready"» y la tarjeta volvía a su estado viejo, así que el
+   * error era eterno.
+   *
+   * `seq` descarta respuestas fuera de orden: mismo patrón que el kanban de
+   * comandas, un solo escritor gana.
+   */
+  const refetchSeq = useRef(0);
+  const refetchOrders = useCallback(async () => {
+    const seq = ++refetchSeq.current;
+    const r = await getPedidosTabOrders(slug);
+    if (!r.ok || seq !== refetchSeq.current) return;
+    setOrders(r.data);
+  }, [slug]);
+
+  // Volver a la tab (el panel no se desmonta, así que no hay refetch de montaje
+  // que lo cubra) — igual que Comandas, Caja, Rendición y Salón.
+  useOnActivate(active, () => void refetchOrders());
+
+  // Volver a la pestaña / despertar la máquina. Es el caso real de la pantalla
+  // de operación, que queda abierta todo el servicio: mientras estuvo oculta el
+  // websocket pudo haberse dormido y perdido eventos.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refetchOrders();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [refetchOrders]);
 
   const fetchOrder = useCallback(
     async (orderId: string): Promise<AdminOrder | null> => {
@@ -226,14 +270,20 @@ export function OrdersRealtimeBoard({
             }
           },
         )
-        .subscribe();
+        .subscribe((status) => {
+          // Cada vez que el canal queda arriba —la primera y las que siguen a
+          // una reconexión— se revalida contra el server. Es el único momento en
+          // que sabemos que hubo un hueco en el stream, y lo que hace que la
+          // pantalla se arregle sola sin que nadie toque nada.
+          if (status === "SUBSCRIBED") void refetchOrders();
+        });
     })();
 
     return () => {
       cancelled = true;
       if (channel) supabase.removeChannel(channel);
     };
-  }, [businessId, fetchOrder]);
+  }, [businessId, fetchOrder, refetchOrders]);
 
   const handleAdvance = useCallback(
     async (order: AdminOrder, next: OrderStatus) => {
@@ -247,14 +297,20 @@ export function OrdersRealtimeBoard({
       });
       if (!result.ok) {
         toast.error(result.error);
+        // No se revierte a lo que teníamos: lo que teníamos es justo lo que está
+        // mal. Un rechazo de transición («No se puede pasar de "delivered" a
+        // "ready"») significa que el server ya está en otro estado, así que se
+        // pide la fila real. Devolver la tarjeta a su columna vieja dejaba el
+        // botón equivocado puesto y el error se repetía para siempre.
+        const fresh = await fetchOrder(order.id);
         setOrders((prev) =>
           prev.map((o) =>
-            o.id === order.id ? { ...o, status: order.status } : o,
+            o.id === order.id ? (fresh ?? { ...o, status: order.status }) : o,
           ),
         );
       }
     },
-    [slug],
+    [slug, fetchOrder],
   );
 
   const handleConfirm = useCallback(
@@ -268,9 +324,10 @@ export function OrdersRealtimeBoard({
       const result = await confirmarPedido(order.id, slug, kitchenNotes);
       if (!result.ok) {
         toast.error(result.error);
+        const fresh = await fetchOrder(order.id);
         setOrders((prev) =>
           prev.map((o) =>
-            o.id === order.id ? { ...o, status: order.status } : o,
+            o.id === order.id ? (fresh ?? { ...o, status: order.status }) : o,
           ),
         );
         return;
@@ -288,7 +345,7 @@ export function OrdersRealtimeBoard({
         `Pedido #${order.daily_number} confirmado · ${cocinaPart}${directPart}`,
       );
     },
-    [slug],
+    [slug, fetchOrder],
   );
 
   // Aceptar un programado (spec 061): lo avala sin marcharlo. Queda en
@@ -303,9 +360,10 @@ export function OrdersRealtimeBoard({
       const result = await aceptarPedidoProgramado(order.id, slug);
       if (!result.ok) {
         toast.error(result.error);
+        const fresh = await fetchOrder(order.id);
         setOrders((prev) =>
           prev.map((o) =>
-            o.id === order.id ? { ...o, status: order.status } : o,
+            o.id === order.id ? (fresh ?? { ...o, status: order.status }) : o,
           ),
         );
         return;
@@ -314,7 +372,7 @@ export function OrdersRealtimeBoard({
         `Pedido #${order.daily_number} aceptado · la comanda sale sola antes de la hora`,
       );
     },
-    [slug],
+    [slug, fetchOrder],
   );
 
   const unlockSound = () => {

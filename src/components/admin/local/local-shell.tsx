@@ -250,11 +250,13 @@ function PedidosPanel({
   slug,
   businessId,
   timezone,
+  active,
 }: {
   promise: Promise<PedidosData>;
   slug: string;
   businessId: string;
   timezone: string;
+  active: boolean;
 }) {
   const {
     initialOrders,
@@ -271,6 +273,7 @@ function PedidosPanel({
       scheduledSlots={scheduledSlots}
       marchLeadPickupMin={marchLeadPickupMin}
       marchLeadDeliveryMin={marchLeadDeliveryMin}
+      active={active}
     />
   );
 }
@@ -843,6 +846,7 @@ function TabsInner({
                 slug={slug}
                 businessId={businessId}
                 timezone={timezone}
+                active={active === "pedidos"}
               />
             </Suspense>
           </ErrorBoundary>

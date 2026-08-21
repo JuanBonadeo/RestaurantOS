@@ -5,7 +5,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireMozoActionContext } from "@/lib/mozo/auth";
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
-import { startOfTodayUtc } from "@/lib/admin/orders-query";
+import {
+  getTodayOrders,
+  startOfTodayUtc,
+  type AdminOrder,
+} from "@/lib/admin/orders-query";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
@@ -88,6 +92,30 @@ export async function getSalonTabData(
       tomorrowStart,
     }),
   );
+}
+
+/**
+ * Tab **Pedidos online**: los pedidos del día, nada más.
+ *
+ * Era la única tab sin refetch, y encima la que más lo necesita: su panel está
+ * **siempre montado** (`local-shell.tsx`, para no tirar la suscripción al
+ * cambiar de tab), así que se seedea con el SSR del page-load y de ahí en más
+ * vive del stream de realtime. Un evento perdido —canal caído, token vencido en
+ * una pantalla que lleva horas abierta, máquina suspendida— la dejaba
+ * desincronizada **para siempre**: tarjetas en la columna equivocada, con el
+ * botón de un estado que el pedido ya pasó, y el server rechazando la
+ * transición («No se puede pasar de "delivered" a "ready"»).
+ *
+ * Devuelve sólo las orders: los horarios programables y los leads de marcha
+ * salen de la config del negocio, que no cambia mientras la pantalla está
+ * abierta.
+ */
+export async function getPedidosTabOrders(
+  slug: string,
+): Promise<ActionResult<AdminOrder[]>> {
+  const ctx = await requireOperacionContext(slug);
+  if (!ctx.ok) return ctx;
+  return actionOk(await getTodayOrders(ctx.data.businessId, ctx.data.timezone));
 }
 
 /** Tab **Caja**: las cajas del negocio con su estado (último corte, período). */
