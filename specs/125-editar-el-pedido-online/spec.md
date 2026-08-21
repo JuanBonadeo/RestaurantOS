@@ -70,7 +70,8 @@ Reglas heredadas de la spec 110, sin cambiarles una coma:
   rechaza; que la UI no los dibuje evita el choque).
 - Gate de rol en la UI además del server: un mozo no ve botones que le van a
   decir que no.
-- `lifecycle_status ≠ open` → sin gestos.
+- `lifecycle_status ≠ open` **o `payment_status = paid`** → sin gestos. La UI no
+  los dibuja y las dos actions lo rechazan.
 
 **Esta fase cierra la spec 110 y este pedido con el mismo código.** Hacer 110
 sola sería escribir dos veces la misma lista.
@@ -108,33 +109,58 @@ recibe el papel con el pedido corregido.
 
 ## Qué NO cambia
 
-- **Las dos server actions de ítem.** Ya validan todo lo que hay que validar; se
-  usan como están.
+- **La firma de las dos actions de ítem.** Se usan como están; lo único que se
+  les agrega es la guarda de `payment_status` (ver D2), una línea en cada una.
 - **`routeOrderToCocina`.** Sigue siendo el camino de la primera marcha y sigue
   siendo idempotente a nivel orden. Agregar ítems es otra puerta.
 - **El salón.** La fase B mueve código, no cambia el flujo del mozo.
 - **La frontera de plata.** Orden cerrada no se edita (spec 092 · H-48).
 
-## Decisiones pendientes — hay que cerrarlas antes de implementar
+## La regla, en una línea
 
-**D1 · Hasta qué estado se edita.** En la mesa la regla es una sola:
-`lifecycle_status = open`. Propuesta: mantener exactamente esa, y que
-`orders.status` sólo module la **advertencia** — sin comandas, edición silenciosa;
-de `preparing` en adelante, aviso de que ya está en cocina y reimpresión
-automática. De `on_the_way` en adelante el pedido está en la calle: ahí no hay
-edición que valga, sólo el camino de anulación que ya existe.
+**Se edita mientras la orden esté abierta y no esté pagada.** Nada más.
 
-**D2 · Pedido ya pagado (MP).** El webhook acredita el pago pero **no** llama a
-`closeOrderIfFullyPaid` en la rama online: la orden queda `open`, o sea
-**editable, y hoy nada avisa que la plata ya entró**. Si se saca un ítem, el
-total baja por debajo de lo pagado y queda una devolución que el sistema no
-modela. Es el borde más caro de los tres. ¿Se permite con confirmación explícita
-y un registro del delta, o un pedido pagado sólo se anula y se rehace? **Decisión
-de negocio.**
+```
+lifecycle_status = 'open'  AND  payment_status <> 'paid'
+```
 
-**D3 · Q1 de la spec 110, todavía abierta.** Editar una bebida (sin sector) y
-cambiarla por un producto **con** sector deja un ítem huérfano sin comanda.
-`enviarComanda` tiene rescate de huérfanos; `editarItemComanda` no pasa por ahí.
+Decidido con Juan (2026-08-20): *"si está pagado, no se debería poder editar,
+hay que hacerlo simple"*. Las tres decisiones que estaban abiertas se cierran con
+esa misma frase.
+
+**D1 · Hasta qué estado se edita.** La regla de arriba y ninguna otra. El
+`orders.status` **no** agrega condiciones: no hay una tabla de qué se puede hacer
+en `preparing` y qué en `on_the_way`. Lo único que cambia con el estado es el
+**aviso**: si el pedido ya marchó, la UI dice que está en cocina y la comanda se
+reimprime sola.
+
+Un pedido `delivered` impago sigue siendo editable, y está bien: es el delivery
+que volvió y se cobra al mostrador (issue #190). Corregirlo **antes** de cobrar es
+justamente el momento correcto.
+
+**D2 · Pedido pagado.** No se edita: sin gestos de editar, eliminar ni agregar.
+El pedido pagado que hay que cambiar se **anula** (`cancelarOrden`, spec 090, que
+ya modela la devolución) y se rehace. Preferimos perder un número de pedido antes
+que dejar una orden cobrada que no coincide con lo que se cobró.
+
+Esto vale para todo el canal, no sólo MP: `payment_status = 'paid'` lo escriben
+también el cobro del encargado y el cierre por saldo.
+
+⚠️ **La guarda va en el server, no sólo en la UI.** Hoy `cancelarItem` y
+`editarItemComanda` validan `lifecycle_status` pero **no** `payment_status`, y un
+pedido pagado por MP queda `open` — el webhook acredita el pago y no llama a
+`closeOrderIfFullyPaid`. O sea que hoy la base **deja** editar un pedido cobrado.
+Es una línea en cada action, y aplica igual a la mesa (donde `paid` implica
+`closed` en la práctica, así que no le cambia nada).
+
+**D3 · El ítem que cambia de sector.** Cambiar de producto se ofrece **sólo entre
+productos del mismo sector**, que es lo que ya hace el modal del kanban con
+`getSwappableProducts(slug, station_id)`. Un ítem **sin** sector (una bebida)
+ofrece cantidad, notas y eliminar — no cambio de producto.
+
+Así el huérfano de la Q1 de la spec 110 no puede nacer, y no hay que escribirle un
+rescate. Si el encargado necesita convertir una Coca en un plato: elimina la
+línea y agrega la otra, que con la fase B es un gesto de dos toques.
 
 ## Verificación
 
