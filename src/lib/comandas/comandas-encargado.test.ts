@@ -119,7 +119,7 @@ vi.mock("@/lib/supabase/service", () => ({
   }),
 }));
 
-const { cancelarComanda, editarItemComanda, getSwappableProducts } =
+const { cancelarComanda, cancelarItem, editarItemComanda, getSwappableProducts } =
   await import("./actions");
 const { notifyItemCancelled } = await import("@/lib/notifications/events");
 
@@ -147,7 +147,11 @@ beforeEach(() => {
       daily_menu_id: null,
       // Spec 069 — precio por ítem. Por defecto sin pisar.
       price_original_cents: null,
-      orders: { business_id: "biz1", lifecycle_status: "open" },
+      orders: {
+        business_id: "biz1",
+        lifecycle_status: "open",
+        payment_status: "pending",
+      },
     },
     orders: { tip_cents: 0, discount_cents: 0, delivery_fee_cents: 0 },
     products: {
@@ -496,6 +500,21 @@ describe("editarItemComanda · precio por ítem (spec 069)", () => {
     expect(upd?.vals).not.toHaveProperty("price_override_reason");
   });
 
+  // Spec 125 — «si está pagado, no se debería poder editar». La guarda de
+  // `lifecycle_status` no alcanza: un pedido online pagado por MP queda `open`
+  // (el webhook acredita el pago y no llama a `closeOrderIfFullyPaid`), así que
+  // se podía reescribir una orden ya cobrada desde el kanban.
+  it("orden ya pagada → rechazado aunque siga abierta", async () => {
+    (state.order_items as Record<string, unknown>).orders = {
+      business_id: "biz1",
+      lifecycle_status: "open",
+      payment_status: "paid",
+    };
+    const res = await editarItemComanda("house", "i1", { quantity: 3 });
+    expect(res.ok).toBe(false);
+    expect(captured.updates).toHaveLength(0);
+  });
+
   it("orden ya cerrada → rechazado (la plata cobrada no se reescribe)", async () => {
     (state.order_items as Record<string, unknown>).orders = {
       business_id: "biz1",
@@ -507,6 +526,28 @@ describe("editarItemComanda · precio por ítem (spec 069)", () => {
     });
     expect(res.ok).toBe(false);
     expect(captured.updates).toHaveLength(0);
+  });
+});
+
+describe("cancelarItem · frontera de plata (spec 125)", () => {
+  it("orden ya pagada → rechazado aunque siga abierta", async () => {
+    (state.order_items as Record<string, unknown>).orders = {
+      id: "o1",
+      business_id: "biz1",
+      lifecycle_status: "open",
+      payment_status: "paid",
+    };
+    const res = await cancelarItem("i1", "me equivoqué", "house");
+    expect(res.ok).toBe(false);
+    expect(captured.updates).toHaveLength(0);
+  });
+
+  it("orden abierta e impaga → se cancela", async () => {
+    const res = await cancelarItem("i1", "me equivoqué", "house");
+    expect(res.ok).toBe(true);
+    const upd = captured.updates.find((u) => u.table === "order_items");
+    expect(upd?.vals.cancelled_at).toBeTruthy();
+    expect(upd?.vals.cancelled_reason).toBe("me equivoqué");
   });
 });
 

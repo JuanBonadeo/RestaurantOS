@@ -6,29 +6,22 @@ import {
   useMemo,
   useRef,
   useState,
-  useTransition,
 } from "react";
 import { toast } from "sonner";
 
-import { formatCurrency } from "@/lib/currency";
 import {
   Ban,
   ChefHat,
   Check,
   Clock,
   MapPin,
-  Minus,
   MoreVertical,
   Package,
   Pencil,
   Play,
-  Plus,
   Printer,
   RotateCcw,
-  Tag,
-  Trash2,
   Truck,
-  Undo2,
   UtensilsCrossed,
   Wifi,
   WifiOff,
@@ -36,16 +29,9 @@ import {
 
 import {
   advanceComandaStatus,
-  cancelarItem,
-  editarItemComanda,
   getComandasTabData,
-  getSwappableProducts,
   marcarComandaEntregada,
   solicitarReimpresion,
-} from "@/lib/comandas/actions";
-import type {
-  EditarItemComandaPatch,
-  SwappableProduct,
 } from "@/lib/comandas/actions";
 import type { LocalComanda, LocalStation } from "@/lib/admin/local-query";
 import { matchesSalon } from "@/lib/admin/salon-filter";
@@ -55,11 +41,6 @@ import {
 } from "@/lib/comandas/entregadas-window";
 import type { ComandaStatus } from "@/lib/comandas/types";
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
 } from "@/components/ui/dialog";
 import {
   DropdownMenu,
@@ -69,6 +50,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { AnularComandaModal } from "@/components/shared/anular-comanda-modal";
+import { EditarItemsModal } from "@/components/shared/editar-items-modal";
 
 /**
  * Umbral (ms) para considerar "caído" al print agent: sin heartbeat hace más
@@ -670,9 +652,34 @@ export function ComandasKanban({
         />
       )}
       {editarTarget && (
-        <EditarComandaModal
+        <EditarItemsModal
           slug={slug}
-          comanda={editarTarget}
+          titulo={`Editar comanda · ${editarTarget.station_name} · tanda ${editarTarget.batch}`}
+          items={editarTarget.items
+            .filter((it) => !it.cancelled_at)
+            .map((it) => ({
+              order_item_id: it.order_item_id,
+              product_id: it.product_id,
+              product_name: it.product_name,
+              quantity: it.quantity,
+              notes: it.notes,
+              is_combo: it.is_combo,
+              unit_price_cents: it.unit_price_cents,
+              price_original_cents: it.price_original_cents,
+              price_override_reason: it.price_override_reason,
+            }))}
+          stationId={editarTarget.station_id}
+          saveLabel="Guardar y reimprimir"
+          afterSave={async () => {
+            const rp = await solicitarReimpresion(slug, editarTarget.id);
+            if (!rp.ok) {
+              toast.error("Cambios guardados, pero no se pudo reimprimir.");
+            } else {
+              toast.success(
+                "Comanda actualizada · se reimprime el ticket corregido.",
+              );
+            }
+          }}
           onClose={() => setEditarTarget(null)}
           onDone={() => {
             setEditarTarget(null);
@@ -1098,10 +1105,6 @@ function AgentHealthPill({ lastSeenAt }: { lastSeenAt: string | null }) {
 
 // ─── Anular comanda entera (spec 049) ───────────────────────────────────────
 
-function formatPrice(cents: number): string {
-  return `$${(cents / 100).toLocaleString("es-AR")}`;
-}
-
 /** De dónde salió la comanda, para que el modal diga qué se está anulando. */
 function comandaOrigen(comanda: LocalComanda): string {
   return comanda.delivery_type === "dine_in"
@@ -1109,433 +1112,3 @@ function comandaOrigen(comanda: LocalComanda): string {
     : comanda.customer_name || "Pedido online";
 }
 
-// ─── Editar comanda ya impresa (spec 049) ───────────────────────────────────
-
-/** Fila de trabajo del modal: copia editable de un ítem vivo + su original. */
-type EditRow = {
-  itemId: string;
-  productId: string | null;
-  productName: string;
-  quantity: number;
-  notes: string;
-  removed: boolean;
-  isCombo: boolean;
-  origProductId: string | null;
-  origQuantity: number;
-  origNotes: string;
-  // ── Precio por ítem (spec 069) ──
-  /** Precio de CATÁLOGO de la línea (lo que dice la carta). */
-  catalogPriceCents: number;
-  /** Precio pisado, o null si se cobra el de catálogo. */
-  overrideCents: number | null;
-  overrideReason: string;
-  origOverrideCents: number | null;
-  origOverrideReason: string;
-};
-
-function EditarComandaModal({
-  slug,
-  comanda,
-  onClose,
-  onDone,
-}: {
-  slug: string;
-  comanda: LocalComanda;
-  onClose: () => void;
-  onDone: () => void;
-}) {
-  const [rows, setRows] = useState<EditRow[]>(() =>
-    comanda.items
-      .filter((it) => !it.cancelled_at)
-      .map((it) => ({
-        itemId: it.order_item_id,
-        productId: it.product_id,
-        productName: it.product_name,
-        quantity: it.quantity,
-        notes: it.notes ?? "",
-        removed: false,
-        isCombo: it.is_combo,
-        origProductId: it.product_id,
-        origQuantity: it.quantity,
-        origNotes: it.notes ?? "",
-        // `unit_price_cents` es lo COBRADO; el de catálogo vive en
-        // `price_original_cents` cuando la línea está pisada (spec 069).
-        catalogPriceCents: it.price_original_cents ?? it.unit_price_cents,
-        overrideCents:
-          it.price_original_cents == null ? null : it.unit_price_cents,
-        overrideReason: it.price_override_reason ?? "",
-        origOverrideCents:
-          it.price_original_cents == null ? null : it.unit_price_cents,
-        origOverrideReason: it.price_override_reason ?? "",
-      })),
-  );
-  const [pending, startTransition] = useTransition();
-  const [products, setProducts] = useState<SwappableProduct[] | null>(null);
-  const [loadingProducts, setLoadingProducts] = useState(false);
-  const [pickerFor, setPickerFor] = useState<string | null>(null);
-
-  // Carga perezosa de los productos del sector (solo al primer "Cambiar producto").
-  const ensureProducts = () => {
-    if (products || loadingProducts) return;
-    setLoadingProducts(true);
-    void getSwappableProducts(slug, comanda.station_id).then((r) => {
-      if (r.ok) setProducts(r.data);
-      else
-        toast.error(r.error ?? "No pudimos cargar los productos del sector.");
-      setLoadingProducts(false);
-    });
-  };
-
-  const patchRow = (itemId: string, patch: Partial<EditRow>) =>
-    setRows((rs) =>
-      rs.map((r) => (r.itemId === itemId ? { ...r, ...patch } : r)),
-    );
-
-  const rowChanged = (r: EditRow) =>
-    r.removed ||
-    r.quantity !== r.origQuantity ||
-    r.notes.trim() !== r.origNotes.trim() ||
-    r.productId !== r.origProductId ||
-    r.overrideCents !== r.origOverrideCents ||
-    // Corregir SÓLO el motivo (sin mover el precio) también es un cambio: el
-    // motivo es el dato que audita el reporte.
-    (r.overrideCents !== null &&
-      r.overrideReason.trim() !== r.origOverrideReason.trim());
-
-  /**
-   * Una fila con precio pisado y motivo vacío no se puede guardar: el server
-   * la rechaza igual, pero cortarlo acá evita que el encargado descubra el
-   * problema recién después de esperar el round-trip (spec 21).
-   */
-  const priceIncomplete = (r: EditRow) =>
-    !r.removed && r.overrideCents !== null && r.overrideReason.trim() === "";
-
-  const dirty = rows.some(rowChanged);
-  const blocked = rows.some(priceIncomplete);
-
-  // Guardar: aplica quitar / editar por ítem y reimprime el ticket corregido.
-  // Loading explícito (no optimista): frontera de plata (spec 21).
-  const submit = () => {
-    startTransition(async () => {
-      for (const r of rows) {
-        if (r.removed) {
-          const res = await cancelarItem(
-            r.itemId,
-            "Quitado por el encargado",
-            slug,
-          );
-          if (!res.ok) {
-            toast.error(res.error ?? "No pudimos quitar un ítem.");
-            return;
-          }
-          continue;
-        }
-        const patch: EditarItemComandaPatch = {};
-        if (r.quantity !== r.origQuantity) patch.quantity = r.quantity;
-        if (r.notes.trim() !== r.origNotes.trim())
-          patch.notes = r.notes.trim() ? r.notes.trim() : null;
-        if (r.productId && r.productId !== r.origProductId)
-          patch.productId = r.productId;
-        const priceChanged =
-          r.overrideCents !== r.origOverrideCents ||
-          (r.overrideCents !== null &&
-            r.overrideReason.trim() !== r.origOverrideReason.trim());
-        if (priceChanged) {
-          // `null` = volver al precio de la carta (el server no pide motivo).
-          patch.priceOverrideCents = r.overrideCents;
-          patch.priceOverrideReason =
-            r.overrideCents === null ? null : r.overrideReason.trim();
-        }
-        if (Object.keys(patch).length === 0) continue;
-        const res = await editarItemComanda(slug, r.itemId, patch);
-        if (!res.ok) {
-          toast.error(res.error ?? "No pudimos guardar un cambio.");
-          return;
-        }
-      }
-      const rp = await solicitarReimpresion(slug, comanda.id);
-      if (!rp.ok) {
-        toast.error("Cambios guardados, pero no se pudo reimprimir.");
-      } else {
-        toast.success(
-          "Comanda actualizada · se reimprime el ticket corregido.",
-        );
-      }
-      onDone();
-    });
-  };
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>
-            Editar comanda · {comanda.station_name} · tanda {comanda.batch}
-          </DialogTitle>
-        </DialogHeader>
-
-        <div className="flex max-h-[55vh] flex-col gap-2 overflow-y-auto pr-1">
-          {rows.map((r) => (
-            <div
-              key={r.itemId}
-              className={[
-                "ring-border/60 flex flex-col gap-2 rounded-xl p-3 ring-1",
-                r.removed ? "opacity-50" : "",
-              ].join(" ")}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span
-                  className={[
-                    "text-foreground min-w-0 flex-1 truncate text-sm font-semibold",
-                    r.removed ? "line-through" : "",
-                  ].join(" ")}
-                >
-                  {r.productName}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => patchRow(r.itemId, { removed: !r.removed })}
-                  disabled={pending}
-                  className={[
-                    "inline-flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] font-semibold transition disabled:opacity-50",
-                    r.removed
-                      ? "text-muted-foreground ring-border/70 hover:bg-muted/60 ring-1"
-                      : "text-rose-700 ring-1 ring-rose-200 hover:bg-rose-50",
-                  ].join(" ")}
-                >
-                  {r.removed ? (
-                    <>
-                      <Undo2 className="size-3" strokeWidth={2.5} /> Deshacer
-                    </>
-                  ) : (
-                    <>
-                      <Trash2 className="size-3" strokeWidth={2.5} /> Quitar
-                    </>
-                  )}
-                </button>
-              </div>
-
-              {!r.removed && (
-                <>
-                  <div className="flex items-center gap-3">
-                    <div className="ring-border/70 inline-flex items-center rounded-lg ring-1">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          patchRow(r.itemId, {
-                            quantity: Math.max(1, r.quantity - 1),
-                          })
-                        }
-                        disabled={pending || r.quantity <= 1}
-                        className="hover:bg-muted/60 inline-flex size-8 items-center justify-center rounded-l-lg disabled:opacity-40"
-                      >
-                        <Minus className="size-3.5" strokeWidth={2.5} />
-                      </button>
-                      <span className="w-8 text-center text-sm font-bold tabular-nums">
-                        {r.quantity}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          patchRow(r.itemId, { quantity: r.quantity + 1 })
-                        }
-                        disabled={pending}
-                        className="hover:bg-muted/60 inline-flex size-8 items-center justify-center rounded-r-lg disabled:opacity-40"
-                      >
-                        <Plus className="size-3.5" strokeWidth={2.5} />
-                      </button>
-                    </div>
-
-                    {!r.isCombo && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          ensureProducts();
-                          setPickerFor(
-                            pickerFor === r.itemId ? null : r.itemId,
-                          );
-                        }}
-                        disabled={pending}
-                        className="text-muted-foreground hover:text-foreground text-xs font-semibold underline underline-offset-2 disabled:opacity-50"
-                      >
-                        Cambiar producto
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Precio por ítem (spec 069). Inline y no en un modal
-                      anidado: este editor es batch — se tocan varias líneas y
-                      recién ahí se guarda — así que abrir un modal por línea
-                      rompería el gesto. */}
-                  {!r.isCombo && (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-muted-foreground text-xs">
-                        Precio de la carta{" "}
-                        <span className="tabular-nums">
-                          {formatCurrency(r.catalogPriceCents)}
-                        </span>
-                      </span>
-                      {r.overrideCents === null ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            patchRow(r.itemId, {
-                              overrideCents: r.catalogPriceCents,
-                            })
-                          }
-                          disabled={pending}
-                          className="inline-flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-200 transition hover:bg-amber-50 disabled:opacity-50"
-                        >
-                          <Tag className="size-3" strokeWidth={2.5} />
-                          Cambiar el precio
-                        </button>
-                      ) : (
-                        <div className="flex flex-1 flex-wrap items-center gap-2">
-                          <input
-                            type="number"
-                            inputMode="decimal"
-                            min={0}
-                            step="any"
-                            value={r.overrideCents / 100}
-                            onChange={(e) => {
-                              const v = Number(e.target.value);
-                              patchRow(r.itemId, {
-                                overrideCents:
-                                  Number.isFinite(v) && v >= 0
-                                    ? Math.round(v * 100)
-                                    : 0,
-                              });
-                            }}
-                            disabled={pending}
-                            aria-label={`Precio a cobrar de ${r.productName}`}
-                            className="border-input bg-background focus-visible:ring-ring h-8 w-24 rounded-lg border px-2 text-sm font-semibold tabular-nums outline-none focus-visible:ring-2"
-                          />
-                          <input
-                            type="text"
-                            value={r.overrideReason}
-                            onChange={(e) =>
-                              patchRow(r.itemId, {
-                                overrideReason: e.target.value,
-                              })
-                            }
-                            disabled={pending}
-                            placeholder="Motivo (obligatorio)"
-                            aria-label={`Motivo del cambio de precio de ${r.productName}`}
-                            className={[
-                              "bg-background focus-visible:ring-ring h-8 min-w-0 flex-1 rounded-lg border px-2 text-xs outline-none focus-visible:ring-2",
-                              priceIncomplete(r)
-                                ? "border-rose-300"
-                                : "border-input",
-                            ].join(" ")}
-                          />
-                          <button
-                            type="button"
-                            onClick={() =>
-                              patchRow(r.itemId, {
-                                overrideCents: null,
-                                overrideReason: "",
-                              })
-                            }
-                            disabled={pending}
-                            className="text-muted-foreground ring-border/70 hover:bg-muted/60 inline-flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] font-semibold ring-1 transition disabled:opacity-50"
-                          >
-                            <Undo2 className="size-3" strokeWidth={2.5} />
-                            Volver a la carta
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {pickerFor === r.itemId && (
-                    <div className="ring-border/60 max-h-40 overflow-y-auto rounded-lg ring-1">
-                      {loadingProducts && (
-                        <p className="text-muted-foreground p-2 text-xs">
-                          Cargando productos…
-                        </p>
-                      )}
-                      {!loadingProducts && products?.length === 0 && (
-                        <p className="text-muted-foreground p-2 text-xs">
-                          No hay otros productos en este sector.
-                        </p>
-                      )}
-                      {products?.map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          onClick={() => {
-                            patchRow(r.itemId, {
-                              productId: p.id,
-                              productName: p.name,
-                              // El server limpia el override al cambiar de
-                              // producto (el motivo y el precio de lista eran
-                              // del viejo, FR-013). Si acá no lo espejáramos,
-                              // el modal seguiría mostrando el precio anterior
-                              // y afirmaría que va a cobrar algo distinto de
-                              // lo que realmente se guarda.
-                              catalogPriceCents: p.price_cents,
-                              overrideCents: null,
-                              overrideReason: "",
-                            });
-                            setPickerFor(null);
-                          }}
-                          className={[
-                            "hover:bg-muted/60 flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-xs",
-                            p.id === r.productId
-                              ? "bg-muted/40 font-semibold"
-                              : "",
-                          ].join(" ")}
-                        >
-                          <span className="truncate">{p.name}</span>
-                          <span className="text-muted-foreground tabular-nums">
-                            {formatPrice(p.price_cents)}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  <input
-                    type="text"
-                    value={r.notes}
-                    onChange={(e) =>
-                      patchRow(r.itemId, { notes: e.target.value })
-                    }
-                    disabled={pending}
-                    placeholder="Aclaración (ej: sin sal, bien cocido)"
-                    className="border-input bg-background focus-visible:ring-ring w-full rounded-lg border px-3 py-1.5 text-xs outline-none focus-visible:ring-2 disabled:opacity-50"
-                  />
-                </>
-              )}
-            </div>
-          ))}
-          {rows.length === 0 && (
-            <p className="text-muted-foreground py-6 text-center text-sm">
-              La comanda no tiene ítems editables.
-            </p>
-          )}
-        </div>
-
-        <DialogFooter>
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={pending}
-            className="text-muted-foreground ring-border/70 hover:bg-muted/60 inline-flex h-9 items-center justify-center rounded-lg px-4 text-sm font-semibold ring-1 transition disabled:opacity-50"
-          >
-            Volver
-          </button>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={pending || !dirty || blocked}
-            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-sky-600 px-4 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:opacity-50"
-          >
-            <Printer className="size-4" strokeWidth={2.5} />
-            {pending ? "Guardando…" : "Guardar y reimprimir"}
-          </button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}

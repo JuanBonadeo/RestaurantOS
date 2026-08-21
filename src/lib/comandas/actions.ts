@@ -17,6 +17,7 @@ import { requireMozoActionContext } from "@/lib/mozo/auth";
 import { getMozosByBusiness, type MozoMember } from "@/lib/mozo/queries";
 import { createNotification } from "@/lib/notifications/create";
 import { notifyItemCancelled } from "@/lib/notifications/events";
+import { isOrderPaid, ORDER_PAID_ERROR } from "@/lib/orders/predicates";
 import { recomputeOrderTotals } from "@/lib/orders/totals-recompute";
 
 import { encolarReimpresionDeItem } from "./reprint";
@@ -1287,12 +1288,18 @@ export async function cancelarItem(
 
   const { data: item } = await service
     .from("order_items")
-    .select("id, cancelled_at, orders!inner(id, business_id, lifecycle_status)")
+    .select(
+      "id, cancelled_at, orders!inner(id, business_id, lifecycle_status, payment_status)",
+    )
     .eq("id", orderItemId)
     .maybeSingle();
   const itemOrder = (
     item as {
-      orders?: { business_id: string; lifecycle_status: string };
+      orders?: {
+        business_id: string;
+        lifecycle_status: string;
+        payment_status: string | null;
+      };
     } | null
   )?.orders;
   if (!item || itemOrder?.business_id !== business.id) {
@@ -1311,6 +1318,9 @@ export async function cancelarItem(
     return actionError(
       "La cuenta ya está cerrada — no se puede cancelar un ítem.",
     );
+  }
+  if (isOrderPaid(itemOrder)) {
+    return actionError(ORDER_PAID_ERROR);
   }
 
   const { error } = await service
@@ -1611,13 +1621,17 @@ export async function editarItemComanda(
   const { data: item } = await service
     .from("order_items")
     .select(
-      "id, order_id, product_id, product_name, unit_price_cents, quantity, notes, station_id, cancelled_at, is_combo_component, parent_order_item_id, daily_menu_id, price_original_cents, orders!inner(business_id, lifecycle_status)",
+      "id, order_id, product_id, product_name, unit_price_cents, quantity, notes, station_id, cancelled_at, is_combo_component, parent_order_item_id, daily_menu_id, price_original_cents, orders!inner(business_id, lifecycle_status, payment_status)",
     )
     .eq("id", orderItemId)
     .maybeSingle();
   const itemOrder = (
     item as {
-      orders?: { business_id: string; lifecycle_status: string };
+      orders?: {
+        business_id: string;
+        lifecycle_status: string;
+        payment_status: string | null;
+      };
     } | null
   )?.orders;
   if (!item || itemOrder?.business_id !== business.id) {
@@ -1627,6 +1641,9 @@ export async function editarItemComanda(
   // arqueo y rendición apoyados en ese total (spec 069, US2 escenario 5).
   if (itemOrder.lifecycle_status !== "open") {
     return actionError("La orden ya está cerrada.");
+  }
+  if (isOrderPaid(itemOrder)) {
+    return actionError(ORDER_PAID_ERROR);
   }
   const it = item as unknown as {
     order_id: string;

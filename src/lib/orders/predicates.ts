@@ -40,3 +40,27 @@ export function isOrderAlive(order: {
 }): boolean {
   return !isOrderDead(order);
 }
+
+/**
+ * ¿La plata de este pedido ya entró? (spec 125)
+ *
+ * Decisión de Juan (2026-08-20): *"si está pagado, no se debería poder editar,
+ * hay que hacerlo simple"*. Un pedido cobrado que se edita queda sin coincidir
+ * con lo que se cobró; el camino correcto es anularlo (`cancelarOrden`, que sí
+ * modela la devolución) y rehacerlo.
+ *
+ * **Por qué no alcanza con `lifecycle_status`.** Un pedido online pagado por MP
+ * queda `open`: el webhook acredita el pago y no llama a
+ * `closeOrderIfFullyPaid`. Así que la orden está cobrada y abierta a la vez, y
+ * la guarda de cuenta cerrada la deja pasar.
+ *
+ * En el salón `paid` implica `closed` en la práctica (el cobro cierra), así que
+ * esto no le cambia nada — es la misma frontera, dicha por el otro eje.
+ */
+export function isOrderPaid(order: { payment_status?: string | null }): boolean {
+  return order.payment_status === "paid";
+}
+
+/** El mensaje único de esa frontera, para que las dos actions digan lo mismo. */
+export const ORDER_PAID_ERROR =
+  "El pedido ya está cobrado — para cambiarlo hay que anularlo y rehacerlo.";
