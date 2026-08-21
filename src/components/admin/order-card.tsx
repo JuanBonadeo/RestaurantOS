@@ -73,6 +73,7 @@ export function OrderCard({
   timezone,
   onAdvance,
   onConfirm,
+  onChanged,
   isNew = false,
   columnRing = "ring-border",
 }: {
@@ -84,6 +85,8 @@ export function OrderCard({
    *  botón "Confirmar" llama acá en lugar de pasar a `confirmed`. La action
    *  resuelve sectores y crea las comandas para cocina. */
   onConfirm?: (order: AdminOrder) => void;
+  /** Se editaron los ítems del pedido desde el detalle (spec 125). */
+  onChanged?: () => void;
   isNew?: boolean;
   columnRing?: string;
 }) {
@@ -317,6 +320,7 @@ export function OrderCard({
         onAdvance={onAdvance}
         onConfirm={onConfirm}
         abrirCobro={cobrarDirecto}
+        onChanged={onChanged}
       />
     </>
   );

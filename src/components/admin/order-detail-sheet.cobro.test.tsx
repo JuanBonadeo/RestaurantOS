@@ -25,6 +25,9 @@ vi.mock("@/lib/orders/update-status", () => ({
 vi.mock("./cobrar-pedido-sheet", () => ({
   CobrarPedidoSheet: () => null,
 }));
+vi.mock("@/components/shared/editar-items-modal", () => ({
+  EditarItemsModal: () => null,
+}));
 
 import { OrderDetailSheet } from "./order-detail-sheet";
 import type { AdminOrder } from "@/lib/admin/orders-query";

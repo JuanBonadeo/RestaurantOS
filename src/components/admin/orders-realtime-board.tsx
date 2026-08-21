@@ -530,6 +530,7 @@ export function OrdersRealtimeBoard({
                     timezone={timezone}
                     onAdvance={handleAdvance}
                     onConfirm={handleConfirm}
+                    onChanged={() => void refetchOrders()}
                     isNew={newlyArrived.has(order.id)}
                     columnRing={col.ring}
                   />

@@ -664,11 +664,12 @@ export function ComandasKanban({
               quantity: it.quantity,
               notes: it.notes,
               is_combo: it.is_combo,
+              // Los ítems de una comanda son todos del sector de la comanda.
+              station_id: editarTarget.station_id,
               unit_price_cents: it.unit_price_cents,
               price_original_cents: it.price_original_cents,
               price_override_reason: it.price_override_reason,
             }))}
-          stationId={editarTarget.station_id}
           saveLabel="Guardar y reimprimir"
           afterSave={async () => {
             const rp = await solicitarReimpresion(slug, editarTarget.id);

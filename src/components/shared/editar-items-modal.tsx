@@ -45,6 +45,13 @@ export type ItemEditable = {
   notes: string | null;
   /** Combo, componente de combo o menú del día: el server no los deja editar. */
   is_combo: boolean;
+  /**
+   * Sector de la línea. `null` (una bebida, un producto de stock) esconde el
+   * «cambiar producto»: es la decisión D3 de la spec 125 — cambiarle el
+   * producto a una línea sin sector la volvería un ítem con sector y sin
+   * comanda, o sea un huérfano que cocina nunca ve.
+   */
+  station_id: string | null;
   unit_price_cents: number;
   price_original_cents: number | null;
   price_override_reason: string | null;
@@ -57,6 +64,7 @@ function formatPrice(cents: number): string {
 /** Fila de trabajo del modal: copia editable de un ítem vivo + su original. */
 type EditRow = {
   itemId: string;
+  stationId: string | null;
   productId: string | null;
   productName: string;
   quantity: number;
@@ -80,7 +88,6 @@ export function EditarItemsModal({
   slug,
   titulo,
   items,
-  stationId,
   saveLabel = "Guardar cambios",
   onClose,
   onDone,
@@ -91,14 +98,6 @@ export function EditarItemsModal({
   titulo: string;
   /** Ítems vivos: el caller filtra los cancelados y elige el alcance. */
   items: ItemEditable[];
-  /**
-   * Sector del que se ofrecen productos para «cambiar producto». `null` =
-   * ítems sin sector (una bebida): se editan cantidad, precio y notas, pero no
-   * se cambia el producto. Es la decisión D3 de la spec 125 — cambiarle el
-   * producto a una línea sin sector la volvería un ítem con sector y sin
-   * comanda, o sea un huérfano que cocina nunca ve.
-   */
-  stationId: string | null;
   saveLabel?: string;
   onClose: () => void;
   onDone: () => void;
@@ -108,6 +107,7 @@ export function EditarItemsModal({
   const [rows, setRows] = useState<EditRow[]>(() =>
     items.map((it) => ({
         itemId: it.order_item_id,
+      stationId: it.station_id,
         productId: it.product_id,
         productName: it.product_name,
         quantity: it.quantity,
@@ -129,19 +129,28 @@ export function EditarItemsModal({
       })),
   );
   const [pending, startTransition] = useTransition();
-  const [products, setProducts] = useState<SwappableProduct[] | null>(null);
-  const [loadingProducts, setLoadingProducts] = useState(false);
+  /**
+   * Productos por sector, cacheados. Un pedido online mezcla líneas de la
+   * parrilla y de la cocina en la misma pantalla, así que el catálogo del
+   * «cambiar producto» es el del sector de **esa** línea, no uno del modal.
+   */
+  const [productsByStation, setProductsByStation] = useState<
+    Record<string, SwappableProduct[]>
+  >({});
+  const [loadingStation, setLoadingStation] = useState<string | null>(null);
   const [pickerFor, setPickerFor] = useState<string | null>(null);
 
   // Carga perezosa de los productos del sector (solo al primer "Cambiar producto").
-  const ensureProducts = () => {
-    if (products || loadingProducts) return;
-    setLoadingProducts(true);
-    void getSwappableProducts(slug, stationId ?? "").then((r) => {
-      if (r.ok) setProducts(r.data);
-      else
+  const ensureProducts = (stationId: string) => {
+    if (productsByStation[stationId] || loadingStation === stationId) return;
+    setLoadingStation(stationId);
+    void getSwappableProducts(slug, stationId).then((r) => {
+      if (r.ok) {
+        setProductsByStation((prev) => ({ ...prev, [stationId]: r.data }));
+      } else {
         toast.error(r.error ?? "No pudimos cargar los productos del sector.");
-      setLoadingProducts(false);
+      }
+      setLoadingStation((cur) => (cur === stationId ? null : cur));
     });
   };
 
@@ -297,11 +306,11 @@ export function EditarItemsModal({
                       </button>
                     </div>
 
-                    {!r.isCombo && stationId && (
+                    {!r.isCombo && r.stationId && (
                       <button
                         type="button"
                         onClick={() => {
-                          ensureProducts();
+                          ensureProducts(r.stationId!);
                           setPickerFor(
                             pickerFor === r.itemId ? null : r.itemId,
                           );
@@ -398,19 +407,20 @@ export function EditarItemsModal({
                     </div>
                   )}
 
-                  {pickerFor === r.itemId && (
+                  {pickerFor === r.itemId && r.stationId && (
                     <div className="ring-border/60 max-h-40 overflow-y-auto rounded-lg ring-1">
-                      {loadingProducts && (
+                      {loadingStation === r.stationId && (
                         <p className="text-muted-foreground p-2 text-xs">
                           Cargando productos…
                         </p>
                       )}
-                      {!loadingProducts && products?.length === 0 && (
+                      {loadingStation !== r.stationId &&
+                        productsByStation[r.stationId]?.length === 0 && (
                         <p className="text-muted-foreground p-2 text-xs">
                           No hay otros productos en este sector.
                         </p>
                       )}
-                      {products?.map((p) => (
+                      {productsByStation[r.stationId]?.map((p) => (
                         <button
                           key={p.id}
                           type="button"

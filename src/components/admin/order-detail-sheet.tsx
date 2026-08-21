@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
 import { formatInTimeZone } from "date-fns-tz";
 import {
   Bike,
   Clock,
+  Pencil,
   Phone,
   Receipt,
   ShoppingBag,
@@ -28,6 +29,8 @@ import type { OrderStatus } from "@/lib/orders/status";
 import { updateOrderStatus } from "@/lib/orders/update-status";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
+import { EditarItemsModal } from "@/components/shared/editar-items-modal";
+
 import { CobrarPedidoSheet } from "./cobrar-pedido-sheet";
 
 type Detail = {
@@ -37,9 +40,16 @@ type Detail = {
   delivery_fee_cents: number;
   items: {
     id: string;
+    product_id: string | null;
     product_name: string;
     quantity: number;
     subtotal_cents: number;
+    unit_price_cents: number;
+    /** Precio de catálogo cuando la línea está pisada (spec 069). */
+    price_original_cents: number | null;
+    price_override_reason: string | null;
+    station_id: string | null;
+    cancelled_at: string | null;
     notes: string | null;
     daily_menu_id: string | null;
     daily_menu_snapshot: { components?: { label: string }[] } | null;
@@ -111,6 +121,7 @@ export function OrderDetailSheet({
   onAdvance,
   onConfirm,
   abrirCobro = false,
+  onChanged,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -122,6 +133,8 @@ export function OrderDetailSheet({
   /** Abrir directo en el cobro: lo usa el botón «Cobrar» de la tarjeta de un
    *  pedido entregado e impago (issue #190). */
   abrirCobro?: boolean;
+  /** Se editaron los ítems: el board de afuera revalida su copia del pedido. */
+  onChanged?: () => void;
 }) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -130,6 +143,8 @@ export function OrderDetailSheet({
   const [cancelling, startCancel] = useTransition();
   // Spec 054 — cobrar/facturar el pedido sin mesa desde el detalle.
   const [cobrarOpen, setCobrarOpen] = useState(false);
+  // Spec 125 — editar los ítems del pedido sin pasar por el kanban.
+  const [editarOpen, setEditarOpen] = useState(false);
   // Indicación para cocina que se escribe al marchar («ENTREGAR x»).
   //
   // Arranca con la que YA tiene el pedido: si el encargado la cargó al levantar
@@ -150,24 +165,29 @@ export function OrderDetailSheet({
     if (open && abrirCobro) setCobrarOpen(true);
   }, [open, abrirCobro]);
 
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
+  /**
+   * Trae el detalle. Vive afuera del efecto porque después de editar los ítems
+   * hay que volver a pedirlo (spec 125): sin esto, guardar dejaba la lista y el
+   * total en lo que decían antes del cambio hasta cerrar y reabrir la hoja.
+   */
+  const cargarDetalle = useCallback(async () => {
     setLoading(true);
-    (async () => {
+    {
       const supabase = createSupabaseBrowserClient();
       const { data } = await supabase
         .from("orders")
         .select(
           `delivery_address, delivery_notes, subtotal_cents, delivery_fee_cents,
-           order_items(id, product_name, quantity, subtotal_cents, notes,
+           order_items(id, product_id, product_name, quantity, subtotal_cents,
+             unit_price_cents, price_original_cents, price_override_reason,
+             station_id, cancelled_at, notes,
              daily_menu_id, daily_menu_snapshot, is_combo_component, parent_order_item_id,
              order_item_modifiers(modifier_name)),
            order_status_history(status, notes, created_at)`,
         )
         .eq("id", order.id)
         .maybeSingle();
-      if (cancelled || !data) {
+      if (!data) {
         setLoading(false);
         return;
       }
@@ -182,6 +202,15 @@ export function OrderDetailSheet({
           product_name: i.product_name,
           quantity: i.quantity,
           subtotal_cents: Number(i.subtotal_cents),
+          product_id: i.product_id ?? null,
+          unit_price_cents: Number(i.unit_price_cents),
+          price_original_cents:
+            i.price_original_cents == null
+              ? null
+              : Number(i.price_original_cents),
+          price_override_reason: i.price_override_reason ?? null,
+          station_id: i.station_id ?? null,
+          cancelled_at: i.cancelled_at ?? null,
           notes: i.notes,
           daily_menu_id: i.daily_menu_id,
           daily_menu_snapshot: i.daily_menu_snapshot as Detail["items"][number]["daily_menu_snapshot"],
@@ -204,11 +233,13 @@ export function OrderDetailSheet({
           ),
       });
       setLoading(false);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [open, order.id]);
+    }
+  }, [order.id]);
+
+  useEffect(() => {
+    if (!open) return;
+    void cargarDetalle();
+  }, [open, cargarDetalle]);
 
   // Reset cancel form when sheet closes
   useEffect(() => {
@@ -233,6 +264,37 @@ export function OrderDetailSheet({
    * normal. Así que el pie se muestra salvo en cancelado, que sí es final.
    */
   const isCancelled = order.status === "cancelled";
+
+  /**
+   * Se edita mientras el pedido esté vivo y **no esté cobrado** (spec 125). El
+   * `status` no entra en la cuenta: un `delivered` impago es el delivery que
+   * volvió y se cobra al mostrador, y corregirlo antes de cobrar es justamente
+   * el momento correcto. Un pedido cobrado se anula y se rehace — `cancelarItem`
+   * y `editarItemComanda` lo rechazan igual del lado del server.
+   */
+  const puedeEditarItems = !isCancelled && order.payment_status !== "paid";
+
+  /** Las líneas que el server acepta editar: vivas y sin combo de por medio. */
+  const itemsEditables = (detail?.items ?? [])
+    .filter(
+      (i) =>
+        !i.cancelled_at &&
+        !i.is_combo_component &&
+        !i.parent_order_item_id &&
+        !i.daily_menu_id,
+    )
+    .map((i) => ({
+      order_item_id: i.id,
+      product_id: i.product_id,
+      product_name: i.product_name,
+      quantity: i.quantity,
+      notes: i.notes,
+      is_combo: false,
+      station_id: i.station_id,
+      unit_price_cents: i.unit_price_cents,
+      price_original_cents: i.price_original_cents,
+      price_override_reason: i.price_override_reason,
+    }));
 
   // spec 047 — un pedido online en `pending` se manda a cocina con "Confirmar"
   // (onConfirm → confirmarPedido → routeOrderToCocina: crea comandas + imprime),
@@ -287,6 +349,19 @@ export function OrderDetailSheet({
 
   return (
     <>
+    {editarOpen && (
+      <EditarItemsModal
+        slug={slug}
+        titulo={`Editar pedido #${order.daily_number}`}
+        items={itemsEditables}
+        onClose={() => setEditarOpen(false)}
+        onDone={() => {
+          setEditarOpen(false);
+          void cargarDetalle();
+          onChanged?.();
+        }}
+      />
+    )}
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
@@ -372,14 +447,26 @@ export function OrderDetailSheet({
           )}
 
           <section className="border-border/60 border-t px-5 py-4">
-            <p className="text-muted-foreground text-[0.65rem] font-semibold uppercase tracking-wider">
-              {detail
-                ? (() => {
-                    const parentCount = detail.items.filter((i) => !i.is_combo_component).length;
-                    return `${parentCount} ${parentCount === 1 ? "ítem" : "ítems"}`;
-                  })()
-                : "Ítems"}
-            </p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-muted-foreground text-[0.65rem] font-semibold uppercase tracking-wider">
+                {detail
+                  ? (() => {
+                      const parentCount = detail.items.filter((i) => !i.is_combo_component).length;
+                      return `${parentCount} ${parentCount === 1 ? "ítem" : "ítems"}`;
+                    })()
+                  : "Ítems"}
+              </p>
+              {puedeEditarItems && itemsEditables.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setEditarOpen(true)}
+                  className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs font-semibold underline underline-offset-2"
+                >
+                  <Pencil className="size-3" strokeWidth={2.5} />
+                  Editar ítems
+                </button>
+              )}
+            </div>
             {loading && !detail && (
               <p className="text-muted-foreground mt-3 text-sm">Cargando…</p>
             )}
