@@ -65,11 +65,9 @@ modal**, porque un pedido online mezcla parrilla y cocina en la misma pantalla;
 y las líneas editables viajan **aparte** de las que se muestran — esas incluyen
 las canceladas (se listan tachadas) y las comparte la vista del mozo.
 
-
-Un componente que reciba `orderId` + los ítems + `canEdit`, y ponga **editar** y
-**eliminar** en cada línea no cancelada, llamando a las dos actions que ya
-existen. Se monta en dos lugares: el panel de la mesa en Operación y el detalle
-del pedido online.
+El editor pone **editar** y **eliminar** en cada línea viva, llamando a las dos
+actions que ya existían, y se monta en tres lugares: el kanban (como siempre),
+el panel de la mesa y el detalle del pedido online.
 
 Reglas heredadas de la spec 110, sin cambiarles una coma:
 
@@ -86,27 +84,41 @@ Reglas heredadas de la spec 110, sin cambiarles una coma:
 **Esta fase cierra la spec 110 y este pedido con el mismo código.** Hacer 110
 sola sería escribir dos veces la misma lista.
 
-De paso, el detalle del pedido online pasa a usar `OrderSummaryCard` —ya es
-genérica, la mesa es un prop opcional— y así muestra las comandas por sector, que
-hoy no muestra.
+> Lo que **no** se hizo de esta fase: que el detalle del pedido online use
+> `OrderSummaryCard` para mostrar las comandas por sector. Era un «de paso» del
+> plan, no parte del pedido; el detalle sigue con su propia lista. Queda anotado.
 
-### Fase B · `agregarItemsAOrden(orderId, items)`
+### Fase B · El envío acepta dos destinos ✅
 
-Extraído de `enviarComanda`, que ya es casi todo genérico: resolver productos y
-modifiers, `resolveStation`, insertar `order_items` con su `kitchen_status`,
-agrupar por sector, `createComandasForItems`, el rescate de huérfanos y la
-idempotencia por `client_line_key`. Lo único atado a la mesa es el bloque que
-resuelve o crea la orden.
+**Implementada** (2026-08-20): `65a071b`.
 
-`enviarComanda(tableId, …)` queda como *«resolver la orden de la mesa → llamar al
-núcleo»*. Ningún cambio de comportamiento del lado del salón: es el mismo código,
-movido.
+Terminó siendo más barata que el plan. No hizo falta extraer un núcleo a un
+módulo nuevo: `enviarComanda` ya era genérico de la primera a la última línea
+salvo dos bloques —resolver la orden de la mesa y mover el estado de la mesa—,
+así que en vez de mudar 600 líneas, **el input pasó a aceptar `tableId` o
+`orderId`** y esos dos bloques quedaron bajo `if (input.tableId)`. El salón no
+cambia: es el mismo código, no una copia.
 
-Con eso, **«Agregar ítems» en el detalle del pedido online** = `PanelDeCarga` (ya
-compartido) + esa action. La comanda nueva sale como batch 2, con el mismo papel
-y el mismo ruteo que cualquier agregado de mesa.
+«Agregar ítems» en el detalle del pedido online es la misma
+`CargarPedidoSheet` en **modo agregar**: sin cliente, sin entrega y sin «para
+cuándo», que ya están decididos. La comanda nueva sale como tanda 2.
 
-### Fase C · Que el papel diga la verdad
+**Un pedido que todavía no marchó no rutea.** Apareció implementando: si la
+orden no tiene una sola comanda está esperando el «Confirmar» del encargado
+(spec 047), y las líneas nuevas esperan con él — rutearlas ahora mandaría a
+cocina un pedido sin avalar, y dejaría el resto sin papel. Cuando confirme,
+`routeOrderToCocina` las toma a todas (es idempotente a nivel orden, y con cero
+comandas rutea todo lo vivo).
+
+### Fase C · Que el papel diga la verdad ✅
+
+**Implementada** (2026-08-20): `65a071b`. Se encola desde `cancelarItem`,
+`editarItemComanda` y el agregado. En una mesa es no-op: no lleva control.
+
+De paso apareció un agujero de la fase A: `editarItemComanda` **no** encolaba la
+reimpresión de la comanda — era un gesto del caller, y sólo el modal del kanban
+lo hacía. Con el mismo editor abierto en la mesa y en el pedido online, eso
+habría dejado a cocina preparando lo viejo. Ahora la encola la propia action.
 
 `print_jobs` **ya tiene `reprint_requested_at`**, el `GET /api/print-agent` ya
 sirve los jobs con ese flag seteado, y el contenido del control **se arma al
