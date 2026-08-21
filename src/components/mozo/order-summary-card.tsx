@@ -2,10 +2,21 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Ban, Check, ChefHat, MoreVertical, Receipt } from "lucide-react";
+import {
+  Ban,
+  Check,
+  ChefHat,
+  MoreVertical,
+  Pencil,
+  Receipt,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { AnularComandaModal } from "@/components/shared/anular-comanda-modal";
+import {
+  EditarItemsModal,
+  type ItemEditable,
+} from "@/components/shared/editar-items-modal";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -69,6 +80,7 @@ export function OrderSummaryCard({
   hideComandasIfAllDelivered = false,
   canAnular = false,
   tableLabel,
+  itemsEditables,
   onChanged,
 }: {
   order: OrderSummaryData;
@@ -78,6 +90,16 @@ export function OrderSummaryCard({
   canAnular?: boolean;
   /** De qué mesa es, para que el modal diga qué se está anulando. */
   tableLabel?: string | null;
+  /**
+   * Las líneas que se pueden editar (spec 125 · issue #169). Ausente o vacío =
+   * sin gesto: es el caller el que sabe si la cuenta está abierta e impaga y si
+   * el rol alcanza. La app del mozo no lo pasa — el mozo no edita.
+   *
+   * Va aparte de `order.items` a propósito: esas líneas son las que se
+   * **muestran** (incluidas las canceladas, que se listan tachadas) y las
+   * comparte con la vista del mozo. Éstas son las que se **tocan**.
+   */
+  itemsEditables?: ItemEditable[];
   /**
    * Cómo se re-sincroniza el que me renderiza después de entregar o anular una
    * comanda (spec 102). Sin esto se cae al `router.refresh()` de siempre, que
@@ -91,6 +113,7 @@ export function OrderSummaryCard({
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [anularTarget, setAnularTarget] = useState<ComandaSummary | null>(null);
+  const [editarOpen, setEditarOpen] = useState(false);
 
   const active = order.items.filter((it) => it.cancelled_at === null);
   const cancelled = order.items.filter((it) => it.cancelled_at !== null);
@@ -128,8 +151,23 @@ export function OrderSummaryCard({
     order.comandas.length > 0 &&
     !(hideComandasIfAllDelivered && allComandasDelivered);
 
+  const puedeEditar = (itemsEditables?.length ?? 0) > 0;
+
   return (
     <div className="space-y-3">
+      {puedeEditar && editarOpen && (
+        <EditarItemsModal
+          slug={slug}
+          titulo={`Editar orden #${order.daily_number}${tableLabel ? ` · mesa ${tableLabel}` : ""}`}
+          items={itemsEditables!}
+          onClose={() => setEditarOpen(false)}
+          onDone={() => {
+            setEditarOpen(false);
+            if (onChanged) onChanged();
+            else router.refresh();
+          }}
+        />
+      )}
       {/* Resumen de items + total */}
       <div className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4">
         <div className="flex items-baseline justify-between">
@@ -141,6 +179,16 @@ export function OrderSummaryCard({
             {formatCurrency(order.total_cents)}
           </p>
         </div>
+        {puedeEditar && (
+          <button
+            type="button"
+            onClick={() => setEditarOpen(true)}
+            className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-emerald-800 underline underline-offset-2 hover:text-emerald-900"
+          >
+            <Pencil className="size-3" strokeWidth={2.5} />
+            Editar ítems
+          </button>
+        )}
         {active.length > 0 ? (
           <ul className="mt-3 space-y-1">
             {active.map((it, i) => (

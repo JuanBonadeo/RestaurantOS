@@ -160,13 +160,24 @@ function mapDineInOrders(rows: unknown[]): SalonOrderRef[] {
       created_at: o.created_at as string,
       status: o.status as string,
       customer_name: (o as { customer_name: string | null }).customer_name,
+      payment_status: (o as { payment_status: string | null }).payment_status,
       items:
         (
           o as {
             order_items?: Array<{
+              id: string;
+              product_id: string | null;
               product_name: string;
               quantity: number;
               cancelled_at: string | null;
+              notes: string | null;
+              station_id: string | null;
+              unit_price_cents: number;
+              price_original_cents: number | null;
+              price_override_reason: string | null;
+              is_combo_component: boolean | null;
+              parent_order_item_id: string | null;
+              daily_menu_id: string | null;
             }>;
           }
         ).order_items ?? [],
@@ -214,7 +225,7 @@ export async function loadSalon(
     service
       .from("orders")
       .select(
-        "id, order_number, daily_number, table_id, total_cents, created_at, status, customer_name, order_items(product_name, quantity, cancelled_at), comandas(id, batch, status, station_id, emitted_at, delivered_at, cancelled_at, stations(name), comanda_items(order_items(product_name, quantity, cancelled_at, products(prep_time_minutes))))",
+        "id, order_number, daily_number, table_id, total_cents, created_at, status, customer_name, payment_status, order_items(id, product_id, product_name, quantity, cancelled_at, notes, station_id, unit_price_cents, price_original_cents, price_override_reason, is_combo_component, parent_order_item_id, daily_menu_id), comandas(id, batch, status, station_id, emitted_at, delivered_at, cancelled_at, stations(name), comanda_items(order_items(product_name, quantity, cancelled_at, products(prep_time_minutes))))",
       )
       .eq("business_id", businessId)
       .eq("delivery_type", "dine_in")

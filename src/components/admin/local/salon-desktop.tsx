@@ -43,6 +43,7 @@ import {
   type TableExtra,
 } from "@/components/mozo/floor-plan-viewer";
 import { OrderSummaryCard } from "@/components/mozo/order-summary-card";
+import type { ItemEditable } from "@/components/shared/editar-items-modal";
 import { TransferTableModal } from "@/components/mozo/transfer-table-modal";
 import { TrasladarMesaModal } from "@/components/mozo/trasladar-mesa-modal";
 import { WalkInPanel } from "@/components/mozo/walk-in-modal";
@@ -119,6 +120,44 @@ import { getSalonTabData } from "@/app/[business_slug]/admin/(authed)/operacion/
 
 // ─── Types compartidos con la page (server) ────────────────────────────────
 
+/**
+ * Las líneas de la orden que el encargado puede tocar desde el panel de la mesa
+ * (spec 125 · issue #169). Devuelve `undefined` —y la card no dibuja el gesto—
+ * cuando el rol no alcanza o la cuenta ya está cobrada.
+ *
+ * Hasta acá, editar o quitar un ítem sólo se podía desde el kanban de comandas,
+ * que dibuja **comandas**: los ítems sin sector (una bebida, un producto de
+ * stock) no generan comanda y por lo tanto no aparecían en ningún lado. Quedaban
+ * intocables hasta que se cobraban.
+ */
+function itemsEditablesDeLaOrden(
+  order: SalonOrderRef,
+  role: BusinessRole,
+): ItemEditable[] | undefined {
+  if (!canCancelItem(role)) return undefined;
+  if (order.payment_status === "paid") return undefined;
+  return order.items
+    .filter(
+      (i) =>
+        !i.cancelled_at &&
+        !i.is_combo_component &&
+        !i.parent_order_item_id &&
+        !i.daily_menu_id,
+    )
+    .map((i) => ({
+      order_item_id: i.id,
+      product_id: i.product_id,
+      product_name: i.product_name,
+      quantity: i.quantity,
+      notes: i.notes,
+      is_combo: false,
+      station_id: i.station_id,
+      unit_price_cents: i.unit_price_cents,
+      price_original_cents: i.price_original_cents,
+      price_override_reason: i.price_override_reason,
+    }));
+}
+
 export type SalonOrderRef = {
   id: string;
   order_number: number;
@@ -129,10 +168,22 @@ export type SalonOrderRef = {
   created_at: string;
   status: string;
   customer_name: string | null;
+  /** Para la regla de edición (spec 125): una cuenta cobrada no se toca. */
+  payment_status: string | null;
   items: {
+    id: string;
+    product_id: string | null;
     product_name: string;
     quantity: number;
     cancelled_at: string | null;
+    notes: string | null;
+    station_id: string | null;
+    unit_price_cents: number;
+    price_original_cents: number | null;
+    price_override_reason: string | null;
+    is_combo_component: boolean | null;
+    parent_order_item_id: string | null;
+    daily_menu_id: string | null;
   }[];
   comandas: {
     id: string;
@@ -2963,6 +3014,7 @@ function TableDetail({
             hideComandasIfAllDelivered={status === "pidio_cuenta"}
             canAnular={canCancelItem(role)}
             tableLabel={table.label}
+            itemsEditables={itemsEditablesDeLaOrden(order, role)}
             onChanged={onChanged}
           />
         )}

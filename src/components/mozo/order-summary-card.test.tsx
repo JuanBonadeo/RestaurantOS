@@ -14,6 +14,9 @@ vi.mock("@/lib/comandas/actions", () => ({
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh }),
 }));
+vi.mock("@/components/shared/editar-items-modal", () => ({
+  EditarItemsModal: () => <div>editor abierto</div>,
+}));
 
 import { OrderSummaryCard, type ComandaSummary } from "./order-summary-card";
 
@@ -125,5 +128,63 @@ describe("panel de mesa · anular comanda (spec 078)", () => {
       "la mesa se levantó",
     );
     expect(refresh).toHaveBeenCalled();
+  });
+});
+
+/**
+ * Spec 125 · issue #169 — los ítems de la mesa se editan desde el panel.
+ *
+ * El gesto lo habilita el caller, no la card: es él quien sabe si la cuenta
+ * está abierta e impaga y si el rol alcanza. La app del mozo no pasa nada, así
+ * que ahí no aparece.
+ */
+describe("OrderSummaryCard · editar ítems", () => {
+  const ITEM = {
+    order_item_id: "i1",
+    product_id: "p1",
+    product_name: "Bife de chorizo",
+    quantity: 2,
+    notes: null,
+    is_combo: false,
+    station_id: "s1",
+    unit_price_cents: 60_000,
+    price_original_cents: null,
+    price_override_reason: null,
+  };
+
+  function renderConEditables(itemsEditables?: (typeof ITEM)[]) {
+    return render(
+      <OrderSummaryCard
+        order={{
+          order_number: 42,
+          daily_number: 7,
+          total_cents: 120_000,
+          items: [
+            { product_name: "Bife de chorizo", quantity: 2, cancelled_at: null },
+          ],
+          comandas: [COMANDA],
+        }}
+        slug="golf-jcr"
+        tableLabel="5"
+        itemsEditables={itemsEditables}
+      />,
+    );
+  }
+
+  it("con líneas editables → aparece el gesto y abre el editor", async () => {
+    renderConEditables([ITEM]);
+    const boton = screen.getByRole("button", { name: /Editar ítems/i });
+    await userEvent.click(boton);
+    expect(screen.getByText("editor abierto")).toBeTruthy();
+  });
+
+  it("sin líneas editables (mozo, o cuenta cobrada) → sin gesto", () => {
+    renderConEditables(undefined);
+    expect(screen.queryByRole("button", { name: /Editar ítems/i })).toBeNull();
+  });
+
+  it("lista vacía → sin gesto (todo lo que queda es combo o está cancelado)", () => {
+    renderConEditables([]);
+    expect(screen.queryByRole("button", { name: /Editar ítems/i })).toBeNull();
   });
 });
