@@ -20,7 +20,10 @@ import { notifyItemCancelled } from "@/lib/notifications/events";
 import { isOrderPaid, ORDER_PAID_ERROR } from "@/lib/orders/predicates";
 import { recomputeOrderTotals } from "@/lib/orders/totals-recompute";
 
-import { encolarReimpresionDeItem } from "./reprint";
+import {
+  encolarReimpresionDeControl,
+  encolarReimpresionDeItem,
+} from "./reprint";
 import {
   canCancelItem,
   canModifyPostEnvio,
@@ -101,7 +104,18 @@ export type EnviarComandaDailyMenuItem = {
 };
 
 export type EnviarComandaInput = {
-  tableId: string;
+  /**
+   * Destino del envío. Uno de los dos, nunca los dos (spec 125).
+   *
+   * `tableId` es el flujo del salón: si la mesa no tiene orden abierta, este
+   * envío la abre. `orderId` es «agregar ítems a un pedido que ya existe» — el
+   * encargue telefónico al que el cliente le suma una empanada. Ahí no hay mesa
+   * que abrir ni estado de mesa que mover: la orden ya está y lo único que pasa
+   * es que sus líneas nuevas salen en una tanda nueva, igual que los postres de
+   * una mesa.
+   */
+  tableId?: string;
+  orderId?: string;
   items: (EnviarComandaItem | EnviarComandaDailyMenuItem)[];
   slug: string;
   /**
@@ -221,19 +235,64 @@ export async function enviarComanda(
 
   const service = createSupabaseServiceClient() as unknown as GenericClient;
 
-  // Cross-tenant: la mesa debe pertenecer a un floor_plan de este business.
-  const { data: table } = await service
-    .from("tables")
-    .select(
-      "id, operational_status, opened_at, mozo_id, floor_plans!inner(business_id)",
-    )
-    .eq("id", input.tableId)
-    .maybeSingle();
-  const tableBusinessId = (
-    table as { floor_plans?: { business_id: string } } | null
-  )?.floor_plans?.business_id;
-  if (!table || tableBusinessId !== business.id) {
-    return actionError("Mesa no encontrada.");
+  if (!input.tableId === !input.orderId) {
+    return actionError("Indicá la mesa o el pedido, no los dos.");
+  }
+
+  // ── Destino: una mesa ───────────────────────────────────────────────────
+  let table: unknown = null;
+  if (input.tableId) {
+    // Cross-tenant: la mesa debe pertenecer a un floor_plan de este business.
+    const { data: tableRow } = await service
+      .from("tables")
+      .select(
+        "id, operational_status, opened_at, mozo_id, floor_plans!inner(business_id)",
+      )
+      .eq("id", input.tableId)
+      .maybeSingle();
+    const tableBusinessId = (
+      tableRow as { floor_plans?: { business_id: string } } | null
+    )?.floor_plans?.business_id;
+    if (!tableRow || tableBusinessId !== business.id) {
+      return actionError("Mesa no encontrada.");
+    }
+    table = tableRow;
+  }
+
+  // ── Destino: un pedido que ya existe (spec 125) ─────────────────────────
+  // Misma frontera que la edición: abierto y no cobrado. Agregarle una línea a
+  // un pedido ya saldado dejaría la orden por encima de lo que se cobró.
+  let ruteaAhora = true;
+  if (input.orderId) {
+    const { data: orderRow } = await service
+      .from("orders")
+      .select("id, business_id, lifecycle_status, payment_status")
+      .eq("id", input.orderId)
+      .maybeSingle();
+    const o = orderRow as {
+      business_id: string;
+      lifecycle_status: string;
+      payment_status: string | null;
+    } | null;
+    if (!o || o.business_id !== business.id) {
+      return actionError("Pedido no encontrado.");
+    }
+    if (o.lifecycle_status !== "open") {
+      return actionError("El pedido ya está cerrado.");
+    }
+    if (isOrderPaid(o)) return actionError(ORDER_PAID_ERROR);
+
+    // ¿Este pedido ya marchó? Si todavía no tiene una sola comanda está
+    // esperando el «Confirmar» del encargado (spec 047), y las líneas nuevas
+    // tienen que esperar con él: rutearlas ahora mandaría media cocina a
+    // trabajar sobre un pedido que el encargado todavía no avaló, y dejaría el
+    // resto sin papel. Cuando confirme, `routeOrderToCocina` las toma a todas
+    // —es idempotente a nivel orden, y con cero comandas rutea todo lo vivo—.
+    const { count } = await service
+      .from("comandas")
+      .select("id", { count: "exact", head: true })
+      .eq("order_id", input.orderId);
+    ruteaAhora = (count ?? 0) > 0;
   }
 
   const productItems = input.items.filter(
@@ -378,14 +437,17 @@ export async function enviarComanda(
   }
 
   // Resolvemos / creamos la order activa. Una sola por mesa garantizada por
-  // el partial unique index `orders_one_open_per_table`.
-  const { data: existing } = await service
-    .from("orders")
-    .select("id, mozo_id")
-    .eq("table_id", input.tableId)
-    .eq("business_id", business.id)
-    .eq("lifecycle_status", "open")
-    .maybeSingle();
+  // el partial unique index `orders_one_open_per_table`. Si el envío va a un
+  // pedido que ya existe (spec 125), ya está resuelta y validada arriba.
+  const { data: existing } = input.orderId
+    ? { data: { id: input.orderId } }
+    : await service
+        .from("orders")
+        .select("id, mozo_id")
+        .eq("table_id", input.tableId!)
+        .eq("business_id", business.id)
+        .eq("lifecycle_status", "open")
+        .maybeSingle();
 
   let orderId: string;
   if (existing) {
@@ -860,11 +922,11 @@ export async function enviarComanda(
   }
 
   // Una comanda por sector con batch autoincremental dentro de (order, station).
-  const routeResult = await createComandasForItems(
-    service,
-    orderId,
-    itemsByStation,
-  );
+  // `ruteaAhora` en false = pedido online que todavía no marchó: las líneas
+  // quedan cargadas y sin comanda, esperando el «Confirmar» como el resto.
+  const routeResult = ruteaAhora
+    ? await createComandasForItems(service, orderId, itemsByStation)
+    : { ok: true as const, comanda_ids: [] as string[] };
   if (!routeResult.ok) {
     // spec 096 · H-38 — el `return` estaba **antes** del recompute de totales,
     // y para este punto los ítems ya están persistidos y el stock ya se
@@ -916,38 +978,51 @@ export async function enviarComanda(
   // Mesa queda `ocupada` al enviar comanda. Si estaba libre, fijamos
   // opened_at. Si estaba pidio_cuenta y vuelven a pedir, pasa a ocupada
   // y limpiamos bill_requested_at (cliente se arrepintió, quiere más).
-  const tableStatus = (table as { operational_status: string })
-    .operational_status;
-  const tableOpenedAt = (table as { opened_at: string | null }).opened_at;
-  const tablePatch: Record<string, unknown> = {
-    operational_status: "ocupada",
-    current_order_id: orderId,
-  };
-  if (tableStatus === "libre" || !tableOpenedAt) {
-    tablePatch.opened_at = tableOpenedAt ?? new Date().toISOString();
-  }
-  // Auto-asignación del mozo (spec 111, FR-012). Es la regla que `openTable`
-  // aplica desde siempre al sentar: si la mesa no tenía mozo, queda el que la
-  // abrió. Acá faltaba, y no se notaba porque hasta ahora a una mesa se entraba
-  // por el walk-in —que pasa por `openTable`— y el envío siempre encontraba la
-  // mesa ya abierta y asignada. Desde que tocar una mesa libre entra directo a
-  // cargar (FR-010/011), **este envío es el que la abre**: sin esto la mesa
-  // quedaría sin mozo en el plano, en la distribución y en la rendición.
-  if ((table as { mozo_id: string | null }).mozo_id === null) {
-    tablePatch.mozo_id = ctx.userId;
-  }
-  await service.from("tables").update(tablePatch).eq("id", input.tableId);
+  //
+  // Nada de esto aplica cuando el destino es un pedido online: no hay mesa que
+  // ocupar ni mozo que asignar (spec 125).
+  if (input.tableId && table) {
+    const tableStatus = (table as { operational_status: string })
+      .operational_status;
+    const tableOpenedAt = (table as { opened_at: string | null }).opened_at;
+    const tablePatch: Record<string, unknown> = {
+      operational_status: "ocupada",
+      current_order_id: orderId,
+    };
+    if (tableStatus === "libre" || !tableOpenedAt) {
+      tablePatch.opened_at = tableOpenedAt ?? new Date().toISOString();
+    }
+    // Auto-asignación del mozo (spec 111, FR-012). Es la regla que `openTable`
+    // aplica desde siempre al sentar: si la mesa no tenía mozo, queda el que la
+    // abrió. Acá faltaba, y no se notaba porque hasta ahora a una mesa se entraba
+    // por el walk-in —que pasa por `openTable`— y el envío siempre encontraba la
+    // mesa ya abierta y asignada. Desde que tocar una mesa libre entra directo a
+    // cargar (FR-010/011), **este envío es el que la abre**: sin esto la mesa
+    // quedaría sin mozo en el plano, en la distribución y en la rendición.
+    if ((table as { mozo_id: string | null }).mozo_id === null) {
+      tablePatch.mozo_id = ctx.userId;
+    }
+    await service.from("tables").update(tablePatch).eq("id", input.tableId);
 
-  // Si la mesa venía de pidio_cuenta (cliente pidió más), limpiamos el flag.
-  if (tableStatus === "pidio_cuenta") {
-    await service
-      .from("orders")
-      .update({ bill_requested_at: null })
-      .eq("id", orderId);
+    // Si la mesa venía de pidio_cuenta (cliente pidió más), limpiamos el flag.
+    if (tableStatus === "pidio_cuenta") {
+      await service
+        .from("orders")
+        .update({ bill_requested_at: null })
+        .eq("id", orderId);
+    }
+  }
+
+  // El control del repartidor quedó viejo: lo que se agregó no está en el papel
+  // que ya salió (spec 125, fase C). No-op si el pedido todavía no marchó o si
+  // es una mesa, que no lleva control.
+  if (input.orderId) {
+    await encolarReimpresionDeControl(service, orderId);
   }
 
   revalidatePath(`/${input.slug}/mozo`);
   revalidatePath(`/${input.slug}/cocina`);
+  revalidatePath(`/${input.slug}/admin/operacion`);
 
   return actionOk({ order_id: orderId, comanda_ids: comandaIds });
 }
@@ -1380,6 +1455,9 @@ export async function cancelarItem(
   // regalado, merma real y discusión sobre quién avisó qué. `cancelarComanda`
   // sí lo encolaba desde la action — esto lo empareja.
   await encolarReimpresionDeItem(service, orderItemId);
+  // Y el papel del repartidor, que también quedó viejo (spec 125). No-op en una
+  // mesa, que no tiene control.
+  await encolarReimpresionDeControl(service, orderId);
 
   // spec 27 — avisar al mozo de la mesa que se anuló un ítem (el actor
   // encargado/admin no se autoavisa; resuelve mesa + destinatario en el helper).
@@ -1795,6 +1873,15 @@ export async function editarItemComanda(
   }
 
   await recomputeOrderTotals(service, it.order_id);
+
+  // El papel corregido (spec 125). Hasta acá la reimpresión era un gesto del
+  // **caller**: sólo el modal del kanban encadenaba `solicitarReimpresion` sobre
+  // su comanda. Desde que el mismo editor se abre en la mesa y en el pedido
+  // online —donde no hay una comanda elegida— eso dejaría a cocina preparando lo
+  // viejo. Encolarlo acá cierra el camino para las tres superficies; el kanban
+  // sigue pidiendo la suya, que reimprime la comanda entera.
+  await encolarReimpresionDeItem(service, orderItemId);
+  await encolarReimpresionDeControl(service, it.order_id);
 
   revalidatePath(`/${slug}/cocina`);
   revalidatePath(`/${slug}/mozo`);

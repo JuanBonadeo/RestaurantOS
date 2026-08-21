@@ -29,6 +29,7 @@ import {
   type ClienteDireccion,
   type ClienteMatch,
 } from "@/lib/admin/customers-actions";
+import { enviarComanda } from "@/lib/comandas/actions";
 import { formatCurrency } from "@/lib/currency";
 import type { CatalogForMozo, CatalogProduct } from "@/lib/mozo/catalog-query";
 import { loadPedirCatalog } from "@/lib/mozo/pedir-panel-data";
@@ -116,11 +117,23 @@ export function CargarPedidoSheet({
   scheduledSlots,
   marchLeadPickupMin,
   marchLeadDeliveryMin,
+  agregarA,
 }: {
   slug: string;
   open: boolean;
   onClose: () => void;
   onCreated?: () => void;
+  /**
+   * Modo **agregar** (spec 125): en vez de crear un pedido, le suma líneas a
+   * uno que ya existe — el encargue telefónico al que el cliente le agrega una
+   * empanada. La misma hoja, sin la mitad que no aplica: el cliente, la entrega
+   * y el «para cuándo» ya están decididos.
+   *
+   * Las líneas nuevas salen por `enviarComanda`, el mismo camino que usa el
+   * mozo cuando manda los postres de una mesa: comanda nueva en el sector que
+   * corresponde, con `batch` incremental.
+   */
+  agregarA?: { orderId: string; dailyNumber: number };
   /** TZ del negocio: el chip "21:00" es hora del local, no del navegador. */
   timezone: string;
   /** Horarios que el negocio ofrece hoy (spec 085); vacío = no se programa. */
@@ -396,6 +409,46 @@ export function CargarPedidoSheet({
       return;
     }
 
+    // Modo agregar (spec 125): no hay pedido que crear ni datos que validar.
+    // Las líneas van por `enviarComanda`, que las inserta en la orden y crea la
+    // comanda del sector con la tanda siguiente.
+    if (agregarA) {
+      startTransition(async () => {
+        const r = await enviarComanda({
+          orderId: agregarA.orderId,
+          slug,
+          items: cart.map((c) => ({
+            product_id: c.product_id,
+            quantity: c.quantity,
+            notes: c.notes || undefined,
+            modifier_ids: c.modifiers.map((m) => m.id),
+            price_override_cents: c.price_override_cents ?? null,
+            price_override_reason: c.price_override_reason ?? null,
+            // Idempotencia (spec 42): la clave del carrito viaja para que un
+            // doble-tap no duplique la línea.
+            client_line_key: c._key,
+          })),
+        });
+        if (!r.ok) {
+          toast.error(r.error);
+          return;
+        }
+        const n = cart.reduce((acc, c) => acc + c.quantity, 0);
+        const cuantos = `${n} ${n === 1 ? "ítem agregado" : "ítems agregados"}`;
+        toast.success(
+          r.data.comanda_ids.length > 0
+            ? `${cuantos} al pedido #${agregarA.dailyNumber} · salió la comanda`
+            : // Sin comanda: o el pedido todavía no marchó (sale con el
+              // «Confirmar», junto al resto), o lo agregado no lleva sector.
+              `${cuantos} al pedido #${agregarA.dailyNumber}`,
+        );
+        setCart([]);
+        onCreated?.();
+        onClose();
+      });
+      return;
+    }
+
     // Pedido programado (spec 085): el chip es una hora del local; armamos el
     // instante en su TZ. Revalidamos contra la anticipación mínima porque el
     // sheet pudo quedar abierto un rato. `persistOrder` valida igual.
@@ -520,10 +573,14 @@ export function CargarPedidoSheet({
             )}
             <div className="min-w-0 flex-1">
               <p className="text-[10px] font-semibold tracking-[0.18em] text-zinc-500 uppercase">
-                Cargar pedido
+                {agregarA ? `Pedido #${agregarA.dailyNumber}` : "Cargar pedido"}
               </p>
               <h2 className="font-heading text-base leading-tight font-bold text-zinc-900">
-                {view === "carga" ? "Elegí los productos" : "Cliente y entrega"}
+                {agregarA
+                  ? "Agregá los productos"
+                  : view === "carga"
+                    ? "Elegí los productos"
+                    : "Cliente y entrega"}
               </h2>
             </div>
             <button
@@ -534,7 +591,7 @@ export function CargarPedidoSheet({
               <X className="h-5 w-5" />
             </button>
           </div>
-          <div className="mt-2.5 flex gap-2">
+          <div className={`mt-2.5 flex gap-2 ${agregarA ? "hidden" : ""}`}>
             <button
               onClick={() => setDeliveryType("pickup")}
               className={`flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg text-sm font-semibold transition ${
@@ -664,106 +721,114 @@ export function CargarPedidoSheet({
             className="@2xl:order-1 @2xl:border-r @2xl:border-zinc-200"
           >
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3 py-3">
-              {/* Spec 068: mismo bloque de cliente que abrir mesa y nueva
+              {/* Modo agregar (spec 125): el cliente, la entrega y el «para
+                  cuándo» ya se decidieron cuando entró el pedido. Lo único que
+                  se elige acá son los productos que se suman. */}
+              {!agregarA && (
+                <>
+                  {/* Spec 068: mismo bloque de cliente que abrir mesa y nueva
                   reserva — un solo buscador, y la regla del teléfono bloqueado
                   con un cliente elegido (spec 067) vive en `CustomerFields`. */}
-              <section className="space-y-2.5 rounded-2xl bg-white p-3 ring-1 ring-zinc-200">
-                <CustomerFields
-                  slug={slug}
-                  idPrefix="cargar"
-                  name={customerName}
-                  phone={customerPhone}
-                  onNameChange={setCustomerName}
-                  onPhoneChange={setCustomerPhone}
-                  onPick={pickCliente}
-                  onClear={quitarCliente}
-                  nameLabel={
-                    deliveryType === "pickup" ? "Cliente (opcional)" : "Cliente"
-                  }
-                  phoneLabel={
-                    deliveryType === "delivery"
-                      ? "Teléfono (requerido)"
-                      : "Teléfono (opcional)"
-                  }
-                  labelClassName="text-xs font-semibold text-zinc-600"
-                  inputClassName="block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
-                />
-                {deliveryType === "delivery" && (
-                  <div>
-                    <label className="text-xs font-semibold text-zinc-600">
-                      Dirección de entrega (requerida)
-                    </label>
-                    {clienteDirecciones.length > 0 && (
-                      <div className="mt-1 flex flex-wrap gap-1.5">
-                        {clienteDirecciones.map((a) => {
-                          const linea = formatDireccion(a);
-                          const activa = deliveryAddress === linea;
-                          return (
-                            <button
-                              key={a.id}
-                              type="button"
-                              onClick={() => setDeliveryAddress(linea)}
-                              className={`rounded-full px-2.5 py-1 text-xs font-semibold transition ${
-                                activa
-                                  ? "bg-zinc-900 text-white"
-                                  : "bg-zinc-100 text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-200"
-                              }`}
-                            >
-                              {a.label ? `${a.label}: ` : ""}
-                              {linea}
-                            </button>
-                          );
-                        })}
+                  <section className="space-y-2.5 rounded-2xl bg-white p-3 ring-1 ring-zinc-200">
+                    <CustomerFields
+                      slug={slug}
+                      idPrefix="cargar"
+                      name={customerName}
+                      phone={customerPhone}
+                      onNameChange={setCustomerName}
+                      onPhoneChange={setCustomerPhone}
+                      onPick={pickCliente}
+                      onClear={quitarCliente}
+                      nameLabel={
+                        deliveryType === "pickup"
+                          ? "Cliente (opcional)"
+                          : "Cliente"
+                      }
+                      phoneLabel={
+                        deliveryType === "delivery"
+                          ? "Teléfono (requerido)"
+                          : "Teléfono (opcional)"
+                      }
+                      labelClassName="text-xs font-semibold text-zinc-600"
+                      inputClassName="block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+                    />
+                    {deliveryType === "delivery" && (
+                      <div>
+                        <label className="text-xs font-semibold text-zinc-600">
+                          Dirección de entrega (requerida)
+                        </label>
+                        {clienteDirecciones.length > 0 && (
+                          <div className="mt-1 flex flex-wrap gap-1.5">
+                            {clienteDirecciones.map((a) => {
+                              const linea = formatDireccion(a);
+                              const activa = deliveryAddress === linea;
+                              return (
+                                <button
+                                  key={a.id}
+                                  type="button"
+                                  onClick={() => setDeliveryAddress(linea)}
+                                  className={`rounded-full px-2.5 py-1 text-xs font-semibold transition ${
+                                    activa
+                                      ? "bg-zinc-900 text-white"
+                                      : "bg-zinc-100 text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-200"
+                                  }`}
+                                >
+                                  {a.label ? `${a.label}: ` : ""}
+                                  {linea}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                        <input
+                          type="text"
+                          value={deliveryAddress}
+                          onChange={(e) => setDeliveryAddress(e.target.value)}
+                          placeholder="Av. del Golf 123"
+                          className="mt-1 block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none"
+                        />
+                        {clienteDirecciones.length > 0 && (
+                          <p className="mt-1 text-[11px] text-zinc-500">
+                            Elegí una dirección guardada o editá el campo.
+                          </p>
+                        )}
                       </div>
                     )}
-                    <input
-                      type="text"
-                      value={deliveryAddress}
-                      onChange={(e) => setDeliveryAddress(e.target.value)}
-                      placeholder="Av. del Golf 123"
-                      className="mt-1 block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none"
-                    />
-                    {clienteDirecciones.length > 0 && (
+                    <div>
+                      <label className="text-xs font-semibold text-zinc-600">
+                        Nota para el pedido (opcional)
+                      </label>
+                      <input
+                        type="text"
+                        value={deliveryNotes}
+                        onChange={(e) => setDeliveryNotes(e.target.value)}
+                        placeholder="ej: sin cebolla, tocar timbre…"
+                        className="mt-1 block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none"
+                      />
                       <p className="mt-1 text-[11px] text-zinc-500">
-                        Elegí una dirección guardada o editá el campo.
+                        Va en el ticket de control, con los datos de la entrega.
                       </p>
-                    )}
-                  </div>
-                )}
-                <div>
-                  <label className="text-xs font-semibold text-zinc-600">
-                    Nota para el pedido (opcional)
-                  </label>
-                  <input
-                    type="text"
-                    value={deliveryNotes}
-                    onChange={(e) => setDeliveryNotes(e.target.value)}
-                    placeholder="ej: sin cebolla, tocar timbre…"
-                    className="mt-1 block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none"
-                  />
-                  <p className="mt-1 text-[11px] text-zinc-500">
-                    Va en el ticket de control, con los datos de la entrega.
-                  </p>
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-zinc-600">
-                    Nota para cocina (opcional)
-                  </label>
-                  <input
-                    type="text"
-                    value={kitchenNotes}
-                    onChange={(e) => setKitchenNotes(e.target.value)}
-                    maxLength={120}
-                    placeholder="ej: 21:30, junto con la mesa 5…"
-                    className="mt-1 block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none"
-                  />
-                  <p className="mt-1 text-[11px] text-zinc-500">
-                    Sale arriba de la comanda como «ENTREGAR …», para cocina.
-                  </p>
-                </div>
-              </section>
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-zinc-600">
+                        Nota para cocina (opcional)
+                      </label>
+                      <input
+                        type="text"
+                        value={kitchenNotes}
+                        onChange={(e) => setKitchenNotes(e.target.value)}
+                        maxLength={120}
+                        placeholder="ej: 21:30, junto con la mesa 5…"
+                        className="mt-1 block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none"
+                      />
+                      <p className="mt-1 text-[11px] text-zinc-500">
+                        Sale arriba de la comanda como «ENTREGAR …», para
+                        cocina.
+                      </p>
+                    </div>
+                  </section>
 
-              {/* ─── ¿Para cuándo? (spec 085) ───
+                  {/* ─── ¿Para cuándo? (spec 085) ───
                   El encargue telefónico: mismos horarios que ve el cliente,
                   sólo hoy. Al programar, la comanda no sale ahora — la manda el
                   cron con el lead del negocio.
@@ -774,73 +839,75 @@ export function CargarPedidoSheet({
                   en `false` el pedido queda siempre «para ahora» — nada del
                   motor de programados se tocó, así que volver a mostrarlo es
                   cambiar esta constante. */}
-              {MOSTRAR_PROGRAMADO && (
-                <section className="space-y-2.5 rounded-2xl bg-white p-3 ring-1 ring-zinc-200">
-                  <h3 className="text-[11px] font-bold tracking-wide text-zinc-500 uppercase">
-                    ¿Para cuándo?
-                  </h3>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setWhen("now")}
-                      className={`h-9 flex-1 rounded-xl text-sm font-semibold transition ${
-                        !isScheduled
-                          ? "bg-zinc-900 text-white"
-                          : "bg-white text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100"
-                      }`}
-                    >
-                      Ahora
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!canSchedule}
-                      onClick={() => setWhen("scheduled")}
-                      className={`flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${
-                        isScheduled
-                          ? "bg-zinc-900 text-white"
-                          : "bg-white text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100"
-                      }`}
-                    >
-                      <Clock className="h-4 w-4" /> Programar
-                    </button>
-                  </div>
-                  {!canSchedule ? (
-                    <p className="text-[11px] leading-snug text-zinc-500">
-                      No quedan horarios para hoy — se programa con al menos{" "}
-                      {SCHEDULED_MIN_LEAD_MIN} min de anticipación, sobre los
-                      horarios del local.
-                    </p>
-                  ) : (
-                    isScheduled && (
-                      <>
-                        <div className="grid grid-cols-4 gap-1.5">
-                          {availableSlots.map((slot) => {
-                            const active = schedSlot === slot;
-                            return (
-                              <button
-                                key={slot}
-                                type="button"
-                                onClick={() => setSchedSlot(slot)}
-                                className={`h-9 rounded-xl text-sm font-semibold tabular-nums transition ${
-                                  active
-                                    ? "bg-emerald-600 text-white"
-                                    : "bg-white text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100"
-                                }`}
-                              >
-                                {slot}
-                              </button>
-                            );
-                          })}
-                        </div>
+                  {MOSTRAR_PROGRAMADO && (
+                    <section className="space-y-2.5 rounded-2xl bg-white p-3 ring-1 ring-zinc-200">
+                      <h3 className="text-[11px] font-bold tracking-wide text-zinc-500 uppercase">
+                        ¿Para cuándo?
+                      </h3>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setWhen("now")}
+                          className={`h-9 flex-1 rounded-xl text-sm font-semibold transition ${
+                            !isScheduled
+                              ? "bg-zinc-900 text-white"
+                              : "bg-white text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100"
+                          }`}
+                        >
+                          Ahora
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!canSchedule}
+                          onClick={() => setWhen("scheduled")}
+                          className={`flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                            isScheduled
+                              ? "bg-zinc-900 text-white"
+                              : "bg-white text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100"
+                          }`}
+                        >
+                          <Clock className="h-4 w-4" /> Programar
+                        </button>
+                      </div>
+                      {!canSchedule ? (
                         <p className="text-[11px] leading-snug text-zinc-500">
-                          {schedSlot
-                            ? `La comanda sale sola ${marchLeadMin} min antes de las ${schedSlot}. Hasta entonces queda en «Próximos».`
-                            : "Elegí la hora del retiro o la entrega — sólo para hoy."}
+                          No quedan horarios para hoy — se programa con al menos{" "}
+                          {SCHEDULED_MIN_LEAD_MIN} min de anticipación, sobre
+                          los horarios del local.
                         </p>
-                      </>
-                    )
+                      ) : (
+                        isScheduled && (
+                          <>
+                            <div className="grid grid-cols-4 gap-1.5">
+                              {availableSlots.map((slot) => {
+                                const active = schedSlot === slot;
+                                return (
+                                  <button
+                                    key={slot}
+                                    type="button"
+                                    onClick={() => setSchedSlot(slot)}
+                                    className={`h-9 rounded-xl text-sm font-semibold tabular-nums transition ${
+                                      active
+                                        ? "bg-emerald-600 text-white"
+                                        : "bg-white text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100"
+                                    }`}
+                                  >
+                                    {slot}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <p className="text-[11px] leading-snug text-zinc-500">
+                              {schedSlot
+                                ? `La comanda sale sola ${marchLeadMin} min antes de las ${schedSlot}. Hasta entonces queda en «Próximos».`
+                                : "Elegí la hora del retiro o la entrega — sólo para hoy."}
+                            </p>
+                          </>
+                        )
+                      )}
+                    </section>
                   )}
-                </section>
+                </>
               )}
 
               {/* El pedido en armado. Vive acá, con el cliente y la entrega:
@@ -950,7 +1017,19 @@ export function CargarPedidoSheet({
             {/* Footer datos — programado: una sola acción, porque "enviar a
                 cocina" contradice el diferido (spec 085). */}
             <footer className="shrink-0 space-y-2 border-t border-zinc-200 bg-white px-3 py-3">
-              {isScheduled ? (
+              {agregarA ? (
+                // Una sola acción: lo que se agrega a un pedido vivo va a
+                // cocina ahora. «Cargar sin marchar» era para el pedido que
+                // todavía no existe — acá el pedido ya está andando.
+                <button
+                  onClick={() => submit(true)}
+                  disabled={cart.length === 0 || pending}
+                  className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 text-sm font-semibold text-white transition active:scale-[0.98] disabled:opacity-40"
+                >
+                  {pending && <Loader2 className="h-4 w-4 animate-spin" />}
+                  Agregar al pedido #{agregarA.dailyNumber}
+                </button>
+              ) : isScheduled ? (
                 <button
                   onClick={() => submit(false)}
                   disabled={!canSubmit}

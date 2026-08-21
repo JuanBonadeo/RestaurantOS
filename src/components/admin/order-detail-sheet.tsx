@@ -7,6 +7,7 @@ import {
   Clock,
   Pencil,
   Phone,
+  Plus,
   Receipt,
   ShoppingBag,
   X,
@@ -31,6 +32,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 import { EditarItemsModal } from "@/components/shared/editar-items-modal";
 
+import { CargarPedidoSheet } from "./cargar-pedido-sheet";
 import { CobrarPedidoSheet } from "./cobrar-pedido-sheet";
 
 type Detail = {
@@ -143,8 +145,10 @@ export function OrderDetailSheet({
   const [cancelling, startCancel] = useTransition();
   // Spec 054 — cobrar/facturar el pedido sin mesa desde el detalle.
   const [cobrarOpen, setCobrarOpen] = useState(false);
-  // Spec 125 — editar los ítems del pedido sin pasar por el kanban.
+  // Spec 125 — editar los ítems del pedido sin pasar por el kanban, y sumarle
+  // líneas nuevas con la misma hoja con la que se carga un pedido a mano.
   const [editarOpen, setEditarOpen] = useState(false);
+  const [agregarOpen, setAgregarOpen] = useState(false);
   // Indicación para cocina que se escribe al marchar («ENTREGAR x»).
   //
   // Arranca con la que YA tiene el pedido: si el encargado la cargó al levantar
@@ -349,6 +353,23 @@ export function OrderDetailSheet({
 
   return (
     <>
+    {/* La misma hoja con la que se carga un pedido a mano, en modo agregar
+        (spec 125). Los horarios y los leads son del pedido programado, que en
+        este modo no se ofrece: la entrega ya está decidida. */}
+    <CargarPedidoSheet
+      slug={slug}
+      open={agregarOpen}
+      onClose={() => setAgregarOpen(false)}
+      timezone={timezone}
+      scheduledSlots={[]}
+      marchLeadPickupMin={0}
+      marchLeadDeliveryMin={0}
+      agregarA={{ orderId: order.id, dailyNumber: order.daily_number }}
+      onCreated={() => {
+        void cargarDetalle();
+        onChanged?.();
+      }}
+    />
     {editarOpen && (
       <EditarItemsModal
         slug={slug}
@@ -456,15 +477,27 @@ export function OrderDetailSheet({
                     })()
                   : "Ítems"}
               </p>
-              {puedeEditarItems && itemsEditables.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setEditarOpen(true)}
-                  className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs font-semibold underline underline-offset-2"
-                >
-                  <Pencil className="size-3" strokeWidth={2.5} />
-                  Editar ítems
-                </button>
+              {puedeEditarItems && (
+                <div className="flex items-center gap-3">
+                  {itemsEditables.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setEditarOpen(true)}
+                      className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs font-semibold underline underline-offset-2"
+                    >
+                      <Pencil className="size-3" strokeWidth={2.5} />
+                      Editar ítems
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setAgregarOpen(true)}
+                    className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs font-semibold underline underline-offset-2"
+                  >
+                    <Plus className="size-3" strokeWidth={2.5} />
+                    Agregar ítems
+                  </button>
+                </div>
               )}
             </div>
             {loading && !detail && (

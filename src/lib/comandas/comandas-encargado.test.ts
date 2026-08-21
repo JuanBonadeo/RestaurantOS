@@ -119,8 +119,13 @@ vi.mock("@/lib/supabase/service", () => ({
   }),
 }));
 
-const { cancelarComanda, cancelarItem, editarItemComanda, getSwappableProducts } =
-  await import("./actions");
+const {
+  cancelarComanda,
+  cancelarItem,
+  editarItemComanda,
+  enviarComanda,
+  getSwappableProducts,
+} = await import("./actions");
 const { notifyItemCancelled } = await import("@/lib/notifications/events");
 
 beforeEach(() => {
@@ -548,6 +553,71 @@ describe("cancelarItem · frontera de plata (spec 125)", () => {
     const upd = captured.updates.find((u) => u.table === "order_items");
     expect(upd?.vals.cancelled_at).toBeTruthy();
     expect(upd?.vals.cancelled_reason).toBe("me equivoqué");
+  });
+});
+
+describe("enviarComanda · agregar a un pedido existente (spec 125)", () => {
+  const ITEM = { product_id: "p1", quantity: 1 };
+
+  it("pedido ya cobrado → rechazado, no se inserta nada", async () => {
+    state.orders = {
+      id: "o1",
+      business_id: "biz1",
+      lifecycle_status: "open",
+      payment_status: "paid",
+    };
+    const res = await enviarComanda({
+      orderId: "o1",
+      items: [ITEM],
+      slug: "house",
+    });
+    expect(res.ok).toBe(false);
+    expect(captured.updates).toHaveLength(0);
+  });
+
+  it("pedido ya cerrado → rechazado", async () => {
+    state.orders = {
+      id: "o1",
+      business_id: "biz1",
+      lifecycle_status: "closed",
+      payment_status: "pending",
+    };
+    const res = await enviarComanda({
+      orderId: "o1",
+      items: [ITEM],
+      slug: "house",
+    });
+    expect(res.ok).toBe(false);
+  });
+
+  it("pedido de otro negocio → rechazado", async () => {
+    state.orders = {
+      id: "o1",
+      business_id: "otro",
+      lifecycle_status: "open",
+      payment_status: "pending",
+    };
+    const res = await enviarComanda({
+      orderId: "o1",
+      items: [ITEM],
+      slug: "house",
+    });
+    expect(res.ok).toBe(false);
+  });
+
+  it("mesa y pedido a la vez → rechazado (el destino es uno solo)", async () => {
+    const res = await enviarComanda({
+      tableId: "t1",
+      orderId: "o1",
+      items: [ITEM],
+      slug: "house",
+    });
+    expect(res.ok).toBe(false);
+  });
+
+  it("sin destino → rechazado", async () => {
+    const res = await enviarComanda({ items: [ITEM], slug: "house" });
+    expect(res.ok).toBe(false);
   });
 });
 

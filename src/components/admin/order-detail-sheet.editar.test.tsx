@@ -46,6 +46,7 @@ vi.mock("@/lib/supabase/browser", () => ({
 vi.mock("@/lib/orders/update-status", () => ({
   updateOrderStatus: async () => ({ ok: true, data: {} }),
 }));
+vi.mock("./cargar-pedido-sheet", () => ({ CargarPedidoSheet: () => null }));
 vi.mock("./cobrar-pedido-sheet", () => ({ CobrarPedidoSheet: () => null }));
 vi.mock("@/components/shared/editar-items-modal", () => ({
   EditarItemsModal: () => <div>editor abierto</div>,
