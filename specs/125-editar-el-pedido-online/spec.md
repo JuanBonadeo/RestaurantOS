@@ -54,7 +54,17 @@ parezca**, es que **es la misma orden**. Un pedido online y una mesa son filas d
 
 ## Qué se construye
 
-### Fase A · Una lista de ítems editable, compartida
+### Fase A · Una lista de ítems editable, compartida ✅
+
+**Implementada** (2026-08-20): `f48dba1` (guarda de plata + el modal sale del
+kanban a `components/shared/editar-items-modal.tsx`), `226101f` (el detalle del
+pedido online), `43d7143` (el panel de la mesa — cierra la spec 110 · #169).
+
+Dos cosas se decidieron sobre la marcha: el **sector es del ítem y no del
+modal**, porque un pedido online mezcla parrilla y cocina en la misma pantalla;
+y las líneas editables viajan **aparte** de las que se muestran — esas incluyen
+las canceladas (se listan tachadas) y las comparte la vista del mozo.
+
 
 Un componente que reciba `orderId` + los ítems + `canEdit`, y ponga **editar** y
 **eliminar** en cada línea no cancelada, llamando a las dos actions que ya
