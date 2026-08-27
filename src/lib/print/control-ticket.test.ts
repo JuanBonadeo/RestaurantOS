@@ -106,12 +106,19 @@ describe("buildControlTicketLines", () => {
     expect(ret).not.toContain("Direccion:");
   });
 
-  it("NO lleva hora de entrega: eso lo dice la nota «ENTREGAR x» de la comanda", () => {
-    expect(text(base())).not.toContain("ENTREGA");
+  // Spec 127 — la hora DEL PEDIDO vuelve al papel del repartidor. Lo que la
+  // había sacado era que la misma hora estuviera en los dos papeles; ahora cada
+  // uno lleva la suya: la comanda dice para cuándo estar LISTO (`kitchen_at`) y
+  // esto dice para cuándo se ENTREGA.
+  it("lleva la hora del pedido cuando la tiene", () => {
     const prog = text(base({ scheduled_at: "2026-07-28T20:30:00-03:00" }));
-    expect(prog).not.toContain("ENTREGA");
+    expect(prog).toContain("ENTREGAR: 28/07 20:30");
     // El sello de emisión sí se queda: es cuándo se imprimió el papel.
     expect(prog).toContain("Emitido:");
+  });
+
+  it("un pedido para ahora no inventa una hora", () => {
+    expect(text(base())).not.toContain("ENTREGAR:");
   });
 
   it("sale 100% en ASCII imprimible (la térmica no recibe codepage)", () => {

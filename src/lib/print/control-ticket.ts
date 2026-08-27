@@ -43,9 +43,12 @@ export type ControlTicketData = {
   delivery_type: "delivery" | "pickup";
   emitted_at: string;
   /**
-   * `orders.scheduled_at`. Ya NO se imprime: la hora de entrega se maneja con
-   * la nota «ENTREGAR x» de la comanda. Se conserva en el tipo porque los
-   * callers lo siguen mandando y por si vuelve a hacer falta en el papel.
+   * `orders.scheduled_at` — la hora DEL PEDIDO: cuándo el cliente lo retira o
+   * lo recibe. Vuelve al papel con la spec 127. Lo que la había sacado era que
+   * la misma hora estuviera en los dos papeles y se contradijeran apenas el
+   * encargado corregía una; ahora cada papel lleva la suya y son datos
+   * distintos: la comanda dice para cuándo tiene que estar LISTO (`kitchen_at`)
+   * y esto dice para cuándo se ENTREGA, que es lo que necesita el que reparte.
    */
   scheduled_at?: string | null;
   customer_name?: string | null;
@@ -150,10 +153,12 @@ export function buildControlTicketLines(c: ControlTicketData): Line[] {
   push(RULE, { size: "sm" });
 
   // ── Cuándo ────────────────────────────────────────────────────────────────
-  // Sólo el sello de emisión. La hora de entrega salía acá en negrita, pero
-  // pasó a manejarse con la nota «ENTREGAR x» de la comanda, que es donde la
-  // lee el que cocina: tenerla en los dos papeles daba dos fuentes para el
-  // mismo dato y se contradecían apenas el encargado corregía una.
+  // La hora del pedido primero y en grande: es el dato con el que trabaja el
+  // que entrega. La de cocina no va acá — ésa es de la comanda (spec 127).
+  if (c.scheduled_at) {
+    const cuando = stamp(c.scheduled_at);
+    if (cuando) push(`ENTREGAR: ${cuando}`, { size: "tall", bold: true });
+  }
   push(`Emitido: ${stamp(c.emitted_at)}`);
   if (isDelivery) push("Repartidor: ____________");
   push(RULE, { size: "sm" });
