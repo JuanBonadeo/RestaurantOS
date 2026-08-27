@@ -4,25 +4,19 @@ import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 
 import { computeIsOpen, type BusinessHour } from "@/lib/business-hours";
+import type { CartaTheme } from "@/lib/carta-theme";
 import { formatCurrency } from "@/lib/currency";
 import { disponibilidadTexto, pasosDelMenu } from "@/lib/daily-menus/carta-resumen";
 import type { MenuCategory, MenuDailyMenu, MenuProduct } from "@/lib/menu";
 
 // Carta SOLO VISUAL (read-only) para el QR de la mesa. El comensal mira y le
-// pide al mozo: sin carrito, sin "+", sin checkout. Estética «Restaurant del
-// Golf» (spec 44): cover de lino + golfista + título de sección en script
-// dorado + líder de puntos dorado plato···precio, en scroll único, sin fotos.
-// Reusa el mismo catálogo (getMenu) que /menu.
-
-// Cover art de la carta. Hoy es la identidad de golf-house (único cliente de
-// carta pre-go-live), con sus assets reales en public/carta/golf/. Parametrizar
-// el arte por business (settings/storage) es el fast-follow de spec 44.
-const COVER = {
-  linen: "/carta/golf/linen.png",
-  figure: "/carta/golf/golfista.svg",
-  wordmark: "/carta/golf/wordmark-blanco.svg",
-  ornament: "/carta/golf/ornamento.svg",
-};
+// pide al mozo: sin carrito, sin "+", sin checkout. Estructura de spec 44:
+// cover a pantalla + título de sección + líder de puntos plato···precio, en
+// scroll único y sin fotos. Reusa el mismo catálogo (getMenu) que /menu.
+//
+// El arte y los colores son del negocio (spec 129): salen de `settings.carta`
+// vía `resolveCartaTheme`, con la identidad de golf-house como default. Acá no
+// hay ningún cliente hardcodeado.
 
 type DisplayTab = {
   id: string;
@@ -58,11 +52,14 @@ function buildDisplayTabs(
   return tabs;
 }
 
-// Flourish dorado reutilizable (ornamento real del cliente).
-function Ornament({ width = 104 }: { width?: number }) {
+// Cenefa del cliente. Sin ornamento no se dibuja nada — ni el hueco: la carta
+// de KCC no tiene flourish y un espacio vacío bajo el título se lee como un
+// error de maquetación, no como aire.
+function Ornament({ src, width = 104 }: { src: string | null; width?: number }) {
+  if (!src) return null;
   return (
     <Image
-      src={COVER.ornament}
+      src={src}
       alt=""
       aria-hidden
       unoptimized
@@ -83,7 +80,7 @@ function ProductRow({ product }: { product: MenuProduct }) {
       <div style={{ display: "flex", alignItems: "flex-end" }}>
         <span
           style={{
-            fontWeight: 600,
+            fontWeight: "var(--carta-item-weight)" as React.CSSProperties["fontWeight"],
             fontSize: 15.5,
             lineHeight: 1.25,
             color: "var(--carta-ink)",
@@ -103,7 +100,7 @@ function ProductRow({ product }: { product: MenuProduct }) {
         />
         <span
           style={{
-            fontWeight: 600,
+            fontWeight: "var(--carta-item-weight)" as React.CSSProperties["fontWeight"],
             fontSize: 15.5,
             color: "var(--carta-ink)",
             whiteSpace: "nowrap",
@@ -148,19 +145,29 @@ function ProductRow({ product }: { product: MenuProduct }) {
   );
 }
 
-// Título de sección: script dorado centrado + ornamento debajo.
-function SectionTitle({ children }: { children: React.ReactNode }) {
+// Título de sección centrado + ornamento debajo. El script dorado pide cuerpo
+// grande para leerse; la serif itálica a 46px se comería la sección entera.
+function SectionTitle({
+  theme,
+  children,
+}: {
+  theme: CartaTheme;
+  children: React.ReactNode;
+}) {
+  const script = theme.title_style === "script";
   return (
     <div style={{ textAlign: "center", padding: "38px 0 8px" }}>
       <h2
-        className="carta-script"
-        style={{ margin: 0, fontSize: 46, lineHeight: 1 }}
+        className={script ? "carta-script" : "carta-serif-italic"}
+        style={{ margin: 0, fontSize: script ? 46 : 30 }}
       >
         {children}
       </h2>
-      <div style={{ marginTop: 6, display: "flex", justifyContent: "center" }}>
-        <Ornament width={104} />
-      </div>
+      {theme.ornament_url && (
+        <div style={{ marginTop: 6, display: "flex", justifyContent: "center" }}>
+          <Ornament src={theme.ornament_url} width={104} />
+        </div>
+      )}
     </div>
   );
 }
@@ -278,7 +285,7 @@ function DailyMenuCard({
   );
 }
 
-function DailyMenu({ menus }: { menus: MenuDailyMenu[] }) {
+function DailyMenu({ theme, menus }: { theme: CartaTheme; menus: MenuDailyMenu[] }) {
   const regular = menus.filter((m) => !m.is_suggestion);
   const suggestions = menus.filter((m) => m.is_suggestion);
   const ordenados = [...regular, ...suggestions];
@@ -286,7 +293,7 @@ function DailyMenu({ menus }: { menus: MenuDailyMenu[] }) {
 
   return (
     <section>
-      <SectionTitle>Menú del día</SectionTitle>
+      <SectionTitle theme={theme}>Menú del día</SectionTitle>
       <ul
         style={{
           display: "flex",
@@ -304,9 +311,61 @@ function DailyMenu({ menus }: { menus: MenuDailyMenu[] }) {
   );
 }
 
-// Cover a pantalla: lino navy + golfista dorado + wordmark + RESTAURANTE +
-// ornamento + cue de scroll hacia el menú.
-function Cover({ businessName }: { businessName: string }) {
+// Cover a pantalla: fondo del negocio + su marca + label + ornamento + cue de
+// scroll hacia el menú. Cada pieza es opcional y su ausencia cambia el layout,
+// no deja un hueco (ver `resolveCartaTheme`).
+function Cover({
+  theme,
+  businessName,
+}: {
+  theme: CartaTheme;
+  businessName: string;
+}) {
+  const layers = [
+    // El velo hace legible el wordmark sobre una textura; sobre un color plano
+    // sólo lo ensuciaría, así que va por tema.
+    theme.cover_scrim
+      ? "linear-gradient(rgba(20,23,28,0.45), rgba(20,23,28,0.6))"
+      : null,
+    theme.cover_texture_url ? `url(${theme.cover_texture_url})` : null,
+  ].filter(Boolean);
+
+  const wordmark = theme.wordmark_url ? (
+    <Image
+      src={theme.wordmark_url}
+      alt={businessName}
+      width={Math.round(300 * theme.wordmark_ratio)}
+      height={300}
+      priority
+      unoptimized
+      style={
+        theme.figure_url
+          ? {
+              // Superpuesto sobre la figura (el wordmark del Golf cruza al
+              // golfista por el medio).
+              position: "absolute",
+              left: "50%",
+              top: "54%",
+              transform: "translate(-50%, -50%)",
+              width: "150%",
+              maxWidth: "none",
+              height: "auto",
+            }
+          : { width: "100%", height: "auto" }
+      }
+    />
+  ) : (
+    // Sin marca cargada: el nombre en la tipografía de títulos del tema.
+    <div
+      className={
+        theme.title_style === "script" ? "carta-script" : "carta-serif-italic"
+      }
+      style={{ fontSize: 44, color: "#fff" }}
+    >
+      {businessName}
+    </div>
+  );
+
   return (
     <header
       style={{
@@ -320,55 +379,46 @@ function Cover({ businessName }: { businessName: string }) {
         padding: "56px 24px",
         color: "#fff",
         backgroundColor: "var(--carta-cover)",
-        backgroundImage: `linear-gradient(rgba(20,23,28,0.45), rgba(20,23,28,0.6)), url(${COVER.linen})`,
+        ...(layers.length > 0 ? { backgroundImage: layers.join(", ") } : {}),
         backgroundSize: "cover",
         backgroundPosition: "center",
       }}
     >
-      {/* Golfista + wordmark superpuesto (identidad del cliente) */}
-      <div style={{ position: "relative", width: 210, maxWidth: "72%", aspectRatio: "177 / 254" }}>
-        <Image
-          src={COVER.figure}
-          alt=""
-          aria-hidden
-          fill
-          priority
-          unoptimized
-          sizes="210px"
-          style={{ objectFit: "contain" }}
-        />
-        <Image
-          src={COVER.wordmark}
-          alt={businessName}
-          width={333}
-          height={88}
-          priority
-          unoptimized
-          style={{
-            position: "absolute",
-            left: "50%",
-            top: "54%",
-            transform: "translate(-50%, -50%)",
-            width: "150%",
-            maxWidth: "none",
-            height: "auto",
-          }}
-        />
-      </div>
+      {theme.figure_url ? (
+        <div style={{ position: "relative", width: 210, maxWidth: "72%", aspectRatio: "177 / 254" }}>
+          <Image
+            src={theme.figure_url}
+            alt=""
+            aria-hidden
+            fill
+            priority
+            unoptimized
+            sizes="210px"
+            style={{ objectFit: "contain" }}
+          />
+          {wordmark}
+        </div>
+      ) : (
+        <div style={{ width: 300, maxWidth: "82%" }}>{wordmark}</div>
+      )}
 
-      <div
-        style={{
-          marginTop: 34,
-          fontWeight: 500,
-          letterSpacing: "0.3em",
-          fontSize: 16,
-        }}
-      >
-        RESTAURANTE
-      </div>
-      <div style={{ marginTop: 16 }}>
-        <Ornament width={116} />
-      </div>
+      {theme.label && (
+        <div
+          style={{
+            marginTop: 34,
+            fontWeight: 500,
+            letterSpacing: "0.3em",
+            fontSize: 16,
+          }}
+        >
+          {theme.label}
+        </div>
+      )}
+      {theme.ornament_url && (
+        <div style={{ marginTop: 16 }}>
+          <Ornament src={theme.ornament_url} width={116} />
+        </div>
+      )}
 
       {/* Wrapper flex para centrar horizontal: la animación del óvalo usa su
           propio transform (translateY), así que el centrado NO puede depender
@@ -411,6 +461,7 @@ function Cover({ businessName }: { businessName: string }) {
 export function CartaClient({
   businessName,
   tagline,
+  theme,
   categories,
   beverageSuperCategoryId,
   todaysMenus,
@@ -420,6 +471,7 @@ export function CartaClient({
 }: {
   businessName: string;
   tagline: string | null;
+  theme: CartaTheme;
   coverImageUrl: string | null;
   logoUrl: string | null;
   categories: MenuCategory[];
@@ -457,8 +509,26 @@ export function CartaClient({
   }, [displayTabs]);
 
   return (
-    <div className="carta-theme" style={{ minHeight: "100vh" }}>
-      <Cover businessName={businessName} />
+    <div
+      className="carta-theme"
+      data-body={theme.body_style}
+      style={
+        {
+          minHeight: "100vh",
+          // Los `--ct-*` los lee `.carta-theme` en globals.css; el dark mode
+          // sigue pisando los `--carta-*` por encima (spec 129, D3).
+          "--ct-cover": theme.cover_bg,
+          "--ct-paper": theme.paper,
+          "--ct-ink": theme.ink,
+          "--ct-ink-2": theme.ink_2,
+          "--ct-accent": theme.accent,
+          ...(theme.paper_texture_url
+            ? { backgroundImage: `url(${theme.paper_texture_url})` }
+            : {}),
+        } as React.CSSProperties
+      }
+    >
+      <Cover theme={theme} businessName={businessName} />
 
       <main
         id="carta-menu"
@@ -500,11 +570,11 @@ export function CartaClient({
           </span>
         </div>
 
-        <DailyMenu menus={todaysMenus} />
+        <DailyMenu theme={theme} menus={todaysMenus} />
 
         {sections.map((s) => (
           <section key={s.key}>
-            <SectionTitle>{s.name}</SectionTitle>
+            <SectionTitle theme={theme}>{s.name}</SectionTitle>
             <ul style={{ margin: 0, padding: 0 }}>
               {s.products.map((p) => (
                 <ProductRow key={p.id} product={p} />

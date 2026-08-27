@@ -236,17 +236,32 @@
    Sustitutos: Angelic→Great Vibes (script), Gotham→Montserrat (sans).
    ───────────────────────────────────────────────────────────── */
 .carta-theme {
-  --carta-gold: #b0956b;
-  --carta-gold-2: #c7a16c;
-  --carta-ink: #333333;
-  --carta-ink-2: #6b6b6b;
-  --carta-paper: #ffffff;
-  --carta-cover: #2b2f38;
+  /* Spec 129 — el tema es por negocio: `CartaClient` inyecta los `--ct-*` que
+     salen de `settings.carta`, y el fallback de cada uno es la identidad de
+     golf-house (el default del sistema). Los `--carta-*` quedan como capa
+     intermedia a propósito: `.dark` los pisa por CSS, y si el componente
+     escribiera directo sobre ellos el style inline le ganaría al dark mode. */
+  --carta-gold: var(--ct-accent, #b0956b);
+  --carta-gold-2: var(--ct-accent, #c7a16c);
+  --carta-ink: var(--ct-ink, #333333);
+  --carta-ink-2: var(--ct-ink-2, #6b6b6b);
+  --carta-paper: var(--ct-paper, #ffffff);
+  --carta-cover: var(--ct-cover, #2b2f38);
   --carta-script: var(--font-great-vibes), "Snell Roundhand", cursive;
+  --carta-serif: var(--font-fraunces), Georgia, "Times New Roman", serif;
   --carta-sans: var(--font-montserrat), -apple-system, system-ui, sans-serif;
+  --carta-body: var(--carta-sans);
+  /* Una serif aguanta el peso del nombre del plato con menos gramaje que una
+     sans: a 600 la carta de KCC se ve gritada. */
+  --carta-item-weight: 600;
   background: var(--carta-paper);
   color: var(--carta-ink);
-  font-family: var(--carta-sans);
+  font-family: var(--carta-body);
+}
+/* Cuerpo en serif: la carta de KCC es serif de punta a punta, no sans. */
+.carta-theme[data-body="serif"] {
+  --carta-body: var(--carta-serif);
+  --carta-item-weight: 500;
 }
 /* La carta impresa es clara por naturaleza; en dark mode: papel cálido oscuro. */
 .dark .carta-theme {
@@ -259,6 +274,16 @@
   font-weight: 400;
   color: var(--carta-gold);
   line-height: 1;
+}
+/* El otro estilo de título de sección: serif itálica en el color de la tinta.
+   Es el de KCC, que no usa su terracota para los títulos sino para el líder
+   punteado — por eso el color va acá y no en el token del acento. */
+.carta-theme .carta-serif-italic {
+  font-family: var(--carta-serif);
+  font-style: italic;
+  font-weight: 400;
+  color: var(--carta-ink);
+  line-height: 1.1;
 }
 /* Cue de scroll del cover: baja suave y en loop. */
 @keyframes carta-bob {

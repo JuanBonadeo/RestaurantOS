@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 
 import { CartaClient } from "@/components/menu/carta-client";
 import { computeIsOpen } from "@/lib/business-hours";
+import { resolveCartaTheme } from "@/lib/carta-theme";
 import { currentDayOfWeek } from "@/lib/day-of-week";
 import { getMenu } from "@/lib/menu";
 import { getBusiness } from "@/lib/tenant";
@@ -34,6 +35,7 @@ export default async function CartaPage({
     <CartaClient
       businessName={business.name}
       tagline={tagline}
+      theme={resolveCartaTheme(business.settings)}
       coverImageUrl={business.cover_image_url ?? business.logo_url}
       logoUrl={business.logo_url}
       categories={menu.categories}

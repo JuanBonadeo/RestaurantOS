@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Kentucky Club House">
+  <rect width="64" height="64" rx="12" fill="#A12D15"/>
+  <!-- El triángulo del isotipo de Kentucky Club House, extraído de su wordmark
+       (path 4 de Logoktc.svg) y reencuadrado en el lienzo del favicon. -->
+  <path transform="translate(11.887 -49.60) scale(1.0121)"
+        d="M17.724 67.5603L0.111328 94.8402H39.6332L20.8674 67.5129C20.1092 66.4072 18.4664 66.423 17.7398 67.5603H17.724Z"
+        fill="#ffffff"/>
+</svg>
