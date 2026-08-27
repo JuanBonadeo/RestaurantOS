@@ -3,194 +3,177 @@
 **Issue:** [#197](https://github.com/gachetponzellini/RestaurantOS-app/issues/197) ·
 **Milestone:** Post-demo · Growth & hardening
 
-**Input:** Juan, 2026-08-27, revisando pedidos: *"la parte de elegir el horario
-y las notas quedó medio rara"*. Y, sobre los dos campos de nota: *"es que una
-sería el horario de cocina, y el otro sería el horario del pedido"*.
+**Input:** Juan, 2026-08-27, revisando pedidos: *"la parte de elegir el horario y
+las notas quedó medio rara"* · *"es que una sería el horario de cocina, y el otro
+sería el horario del pedido"* · *"que el horario de cocina se informe en todas las
+comandas, como una nota, sólo en las comandas para pedidos"* · **"así como está
+ahora funciona bien para los cocineros y para Ale que se encarga de los pedidos,
+pero para el encargado queda raro, y para nuestro sistema también"**.
 
 ## Por qué
 
-El encargue telefónico no tiene dónde escribir su hora, así que se la escribe
-encima a una nota. De ahí salen cuatro costuras que se cruzan justo en el paso
-de datos de «Cargar pedido».
+Esa última frase es la spec entera. **El papel no está roto** — cocina lee
+«ENTREGAR 21:30» arriba del ticket y se organiza; Ale trabaja con eso. Lo que
+está roto es de dónde sale ese texto: el encargue telefónico **no tiene dónde
+escribir su hora**, así que se la escribe encima a una nota.
+
+De ahí las cuatro costuras, todas del lado del encargado y del sistema:
 
 **1 · La hora vive en un campo de texto.** El selector real está apagado en la
-carga a mano (spec 120, `MOSTRAR_PROGRAMADO = false`) pero sigue vivo en el
-checkout del cliente. Por teléfono la única forma de decir «para las 21:30» es
-escribirlo en «Nota para cocina», y el board después muestra esa nota como si
-fuera el «para cuándo» ([`entrega.ts`](../../src/lib/orders/entrega.ts)). El
-cartel dice una hora que el sistema no respeta: no hay `scheduled_at`, no cae en
-«Próximos», la comanda sale a cocina en el acto.
+carga a mano (spec 120) pero sigue vivo en el checkout del cliente. Por teléfono
+la única forma de decir «21:30» es «Nota para cocina». El sistema no la entiende:
+no la puede ordenar, ni mostrar como hora, ni ponerla en el control.
 
-**Por qué se llegó a esto:** el motor real pide ≥60 min (`SCHEDULED_MIN_LEAD_MIN`)
-y sólo ofrece los chips de los servicios de reserva, cada 15 min. El encargue
-típico —«en 40 minutos», «21:20»— no entra por esa puerta. La nota fue la
-válvula de escape.
-
-**2 · La nota le gana a la hora real.** `entregaLabel` devuelve la nota primero
-y `scheduled_at` sólo si la nota está vacía. Un programado del cliente para las
-21:00 al que el encargado le escribe «junto con la mesa 5» al marchar muestra
-la nota donde debería decir la hora. La precedencia está al revés.
+**2 · El board muestra la nota como si fuera la hora.** `entregaLabel` devuelve
+`kitchen_notes` primero y `scheduled_at` sólo si la nota está vacía
+([`entrega.ts`](../../src/lib/orders/entrega.ts), #192). Un pedido con nota
+«junto con la mesa 5» muestra eso donde debería ir una hora, y un programado del
+cliente con nota muestra la nota en vez de su hora real. La precedencia está al
+revés.
 
 **3 · Los dos campos de nota prometen lo que no hacen.**
 
 | Campo | Placeholder | Dónde imprime | El problema |
 |---|---|---|---|
 | «Nota para el pedido» (`delivery_notes`) | *sin cebolla, tocar timbre…* | **sólo** el ticket de control | «sin cebolla» no llega nunca a cocina |
-| «Nota para cocina» (`kitchen_notes`) | *21:30, junto con la mesa 5…* | banner «ENTREGAR x» de la comanda | no es nota libre: «sin cebolla» sale como «ENTREGAR sin cebolla» |
-| nota del ítem (`order_items.notes`) | — | comanda **y** control, «obs: …» | es la única que sirve para «sin cebolla», y no está en el paso de datos |
+| «Nota para cocina» (`kitchen_notes`) | *21:30, junto con la mesa 5…* | banner «ENTREGAR x» de la comanda | no es nota libre: es el renglón del **cuándo** |
+| nota del ítem (`order_items.notes`) | — | comanda **y** control, «obs: …» | es la única que sirve para «sin cebolla», y no está en ese paso |
 
 **4 · El mismo campo tiene dos nombres.** `kitchen_notes` es «Nota para cocina»
-en la hoja de carga y «Entregar (sale en la comanda)» en el detalle
+en la hoja y «Entregar (sale en la comanda)» en el detalle
 ([`order-detail-sheet.tsx:653`](../../src/components/admin/order-detail-sheet.tsx)),
 y se pide dos veces: al cargar y otra vez al marchar.
 
 ## Las decisiones (Juan, 2026-08-27)
 
-**D1 · Hora libre para el staff, y el pedido queda programado de verdad.** Vuelve
-«¿Para cuándo?» a la hoja, pero para el encargado es hora libre: sin chips y sin
-el mínimo de 60 min. El cliente por la web sigue con chips y anticipación, igual
-que hoy.
+**D1 · Son dos horas, y las dos a mano.**
 
-**D2 · Son dos horas, no dos notas.** La **hora del pedido** (cuándo lo retira o
-lo recibe el cliente) y la **hora de cocina** (cuándo sale la comanda). Las dos
-**a mano, siempre**: el sistema no las calcula ni las pre-llena. El lead del
-negocio sigue gobernando sólo el canal web, donde no hay quien escriba la
-segunda.
+| | Qué es | Para quién |
+|---|---|---|
+| **Hora de cocina** | para cuándo el plato tiene que estar **listo** | cocina — se imprime arriba de la comanda |
+| **Hora del pedido** | cuándo el cliente lo **retira o lo recibe** | el encargado y Ale — board y ticket de control |
 
-**D3 · El cron no marcha, avisa.** Nada sale solo a cocina por ahora. El cron
-sigue corriendo —es lo único que sabe que llegó la hora— pero cambia de trabajo:
-en vez de mandar la comanda, toca el timbre. La tarjeta de «Próximos» se
-enciende y sale la notificación interna al encargado.
+El sistema **no calcula ninguna de las dos** ni pre-llena la segunda con la
+primera: nada de leads ni de magia.
 
-> ⚠️ **Corolario de D3, explícito:** hoy un pedido web **pagado y programado**
-> marcha solo. Con esto deja de hacerlo y espera el gesto del encargado, igual
-> que el impago. Es lo pedido, pero es un cambio de comportamiento del canal
-> cliente, no sólo del teléfono. El aviso es lo que hace que sea seguro.
+**D2 · La comanda sale ya, siempre.** El encargue no espera: se carga y marcha,
+como hoy — que es justamente lo que funciona. Las dos horas son **información**,
+no un temporizador. Cocina se organiza sola con la hora impresa, que es lo que ya
+viene haciendo.
+
+**D3 · La hora de cocina va en todas las comandas del pedido, y sólo en ésas.**
+Como una nota, arriba de todo, igual que hoy. En una mesa no aparece.
+
+**D4 · «Nota para el pedido» queda como campo de notas y nada más.** Ningún
+horario adentro.
+
+### Lo que estas decisiones dan de baja
+
+Las fases B y C de la versión anterior de esta spec (**el cron avisando** y
+**«Próximos» encendido**) **se caen**: existían para un pedido de staff que
+esperaba su hora, y con D2 el pedido de staff no espera nunca.
+
+> ⚠️ **Queda abierto, sin implementar:** Juan había pedido *"con el cron
+> desactivado por ahora"* cuando el modelo era otro. Con D2, **el staff ya no
+> produce ni un programado**, así que el cron sólo toca los del **canal web**
+> (el cliente que elige hora en el checkout), que hoy funcionan. Apagarlo ahora
+> sólo rompería eso. Se deja como está y se decide aparte; si se quiere apagar,
+> es una columna `businesses.scheduled_auto_march` y un `if`.
 
 ## Qué se construye
 
-### FR-001 · La hora de cocina es una columna
+### FR-001 · Dos columnas, dos horas
 
-`orders.kitchen_at timestamptz null` — cuándo tiene que salir la comanda. Hoy esa
-hora es implícita (`scheduled_at − lead`) y en la práctica se tipea a mano dentro
-de `kitchen_notes`.
+Migración **0050**, puramente aditiva:
 
-Una función pura resuelve la ventana para todo el resto:
+| Columna | Qué guarda |
+|---|---|
+| `orders.kitchen_at timestamptz null` | hora de cocina — para cuándo tiene que estar listo |
+| `orders.entrega_at timestamptz null` | hora del pedido — cuándo lo retira o lo recibe el cliente |
 
-```
-horaDeCocina(order, business) = order.kitchen_at ?? order.scheduled_at − lead(delivery_type)
-```
+**`scheduled_at` no se toca.** Sigue significando lo único que significó: *esta
+orden difiere su marcha hasta esta hora*, que es el motor del canal web. Las dos
+nuevas son información y **no difieren nada** — por eso el pedido de staff sale
+al instante sin tocar una línea del motor.
 
-El `??` es lo que deja el canal web intacto: sin `kitchen_at`, la ventana se
-sigue calculando con `scheduled_march_lead_{pickup,delivery}_min`.
-
-Migración **0050**: `orders.kitchen_at`, `orders.march_alerted_at` (idempotencia
-del aviso, ver FR-004) y `businesses.scheduled_auto_march boolean not null
-default false` (el interruptor de D3).
+Para que la UI tenga una sola fuente para «la hora del pedido» en los dos
+canales, `persistOrder` escribe `entrega_at = scheduled_at` cuando el pedido
+viene programado del checkout. Backfill del histórico en la misma migración.
 
 ### FR-002 · La hoja pide las dos horas
 
-Vuelve la sección «¿Para cuándo?» (se borra `MOSTRAR_PROGRAMADO`), con los chips
-«Ahora» / «Programar» de siempre. Al programar, dos `input type="time"` — hora
-del local, no del navegador:
+Muere `MOSTRAR_PROGRAMADO`. En su lugar, dos `input type="time"` — hora del
+local, no del navegador:
 
-| Campo | Qué es |
-|---|---|
-| **Hora del pedido** | cuándo lo retira o lo recibe el cliente |
-| **Hora de cocina** | cuándo sale la comanda al sector |
+- **Hora de cocina** — «para cuándo tiene que estar listo»
+- **Hora del pedido** — «cuándo lo retira o lo recibe»
 
-Las dos son **obligatorias** al programar: es lo que significa «a mano,
-siempre», y evita el fallback silencioso al lead. Coherencia mínima: hora de
-cocina ≤ hora del pedido, las dos de hoy. La hora de cocina en el pasado se
-acepta —es «ya»— y marcha al confirmar; la hora del pedido en el pasado no.
+Vacías = el pedido es para ahora, como siempre. **Si se completa una, la otra es
+obligatoria**: es lo que significa «las dos a mano». Coherencia mínima: cocina ≤
+pedido, las dos de hoy. Ninguna difiere la marcha: el pie sigue siendo «Cargar y
+enviar a cocina» / «Sólo cargar», y ⌘Enter marcha.
 
-En **modo agregar** (spec 125) nada de esto aparece: las horas ya se decidieron.
+En **modo agregar** (spec 125) no aparecen: las horas ya se decidieron.
 
-### FR-003 · El server valida distinto según quién carga
+Las mismas dos horas se pueden corregir desde el detalle del pedido, donde hoy
+se pide la nota al marchar.
 
-`validateScheduledOrder` suma `source: "public" | "staff"`:
+### FR-003 · El papel, igual que hoy pero con el dato bien
 
-| Regla | `public` | `staff` |
-|---|---|---|
-| Sólo hoy | sí | sí |
-| ≥ `SCHEDULED_MIN_LEAD_MIN` (60) | sí | **no** |
-| La hora tiene que ser un chip de la grilla | sí | **no** |
+- **Comanda** — el banner sigue siendo lo primero del ticket y sigue diciendo
+  `ENTREGAR 21:30`, pero la hora sale de `kitchen_at` en vez del texto libre. La
+  nota de cocina, si la hay, baja un renglón. Sale en **todas** las comandas del
+  pedido (ya es así: el payload se arma por comanda desde la orden) y **en
+  ninguna de mesa** (nada llena esas columnas en el salón).
+- **Control** (el papel de Ale) — suma la **hora del pedido**, que es la que le
+  sirve al que entrega. Hoy no la tiene.
 
-`cargarPedidoStaff` pasa `source: "staff"`; el checkout público no cambia una
-coma. Es el único punto donde las dos puertas se separan.
+### FR-004 · Las notas vuelven a ser notas
 
-### FR-004 · El cron avisa en vez de marchar
-
-`marchDueScheduledOrders` se parte en dos trabajos sobre la misma ventana
-(`horaDeCocina <= now`, sin comandas, `pending` pagado o `confirmed`):
-
-1. **Avisar** — `createNotification({ type: "pedido.hora_de_marchar", targetRole:
-   "encargado" })` + su render en `notifications/view.ts`. Idempotente por
-   `orders.march_alerted_at`: el tick corre cada 5 min y el timbre suena una vez.
-2. **Marchar** — sólo si `businesses.scheduled_auto_march = true`. Default
-   `false`, así que hoy no marcha nadie.
-
-El endpoint, el `pg_cron` y `routeOrderToCocina` no se tocan. El interruptor es
-una columna, no un deploy: prenderlo por negocio es un UPDATE.
-
-### FR-005 · «Próximos» se enciende
-
-- **Ordena por hora de cocina**, no por la del pedido: es la que exige el gesto.
-- Muestra las dos: «Cocina 21:00 · Entrega 21:30».
-- Tres estados, con un tick de reloj client-side (30 s):
-
-| Cuándo | Cómo se ve |
-|---|---|
-| falta > 15 min | como hoy |
-| faltan ≤ 15 min | ámbar, con la cuenta regresiva |
-| pasada la hora | rojo, primera de la lista, «hace 6 min que tenía que marchar» |
-
-### FR-006 · Las notas vuelven a ser notas
-
-- `entregaLabel` deja de leer `kitchen_notes`: la hora sale de `scheduled_at` y
-  nada más. Muere la costura 2.
-- «Nota para el pedido» (`delivery_notes`): el placeholder deja de sugerir «sin
-  cebolla» —que cocina no ve— y la ayuda lo dice entero: *va en el ticket de
-  control, cocina no la ve*.
-- «Nota para cocina» (`kitchen_notes`): el placeholder deja de sugerir «21:30».
-  Queda para lo que siempre fue, la instrucción de armado («junto con la mesa
-  5»). **Mismo nombre en la hoja y en el detalle.**
+- `entregaLabel` deja de leer `kitchen_notes`: lee `entrega_at` y nada más. Muere
+  la costura 2, y de paso el board pasa a mostrar una hora de verdad, ordenable.
+- **«Nota para el pedido»** (`delivery_notes`): el placeholder deja de sugerir
+  «sin cebolla» —que cocina no ve— y la ayuda lo dice entero: *va en el ticket de
+  control; cocina no la ve*.
+- **«Nota para cocina»** (`kitchen_notes`): el placeholder deja de sugerir
+  «21:30». Queda para lo que siempre fue, la instrucción de armado («junto con la
+  mesa 5»). **Mismo nombre en la hoja y en el detalle.**
 - Una línea de ayuda manda «sin cebolla» a donde corresponde: la nota del
   producto.
 
-### FR-007 · El papel dice la hora
+### FR-005 · El board muestra las dos
 
-- **Comanda**: el banner pasa a `ENTREGAR 21:30` desde `scheduled_at`, con la
-  nota libre debajo si la hay. Hoy el banner **es** la nota, y por eso la hora
-  sólo llegaba a cocina si alguien la tipeaba.
-- **Control** (el papel del repartidor): suma la hora del pedido.
+La tarjeta dice la **hora del pedido** (es la promesa al cliente); el detalle,
+las dos. Ordenar por hora queda habilitado por ser un dato — no entra en esta
+spec.
 
 ## Qué NO cambia
 
-- **El checkout del cliente.** Chips, anticipación y `scheduled_at` idénticos.
+- **El papel que ve cocina.** Mismo banner, misma posición, mismo formato.
+- **El checkout del cliente**, `scheduled_at`, «Próximos», el cron y el lead por
+  negocio: intactos.
 - **`routeOrderToCocina`** y la idempotencia de la marcha.
-- **El lead por negocio.** Sigue gobernando la ventana del canal web.
-- **El salón.** Una mesa no se programa (`dine_in` ya lo rechaza).
-- **`pg_cron`.** El job sigue agendado y activo; cambia lo que hace el endpoint.
+- **El salón.** Una mesa no tiene horas y su comanda no lleva banner.
 
-## Fases
+## Riesgo conocido
 
-| Fase | Qué entra |
-|---|---|
-| **A** | Migración 0050 · los dos campos en la hoja · FR-003 · `entregaLabel` · las notas · los papeles |
-| **B** | El cron avisa: notificación, idempotencia, flag por negocio |
-| **C** | «Próximos» encendido: orden, colores, cuenta regresiva |
+Los pedidos viejos tienen la hora **adentro** de `kitchen_notes` y no hay
+backfill posible (parsear texto libre no es confiable: en la base hay `T`,
+`transfirio`, `a`). Cuando `entregaLabel` deje de leer la nota, esos pedidos
+dejan de mostrarla en el board. Es aceptable: son pedidos del día, y la nota
+sigue impresa en su comanda.
 
 ## Verificación
 
 - `pnpm typecheck` · `pnpm test` · `pnpm build` en verde.
 - **En vivo, con rol real de encargado** (nunca service_role):
-  1. Encargue telefónico a las 20:50 para las **21:20** (40 min: hoy lo rechaza
-     el mínimo de 60) con cocina **21:00** → entra, cae en «Próximos», no marcha.
-  2. A las 21:00 la tarjeta se pone en rojo y llega el aviso interno. Una sola
-     vez, aunque el cron pase tres veces.
-  3. «Marchar ahora» → la comanda sale con `ENTREGAR 21:20` arriba.
-  4. Pedido web pagado y programado: **no** marcha solo; avisa y espera.
-  5. `scheduled_auto_march = true` en el negocio → vuelve a marchar solo.
-  6. Escribir sólo notas (sin horas) → el pedido es para ahora, como siempre.
-  7. El detalle y la hoja llaman al mismo campo con el mismo nombre.
+  1. Encargue a las 20:50: cocina **21:15**, pedido **21:30** → la comanda sale
+     **en el acto**, con `ENTREGAR 21:15` arriba.
+  2. Un pedido con tres sectores → las **tres** comandas llevan el banner.
+  3. Abrir una mesa y mandar comanda → **sin** banner.
+  4. El board dice `21:30` (hora del pedido), no la nota ni «hace 40 min».
+  5. El control de Ale trae la hora del pedido.
+  6. Cargar sin horas → todo igual que hoy.
+  7. Completar una sola hora → no deja guardar hasta poner la otra.
+  8. Escribir «junto con la mesa 5» en la nota de cocina → sale debajo del
+     banner, y el board **no** la muestra como hora.
