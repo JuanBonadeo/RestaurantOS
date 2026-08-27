@@ -174,6 +174,21 @@ No se rutea al cargar. Llegado `marchaAt`, el cron hace lo que ya hace hoy:
 El encargue que **nace con la ventana vencida** (21:10 para cocina 21:15) sale en
 el acto, sin esperar hasta 5 minutos al próximo tick.
 
+### FR-006b · El pedido de otro día pertenece a la jornada en que se prepara
+
+`orders.business_day` y `orders.daily_number` los materializa el trigger
+`set_order_daily_number` sobre **`created_at`** (migración 0049). Sin tocar nada,
+el encargue cargado hoy para mañana se lleva el número **de hoy**: mañana el pase
+cantaría un «#7» que no es el #7 de mañana, y podrían convivir dos.
+
+El trigger ya deja la puerta abierta —`if new.business_day is null`—, así que
+alcanza con que `persistOrder` mande `business_day = operating_day(kitchen_at)`
+cuando el encargue es para otro día. El número se saca de la jornada correcta y
+el encargue queda **#1 de mañana**, que es lo que corresponde: llegó primero.
+
+Corolario aceptado: el pedido no aparece en los totales de la jornada en que se
+cargó, sino en la que se trabaja. Es lo correcto para caja y para el pase.
+
 ### FR-007 · El papel, igual que hoy pero con el dato bien
 
 - **Comanda** — el banner sigue siendo lo primero del ticket y sigue diciendo
@@ -227,6 +242,10 @@ y la tarjeta en rojo. Idempotente por `orders.march_alerted_at`.
   nuevo en la operación: papel afuera, pedido fuera del kanban. El KDS de cocina
   lo muestra desde que se imprime (correcto: el papel ya está en la cocina), pero
   el board no. FR-009 lo hace legible.
+- **El stock se descuenta al cargar, no al marchar.** Los triggers cuelgan de
+  `order_items` (0039 · 0042), así que un encargue para mañana reserva el insumo
+  hoy. Es defendible —el insumo está comprometido— pero puede dejar el stock de
+  hoy en negativo (spec 099 ya lo permite). No se toca en esta spec.
 - **Los pedidos viejos tienen la hora adentro de `kitchen_notes`** y no hay
   backfill posible (en la base hay `T`, `transfirio`, `a`). Al dejar de leer la
   nota, esos pedidos dejan de mostrarla en el board. Aceptable: son del día.
