@@ -10,10 +10,94 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.5"
+    PostgrestVersion: "14.17"
   }
   public: {
     Tables: {
+      _menufacil: {
+        Row: {
+          nombre: string | null
+          precio_cents: number | null
+          seccion: string | null
+        }
+        Insert: {
+          nombre?: string | null
+          precio_cents?: number | null
+          seccion?: string | null
+        }
+        Update: {
+          nombre?: string | null
+          precio_cents?: number | null
+          seccion?: string | null
+        }
+        Relationships: []
+      }
+      _mx_precios_20260528: {
+        Row: {
+          key: string
+          precio_cents: number
+        }
+        Insert: {
+          key: string
+          precio_cents: number
+        }
+        Update: {
+          key?: string
+          precio_cents?: number
+        }
+        Relationships: []
+      }
+      _mxemp: {
+        Row: {
+          apellido: string | null
+          codigo: number | null
+          fecha_baja: string | null
+          nivel: number | null
+          nombre: string | null
+          rinde: boolean | null
+          tipo: string | null
+        }
+        Insert: {
+          apellido?: string | null
+          codigo?: number | null
+          fecha_baja?: string | null
+          nivel?: number | null
+          nombre?: string | null
+          rinde?: boolean | null
+          tipo?: string | null
+        }
+        Update: {
+          apellido?: string | null
+          codigo?: number | null
+          fecha_baja?: string | null
+          nivel?: number | null
+          nombre?: string | null
+          rinde?: boolean | null
+          tipo?: string | null
+        }
+        Relationships: []
+      }
+      _price_backup_20260728: {
+        Row: {
+          id: string | null
+          name: string | null
+          price_cents: number | null
+          snapshot_at: string | null
+        }
+        Insert: {
+          id?: string | null
+          name?: string | null
+          price_cents?: number | null
+          snapshot_at?: string | null
+        }
+        Update: {
+          id?: string | null
+          name?: string | null
+          price_cents?: number | null
+          snapshot_at?: string | null
+        }
+        Relationships: []
+      }
       afip_gateway_credentials: {
         Row: {
           api_key: string
@@ -160,15 +244,15 @@ export type Database = {
           afip_mode: string
           afip_provider: string | null
           afip_punto_venta: number | null
-          cover_image_url: string | null
           control_printer_enabled: boolean
           control_printer_ip: string | null
           control_printer_port: number
+          cover_image_url: string | null
           created_at: string
-          currency: string
           cuenta_printer_enabled: boolean
           cuenta_printer_ip: string | null
           cuenta_printer_port: number
+          currency: string
           customer_channel: string
           delivery_fee_cents: number
           email: string | null
@@ -188,6 +272,7 @@ export type Database = {
           plan: string | null
           print_agent_key_set: boolean
           scheduled_march_lead_delivery_min: number
+          scheduled_march_lead_kitchen_min: number
           scheduled_march_lead_pickup_min: number
           settings: Json
           slug: string
@@ -203,15 +288,15 @@ export type Database = {
           afip_mode?: string
           afip_provider?: string | null
           afip_punto_venta?: number | null
-          cover_image_url?: string | null
           control_printer_enabled?: boolean
           control_printer_ip?: string | null
           control_printer_port?: number
+          cover_image_url?: string | null
           created_at?: string
-          currency?: string
           cuenta_printer_enabled?: boolean
           cuenta_printer_ip?: string | null
           cuenta_printer_port?: number
+          currency?: string
           customer_channel?: string
           delivery_fee_cents?: number
           email?: string | null
@@ -231,6 +316,7 @@ export type Database = {
           plan?: string | null
           print_agent_key_set?: boolean
           scheduled_march_lead_delivery_min?: number
+          scheduled_march_lead_kitchen_min?: number
           scheduled_march_lead_pickup_min?: number
           settings?: Json
           slug: string
@@ -246,15 +332,15 @@ export type Database = {
           afip_mode?: string
           afip_provider?: string | null
           afip_punto_venta?: number | null
-          cover_image_url?: string | null
           control_printer_enabled?: boolean
           control_printer_ip?: string | null
           control_printer_port?: number
+          cover_image_url?: string | null
           created_at?: string
-          currency?: string
           cuenta_printer_enabled?: boolean
           cuenta_printer_ip?: string | null
           cuenta_printer_port?: number
+          currency?: string
           customer_channel?: string
           delivery_fee_cents?: number
           email?: string | null
@@ -274,6 +360,7 @@ export type Database = {
           plan?: string | null
           print_agent_key_set?: boolean
           scheduled_march_lead_delivery_min?: number
+          scheduled_march_lead_kitchen_min?: number
           scheduled_march_lead_pickup_min?: number
           settings?: Json
           slug?: string
@@ -449,13 +536,6 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "caja_movimientos_cancelled_by_fkey"
-            columns: ["cancelled_by"]
-            isOneToOne: false
-            referencedRelation: "users"
-            referencedColumns: ["id"]
-          },
-          {
             foreignKeyName: "caja_movimientos_business_id_fkey"
             columns: ["business_id"]
             isOneToOne: false
@@ -467,6 +547,13 @@ export type Database = {
             columns: ["caja_id"]
             isOneToOne: false
             referencedRelation: "cajas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "caja_movimientos_cancelled_by_fkey"
+            columns: ["cancelled_by"]
+            isOneToOne: false
+            referencedRelation: "users"
             referencedColumns: ["id"]
           },
           {
@@ -1260,57 +1347,6 @@ export type Database = {
           },
         ]
       }
-      daily_menu_components: {
-        Row: {
-          choice_group_id: string | null
-          description: string | null
-          extra_price_cents: number
-          id: string
-          kind: string
-          label: string
-          menu_id: string
-          product_id: string | null
-          sort_order: number
-        }
-        Insert: {
-          choice_group_id?: string | null
-          description?: string | null
-          extra_price_cents?: number
-          id?: string
-          kind?: string
-          label: string
-          menu_id: string
-          product_id?: string | null
-          sort_order?: number
-        }
-        Update: {
-          choice_group_id?: string | null
-          description?: string | null
-          extra_price_cents?: number
-          id?: string
-          kind?: string
-          label?: string
-          menu_id?: string
-          product_id?: string | null
-          sort_order?: number
-        }
-        Relationships: [
-          {
-            foreignKeyName: "daily_menu_components_menu_id_fkey"
-            columns: ["menu_id"]
-            isOneToOne: false
-            referencedRelation: "daily_menus"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "daily_menu_components_product_id_fkey"
-            columns: ["product_id"]
-            isOneToOne: false
-            referencedRelation: "products"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       daily_menu_choice_groups: {
         Row: {
           applies_when_group_id: string | null
@@ -1355,6 +1391,64 @@ export type Database = {
             columns: ["menu_id"]
             isOneToOne: false
             referencedRelation: "daily_menus"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      daily_menu_components: {
+        Row: {
+          choice_group_id: string | null
+          description: string | null
+          extra_price_cents: number
+          id: string
+          kind: string
+          label: string
+          menu_id: string
+          product_id: string | null
+          sort_order: number
+        }
+        Insert: {
+          choice_group_id?: string | null
+          description?: string | null
+          extra_price_cents?: number
+          id?: string
+          kind?: string
+          label: string
+          menu_id: string
+          product_id?: string | null
+          sort_order?: number
+        }
+        Update: {
+          choice_group_id?: string | null
+          description?: string | null
+          extra_price_cents?: number
+          id?: string
+          kind?: string
+          label?: string
+          menu_id?: string
+          product_id?: string | null
+          sort_order?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "daily_menu_components_choice_group_fkey"
+            columns: ["menu_id", "choice_group_id"]
+            isOneToOne: false
+            referencedRelation: "daily_menu_choice_groups"
+            referencedColumns: ["menu_id", "id"]
+          },
+          {
+            foreignKeyName: "daily_menu_components_menu_id_fkey"
+            columns: ["menu_id"]
+            isOneToOne: false
+            referencedRelation: "daily_menus"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_menu_components_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
             referencedColumns: ["id"]
           },
         ]
@@ -1480,6 +1574,7 @@ export type Database = {
           height: number
           id: string
           name: string
+          show_customer_name: boolean
           updated_at: string
           width: number
         }
@@ -1494,6 +1589,7 @@ export type Database = {
           height?: number
           id?: string
           name?: string
+          show_customer_name?: boolean
           updated_at?: string
           width?: number
         }
@@ -1508,6 +1604,7 @@ export type Database = {
           height?: number
           id?: string
           name?: string
+          show_customer_name?: boolean
           updated_at?: string
           width?: number
         }
@@ -2415,12 +2512,14 @@ export type Database = {
           delivery_lat: number | null
           delivery_lng: number | null
           delivery_notes: string | null
-          kitchen_notes: string | null
           delivery_type: string
           discount_cents: number
           discount_reason: string | null
           id: string
+          kitchen_at: string | null
+          kitchen_notes: string | null
           lifecycle_status: string
+          march_alerted_at: string | null
           mozo_id: string | null
           mp_payment_id: string | null
           mp_preference_id: string | null
@@ -2441,7 +2540,7 @@ export type Database = {
         }
         Insert: {
           bill_requested_at?: string | null
-          business_day?: string
+          business_day: string
           business_id: string
           cancelled_at?: string | null
           cancelled_by?: string | null
@@ -2452,18 +2551,20 @@ export type Database = {
           customer_id?: string | null
           customer_name: string
           customer_phone: string
-          daily_number?: number
+          daily_number: number
           delivery_address?: string | null
           delivery_fee_cents?: number
           delivery_lat?: number | null
           delivery_lng?: number | null
           delivery_notes?: string | null
-          kitchen_notes?: string | null
           delivery_type: string
           discount_cents?: number
           discount_reason?: string | null
           id?: string
+          kitchen_at?: string | null
+          kitchen_notes?: string | null
           lifecycle_status?: string
+          march_alerted_at?: string | null
           mozo_id?: string | null
           mp_payment_id?: string | null
           mp_preference_id?: string | null
@@ -2501,12 +2602,14 @@ export type Database = {
           delivery_lat?: number | null
           delivery_lng?: number | null
           delivery_notes?: string | null
-          kitchen_notes?: string | null
           delivery_type?: string
           discount_cents?: number
           discount_reason?: string | null
           id?: string
+          kitchen_at?: string | null
+          kitchen_notes?: string | null
           lifecycle_status?: string
+          march_alerted_at?: string | null
           mozo_id?: string | null
           mp_payment_id?: string | null
           mp_preference_id?: string | null
@@ -2842,8 +2945,8 @@ export type Database = {
           business_id: string
           emitted_at: string
           id: string
-          kind: string
           invoice_id: string | null
+          kind: string
           order_id: string | null
           print_failed_at: string | null
           printed_at: string | null
@@ -2855,8 +2958,8 @@ export type Database = {
           business_id: string
           emitted_at?: string
           id?: string
-          kind: string
           invoice_id?: string | null
+          kind: string
           order_id?: string | null
           print_failed_at?: string | null
           printed_at?: string | null
@@ -2868,8 +2971,9 @@ export type Database = {
           business_id?: string
           emitted_at?: string
           id?: string
+          invoice_id?: string | null
           kind?: string
-          order_id?: string
+          order_id?: string | null
           print_failed_at?: string | null
           printed_at?: string | null
           reprint_requested_at?: string | null
@@ -2885,10 +2989,24 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "print_jobs_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "print_jobs_order_id_fkey"
             columns: ["order_id"]
             isOneToOne: false
             referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "print_jobs_requested_by_fkey"
+            columns: ["requested_by"]
+            isOneToOne: false
+            referencedRelation: "users"
             referencedColumns: ["id"]
           },
         ]
@@ -3090,6 +3208,7 @@ export type Database = {
           created_at: string
           day_of_week: number | null
           floor_plan_id: string | null
+          hold_tables: number
           id: string
           name: string
           opens_at: string
@@ -3102,6 +3221,7 @@ export type Database = {
           created_at?: string
           day_of_week?: number | null
           floor_plan_id?: string | null
+          hold_tables?: number
           id?: string
           name: string
           opens_at: string
@@ -3114,6 +3234,7 @@ export type Database = {
           created_at?: string
           day_of_week?: number | null
           floor_plan_id?: string | null
+          hold_tables?: number
           id?: string
           name?: string
           opens_at?: string
@@ -3187,8 +3308,6 @@ export type Database = {
       reservations: {
         Row: {
           business_id: string
-          floor_plan_id: string | null
-          service: string | null
           client_confirmed_at: string | null
           confirm_token: string
           created_at: string
@@ -3196,9 +3315,11 @@ export type Database = {
           customer_name: string
           customer_phone: string
           ends_at: string
+          floor_plan_id: string | null
           id: string
           notes: string | null
           party_size: number
+          service: string | null
           source: string
           starts_at: string
           status: string
@@ -3208,8 +3329,6 @@ export type Database = {
         }
         Insert: {
           business_id: string
-          floor_plan_id?: string | null
-          service?: string | null
           client_confirmed_at?: string | null
           confirm_token?: string
           created_at?: string
@@ -3217,9 +3336,11 @@ export type Database = {
           customer_name: string
           customer_phone: string
           ends_at: string
+          floor_plan_id?: string | null
           id?: string
           notes?: string | null
           party_size: number
+          service?: string | null
           source?: string
           starts_at: string
           status?: string
@@ -3229,8 +3350,6 @@ export type Database = {
         }
         Update: {
           business_id?: string
-          floor_plan_id?: string | null
-          service?: string | null
           client_confirmed_at?: string | null
           confirm_token?: string
           created_at?: string
@@ -3238,9 +3357,11 @@ export type Database = {
           customer_name?: string
           customer_phone?: string
           ends_at?: string
+          floor_plan_id?: string | null
           id?: string
           notes?: string | null
           party_size?: number
+          service?: string | null
           source?: string
           starts_at?: string
           status?: string
@@ -3254,6 +3375,13 @@ export type Database = {
             columns: ["business_id"]
             isOneToOne: false
             referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reservations_floor_plan_id_fkey"
+            columns: ["floor_plan_id"]
+            isOneToOne: false
+            referencedRelation: "floor_plans"
             referencedColumns: ["id"]
           },
           {
@@ -3976,6 +4104,18 @@ export type Database = {
         Args: { p_delta: number; p_stock_item_id: string }
         Returns: number
       }
+      anular_pago_tx: {
+        Args: {
+          p_business_id: string
+          p_by_user_id: string
+          p_payment_id: string
+          p_reason: string
+        }
+        Returns: {
+          fully_paid: boolean
+          payment: Json
+        }[]
+      }
       corregir_movimiento_tx: {
         Args: {
           p_amount_cents: number
@@ -4004,10 +4144,6 @@ export type Database = {
           payment: Json
         }[]
       }
-      operating_day: {
-        Args: { ts: string }
-        Returns: string
-      }
       fn_explode_ingredient: {
         Args: { p_ingredient_id: string; p_quantity: number }
         Returns: {
@@ -4020,16 +4156,23 @@ export type Database = {
         Args: { p_ingredient_id: string }
         Returns: number
       }
+      fn_stock_reversion_item: {
+        Args: { p_order_item_id: string }
+        Returns: undefined
+      }
       increment_promo_use: {
         Args: { p_business_id: string; p_promo_id: string }
         Returns: boolean
       }
       is_business_admin: { Args: { bid: string }; Returns: boolean }
+      is_business_manager: { Args: { bid: string }; Returns: boolean }
       is_business_member: { Args: { bid: string }; Returns: boolean }
       is_business_staff: { Args: { bid: string }; Returns: boolean }
       is_platform_admin: { Args: never; Returns: boolean }
       march_due_scheduled_orders: { Args: never; Returns: undefined }
       mark_overdue_reservations_no_show: { Args: never; Returns: number }
+      operating_day: { Args: { ts: string }; Returns: string }
+      reconcile_pending_invoices: { Args: never; Returns: undefined }
       registrar_pago_tx: {
         Args: {
           p_adjustment_cents: number

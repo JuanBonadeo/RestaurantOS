@@ -57,6 +57,12 @@ export async function crearPedidoFlash(
     .from("orders")
     .insert({
       order_number: 0,
+      // `business_day` y `daily_number` los asigna el trigger
+      // `set_order_daily_number` (migración 0049): van con los sentinels que el
+      // trigger reconoce (null y 0). El tipo generado los pide porque en la base
+      // son NOT NULL sin default de columna — los tipos no saben de triggers.
+      business_day: null as unknown as string,
+      daily_number: 0,
       business_id: business.id,
       customer_name: concepto,
       customer_phone: "-",
