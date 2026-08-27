@@ -82,9 +82,7 @@ function shellProps() {
     }),
     pedidos: Promise.resolve({
       initialOrders: [],
-      scheduledSlots: [],
-      marchLeadPickupMin: 0,
-      marchLeadDeliveryMin: 0,
+      marchLeadKitchenMin: 40,
     }),
     caja: Promise.resolve({ cajas: [] }),
     rendicion: Promise.resolve({

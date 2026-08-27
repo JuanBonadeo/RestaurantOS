@@ -75,8 +75,7 @@ export default async function LocalEnVivoPage({
   const salon = loadSalon(business.id, service, { todayStart, tomorrowStart });
   const comandas = loadComandas(business.id);
   const pedidos = loadPedidos(business.id, business.timezone, {
-    pickupMin: business.scheduled_march_lead_pickup_min,
-    deliveryMin: business.scheduled_march_lead_delivery_min,
+    kitchenMin: business.scheduled_march_lead_kitchen_min,
   });
   const caja = loadCaja(business.id);
   const rendicion = loadRendicion(business.id, service);

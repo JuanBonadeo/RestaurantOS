@@ -66,20 +66,22 @@ function renderSheet(o: AdminOrder) {
 }
 
 describe("OrderDetailSheet · para cuándo es el pedido", () => {
-  it("muestra la indicación del encargado arriba, con los datos del pedido", () => {
-    renderSheet(order({ kitchen_notes: "21:30, junto con la mesa 5" }));
-    expect(screen.getByText("Entregar 21:30, junto con la mesa 5")).toBeTruthy();
-  });
-
-  it("sin nota, muestra la hora del pedido agendado", () => {
+  it("muestra la hora del pedido arriba, con sus datos", () => {
     renderSheet(order({ scheduled_at: "2026-08-20T23:30:00.000Z" }));
     expect(screen.getByText("Entregar 20:30 hs")).toBeTruthy();
   });
 
+  // Spec 127 — la nota de cocina dejó de hacer de hora. Antes le ganaba a la
+  // real, así que «junto con la mesa 5» aparecía donde va un horario.
+  it("la nota de cocina ya no ocupa el lugar de la hora", () => {
+    renderSheet(order({ kitchen_notes: "junto con la mesa 5" }));
+    expect(screen.queryByText("Entregar junto con la mesa 5")).toBeNull();
+  });
+
   it("el input de cocina abre con la nota ya cargada — confirmar no la borra", () => {
-    renderSheet(order({ kitchen_notes: "21:30" }));
-    const input = screen.getByLabelText(/Entregar \(sale en la comanda\)/i);
-    expect((input as HTMLInputElement).value).toBe("21:30");
+    renderSheet(order({ kitchen_notes: "junto con la mesa 5" }));
+    const input = screen.getByLabelText(/Nota para cocina \(sale en la comanda\)/i);
+    expect((input as HTMLInputElement).value).toBe("junto con la mesa 5");
   });
 
   it("sin nota ni agenda, no inventa ninguna indicación", () => {

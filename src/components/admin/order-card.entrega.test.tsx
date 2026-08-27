@@ -48,20 +48,23 @@ function renderCard(o: AdminOrder) {
 }
 
 describe("OrderCard · para cuándo es el pedido", () => {
-  it("muestra la nota del encargado en lugar del transcurrido", () => {
-    renderCard(order({ kitchen_notes: "21:30, junto con la mesa 5" }));
-    expect(screen.getByText("21:30, junto con la mesa 5")).toBeTruthy();
-    expect(screen.queryByText("1h 30")).toBeNull();
-  });
-
-  it("sin nota, cae en la hora del pedido agendado", () => {
+  it("muestra la hora del pedido en lugar del transcurrido", () => {
     renderCard(
       order({ scheduled_at: "2026-08-20T23:30:00.000Z" }), // 20:30 en AR
     );
     expect(screen.getByText("20:30 hs")).toBeTruthy();
+    expect(screen.queryByText("1h 30")).toBeNull();
   });
 
-  it("sin nota ni agenda, sigue mostrando el transcurrido", () => {
+  // Spec 127 — la nota volvió a ser una nota. Antes le ganaba a la hora real,
+  // así que un pedido con «junto con la mesa 5» mostraba eso donde va una hora.
+  it("la nota de cocina ya no se muestra como si fuera la hora", () => {
+    renderCard(order({ kitchen_notes: "junto con la mesa 5" }));
+    expect(screen.queryByText("junto con la mesa 5")).toBeNull();
+    expect(screen.getByText("1h 30")).toBeTruthy();
+  });
+
+  it("sin hora, sigue mostrando el transcurrido", () => {
     renderCard(order());
     expect(screen.getByText("1h 30")).toBeTruthy();
   });

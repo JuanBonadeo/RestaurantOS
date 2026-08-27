@@ -361,9 +361,7 @@ export function OrderDetailSheet({
       open={agregarOpen}
       onClose={() => setAgregarOpen(false)}
       timezone={timezone}
-      scheduledSlots={[]}
-      marchLeadPickupMin={0}
-      marchLeadDeliveryMin={0}
+
       agregarA={{ orderId: order.id, dailyNumber: order.daily_number }}
       onCreated={() => {
         void cargarDetalle();
@@ -650,14 +648,14 @@ export function OrderDetailSheet({
                   htmlFor="kitchen-notes"
                   className="text-muted-foreground text-[0.65rem] font-semibold uppercase tracking-wider"
                 >
-                  Entregar (sale en la comanda)
+                  Nota para cocina (sale en la comanda)
                 </Label>
                 <Input
                   id="kitchen-notes"
                   value={kitchenNotes}
                   onChange={(e) => setKitchenNotes(e.target.value)}
                   maxLength={120}
-                  placeholder="21:30, junto con la mesa 5…"
+                  placeholder="junto con la mesa 5…"
                   className="mt-1.5"
                 />
               </div>

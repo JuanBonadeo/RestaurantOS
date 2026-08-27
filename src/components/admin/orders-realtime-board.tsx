@@ -115,9 +115,7 @@ export function OrdersRealtimeBoard({
   slug,
   timezone,
   initialOrders,
-  scheduledSlots,
-  marchLeadPickupMin,
-  marchLeadDeliveryMin,
+  marchLeadKitchenMin,
   active,
 }: {
   businessId: string;
@@ -125,9 +123,7 @@ export function OrdersRealtimeBoard({
   timezone: string;
   initialOrders: AdminOrder[];
   /** Horarios que el negocio ofrece hoy para programar (spec 085). */
-  scheduledSlots: string[];
-  marchLeadPickupMin: number;
-  marchLeadDeliveryMin: number;
+  marchLeadKitchenMin: number;
   /** Si la tab «Pedidos online» está a la vista. El panel no se desmonta al
    *  cambiar de tab, así que es la señal para revalidar al volver. */
   active: boolean;
@@ -448,9 +444,7 @@ export function OrdersRealtimeBoard({
         open={cargarOpen}
         onClose={() => setCargarOpen(false)}
         timezone={timezone}
-        scheduledSlots={scheduledSlots}
-        marchLeadPickupMin={marchLeadPickupMin}
-        marchLeadDeliveryMin={marchLeadDeliveryMin}
+        marchLeadKitchenMin={marchLeadKitchenMin}
       />
 
       {/* Próximos / agendados (spec 31): diferidos pagados esperando su hora.

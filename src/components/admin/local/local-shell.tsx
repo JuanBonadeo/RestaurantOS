@@ -260,9 +260,7 @@ function PedidosPanel({
 }) {
   const {
     initialOrders,
-    scheduledSlots,
-    marchLeadPickupMin,
-    marchLeadDeliveryMin,
+    marchLeadKitchenMin,
   } = use(promise);
   return (
     <OrdersRealtimeBoard
@@ -270,9 +268,7 @@ function PedidosPanel({
       slug={slug}
       timezone={timezone}
       initialOrders={initialOrders}
-      scheduledSlots={scheduledSlots}
-      marchLeadPickupMin={marchLeadPickupMin}
-      marchLeadDeliveryMin={marchLeadDeliveryMin}
+      marchLeadKitchenMin={marchLeadKitchenMin}
       active={active}
     />
   );

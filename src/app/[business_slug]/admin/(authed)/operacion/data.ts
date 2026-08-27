@@ -83,9 +83,11 @@ export type ComandasData = {
  */
 export type PedidosData = {
   initialOrders: AdminOrder[];
-  scheduledSlots: string[];
-  marchLeadPickupMin: number;
-  marchLeadDeliveryMin: number;
+  /**
+   * Spec 127 — minutos entre la marcha y la hora de cocina. La hoja lo usa sólo
+   * para decir a qué hora va a salir el papel; el server hace la misma cuenta.
+   */
+  marchLeadKitchenMin: number;
 };
 
 export type CajaData = { cajas: CajaConEstado[] };
@@ -276,35 +278,14 @@ export async function loadComandas(
 export async function loadPedidos(
   businessId: string,
   timezone: string,
-  marchLead: { pickupMin: number; deliveryMin: number },
+  marchLead: { kitchenMin: number },
 ): Promise<PedidosData> {
-  const [initialOrders, reservationSettings, reservationServices] =
-    await Promise.all([
-      getTodayOrders(businessId, timezone),
-      getReservationSettings(businessId),
-      getReservationServices(businessId),
-    ]);
-
-  // Los horarios se resuelven acá (server) con "hoy" en la TZ del local, igual
-  // que en el checkout: el chip que ve el encargado no puede depender del reloj
-  // ni de la zona del navegador. El filtro por anticipación mínima corre en el
-  // cliente, que es donde el tiempo sigue pasando mientras el sheet está
-  // abierto.
-  const scheduledSlots = orderSlotsForDay(
-    {
-      mode: reservationSettings.mode ?? null,
-      schedule: reservationSettings.schedule,
-      services: reservationServices,
-    },
-    new Date(),
-    timezone,
-  );
-
+  // Spec 127 — la grilla de chips del checkout ya no entra acá: el encargue del
+  // staff escribe la hora libre, así que la hoja no necesita los horarios del
+  // negocio ni los leads por tipo de entrega.
   return {
-    initialOrders,
-    scheduledSlots,
-    marchLeadPickupMin: marchLead.pickupMin,
-    marchLeadDeliveryMin: marchLead.deliveryMin,
+    initialOrders: await getTodayOrders(businessId, timezone),
+    marchLeadKitchenMin: marchLead.kitchenMin,
   };
 }
 

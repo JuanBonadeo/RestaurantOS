@@ -34,10 +34,10 @@ import { formatCurrency } from "@/lib/currency";
 import type { CatalogForMozo, CatalogProduct } from "@/lib/mozo/catalog-query";
 import { loadPedirCatalog } from "@/lib/mozo/pedir-panel-data";
 import { confirmarPedido } from "@/lib/orders/confirm-order";
+import { horaLocal } from "@/lib/orders/entrega";
 import {
-  filterSlotsByLead,
+  DEFAULT_MARCH_LEAD_KITCHEN_MIN,
   localYmd,
-  SCHEDULED_MIN_LEAD_MIN,
 } from "@/lib/orders/scheduled";
 import { cargarPedidoStaff } from "@/lib/orders/staff-order";
 import {
@@ -73,23 +73,21 @@ function effectiveUnitPriceCents(c: CartItem): number {
   return c.price_override_cents ?? c.unit_price_cents;
 }
 /**
- * ¿Se puede elegir para cuándo es el pedido? (spec 085 · apagado en la 120)
+ * Spec 127 — la hoja tiene dos modos, y el default es el 95% de los encargues.
  *
- * En `false` la hoja no muestra el paso y todo sale **para ahora**: la comanda
- * va a cocina al confirmar, como siempre. El motor de programados —los slots,
- * el cron que marcha con el lead, «Próximos»— queda intacto; esto sólo esconde
- * la puerta de entrada desde la carga del personal.
+ * - **Para hoy**: la comanda sale ahora (es lo que ya funcionaba) y las dos
+ *   horas, si se cargan, sólo dicen cuándo el pedido entra a «Preparando».
+ * - **Programado**: por definición es para OTRO día. El papel no sale hoy; sale
+ *   ese día, 40 min antes de la hora de cocina.
  *
- * Tipado `boolean` a propósito: sin eso TypeScript estrecha a `false` y marca
- * como muerto todo el bloque, que es justamente el que hay que poder revivir.
+ * Un pedido para hoy nunca es «programado», aunque sea para dentro de cinco
+ * horas: eso saca de la cabeza del encargado la pregunta «¿esto va como
+ * programado?», que antes no tenía una respuesta obvia.
  */
-const MOSTRAR_PROGRAMADO: boolean = false;
+type Cuando = "hoy" | "programado";
 
 type DeliveryType = "pickup" | "delivery";
 type View = "carga" | "datos";
-/** Spec 085 — para ahora (lo de siempre) o programado a una hora de hoy. */
-type When = "now" | "scheduled";
-
 /** Compone una dirección guardada en una línea editable. */
 function formatDireccion(a: ClienteDireccion): string {
   const base = [a.street, a.number].filter(Boolean).join(" ");
@@ -114,9 +112,7 @@ export function CargarPedidoSheet({
   onClose,
   onCreated,
   timezone,
-  scheduledSlots,
-  marchLeadPickupMin,
-  marchLeadDeliveryMin,
+  marchLeadKitchenMin = DEFAULT_MARCH_LEAD_KITCHEN_MIN,
   agregarA,
 }: {
   slug: string;
@@ -134,12 +130,15 @@ export function CargarPedidoSheet({
    * corresponde, con `batch` incremental.
    */
   agregarA?: { orderId: string; dailyNumber: number };
-  /** TZ del negocio: el chip "21:00" es hora del local, no del navegador. */
+  /** TZ del negocio: «21:15» es hora del local, no del navegador. */
   timezone: string;
-  /** Horarios que el negocio ofrece hoy (spec 085); vacío = no se programa. */
-  scheduledSlots: string[];
-  marchLeadPickupMin: number;
-  marchLeadDeliveryMin: number;
+  /**
+   * Spec 127 — minutos entre la marcha y la hora de cocina. Sólo sirve para
+   * decirle al encargado a qué hora va a salir el papel; el server calcula lo
+   * mismo con la columna del negocio. Opcional para no obligar a cada caller a
+   * traerla: sin ella, el default de la migración.
+   */
+  marchLeadKitchenMin?: number;
 }) {
   const [catalog, setCatalog] = useState<CatalogForMozo | null>(null);
   const [loadingCatalog, setLoadingCatalog] = useState(false);
@@ -158,11 +157,14 @@ export function CargarPedidoSheet({
   const [priceTargetKey, setPriceTargetKey] = useState<string | null>(null);
 
   const [deliveryType, setDeliveryType] = useState<DeliveryType>("pickup");
-  // ── ¿Para cuándo? (spec 085) ──
-  // El encargue telefónico para una hora de hoy. Los chips son los mismos que
-  // ve el cliente al programar; el server revalida en `persistOrder`.
-  const [when, setWhen] = useState<When>("now");
-  const [schedSlot, setSchedSlot] = useState<string | null>(null);
+  // ── Las dos horas del pedido (spec 127) ──
+  // La de cocina es para cuándo tiene que estar LISTO —es la que se imprime
+  // arriba de la comanda— y la del pedido es cuándo el cliente lo retira o lo
+  // recibe. Las dos a mano: el sistema no calcula ninguna. Vacías = para ahora.
+  const [cuando, setCuando] = useState<Cuando>("hoy");
+  const [dia, setDia] = useState<string>("");
+  const [horaCocina, setHoraCocina] = useState("");
+  const [horaPedido, setHoraPedido] = useState("");
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [deliveryAddress, setDeliveryAddress] = useState("");
@@ -288,26 +290,39 @@ export function CargarPedidoSheet({
     onType: escribirEnBuscador,
   });
 
-  // Chips de horario (spec 085): los de hoy que todavía cumplen la anticipación
-  // mínima. Dependen de "ahora", así que se calculan en el cliente — pero sólo
-  // se renderizan al tocar «Programar», así que no hay mismatch de hidratación.
-  // Al enviar se revalidan, por si el encargado tardó en cargar el pedido.
-  const availableSlots = useMemo(
-    () => filterSlotsByLead(scheduledSlots, timezone),
-    [scheduledSlots, timezone],
+  const esProgramado = cuando === "programado";
+  /** El día que se está cargando: hoy, salvo que sea un encargue programado. */
+  const diaDelPedido = esProgramado ? dia : localYmd(new Date(), timezone);
+  const hayHoras = Boolean(horaCocina && horaPedido);
+  /**
+   * A qué hora se pone en marcha. Es lo que la hoja le promete al encargado
+   * abajo de los campos, y sale de la misma cuenta que hace el server
+   * (`marchAtForOrder`): hora de cocina menos el lead de cocina.
+   */
+  const marchaLabel = useMemo(() => {
+    if (!diaDelPedido || !horaCocina) return null;
+    const cocina = fromZonedTime(`${diaDelPedido}T${horaCocina}:00`, timezone);
+    if (Number.isNaN(cocina.getTime())) return null;
+    return horaLocal(
+      new Date(cocina.getTime() - marchLeadKitchenMin * 60_000).toISOString(),
+      timezone,
+    );
+  }, [diaDelPedido, horaCocina, timezone, marchLeadKitchenMin]);
+  /** Mañana, en el TZ del local: el primer día que un programado puede tomar. */
+  const manana = useMemo(
+    () => localYmd(new Date(Date.now() + 24 * 60 * 60_000), timezone),
+    [timezone],
   );
-  const canSchedule = availableSlots.length > 0;
-  const isScheduled = when === "scheduled";
-  const marchLeadMin =
-    deliveryType === "delivery" ? marchLeadDeliveryMin : marchLeadPickupMin;
 
   function reset() {
     setView("carga");
     searchApi.setSearch("");
     setCart([]);
     setDeliveryType("pickup");
-    setWhen("now");
-    setSchedSlot(null);
+    setCuando("hoy");
+    setDia("");
+    setHoraCocina("");
+    setHoraPedido("");
     setCustomerName("");
     setCustomerPhone("");
     setDeliveryAddress("");
@@ -398,8 +413,11 @@ export function CargarPedidoSheet({
   const canSubmit =
     cart.length > 0 &&
     !pending &&
-    // Programar sin hora no es un pedido: es una intención (spec 085).
-    (!isScheduled || !!schedSlot) &&
+    // Un programado sin día ni horas no es un pedido, es una intención. Y las
+    // dos horas van juntas siempre: media hora cargada es un pedido del que no
+    // se sabe si es para ahora (spec 127).
+    (!esProgramado || (!!dia && hayHoras)) &&
+    (!horaCocina === !horaPedido) &&
     (deliveryType === "pickup" ||
       (deliveryAddress.trim().length > 0 && customerPhone.trim().length >= 6));
 
@@ -449,24 +467,42 @@ export function CargarPedidoSheet({
       return;
     }
 
-    // Pedido programado (spec 085): el chip es una hora del local; armamos el
-    // instante en su TZ. Revalidamos contra la anticipación mínima porque el
-    // sheet pudo quedar abierto un rato. `persistOrder` valida igual.
+    // Las dos horas (spec 127). Son horas del LOCAL, así que el instante se arma
+    // en su TZ. El server revalida todo en `persistOrder`; acá cortamos antes
+    // para que el error salga al lado del campo y no como un toast del server.
     let scheduledAtIso: string | undefined;
-    if (isScheduled) {
-      if (!schedSlot) {
-        toast.error("Elegí la hora del pedido.");
+    let kitchenAtIso: string | undefined;
+    if (esProgramado && !dia) {
+      toast.error("Elegí el día del encargue.");
+      return;
+    }
+    if (Boolean(horaCocina) !== Boolean(horaPedido)) {
+      toast.error("Cargá las dos horas: la de cocina y la del pedido.");
+      return;
+    }
+    if (esProgramado && !hayHoras) {
+      toast.error("Un encargue programado necesita las dos horas.");
+      return;
+    }
+    if (hayHoras) {
+      const cocina = fromZonedTime(`${diaDelPedido}T${horaCocina}:00`, timezone);
+      const pedido = fromZonedTime(`${diaDelPedido}T${horaPedido}:00`, timezone);
+      if (Number.isNaN(cocina.getTime()) || Number.isNaN(pedido.getTime())) {
+        toast.error("Revisá las horas.");
         return;
       }
-      if (!filterSlotsByLead(scheduledSlots, timezone).includes(schedSlot)) {
-        setSchedSlot(null);
-        toast.error("Ese horario ya no está disponible. Elegí otro.");
+      if (cocina.getTime() > pedido.getTime()) {
+        toast.error(
+          "La hora de cocina no puede ser posterior a la del pedido.",
+        );
         return;
       }
-      scheduledAtIso = fromZonedTime(
-        `${localYmd(new Date(), timezone)}T${schedSlot}:00`,
-        timezone,
-      ).toISOString();
+      if (pedido.getTime() <= Date.now()) {
+        toast.error("Esa hora ya pasó.");
+        return;
+      }
+      scheduledAtIso = pedido.toISOString();
+      kitchenAtIso = cocina.toISOString();
     }
 
     startTransition(async () => {
@@ -474,6 +510,7 @@ export function CargarPedidoSheet({
         business_slug: slug,
         delivery_type: deliveryType,
         scheduled_at: scheduledAtIso,
+        kitchen_at: kitchenAtIso,
         customer_name: customerName.trim() || undefined,
         customer_phone: customerPhone.trim() || undefined,
         delivery_address:
@@ -496,16 +533,16 @@ export function CargarPedidoSheet({
         toast.error(r.error);
         return;
       }
-      if (isScheduled) {
-        // El programado no marcha ahora: sale solo antes de la hora (o a mano
-        // desde «Próximos»). Si el aval falló, avisamos que hay que aceptarlo.
+      if (esProgramado) {
+        // El encargue programado no imprime hoy: la comanda sale ese día, a la
+        // hora de marcha. Si el aval falló, avisamos que hay que aceptarlo.
         if (r.data.needs_accept) {
           toast.warning(
-            `Pedido #${r.data.daily_number} programado para las ${schedSlot}, pero quedó sin aceptar — aceptalo desde «Próximos» para que salga solo`,
+            `Pedido #${r.data.daily_number} para el ${diaDelPedido}, pero quedó sin aceptar — aceptalo desde «Próximos» para que salga solo`,
           );
         } else {
           toast.success(
-            `Pedido #${r.data.daily_number} programado para las ${schedSlot} · la comanda sale sola ${marchLeadMin} min antes`,
+            `Pedido #${r.data.daily_number} para las ${horaPedido} · la comanda sale sola a las ${marchaLabel}`,
           );
         }
       } else if (marchar) {
@@ -516,7 +553,12 @@ export function CargarPedidoSheet({
           );
         } else {
           toast.success(
-            `Pedido #${r.data.daily_number} cargado y enviado a cocina`,
+            // Spec 127 — con horas, el papel sale igual pero el pedido todavía
+            // no entra al kanban: decirlo evita que el encargado lo busque en
+            // «Preparando» y crea que no marchó.
+            hayHoras
+              ? `Pedido #${r.data.daily_number} enviado a cocina · entra a Preparando a las ${marchaLabel}`
+              : `Pedido #${r.data.daily_number} cargado y enviado a cocina`,
           );
         }
       } else {
@@ -544,9 +586,9 @@ export function CargarPedidoSheet({
             // confirma. Angosto: el primer ⌘Enter pasa a «datos» y el
             // segundo confirma, como venía siendo.
             if (sheetAncho) {
-              if (canSubmit) submit(!isScheduled);
+              if (canSubmit) submit(!esProgramado);
             } else if (view === "carga" && cart.length > 0) setView("datos");
-            else if (view === "datos" && canSubmit) submit(!isScheduled);
+            else if (view === "datos" && canSubmit) submit(!esProgramado);
           }
         }}
         ref={hojaRef}
@@ -802,11 +844,12 @@ export function CargarPedidoSheet({
                         type="text"
                         value={deliveryNotes}
                         onChange={(e) => setDeliveryNotes(e.target.value)}
-                        placeholder="ej: sin cebolla, tocar timbre…"
+                        placeholder="ej: tocar timbre, portón negro…"
                         className="mt-1 block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none"
                       />
                       <p className="mt-1 text-[11px] text-zinc-500">
-                        Va en el ticket de control, con los datos de la entrega.
+                        Va en el ticket de control, con los datos de la entrega:
+                        cocina no la ve.
                       </p>
                     </div>
                     <div>
@@ -818,95 +861,138 @@ export function CargarPedidoSheet({
                         value={kitchenNotes}
                         onChange={(e) => setKitchenNotes(e.target.value)}
                         maxLength={120}
-                        placeholder="ej: 21:30, junto con la mesa 5…"
+                        placeholder="ej: junto con la mesa 5…"
                         className="mt-1 block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none"
                       />
                       <p className="mt-1 text-[11px] text-zinc-500">
-                        Sale arriba de la comanda como «ENTREGAR …», para
-                        cocina.
+                        Sale arriba de la comanda, para cocina. La hora va en
+                        los campos de abajo; para «sin cebolla», usá la nota del
+                        producto.
                       </p>
                     </div>
                   </section>
 
-                  {/* ─── ¿Para cuándo? (spec 085) ───
-                  El encargue telefónico: mismos horarios que ve el cliente,
-                  sólo hoy. Al programar, la comanda no sale ahora — la manda el
-                  cron con el lead del negocio.
+                  {/* ─── ¿Para cuándo? (spec 127) ───
+                  Dos modos, y el default es el 95% de los encargues. «Para
+                  hoy» es lo de siempre: la comanda sale ahora. «Programado»
+                  es, por definición, para OTRO día — el papel sale ese día,
+                  solo, antes de la hora de cocina.
 
-                  Apagado por ahora (spec 120): el local arranca mandando todo
-                  al momento, y un paso más en la carga por una función que
-                  todavía no usan es fricción en hora pico. Con el interruptor
-                  en `false` el pedido queda siempre «para ahora» — nada del
-                  motor de programados se tocó, así que volver a mostrarlo es
-                  cambiar esta constante. */}
-                  {MOSTRAR_PROGRAMADO && (
-                    <section className="space-y-2.5 rounded-2xl bg-white p-3 ring-1 ring-zinc-200">
-                      <h3 className="text-[11px] font-bold tracking-wide text-zinc-500 uppercase">
-                        ¿Para cuándo?
-                      </h3>
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setWhen("now")}
-                          className={`h-9 flex-1 rounded-xl text-sm font-semibold transition ${
-                            !isScheduled
-                              ? "bg-zinc-900 text-white"
-                              : "bg-white text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100"
-                          }`}
+                  Las dos horas son a mano: el sistema no calcula ninguna ni
+                  pre-llena la segunda con la primera. Vacías = para ahora. */}
+                  <section className="space-y-2.5 rounded-2xl bg-white p-3 ring-1 ring-zinc-200">
+                    <h3 className="text-[11px] font-bold tracking-wide text-zinc-500 uppercase">
+                      ¿Para cuándo?
+                    </h3>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCuando("hoy");
+                          setDia("");
+                        }}
+                        className={`h-9 flex-1 rounded-xl text-sm font-semibold transition ${
+                          !esProgramado
+                            ? "bg-zinc-900 text-white"
+                            : "bg-white text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100"
+                        }`}
+                      >
+                        Para hoy
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCuando("programado");
+                          // Arranca en mañana: un pedido de hoy no es un
+                          // programado, aunque sea para dentro de cinco horas.
+                          if (!dia) setDia(manana);
+                        }}
+                        className={`flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl text-sm font-semibold transition ${
+                          esProgramado
+                            ? "bg-zinc-900 text-white"
+                            : "bg-white text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100"
+                        }`}
+                      >
+                        <Clock className="h-4 w-4" /> Programado
+                      </button>
+                    </div>
+
+                    {esProgramado && (
+                      <div>
+                        <label
+                          htmlFor="cargar-dia"
+                          className="text-xs font-semibold text-zinc-600"
                         >
-                          Ahora
-                        </button>
-                        <button
-                          type="button"
-                          disabled={!canSchedule}
-                          onClick={() => setWhen("scheduled")}
-                          className={`flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${
-                            isScheduled
-                              ? "bg-zinc-900 text-white"
-                              : "bg-white text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100"
-                          }`}
-                        >
-                          <Clock className="h-4 w-4" /> Programar
-                        </button>
-                      </div>
-                      {!canSchedule ? (
-                        <p className="text-[11px] leading-snug text-zinc-500">
-                          No quedan horarios para hoy — se programa con al menos{" "}
-                          {SCHEDULED_MIN_LEAD_MIN} min de anticipación, sobre
-                          los horarios del local.
+                          Día
+                        </label>
+                        <input
+                          id="cargar-dia"
+                          type="date"
+                          value={dia}
+                          min={manana}
+                          onChange={(e) => setDia(e.target.value)}
+                          className="mt-1 block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none"
+                        />
+                        <p className="mt-1 text-[11px] leading-snug text-zinc-500">
+                          Un pedido programado es para otro día. Para hoy,
+                          cargalo como «Para hoy».
                         </p>
-                      ) : (
-                        isScheduled && (
-                          <>
-                            <div className="grid grid-cols-4 gap-1.5">
-                              {availableSlots.map((slot) => {
-                                const active = schedSlot === slot;
-                                return (
-                                  <button
-                                    key={slot}
-                                    type="button"
-                                    onClick={() => setSchedSlot(slot)}
-                                    className={`h-9 rounded-xl text-sm font-semibold tabular-nums transition ${
-                                      active
-                                        ? "bg-emerald-600 text-white"
-                                        : "bg-white text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-100"
-                                    }`}
-                                  >
-                                    {slot}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                            <p className="text-[11px] leading-snug text-zinc-500">
-                              {schedSlot
-                                ? `La comanda sale sola ${marchLeadMin} min antes de las ${schedSlot}. Hasta entonces queda en «Próximos».`
-                                : "Elegí la hora del retiro o la entrega — sólo para hoy."}
-                            </p>
-                          </>
-                        )
-                      )}
-                    </section>
-                  )}
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label
+                          htmlFor="cargar-hora-cocina"
+                          className="text-xs font-semibold text-zinc-600"
+                        >
+                          Hora de cocina
+                        </label>
+                        <input
+                          id="cargar-hora-cocina"
+                          type="time"
+                          value={horaCocina}
+                          onChange={(e) => setHoraCocina(e.target.value)}
+                          className="mt-1 block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm tabular-nums focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none"
+                        />
+                        <p className="mt-1 text-[11px] text-zinc-500">
+                          Para cuándo tiene que estar listo. Sale impresa en la
+                          comanda.
+                        </p>
+                      </div>
+                      <div>
+                        <label
+                          htmlFor="cargar-hora-pedido"
+                          className="text-xs font-semibold text-zinc-600"
+                        >
+                          Hora del pedido
+                        </label>
+                        <input
+                          id="cargar-hora-pedido"
+                          type="time"
+                          value={horaPedido}
+                          onChange={(e) => setHoraPedido(e.target.value)}
+                          className="mt-1 block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm tabular-nums focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none"
+                        />
+                        <p className="mt-1 text-[11px] text-zinc-500">
+                          Cuándo lo retira o lo recibe el cliente.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Lo que va a pasar, dicho antes de que pase. Cambia con el
+                        modo: para hoy el papel sale ya y lo único que espera es
+                        el kanban; programado, espera todo. */}
+                    <p className="text-[11px] leading-snug text-zinc-500">
+                      {!hayHoras
+                        ? esProgramado
+                          ? "Cargá las dos horas del encargue."
+                          : "Sin horas, el pedido es para ahora."
+                        : esProgramado
+                          ? `La comanda sale sola a las ${marchaLabel}, y ahí pasa a Preparando.`
+                          : `La comanda sale ahora. El pedido pasa a Preparando a las ${marchaLabel}.`}
+                    </p>
+                  </section>
                 </>
               )}
 
@@ -1029,7 +1115,7 @@ export function CargarPedidoSheet({
                   {pending && <Loader2 className="h-4 w-4 animate-spin" />}
                   Agregar al pedido #{agregarA.dailyNumber}
                 </button>
-              ) : isScheduled ? (
+              ) : esProgramado ? (
                 <button
                   onClick={() => submit(false)}
                   disabled={!canSubmit}
@@ -1040,9 +1126,9 @@ export function CargarPedidoSheet({
                   ) : (
                     <Clock className="h-4 w-4" />
                   )}
-                  {schedSlot
-                    ? `Programar para las ${schedSlot}`
-                    : "Elegí una hora"}
+                  {/* «Enviar a cocina» no aplica: no hay nada que enviar
+                      todavía. El papel sale ese día, solo. */}
+                  {hayHoras ? "Cargar el encargue" : "Cargá las dos horas"}
                 </button>
               ) : (
                 <>

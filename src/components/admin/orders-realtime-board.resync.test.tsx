@@ -79,9 +79,7 @@ function renderBoard(orders: AdminOrder[], active = true) {
       slug="golf"
       timezone="America/Argentina/Buenos_Aires"
       initialOrders={orders}
-      scheduledSlots={[]}
-      marchLeadPickupMin={20}
-      marchLeadDeliveryMin={40}
+      marchLeadKitchenMin={40}
       active={active}
     />,
   );
@@ -143,9 +141,7 @@ describe("OrdersRealtimeBoard · resincronización", () => {
         slug="golf"
         timezone="America/Argentina/Buenos_Aires"
         initialOrders={[order()]}
-        scheduledSlots={[]}
-        marchLeadPickupMin={20}
-        marchLeadDeliveryMin={40}
+        marchLeadKitchenMin={40}
         active
       />,
     );
