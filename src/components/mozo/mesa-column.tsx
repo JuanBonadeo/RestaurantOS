@@ -13,6 +13,7 @@ import type { ComandaConItems } from "@/lib/comandas/queries";
 import type { KitchenItemStatus } from "@/lib/comandas/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatCurrency } from "@/lib/currency";
+import { ObservacionDeLaTanda } from "./observacion-de-la-tanda";
 import {
   agruparPorTanda,
   estaAnulado,
@@ -105,6 +106,8 @@ export function MesaColumn({
   onEnviar,
   acciones,
   cartZone,
+  observacion,
+  onObservacionChange,
   cargando = false,
   className = "",
 }: {
@@ -152,6 +155,13 @@ export function MesaColumn({
     handleKeyDown: (e: React.KeyboardEvent) => void;
     itemProps: (i: number) => Record<string, unknown>;
   };
+  /**
+   * La observación de la tanda (spec 128). Controlada por el padre porque la
+   * manda **él** al enviar y la limpia después: la columna sólo la muestra.
+   * Sin los dos, el campo no aparece.
+   */
+  observacion?: string;
+  onObservacionChange?: (v: string) => void;
   className?: string;
 }) {
   const enviados = loPedido?.items ?? [];
@@ -334,6 +344,16 @@ export function MesaColumn({
               {formatCurrency(loPedido.total_cents)}
             </span>
           </div>
+        )}
+
+        {/* La observación va pegada a «Enviar» y sólo cuando hay algo que
+            enviar: es del envío, no de la mesa. Arriba y no abajo del botón
+            porque abajo no se lee — el pulgar ya está en el verde. */}
+        {haySinEnviar && observacion != null && onObservacionChange && (
+          <ObservacionDeLaTanda
+            value={observacion}
+            onChange={onObservacionChange}
+          />
         )}
 
         <div className="flex items-stretch gap-2">

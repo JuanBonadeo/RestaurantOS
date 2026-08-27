@@ -61,6 +61,7 @@ import {
   type PriceOverride,
   type PriceOverrideInput,
 } from "./price-override";
+import { normalizarObservacion } from "./observacion";
 import { createComandasForItems } from "./route-items";
 import { resolveStation } from "./routing";
 import type { ComandaStatus, KitchenItemStatus } from "./types";
@@ -127,6 +128,15 @@ export type EnviarComandaInput = {
    * Sólo se aplica al crearla; después la mueve «Datos de la mesa».
    */
   partySize?: number | null;
+  /**
+   * La observación de la tanda (spec 128): lo que el mozo escribió para **este**
+   * envío y sale en las comandas de todos sus sectores.
+   *
+   * Es del envío y no de la mesa: el próximo arranca en blanco. Si se
+   * arrastrara, la tercera tanda repetiría «apuro» cuando el apuro ya pasó, y
+   * cocina aprendería a no leer el renglón.
+   */
+  notes?: string | null;
 };
 
 export type EnviarComandaResult = {
@@ -925,7 +935,11 @@ export async function enviarComanda(
   // `ruteaAhora` en false = pedido online que todavía no marchó: las líneas
   // quedan cargadas y sin comanda, esperando el «Confirmar» como el resto.
   const routeResult = ruteaAhora
-    ? await createComandasForItems(service, orderId, itemsByStation)
+    ? await createComandasForItems(service, orderId, itemsByStation, {
+        // Normalizada acá y no en el cliente: la action es la frontera, y
+        // `enviarComanda` la llaman el panel del mozo y el del salón.
+        notes: normalizarObservacion(input.notes),
+      })
     : { ok: true as const, comanda_ids: [] as string[] };
   if (!routeResult.ok) {
     // spec 096 · H-38 — el `return` estaba **antes** del recompute de totales,

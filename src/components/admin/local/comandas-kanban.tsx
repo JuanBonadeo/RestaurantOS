@@ -873,6 +873,19 @@ function ComandaCard({
         )}
       </div>
 
+      {/* La observación de la tanda (spec 128): lo que el mozo escribió para
+          TODO el envío. Va arriba de los ítems y no truncada —a diferencia de
+          la nota de un plato— porque es la instrucción con la que se lee la
+          lista: «va todo junto», «la mesa tiene apuro». En papel sale igual, en
+          las comandas de todos los sectores de la tanda; acá está para el que
+          trabaja mirando la pantalla. */}
+      {comanda.notes && (
+        <p className="rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] leading-snug font-semibold text-amber-900 ring-1 ring-amber-200">
+          <span className="font-bold tracking-wide uppercase">Obs: </span>
+          {comanda.notes}
+        </p>
+      )}
+
       {/* Items */}
       <ul className="flex flex-col gap-0.5">
         {liveItems.map((it) => (

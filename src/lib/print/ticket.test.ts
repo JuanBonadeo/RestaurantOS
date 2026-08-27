@@ -360,6 +360,68 @@ describe("buildTicketLines · nota de cocina («ENTREGAR x»)", () => {
   });
 });
 
+describe("buildTicketLines · la observación de la tanda (spec 128)", () => {
+  // Lo que el mozo escribe UNA vez al enviar y sale igual en las comandas de
+  // todos los sectores de esa tanda: «va todo junto», «la mesa tiene apuro».
+  // Es de la tanda, así que viaja con la comanda y no con el pedido.
+  const conObs = { ...base, comanda_notes: "va todo junto, la mesa tiene apuro" };
+
+  it("la imprime con el prefijo OBS", () => {
+    const texts = buildTicketLines(conObs).map((l) => l.text);
+    expect(texts.join(" ")).toContain("OBS: va todo junto");
+  });
+
+  it("va entre el encabezado y los ítems", () => {
+    // Después del sector (a esa altura la cocina ya sabe que el ticket es suyo)
+    // y antes del primer plato: es la instrucción con la que se lee la lista.
+    const texts = buildTicketLines(conObs).map((l) => l.text);
+    const obs = texts.findIndex((t) => t.startsWith("OBS:"));
+    const sector = texts.indexOf("COCINA");
+    const primerPlato = texts.findIndex((t) => t.includes("Milanesa"));
+    expect(sector).toBeLessThan(obs);
+    expect(obs).toBeLessThan(primerPlato);
+  });
+
+  it("es contenido, no urgencia: doble alto, no el cuerpo de ENTREGAR", () => {
+    // El `xl` está reservado para lo que cambia el MOMENTO de salida
+    // (ENTREGAR / ANULADA / REIMPRESION). La observación se lee con el ticket
+    // en la mano, no de lejos.
+    const linea = buildTicketLines(conObs).find((l) => l.text.startsWith("OBS:"));
+    expect(linea).toMatchObject({ size: "tall", bold: true });
+  });
+
+  it("una observación larga se parte por palabra, sin perder el prefijo", () => {
+    const texts = buildTicketLines({
+      ...conObs,
+      comanda_notes:
+        "la mesa esta apurada, sacar todo junto y avisar al mozo antes de emplatar",
+    }).map((l) => l.text);
+    expect(texts.some((t) => t.startsWith("OBS:"))).toBe(true);
+    expect(texts.join(" ")).toContain("antes de emplatar");
+    // Corte por palabra: el renglón del prefijo entra en el doble alto.
+    expect(texts.find((t) => t.startsWith("OBS:"))!.length).toBeLessThanOrEqual(
+      COLS.tall,
+    );
+  });
+
+  it("una comanda anulada no la imprime: no hay nada que preparar", () => {
+    const texts = buildTicketLines({ ...conObs, cancelled: true }).map((l) => l.text);
+    expect(texts.some((t) => t.startsWith("OBS:"))).toBe(false);
+  });
+
+  it("sin el campo, el ticket sale igual que siempre (aditivo)", () => {
+    const texts = buildTicketLines(base).map((l) => l.text);
+    expect(texts.some((t) => t.startsWith("OBS:"))).toBe(false);
+  });
+
+  it("no se confunde con la nota del ítem: las dos pueden convivir", () => {
+    const texts = buildTicketLines(conObs).map((l) => l.text);
+    // «bien calientes» es la nota del ítem del fixture base.
+    expect(texts.join(" ")).toContain("obs: bien calientes");
+    expect(texts.join(" ")).toContain("OBS: va todo junto");
+  });
+});
+
 describe("buildTicketLines · solo ASCII imprimible", () => {
   it("saca tildes y eñes: la térmica no las imprime", () => {
     const texts = buildTicketLines({

@@ -1,7 +1,8 @@
 # 128 · La observación de la tanda
 
 **Issue:** [#199](https://github.com/gachetponzellini/RestaurantOS-app/issues/199) ·
-**Milestone:** Post-demo · Growth & hardening
+**Milestone:** Post-demo · Growth & hardening ·
+**Estado:** implementada (2026-08-27) — falta el verify en vivo
 
 **Input:** Juan, 2026-08-27: *"me gustaría agregar una opción de un campo de
 observación en común para todas las comandas que vayan a enviar"*.
@@ -101,26 +102,50 @@ que termina en una térmica. Sin `notes` el comportamiento es exactamente el de 
 
 ### FR-005 · El mozo la escribe
 
-En el pie de la columna de la mesa, **arriba** de «Enviar», un renglón plegado:
+Un componente propio (`ObservacionDeLaTanda`), **en los dos lugares desde donde
+se envía**: el pie de la columna de la mesa —arriba de «Enviar»— y el paso
+«resumen» del teléfono. Una observación que existe en una sola de las dos
+pantallas es una que no se usa.
 
 ```
  💬 Observación para cocina                                    (plegado)
  ─────────────────────────────────────────────────────────────
- [ va todo junto, la mesa tiene apuro________________ ]  0/200
- Sale arriba de todo en las tres comandas de este envío.
+ OBSERVACIÓN PARA COCINA                              12/200  ✕
+ [ va todo junto, la mesa tiene apuro________________ ]
+ Sale arriba de los ítems en todas las comandas de este envío.
+ Para un plato solo, usá la nota del ítem.
 ```
 
-- Plegado por default; se abre con un tap y se cierra vacío.
-- Con texto cargado, el renglón muestra la observación en vez del rótulo, para
-  que no se envíe a ciegas algo escrito hace diez minutos.
+- Plegado por default; se abre con un tap. La ✕ la borra y vuelve a plegar.
+- Con texto cargado **no se pliega**: se envía lo que se ve. Un campo que
+  esconde lo que escribiste hace diez minutos manda «la mesa tiene apuro» a una
+  tanda de postres.
+- Sólo aparece **cuando hay algo sin enviar**: sin tanda no hay a qué ponerle
+  una observación.
 - **Se limpia al enviar** (D1), en el mismo lugar donde hoy se limpia el carrito.
-- La pastilla dice a cuántos sectores va, con el ruteo que ya se calcula para el
-  botón de enviar.
+
+**Sin contar sectores.** La primera versión decía «sale en las tres comandas de
+este envío», pero el ruteo a sector se resuelve en el **server** —el carrito del
+cliente no sabe a qué comandera va cada plato—, así que ese número sería
+inventado. Dice «todas las comandas de este envío», que es verdad sin pedirle
+nada al server.
+
+**Borrador propio, por mesa.** La observación se guarda en `localStorage` bajo
+`mozo-obs:<slug>:<mesa>`, al lado del borrador del carrito y con su misma vida.
+Dos razones:
+
+- El borrador del carrito es un `CartItem[]` serializado; meterle un objeto
+  rompería los que ya están guardados en los teléfonos del local.
+- Desde el keep-alive (specs 101/114) el panel **no se desmonta al cambiar de
+  mesa**. Sin una clave por mesa, «la mesa tiene apuro» se iba con el mozo a la
+  mesa siguiente y salía impreso en una tanda que no tenía nada que ver.
 
 ### FR-006 · La pantalla de cocina
 
-La tarjeta de la comanda muestra su observación arriba de los ítems, con el mismo
-`OBS:` del papel (D5).
+La tarjeta de la comanda (kanban de `/admin/operacion`) muestra su observación
+arriba de los ítems, con el mismo `OBS:` del papel (D5) y **sin truncar** —a
+diferencia de la nota de un plato—: es la instrucción con la que se lee la
+lista.
 
 ## Qué NO cambia
 

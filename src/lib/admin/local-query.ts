@@ -68,6 +68,11 @@ export type LocalComanda = {
   /** Mozo asignado a la order (solo dine_in). El nombre se resuelve en
    *  cliente desde la lista de mozos del business. */
   mozo_id: string | null;
+  /** Spec 128: la observación del ENVÍO —«va todo junto», «la mesa tiene
+   *  apuro»—, la misma en todas las comandas de la tanda. Sale impresa arriba
+   *  de los ítems; la card la muestra igual, para el sector que trabaja
+   *  mirando la pantalla y no el papel. */
+  notes: string | null;
   items: LocalComandaItem[];
 };
 
@@ -102,7 +107,7 @@ export async function getActiveComandas(
   // PostgREST con timestamp ISO embebido era frágil.
   const select = `
     id, order_id, station_id, batch, status, emitted_at, delivered_at,
-    print_failed_at, reprint_requested_at, cancelled_at,
+    print_failed_at, reprint_requested_at, cancelled_at, notes,
     stations!inner ( name ),
     orders!inner (
       id, business_id, order_number, daily_number, delivery_type, customer_name, mozo_id,
@@ -165,6 +170,7 @@ export async function getActiveComandas(
     print_failed_at: string | null;
     reprint_requested_at: string | null;
     cancelled_at: string | null;
+    notes: string | null;
     stations: { name: string };
     orders: {
       id: string;
@@ -216,6 +222,7 @@ export async function getActiveComandas(
     floor_plan_id: c.orders.tables?.floor_plan_id ?? null,
     customer_name: c.orders.customer_name,
     mozo_id: c.orders.mozo_id,
+    notes: c.notes,
     items: (c.comanda_items ?? [])
       .map((ci) => ci.order_items)
       .filter((it): it is NonNullable<typeof it> => Boolean(it))

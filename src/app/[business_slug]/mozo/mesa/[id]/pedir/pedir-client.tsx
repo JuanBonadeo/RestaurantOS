@@ -55,6 +55,7 @@ import {
 } from "@/lib/comandas/actions";
 import type { ComandaConItems } from "@/lib/comandas/queries";
 import { contarItemsVivos, type LoPedido } from "@/lib/mozo/lo-pedido";
+import { ObservacionDeLaTanda } from "@/components/mozo/observacion-de-la-tanda";
 import {
   MesaColumn,
   type MesaColumnAcciones,
@@ -715,6 +716,41 @@ export function MozoPedirClient({
     guardarBorrador(cart);
   }, [cart, guardarBorrador]);
 
+  // ── La observación de la tanda (spec 128) ────────────────────────────────
+  // Clave propia y no adentro del borrador: ése es un `CartItem[]` serializado
+  // y meterle un objeto rompería los borradores ya guardados en los teléfonos
+  // del local.
+  //
+  // Por mesa, igual que el carrito: desde el keep-alive (specs 101/114) el
+  // panel no se desmonta al cambiar de mesa, así que sin esto «la mesa tiene
+  // apuro» se iba con el mozo a la mesa siguiente y salía impreso en una tanda
+  // que no tenía nada que ver.
+  const obsCacheKey = `mozo-obs:${slug}:${table.id}`;
+  const [observacion, setObservacion] = useState("");
+
+  const cambiarObservacion = useCallback(
+    (v: string) => {
+      setObservacion(v);
+      try {
+        if (v.trim().length === 0) window.localStorage.removeItem(obsCacheKey);
+        else window.localStorage.setItem(obsCacheKey, v);
+      } catch {
+        // ignorar (modo privado, cuota excedida, etc.)
+      }
+    },
+    [obsCacheKey],
+  );
+
+  useEffect(() => {
+    let guardada: string | null = null;
+    try {
+      guardada = window.localStorage.getItem(obsCacheKey);
+    } catch {
+      // localStorage no disponible → arrancamos vacía.
+    }
+    setObservacion(guardada ?? "");
+  }, [obsCacheKey]);
+
   // Espejo del carrito para leerlo fuera del render — `handleSend` lo necesita
   // después del `await`, cuando el closure ya quedó viejo.
   const cartRef = useRef(cart);
@@ -896,6 +932,9 @@ export function MozoPedirClient({
           items,
           slug,
           partySize: personas,
+          // La observación es de ESTA tanda (spec 128): sale en las comandas de
+          // todos los sectores de este envío y después se limpia.
+          notes: observacion,
         });
       } catch (e) {
         // Fallo de red / respuesta perdida: no sabemos si el server procesó el
@@ -916,6 +955,11 @@ export function MozoPedirClient({
       toast.success(
         `Enviado · ${r.data.comanda_ids.length} ${r.data.comanda_ids.length === 1 ? "comanda" : "comandas"}`,
       );
+      // La observación se va con la tanda que acaba de salir (spec 128 · D1):
+      // el próximo envío arranca en blanco. Se limpia entera —y no sólo si no
+      // cambió durante el vuelo— porque el envío tarda menos de lo que se tarda
+      // en escribir, y dejarla puesta es peor: se repite en la tanda siguiente.
+      cambiarObservacion("");
       // Quitamos solo los ítems enviados (no vaciamos el carrito) — FR-009.
       // `cartRef` y no el `cart` del closure: durante el envío se pueden haber
       // agregado líneas nuevas, y ésas se quedan.
@@ -1337,6 +1381,8 @@ export function MozoPedirClient({
               onEditPrice={setPriceTargetKey}
               onEnviar={handleSend}
               cartZone={carrito}
+              observacion={observacion}
+              onObservacionChange={cambiarObservacion}
               acciones={{
                 ...mesaAcciones,
                 onCargarCliente: () => setClienteOpen(true),
@@ -1650,6 +1696,8 @@ export function MozoPedirClient({
                 cartCount={cartCount}
                 pending={pending}
                 onSend={handleSend}
+                observacion={observacion}
+                onObservacionChange={cambiarObservacion}
               />
             )}
           </div>
@@ -2367,11 +2415,15 @@ function BottomCTAResumen({
   cartCount,
   pending,
   onSend,
+  observacion,
+  onObservacionChange,
 }: {
   cartTotal: number;
   cartCount: number;
   pending: boolean;
   onSend: () => void;
+  observacion: string;
+  onObservacionChange: (v: string) => void;
 }) {
   if (cartCount === 0) {
     return (
@@ -2388,6 +2440,12 @@ function BottomCTAResumen({
           {formatCurrency(cartTotal)}
         </span>
       </div>
+      {/* Misma observación que en el panel del salón (spec 128): el mozo carga
+          desde los dos lados y una que existe en uno solo es una que no se usa. */}
+      <ObservacionDeLaTanda
+        value={observacion}
+        onChange={onObservacionChange}
+      />
       <button
         onClick={onSend}
         disabled={pending}

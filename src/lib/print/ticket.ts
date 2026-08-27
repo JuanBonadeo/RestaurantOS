@@ -94,6 +94,17 @@ export type TicketComanda = {
    */
   kitchen_notes?: string | null;
   /**
+   * `comandas.notes` (spec 128): la observación que el mozo escribió para
+   * **este envío**, la misma en las comandas de todos los sectores de la tanda
+   * («va todo junto», «la mesa tiene apuro»).
+   *
+   * Va con la COMANDA y no con la orden: así la reimpresión saca el ticket tal
+   * cual salió, y una tanda no arrastra la observación de otra. NO confundir
+   * con `kitchen_notes` —que es del pedido y define el CUÁNDO— ni con la nota
+   * del ítem, que es de un plato. Campo aditivo.
+   */
+  comanda_notes?: string | null;
+  /**
    * `orders.daily_number`: el número de pedido DEL DÍA — arranca en 1 cada
    * jornada (corte 6 AM) y es el mismo que el mozo y el encargado ven en
    * pantalla. Es lo que la cocina usa para juntar los tickets del MISMO pedido
@@ -304,6 +315,20 @@ export function buildTicketLines(c: TicketComanda): Line[] {
       push(l, { size: "tall", bold: true });
 
   push(RULE);
+
+  // La observación de la tanda (spec 128), entre el encabezado y los ítems:
+  // es la instrucción CON LA QUE se lee la lista de abajo («va todo junto»,
+  // «la mesa tiene apuro»), así que tiene que estar leída antes del primer
+  // plato. En doble alto y negrita, no en el cuerpo `xl`: ese tamaño está
+  // reservado para lo que cambia el momento de salida (ENTREGAR, ANULADA,
+  // REIMPRESION) y se lee de lejos; ésta se lee con el ticket ya en la mano.
+  // En una comanda anulada no va: no hay nada que preparar.
+  if (c.comanda_notes && !c.cancelled) {
+    for (const l of wrap(`OBS: ${c.comanda_notes}`, COLS.tall))
+      push(l, { size: "tall", bold: true });
+    push(RULE);
+  }
+
   pad(EDGE_PADDING); // aire entre la línea y el primer ítem
 
   // Ítems: el corazón de la comanda. Doble alto Y doble ancho, con un renglón

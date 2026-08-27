@@ -76,6 +76,7 @@ export async function GET(req: Request) {
       batch,
       status,
       emitted_at,
+      notes,
       cancelled_at,
       cancelled_reason,
       reprint_requested_at,
@@ -198,6 +199,10 @@ export async function GET(req: Request) {
       // `delivery_notes` —la nota del cliente sobre la entrega—, que va al
       // ticket de control y no le sirve a la parrilla.
       kitchen_notes: sanitizeTicketText(order?.kitchen_notes),
+      // La observación de la tanda (spec 128): lo que el mozo escribió para
+      // este envío, igual en las comandas de todos sus sectores. Campo
+      // aditivo — un agente viejo lo ignora e imprime el ticket de siempre.
+      comanda_notes: sanitizeTicketText(c.notes as string | null),
       // Con qué combina: lo del MISMO envío que sale de los otros sectores.
       otros_sectores: agruparOtrosSectores(
         otrosPorPedido.get(order?.id) ?? [],

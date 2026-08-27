@@ -103,6 +103,52 @@ describe("MesaColumn (spec 111)", () => {
     expect(within(bloque).queryByText("Milanesa napolitana")).toBeNull();
   });
 
+  it("la observación de la tanda sólo aparece con algo para enviar (spec 128)", () => {
+    // Es del ENVÍO, no de la mesa: sin nada sin enviar no hay tanda a la que
+    // ponerle una observación, y el campo sería un cartel que no hace nada.
+    const onObservacionChange = vi.fn();
+    const { rerender } = renderColumna({
+      observacion: "",
+      onObservacionChange,
+    });
+    expect(
+      screen.queryByRole("button", { name: /Observación para cocina/ }),
+    ).toBeNull();
+
+    rerender(
+      <MesaColumn
+        tableLabel="VITRINA"
+        loPedido={enviado}
+        comandas={[]}
+        stationNameById={{ cocina: "Cocina" }}
+        cart={sinEnviar}
+        cartTotalCents={200000}
+        userCanCancel
+        userCanEditPrice
+        enviando={false}
+        onCancelItem={vi.fn()}
+        onAdvance={vi.fn()}
+        onChangeQty={vi.fn()}
+        onRemoveCartItem={vi.fn()}
+        onEditPrice={vi.fn()}
+        onEnviar={vi.fn()}
+        observacion=""
+        onObservacionChange={onObservacionChange}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: /Observación para cocina/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("sin el par de props, la columna se dibuja igual que antes", () => {
+    // El campo es opcional: la columna la usan pantallas que no envían.
+    renderColumna({ cart: sinEnviar, cartTotalCents: 200000 });
+    expect(
+      screen.queryByRole("button", { name: /Observación para cocina/ }),
+    ).toBeNull();
+  });
+
   it("un envío en curso sólo apaga «Enviar»: lo demás sigue vivo", () => {
     // El reporte de Juan era sobre personas, pero el patrón estaba en toda la
     // columna: un pending global apagando controles que no tienen nada que ver

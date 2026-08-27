@@ -1160,6 +1160,7 @@ export type Database = {
           delivered_at: string | null
           emitted_at: string
           id: string
+          notes: string | null
           order_id: string
           print_failed_at: string | null
           reprint_requested_at: string | null
@@ -1174,6 +1175,7 @@ export type Database = {
           delivered_at?: string | null
           emitted_at?: string
           id?: string
+          notes?: string | null
           order_id: string
           print_failed_at?: string | null
           reprint_requested_at?: string | null
@@ -1188,6 +1190,7 @@ export type Database = {
           delivered_at?: string | null
           emitted_at?: string
           id?: string
+          notes?: string | null
           order_id?: string
           print_failed_at?: string | null
           reprint_requested_at?: string | null

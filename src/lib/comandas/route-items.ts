@@ -24,6 +24,18 @@ export async function createComandasForItems(
   service: GenericClient,
   orderId: string,
   itemsByStation: Map<string, string[]>,
+  opts: {
+    /**
+     * La observación de **este envío** (spec 128), ya normalizada por el
+     * caller. Se escribe igual en todas las comandas que crea esta llamada:
+     * una indicación de coordinación —«va todo junto»— que sólo le llega a un
+     * sector no coordina nada.
+     *
+     * Copiada y no referenciada a propósito: la comanda es lo que se reimprime
+     * (spec 035), así que el texto tiene que quedar congelado con ella.
+     */
+    notes?: string | null;
+  } = {},
 ): Promise<{ ok: true; comanda_ids: string[] } | { ok: false; error: string }> {
   const comandaIds: string[] = [];
 
@@ -49,6 +61,7 @@ export async function createComandasForItems(
         station_id: stationId,
         batch: nextBatch,
         status: "pendiente",
+        notes: opts.notes ?? null,
       } as any)
       .select("id")
       .single();
