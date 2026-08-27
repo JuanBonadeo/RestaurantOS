@@ -110,6 +110,22 @@ export function localYmd(at: Date, timezone: string): string {
   }).format(at);
 }
 
+/**
+ * **Jornada operativa** a la que pertenece un instante: el día de trabajo del
+ * local, con corte a las 6 AM en vez de medianoche, para que la cena que cruza
+ * las doce no se parta en dos.
+ *
+ * Espejo exacto de `public.operating_day(timestamptz)` (migración 0049), que es
+ * quien materializa `orders.business_day` y sobre quien se reinicia
+ * `daily_number`. Existe en TS porque el encargue **para otro día** (spec 127)
+ * tiene que nacer con la jornada en que se va a trabajar, no con la del día en
+ * que se cargó: si no, el pedido tomado hoy para mañana se llevaría un número
+ * de hoy y mañana habría dos «#7» en el pase.
+ */
+export function operatingDay(at: Date, timezone: string): string {
+  return localYmd(new Date(at.getTime() - 6 * 60 * MIN_MS), timezone);
+}
+
 /** Paso de la grilla de llegada en modo flexible (igual que reservas). */
 export const ORDER_SLOT_STEP_MIN = 15;
 

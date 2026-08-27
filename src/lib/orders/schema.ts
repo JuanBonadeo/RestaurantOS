@@ -139,9 +139,27 @@ export const StaffOrderInput = z
     kitchen_notes: z.string().max(120).optional(),
     /** Spec 085 — instante de retiro/entrega. Ausente = "para ahora". */
     scheduled_at: z.string().datetime({ offset: true }).optional(),
+    /**
+     * Spec 127 — hora DE COCINA: para cuándo el plato tiene que estar listo. La
+     * escribe el encargado a mano, junto con la del pedido; el sistema no la
+     * calcula. Es la que sale impresa arriba de la comanda y la que manda la
+     * ventana de marcha. Sólo existe acá: el checkout público expresa una sola
+     * hora, así que `CreateOrderInput` no la tiene.
+     */
+    kitchen_at: z.string().datetime({ offset: true }).optional(),
     items: z.array(StaffOrderItemInput).min(1),
   })
   .superRefine((data, ctx) => {
+    // Spec 127 — las dos horas van juntas: el encargado escribe las dos o
+    // ninguna. Media hora cargada es un pedido que no se sabe si es para ahora.
+    if (Boolean(data.scheduled_at) !== Boolean(data.kitchen_at)) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "Cargá las dos horas: la de cocina y la del pedido, o ninguna de las dos.",
+        path: [data.scheduled_at ? "kitchen_at" : "scheduled_at"],
+      });
+    }
     if (data.delivery_type === "delivery") {
       if (!data.delivery_address || data.delivery_address.trim().length === 0) {
         ctx.addIssue({

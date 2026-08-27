@@ -243,6 +243,10 @@ describe("cargarPedidoStaff — precio por ítem (spec 069)", () => {
 describe("cargarPedidoStaff — pedido programado (spec 085)", () => {
   const enTresHoras = () =>
     new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
+  let pedido = "";
+  /** Spec 127: la hora de cocina va con la del pedido, un rato antes. */
+  const cocinaDe = (pedidoIso: string) =>
+    new Date(new Date(pedidoIso).getTime() - 15 * 60 * 1000).toISOString();
 
   it("pasa scheduled_at a persistOrder tal cual", async () => {
     const scheduled = enTresHoras();
@@ -250,6 +254,7 @@ describe("cargarPedidoStaff — pedido programado (spec 085)", () => {
       business_slug: "golf",
       delivery_type: "pickup",
       scheduled_at: scheduled,
+      kitchen_at: cocinaDe(scheduled),
       items,
     });
     expect(res.ok).toBe(true);
@@ -260,7 +265,8 @@ describe("cargarPedidoStaff — pedido programado (spec 085)", () => {
     const res = await cargarPedidoStaff({
       business_slug: "golf",
       delivery_type: "pickup",
-      scheduled_at: enTresHoras(),
+      scheduled_at: (pedido = enTresHoras()),
+      kitchen_at: cocinaDe(pedido),
       items,
     });
     expect(res.ok).toBe(true);
@@ -275,11 +281,22 @@ describe("cargarPedidoStaff — pedido programado (spec 085)", () => {
     const res = await cargarPedidoStaff({
       business_slug: "golf",
       delivery_type: "pickup",
-      scheduled_at: enTresHoras(),
+      scheduled_at: (pedido = enTresHoras()),
+      kitchen_at: cocinaDe(pedido),
       items,
     });
     expect(res.ok).toBe(true);
     expect(res.ok && res.data.needs_accept).toBe(true);
+  });
+
+  it("media hora cargada no entra: van las dos o ninguna (spec 127)", async () => {
+    const res = await cargarPedidoStaff({
+      business_slug: "golf",
+      delivery_type: "pickup",
+      scheduled_at: enTresHoras(),
+      items,
+    });
+    expect(res.ok).toBe(false);
   });
 
   it("un pedido para ahora no toca el status (camino de siempre)", async () => {
@@ -298,7 +315,8 @@ describe("cargarPedidoStaff — pedido programado (spec 085)", () => {
     const res = await cargarPedidoStaff({
       business_slug: "golf",
       delivery_type: "pickup",
-      scheduled_at: new Date(Date.now() - 60_000).toISOString(),
+      scheduled_at: (pedido = new Date(Date.now() - 60_000).toISOString()),
+      kitchen_at: cocinaDe(pedido),
       items,
     });
     expect(res.ok).toBe(true);

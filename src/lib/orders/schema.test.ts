@@ -160,27 +160,53 @@ describe("StaffOrderInput (spec 054)", () => {
   // de fase 1"). Acá sólo la forma: las reglas de negocio —hoy, anticipación,
   // chip de la grilla— dependen del negocio y las aplica `validateScheduledOrder`
   // dentro de `persistOrder`, igual que en el camino público.
-  it("acepta scheduled_at ISO con offset", () => {
+  it("acepta las dos horas ISO con offset", () => {
     const result = StaffOrderInput.safeParse({
       ...staffBase,
       scheduled_at: "2026-08-01T13:00:00-03:00",
+      kitchen_at: "2026-08-01T12:45:00-03:00",
     });
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.scheduled_at).toBe("2026-08-01T13:00:00-03:00");
+      expect(result.data.kitchen_at).toBe("2026-08-01T12:45:00-03:00");
     }
+  });
+
+  // Spec 127 — las dos horas son un par: media hora cargada es un pedido del
+  // que no se sabe si es para ahora. El orden entre ellas lo valida el server
+  // (`validateScheduledOrder`), que sí sabe cuál es cuál.
+  it("rechaza una sola de las dos horas", () => {
+    expect(
+      StaffOrderInput.safeParse({
+        ...staffBase,
+        scheduled_at: "2026-08-01T13:00:00-03:00",
+      }).success,
+    ).toBe(false);
+    expect(
+      StaffOrderInput.safeParse({
+        ...staffBase,
+        kitchen_at: "2026-08-01T12:45:00-03:00",
+      }).success,
+    ).toBe(false);
   });
 
   it("rechaza scheduled_at que no es un instante con offset", () => {
     // Sin offset no hay instante: "21:00" en qué zona. El público exige lo
     // mismo, así que el staff no puede ser la puerta de atrás.
     expect(
-      StaffOrderInput.safeParse({ ...staffBase, scheduled_at: "2026-08-01T13:00:00" })
-        .success,
+      StaffOrderInput.safeParse({
+        ...staffBase,
+        scheduled_at: "2026-08-01T13:00:00",
+        kitchen_at: "2026-08-01T12:45:00-03:00",
+      }).success,
     ).toBe(false);
     expect(
-      StaffOrderInput.safeParse({ ...staffBase, scheduled_at: "mañana 21hs" })
-        .success,
+      StaffOrderInput.safeParse({
+        ...staffBase,
+        scheduled_at: "mañana 21hs",
+        kitchen_at: "2026-08-01T12:45:00-03:00",
+      }).success,
     ).toBe(false);
   });
 

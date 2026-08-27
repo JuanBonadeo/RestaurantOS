@@ -21,7 +21,11 @@ import type {
 } from "@/lib/reservations/types";
 
 import { resolveComboUpcharge } from "./combo-pricing";
-import { orderSlotsForDay, validateScheduledOrder } from "./scheduled";
+import {
+  operatingDay,
+  orderSlotsForDay,
+  validateScheduledOrder,
+} from "./scheduled";
 import type { PersistableOrderInput } from "./schema";
 
 export type CreateOrderResult = {
@@ -68,6 +72,24 @@ export async function persistOrder(
      * el comportamiento es idéntico al de antes de la spec.
      */
     priceOverrides?: (PriceOverride | null)[];
+    /**
+     * Quién carga el pedido (spec 127). `staff` afloja las tres reglas del
+     * checkout —la grilla de chips, los 60 min de anticipación y el «sólo
+     * hoy»— que son justo las que le impiden al encargado tomar un encargue
+     * telefónico para dentro de un rato.
+     *
+     * Va por opciones y no dentro de `data`, como los precios pisados: el input
+     * del checkout público es el mismo tipo, y así no hay forma de que un
+     * payload del comensal se declare staff y se saltee la validación.
+     */
+    source?: "public" | "staff";
+    /**
+     * Hora DE COCINA (spec 127): para cuándo el plato tiene que estar listo. Es
+     * la que se imprime arriba de la comanda y la que manda la ventana de
+     * marcha. Por opciones por la misma razón que `source`: si viajara en el
+     * input, un pedido del comensal podría adelantar su propia marcha.
+     */
+    kitchenAt?: string | null;
   },
 ): Promise<ActionResult<CreateOrderResult>> {
   const supabase = createSupabaseServiceClient();
@@ -102,6 +124,11 @@ export async function persistOrder(
   // marcha hasta el lead del negocio (cron) o "marchar ahora"; si está impago,
   // hasta que el encargado lo acepte.
   let scheduledAtIso: string | null = null;
+  // Spec 127 — la hora de cocina viaja por opciones (ver docblock). Se valida
+  // junto con la del pedido: no puede ser posterior, y sin hora de pedido no
+  // tiene sentido, así que se descarta.
+  const kitchenAt = options?.kitchenAt ? new Date(options.kitchenAt) : null;
+  let kitchenAtIso: string | null = null;
   if (data.scheduled_at) {
     const scheduledAt = new Date(data.scheduled_at);
     const [{ data: reservationSettings }, { data: services }] =
@@ -130,9 +157,12 @@ export async function persistOrder(
         business.timezone,
       ),
       timezone: business.timezone,
+      source: options?.source ?? "public",
+      kitchenAt,
     });
     if (!validation.ok) return actionError(validation.error);
     scheduledAtIso = scheduledAt.toISOString();
+    kitchenAtIso = kitchenAt?.toISOString() ?? null;
   }
 
   // Separamos ítems por tipo. Un carrito puede mezclar productos y menús.
@@ -540,6 +570,20 @@ export async function persistOrder(
   // Cast: `promo_code_id`, `promo_code_snapshot`, `discount_cents` were added
   // by migration 0018. Once `database.types.ts` is regenerated this cast can
   // be removed and the call inline-typed.
+  // La jornada del pedido: null salvo que se trabaje otro día (ver el comentario
+  // en el insert). Manda la hora de cocina, que es cuando el local lo prepara.
+  const trabajaAt = kitchenAtIso
+    ? new Date(kitchenAtIso)
+    : scheduledAtIso
+      ? new Date(scheduledAtIso)
+      : null;
+  const businessDay =
+    trabajaAt &&
+    operatingDay(trabajaAt, business.timezone) !==
+      operatingDay(new Date(), business.timezone)
+      ? operatingDay(trabajaAt, business.timezone)
+      : null;
+
   const orderInsert = {
     order_number: 0,
     business_id: business.id,
@@ -564,6 +608,15 @@ export async function persistOrder(
     promo_code_id: promoCodeId,
     promo_code_snapshot: promoCodeSnapshot,
     scheduled_at: scheduledAtIso,
+    // Hora de cocina (spec 127): para cuándo tiene que estar LISTO. Es la que
+    // sale impresa y la que manda la ventana de marcha.
+    kitchen_at: kitchenAtIso,
+    // Jornada operativa del pedido (spec 127). El trigger `set_order_daily_number`
+    // la deriva de `created_at` cuando viene null, que es lo correcto para todo
+    // pedido que se trabaja el mismo día. El encargue **para otro día** tiene
+    // que nacer con la jornada en que se va a preparar: si no, se llevaría un
+    // número de hoy y ese día habría dos «#7» en el pase.
+    business_day: businessDay,
     // Staff que cargó el pedido a mano (spec 054); null en el checkout público.
     mozo_id: options?.mozoId ?? null,
   };

@@ -112,6 +112,11 @@ export async function cargarPedidoStaff(
     const result = await persistOrder(mapped, ctxResult.data.userId, {
       mozoId: ctxResult.data.userId,
       priceOverrides,
+      // Spec 127: el encargue del staff no pasa por la grilla del checkout, y
+      // trae su propia hora de cocina — la que se imprime y la que manda la
+      // ventana de marcha.
+      source: "staff",
+      kitchenAt: data.kitchen_at,
     });
     if (!result.ok || !isScheduledForLater(data.scheduled_at)) return result;
 

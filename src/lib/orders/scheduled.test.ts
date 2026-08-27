@@ -10,6 +10,7 @@ import {
   isScheduledForLater,
   marchAtForOrder,
   marchLeadForOrder,
+  operatingDay,
   orderSlotsForDay,
   shouldMarchNow,
   validateScheduledOrder,
@@ -461,5 +462,34 @@ describe("validateScheduledOrder · source staff (spec 127)", () => {
   it("sin source explícito se comporta como el público (back-compat)", () => {
     const at = new Date("2026-06-25T21:20:00-03:00");
     expect(validateScheduledOrder({ ...base, scheduledAt: at }).ok).toBe(false);
+  });
+});
+
+describe("operatingDay (spec 127 · espejo TS de public.operating_day)", () => {
+  it("una cena normal cae en su propio día", () => {
+    expect(operatingDay(new Date("2026-06-25T21:30:00-03:00"), TZ)).toBe(
+      "2026-06-25",
+    );
+  });
+
+  it("la madrugada pertenece a la jornada del día anterior (corte 6 AM)", () => {
+    expect(operatingDay(new Date("2026-06-26T02:00:00-03:00"), TZ)).toBe(
+      "2026-06-25",
+    );
+    expect(operatingDay(new Date("2026-06-26T05:59:00-03:00"), TZ)).toBe(
+      "2026-06-25",
+    );
+  });
+
+  it("a las 6 AM arranca la jornada nueva", () => {
+    expect(operatingDay(new Date("2026-06-26T06:00:00-03:00"), TZ)).toBe(
+      "2026-06-26",
+    );
+  });
+
+  it("el encargue de mañana a la noche cae en la jornada de mañana", () => {
+    expect(operatingDay(new Date("2026-06-26T21:15:00-03:00"), TZ)).toBe(
+      "2026-06-26",
+    );
   });
 });
