@@ -95,6 +95,12 @@ un lunes cerrado, entra. Decidido con Juan (2026-08-27) sabiendo que `business_h
 está y permitiría avisar — el encargado es el responsable, y un aviso más en hora
 pico no paga. Si algún día molesta, es un `<p>` gris debajo del campo.
 
+**D8 · «Programado» significa otro día, y punto.** Un pedido para hoy —aunque sea
+para dentro de cinco horas— **no** es un pedido programado: es un pedido normal
+cuya comanda sale ya. La hoja lo dice con todas las letras y el selector de fecha
+del modo programado **arranca en mañana**. Esto saca de la cabeza del encargado la
+pregunta «¿esto va como programado?», que hoy no tiene una respuesta obvia.
+
 ## Qué se construye
 
 ### FR-001 · Una columna nueva
@@ -112,27 +118,46 @@ siempre significó. Los dos canales escriben la misma y el board, el control y
 
 `scheduled_march_lead_{pickup,delivery}_min` **se conservan**: rigen el canal web.
 
-### FR-002 · La hoja pide fecha y dos horas
+### FR-002 · La hoja: para hoy, o programado
 
-Muere `MOSTRAR_PROGRAMADO`. En su lugar:
+Muere `MOSTRAR_PROGRAMADO`. La hoja arranca en **Para hoy**, que es el 95% de los
+encargues, y «Programado» es la puerta aparte para otro día (D8).
+
+**Para hoy** — las dos horas, opcionales:
 
 ```
-Día              [ hoy ▾ ]      hoy · mañana · otra fecha
+( • ) Para hoy      (   ) Programado
+
 Hora de cocina   [ 21:15 ]      para cuándo tiene que estar listo
 Hora del pedido  [ 21:30 ]      cuándo lo retira o lo recibe
+
+La comanda sale ahora. El pedido pasa a Preparando a las 20:35.
 ```
 
-Vacías = para ahora, como siempre. **Si se completa una hora, la otra es
-obligatoria.** Coherencia: cocina ≤ pedido, las dos del día elegido. Debajo, en
-gris, lo que va a pasar — y **dice cosas distintas según el día**:
+Vacías = para ahora mismo, como siempre.
 
-- hoy → *La comanda sale ahora. El pedido pasa a Preparando a las 20:35.*
-- mañana → *La comanda sale mañana 20:35, y ahí pasa a Preparando.*
+**Programado** — la fecha aparece y **arranca en mañana**; hoy no se puede elegir.
+Las dos horas pasan a ser obligatorias:
 
-El pie cambia con el día: para otro día, «Cargar y enviar a cocina» no aplica —
-queda un solo botón, «Cargar el encargue».
+```
+(   ) Para hoy      ( • ) Programado
 
-En **modo agregar** (spec 125) nada de esto aparece. Las mismas tres se corrigen
+Día              [ miércoles 28/08 ]     desde mañana
+Hora de cocina   [ 21:15 ]
+Hora del pedido  [ 21:30 ]
+
+Un pedido programado es para otro día. Para hoy, cargalo como «Para hoy».
+La comanda sale el miércoles 20:35, y ahí pasa a Preparando.
+```
+
+En los dos casos: **si se completa una hora, la otra es obligatoria**, y cocina ≤
+pedido.
+
+El pie cambia con el modo: en «Programado» no hay nada que enviar todavía, así
+que «Cargar y enviar a cocina» se va y queda un solo botón, **«Cargar el
+encargue»**.
+
+En **modo agregar** (spec 125) nada de esto aparece. Las mismas horas se corrigen
 desde el detalle, donde hoy se pide la nota al marchar.
 
 ### FR-003 · El server valida distinto según quién carga
