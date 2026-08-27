@@ -472,3 +472,43 @@ describe("buildComandaContent · base64", () => {
     expect(decoded).toBe(expected);
   });
 });
+
+// ── Spec 127 · las dos horas del pedido ─────────────────────────────────────
+
+describe("buildTicketLines · la hora de cocina (spec 127)", () => {
+  const conHora = (over: Partial<TicketComanda> = {}) =>
+    buildTicketLines({ ...base, kitchen_time: "21:15", ...over });
+
+  it("encabeza el ticket, en el cuerpo más grande", () => {
+    const lines = conHora();
+    // A doble ancho entra en dos renglones, como cualquier banner del ticket.
+    expect(lines[0]).toMatchObject({ text: "ENTREGAR", size: "xl" });
+    expect(lines[1]).toMatchObject({ text: "21:15", size: "xl" });
+  });
+
+  it("la nota de cocina baja un renglón y deja de ser el banner", () => {
+    const lines = conHora({ kitchen_notes: "junto con la mesa 5" });
+    const hora = lines.findIndex((l) => l.text === "21:15");
+    const nota = lines.findIndex((l) => l.text.includes("junto con la mesa"));
+    expect(hora).toBeGreaterThanOrEqual(0);
+    expect(nota).toBeGreaterThan(hora);
+    // La nota se lee, pero no le gana a la hora.
+    expect(lines[nota].size).toBe("tall");
+  });
+
+  it("sin hora, la nota vieja sigue ocupando el banner", () => {
+    // El pedido de antes de la spec tiene su «21:30» adentro del texto libre y
+    // sigue necesitando leerse de lejos.
+    const lines = buildTicketLines({
+      ...base,
+      kitchen_notes: "21:30, junto con la mesa 5",
+    });
+    const banner = lines.find((l) => l.text.startsWith("ENTREGAR"));
+    expect(banner?.size).toBe("xl");
+  });
+
+  it("una comanda anulada no lleva hora: no hay nada que entregar", () => {
+    const lines = conHora({ cancelled: true });
+    expect(lines.find((l) => l.text.startsWith("ENTREGAR"))).toBeUndefined();
+  });
+});

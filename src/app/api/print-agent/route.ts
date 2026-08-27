@@ -15,7 +15,7 @@ import {
   type FacturaTicketData,
 } from "@/lib/print/factura-ticket";
 import { resolveFiscalPrinter } from "@/lib/print/fiscal-printer";
-import { buildComandaContent, toAscii } from "@/lib/print/ticket";
+import { buildComandaContent, TIMEZONE, toAscii } from "@/lib/print/ticket";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 import { alcanzaLaImpresora } from "@/lib/print/agent-scope";
@@ -51,6 +51,22 @@ function sanitizeTicketText(s: string | null | undefined): string | null {
  * Si se pasa `station_id`, filtra por sector; si no, devuelve todas las del
  * negocio. El print agent llama esto en loop (pull).
  */
+/**
+ * `HH:MM` del local para la hora de cocina (spec 127). Vive acá y no en
+ * `ticket.ts` porque el armador del ticket es puro: recibe texto ya resuelto.
+ */
+function horaDeCocina(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return new Intl.DateTimeFormat("es-AR", {
+    timeZone: TIMEZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(d);
+}
+
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const businessId = url.searchParams.get("business_id");
@@ -88,6 +104,7 @@ export async function GET(req: Request) {
         table_id,
         delivery_type,
         kitchen_notes,
+        kitchen_at,
         tables!orders_table_id_fkey(label)
       ),
       comanda_items(
@@ -157,6 +174,7 @@ export async function GET(req: Request) {
       table_id: string | null;
       delivery_type: string | null;
       kitchen_notes: string | null;
+      kitchen_at: string | null;
       tables: { label: string } | null;
     };
     const station = c.stations as unknown as {
@@ -195,10 +213,15 @@ export async function GET(req: Request) {
         | "delivery"
         | "pickup"
         | null,
-      // Indicación del encargado para cocina («ENTREGAR 21:30»). NO es
+      // Indicación del encargado para cocina («junto con la mesa 5»). NO es
       // `delivery_notes` —la nota del cliente sobre la entrega—, que va al
       // ticket de control y no le sirve a la parrilla.
       kitchen_notes: sanitizeTicketText(order?.kitchen_notes),
+      // Para cuándo el plato tiene que estar LISTO (spec 127). Va formateada
+      // como `HH:MM` del local: el armador del ticket es puro y no resuelve TZ.
+      // Es la que encabeza la comanda; la nota de arriba pasó a ser el renglón
+      // de abajo. Campo aditivo — un agente viejo lo ignora.
+      kitchen_time: horaDeCocina(order?.kitchen_at ?? null),
       // La observación de la tanda (spec 128): lo que el mozo escribió para
       // este envío, igual en las comandas de todos sus sectores. Campo
       // aditivo — un agente viejo lo ignora e imprime el ticket de siempre.

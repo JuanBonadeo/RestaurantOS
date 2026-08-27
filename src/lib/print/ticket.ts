@@ -83,16 +83,28 @@ export type TicketComanda = {
    */
   otros_sectores?: TicketSectorHermano[] | null;
   /**
-   * `orders.kitchen_notes`: la indicación del encargado PARA COCINA — cuándo o
-   * cómo sacar el plato («21:30», «junto con la mesa 5»). Sale arriba de todo
-   * como «ENTREGAR x»: es lo primero que tiene que leer el que cocina, porque
-   * define el tiempo, no el contenido.
+   * `orders.kitchen_notes`: la indicación del encargado PARA COCINA sobre cómo
+   * sacar el plato («junto con la mesa 5»). Sale arriba de todo, debajo de la
+   * hora. Desde la spec 127 es sólo eso, una nota: el «cuándo» tiene su propio
+   * campo (`kitchen_time`), y no hay que escribirlo más acá adentro.
    *
    * NO confundir con `orders.delivery_notes`, que es la nota del CLIENTE sobre
    * la entrega («tocar timbre», «depto 3B»): ésa no le sirve a la parrilla y va
    * sólo en el ticket de control. Campo aditivo.
    */
   kitchen_notes?: string | null;
+  /**
+   * `orders.kitchen_at` ya formateado como `HH:MM` en la hora del local (spec
+   * 127): **para cuándo el plato tiene que estar listo**. Es lo primero del
+   * ticket, en el cuerpo más grande.
+   *
+   * Hasta la 127 esta hora vivía adentro de `kitchen_notes` —el encargue
+   * telefónico no tenía dónde escribirla— y por eso el banner era la nota. Ya
+   * no: la hora tiene su campo y la nota volvió a ser una nota. Llega formateada
+   * y no como instante porque el ticket es puro: el TZ lo resuelve quien arma
+   * el payload. Campo aditivo.
+   */
+  kitchen_time?: string | null;
   /**
    * `comandas.notes` (spec 128): la observación que el mozo escribió para
    * **este envío**, la misma en las comandas de todos los sectores de la tanda
@@ -234,11 +246,18 @@ export function buildTicketLines(c: TicketComanda): Line[] {
   };
 
   // Lo PRIMERO del ticket, arriba incluso del sector: cuándo sale el plato
-  // manda sobre qué plato es. El prefijo lo pone el sistema —el encargado sólo
-  // escribe el «cuándo»— así que siempre se lee igual, lo escriba quien lo
-  // escriba. En una comanda anulada no va: no hay nada que entregar.
-  if (c.kitchen_notes && !c.cancelled) {
-    banner(`ENTREGAR ${c.kitchen_notes}`);
+  // manda sobre qué plato es. El prefijo lo pone el sistema, así que siempre se
+  // lee igual. En una comanda anulada no va: no hay nada que entregar.
+  //
+  // Spec 127 — la hora sale de `kitchen_time` y la nota baja un renglón. Cuando
+  // no hay hora, la nota vuelve a ocupar el banner: es el pedido viejo, que
+  // tiene su «21:30» escrito adentro del texto libre y seguiría necesitando
+  // leerse de lejos.
+  if (!c.cancelled && (c.kitchen_time || c.kitchen_notes)) {
+    banner(`ENTREGAR ${c.kitchen_time ?? c.kitchen_notes}`);
+    if (c.kitchen_time && c.kitchen_notes)
+      for (const l of wrap(c.kitchen_notes, COLS.tall))
+        push(l, { size: "tall", bold: true, align: "center" });
     push(RULE);
   }
 
