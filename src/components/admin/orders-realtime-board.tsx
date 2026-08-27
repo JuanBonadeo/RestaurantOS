@@ -11,7 +11,11 @@ import {
   aceptarPedidoProgramado,
   confirmarPedido,
 } from "@/lib/orders/confirm-order";
-import { isScheduledForLater } from "@/lib/orders/scheduled";
+import { horaLocal, horariosLabel } from "@/lib/orders/entrega";
+import {
+  isScheduledForLater,
+  marchAtForOrder,
+} from "@/lib/orders/scheduled";
 import type { OrderStatus } from "@/lib/orders/status";
 import { updateOrderStatus } from "@/lib/orders/update-status";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -182,7 +186,7 @@ export function OrdersRealtimeBoard({
       const { data } = await supabase
         .from("orders")
         .select(
-          "id, order_number, daily_number, created_at, customer_name, customer_phone, delivery_type, total_cents, status, payment_method, payment_status, cancelled_reason, scheduled_at, kitchen_notes, order_items(product_name, quantity)",
+          "id, order_number, daily_number, created_at, customer_name, customer_phone, delivery_type, total_cents, status, payment_method, payment_status, cancelled_reason, scheduled_at, kitchen_at, kitchen_notes, order_items(product_name, quantity)",
         )
         .eq("id", orderId)
         .maybeSingle();
@@ -204,6 +208,7 @@ export function OrdersRealtimeBoard({
         payment_status: data.payment_status,
         cancelled_reason: data.cancelled_reason,
         scheduled_at: data.scheduled_at,
+        kitchen_at: data.kitchen_at,
         kitchen_notes: data.kitchen_notes,
         items: (data.order_items ?? []).map((i) => ({
           product_name: i.product_name,
@@ -383,6 +388,20 @@ export function OrdersRealtimeBoard({
   //  · `pending`   → pago (MP aprobado, listo) o impago (espera que el
   //                  encargado lo acepte; sin eso el cron no lo toma — 047).
   //  · `confirmed` → ya aceptado, esperando su ventana.
+  // Spec 127 — la cuenta de la marcha, igual que la del server.
+  const lead = useMemo(
+    () => ({ scheduled_march_lead_kitchen_min: marchLeadKitchenMin }),
+    [marchLeadKitchenMin],
+  );
+  // Un tick lento sólo para que la tarjeta se encienda sola cuando llega la
+  // hora: sin esto, el encargado que dejó el board abierto ve el pedido en
+  // blanco hasta que algo más lo re-renderiza.
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
   const { agendados, byColumn } = useMemo(() => {
     const now = new Date();
     const isAgendado = (o: AdminOrder) =>
@@ -390,11 +409,14 @@ export function OrdersRealtimeBoard({
       (o.status === "pending" || o.status === "confirmed") &&
       isScheduledForLater(o.scheduled_at, now);
 
-    const proximos = orders
-      .filter(isAgendado)
-      .sort((a, b) =>
-        (a.scheduled_at ?? "").localeCompare(b.scheduled_at ?? ""),
-      );
+    // Spec 127 — ordenados por **hora de marcha**, no por la del pedido: es la
+    // que va a pasar primero, y con dos pedidos que se entregan a la misma hora
+    // el que se cocina antes tiene que estar arriba.
+    const proximos = orders.filter(isAgendado).sort((a, b) => {
+      const ma = marchAtForOrder(a, lead)?.getTime() ?? 0;
+      const mb = marchAtForOrder(b, lead)?.getTime() ?? 0;
+      return ma - mb;
+    });
 
     const groups: Record<string, AdminOrder[]> = {};
     for (const col of COLUMNS) groups[col.key] = [];
@@ -418,7 +440,7 @@ export function OrdersRealtimeBoard({
     }
     groups["delivered"] = groups["delivered"].slice(0, 20);
     return { agendados: proximos, byColumn: groups };
-  }, [orders]);
+  }, [orders, lead]);
 
   const cancelledOrders = useMemo(
     () => orders.filter((o) => o.status === "cancelled"),
@@ -466,9 +488,10 @@ export function OrdersRealtimeBoard({
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {agendados.map((order) => (
               <ScheduledOrderCard
-                key={order.id}
+                key={`${order.id}-${tick}`}
                 order={order}
                 timezone={timezone}
+                marchLeadKitchenMin={marchLeadKitchenMin}
                 onMarchNow={() => handleConfirm(order)}
                 onAccept={() => handleAceptarProgramado(order)}
               />
@@ -588,11 +611,13 @@ function formatScheduled(iso: string, timezone: string): string {
 function ScheduledOrderCard({
   order,
   timezone,
+  marchLeadKitchenMin,
   onMarchNow,
   onAccept,
 }: {
   order: AdminOrder;
   timezone: string;
+  marchLeadKitchenMin: number;
   onMarchNow: () => void;
   onAccept: () => void;
 }) {
@@ -611,19 +636,65 @@ function ScheduledOrderCard({
     : accepted
       ? { label: "Aceptado · paga al recibir", className: "text-violet-700" }
       : { label: "Esperando aceptación", className: "text-amber-700" };
+
+  // Spec 127 — a qué hora se pone en marcha, y si esa hora ya pasó. Lo segundo
+  // es la red del automatismo del lado del cliente: el aviso del server sale
+  // del propio cron, así que si el cron **no corre** nadie avisa. Esto sí se ve
+  // igual, porque lo calcula el board que está abierto en el local.
+  const marchAt = marchAtForOrder(order, {
+    scheduled_march_lead_kitchen_min: marchLeadKitchenMin,
+  });
+  const faltanMin = marchAt
+    ? Math.round((marchAt.getTime() - Date.now()) / 60_000)
+    : null;
+  const vencido = faltanMin !== null && faltanMin < 0;
+  const cerca = faltanMin !== null && faltanMin >= 0 && faltanMin <= 15;
+  // El papel del encargue de hoy ya salió al cargarlo: sin decirlo, la tarjeta
+  // en «Próximos» parece un pedido que nunca marchó.
+  const yaImprimio = Boolean(order.kitchen_at) && order.status === "confirmed";
+
   return (
-    <div className="ring-border/60 flex flex-col gap-2 rounded-xl bg-white p-3 ring-1">
+    <div
+      className={`flex flex-col gap-2 rounded-xl p-3 ring-1 ${
+        vencido
+          ? "bg-red-50 ring-red-300"
+          : cerca
+            ? "bg-amber-50 ring-amber-300"
+            : "ring-border/60 bg-white"
+      }`}
+    >
       <div className="flex items-center justify-between gap-2">
-        <span className="inline-flex items-center gap-1.5 text-sm font-bold text-violet-700">
+        <span
+          className={`inline-flex items-center gap-1.5 text-sm font-bold ${
+            vencido
+              ? "text-red-700"
+              : cerca
+                ? "text-amber-800"
+                : "text-violet-700"
+          }`}
+        >
           <Clock className="size-3.5" />
-          {order.scheduled_at
-            ? formatScheduled(order.scheduled_at, timezone)
-            : ""}
+          {horariosLabel(order, timezone) ??
+            (order.scheduled_at
+              ? formatScheduled(order.scheduled_at, timezone)
+              : "")}
         </span>
         <span className="text-muted-foreground text-xs font-medium tabular-nums">
           #{order.daily_number}
         </span>
       </div>
+      {marchAt && (
+        <p
+          className={`text-xs font-medium tabular-nums ${
+            vencido ? "text-red-700" : "text-muted-foreground"
+          }`}
+        >
+          {vencido
+            ? `hace ${Math.abs(faltanMin!)} min que tenía que marchar`
+            : `marcha ${horaLocal(marchAt.toISOString(), timezone)}`}
+          {yaImprimio && " · comanda impresa"}
+        </p>
+      )}
       <div className="text-foreground text-sm font-semibold">
         {order.customer_name}
       </div>
