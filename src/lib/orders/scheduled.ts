@@ -347,6 +347,32 @@ export function marchAtForOrder(
 }
 
 /**
+ * ¿El pedido todavía **no llegó a su momento de marcha**? (spec 127)
+ *
+ * Es la pregunta que separa el papel del estado: cuando la respuesta es sí, la
+ * comanda del encargue de hoy se imprime igual —el encargado apretó «enviar a
+ * cocina» y cocina necesita el papel— pero el pedido **no** entra al kanban
+ * todavía. Si entrara, la columna «Preparando» mostraría a las 18:00 un pedido
+ * que recién se cocina a las 21.
+ */
+export function esperaSuHoraDeMarcha(
+  order: {
+    kitchen_at?: string | Date | null;
+    scheduled_at?: string | Date | null;
+    delivery_type: string;
+  },
+  business: {
+    scheduled_march_lead_pickup_min?: number | null;
+    scheduled_march_lead_delivery_min?: number | null;
+    scheduled_march_lead_kitchen_min?: number | null;
+  } | null,
+  now: Date = new Date(),
+): boolean {
+  const at = marchAtForOrder(order, business);
+  return at !== null && at.getTime() > now.getTime();
+}
+
+/**
  * ¿El pedido es para más tarde (diferido a futuro)? Es la condición de "no
  * marchar al crear ni al aprobar el pago": null o instante pasado → marcha
  * como un pedido normal; instante futuro → queda agendado.

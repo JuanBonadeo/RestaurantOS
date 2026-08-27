@@ -6,6 +6,7 @@ import {
   DEFAULT_MARCH_LEAD_DELIVERY_MIN,
   DEFAULT_MARCH_LEAD_KITCHEN_MIN,
   DEFAULT_MARCH_LEAD_PICKUP_MIN,
+  esperaSuHoraDeMarcha,
   filterSlotsByLead,
   isScheduledForLater,
   marchAtForOrder,
@@ -491,5 +492,48 @@ describe("operatingDay (spec 127 · espejo TS de public.operating_day)", () => {
     expect(operatingDay(new Date("2026-06-26T21:15:00-03:00"), TZ)).toBe(
       "2026-06-26",
     );
+  });
+});
+
+describe("esperaSuHoraDeMarcha (spec 127)", () => {
+  const BUSINESS = { scheduled_march_lead_kitchen_min: 40 };
+  const NOW_ = new Date("2026-06-25T18:00:00-03:00");
+
+  it("el encargue de las 21:15 todavía espera a las 18:00", () => {
+    expect(
+      esperaSuHoraDeMarcha(
+        {
+          kitchen_at: "2026-06-25T21:15:00-03:00",
+          scheduled_at: "2026-06-25T21:30:00-03:00",
+          delivery_type: "pickup",
+        },
+        BUSINESS,
+        NOW_,
+      ),
+    ).toBe(true);
+  });
+
+  it("pasada la hora de marcha, ya no espera", () => {
+    expect(
+      esperaSuHoraDeMarcha(
+        {
+          kitchen_at: "2026-06-25T21:15:00-03:00",
+          scheduled_at: "2026-06-25T21:30:00-03:00",
+          delivery_type: "pickup",
+        },
+        BUSINESS,
+        new Date("2026-06-25T20:36:00-03:00"),
+      ),
+    ).toBe(false);
+  });
+
+  it("un pedido sin horas no espera nada: marcha cuando lo mandan", () => {
+    expect(
+      esperaSuHoraDeMarcha(
+        { kitchen_at: null, scheduled_at: null, delivery_type: "pickup" },
+        BUSINESS,
+        NOW_,
+      ),
+    ).toBe(false);
   });
 });

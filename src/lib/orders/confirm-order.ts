@@ -10,7 +10,7 @@ import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
 import { routeOrderToCocina, type RouteOrderResult } from "./route-to-cocina";
-import { isScheduledForLater } from "./scheduled";
+import { esperaSuHoraDeMarcha, isScheduledForLater } from "./scheduled";
 
 type GenericClient = SupabaseClient;
 
@@ -52,7 +52,7 @@ export async function confirmarPedido(
 
   const { data: order } = await service
     .from("orders")
-    .select("id, business_id, status, delivery_type")
+    .select("id, business_id, status, delivery_type, kitchen_at, scheduled_at")
     .eq("id", orderId)
     .maybeSingle();
   type OrderRow = {
@@ -60,6 +60,8 @@ export async function confirmarPedido(
     business_id: string;
     status: string;
     delivery_type: string;
+    kitchen_at: string | null;
+    scheduled_at: string | null;
   };
   const orderRow = order as OrderRow | null;
   if (!orderRow || orderRow.business_id !== business.id) {
@@ -96,7 +98,16 @@ export async function confirmarPedido(
     if (notesErr) console.error("confirmarPedido · kitchen_notes", notesErr);
   }
 
-  const result = await routeOrderToCocina(orderId, business.id);
+  // Spec 127 — el papel y el estado se separan. Un encargue de hoy para las
+  // 21:30 necesita que la comanda salga ahora (cocina se organiza con la hora
+  // impresa, que es lo que ya hacía) pero NO que el pedido aparezca en
+  // «Preparando» tres horas antes: la columna mostraría quince pedidos en
+  // preparación de los que ninguno se está preparando. El estado lo avanza el
+  // cron a `kitchen_at − lead`.
+  const esperando = esperaSuHoraDeMarcha(orderRow, business);
+  const result = await routeOrderToCocina(orderId, business.id, {
+    skipStatusAdvance: esperando,
+  });
 
   revalidatePath(`/${slug}/admin/pedidos`);
   revalidatePath(`/${slug}/admin/operacion`);
