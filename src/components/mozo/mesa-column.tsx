@@ -416,7 +416,7 @@ function ItemEnviado({
           {item.quantity}×
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-semibold line-through">
+          <p className="text-xs font-semibold break-words line-through">
             {item.product_name}
           </p>
           {item.cancelled_reason && (
@@ -435,7 +435,7 @@ function ItemEnviado({
         {item.quantity}×
       </span>
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold text-zinc-900">
+        <p className="text-sm font-semibold break-words text-zinc-900">
           {item.product_name}
         </p>
         {/* Los modificadores son la mitad del pedido: sin ellos «Milanesa» no
@@ -506,13 +506,20 @@ function ItemSinEnviar({
       // ←/→ mueven la cantidad y Supr la quita.
       {...rowProps}
       aria-label={`${item.product_name}, cantidad ${item.quantity}. Sin enviar. ← y → cambian la cantidad, Supr la quita.`}
-      className="flex items-start gap-2 px-3 py-2 outline-none focus-visible:bg-emerald-100 focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-inset"
+      // `flex-wrap` + un ancho mínimo para el nombre: la fila tiene mucha
+      // ferretería fija (precio + hasta cinco botones, ~285 px) y la columna
+      // mide 46% del panel. Con una sola línea el nombre se achicaba por
+      // debajo del ancho de su propia palabra y —al ser `overflow` visible—
+      // se dibujaba ENCIMA del precio: «Milanesa» pisada por «$ 27.500».
+      // Ahora, cuando no entra todo, los botones bajan a su propio renglón y
+      // el nombre se lee siempre entero.
+      className="flex flex-wrap items-start gap-x-2 gap-y-1.5 px-3 py-2 outline-none focus-visible:bg-emerald-100 focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-inset"
     >
       <span className="mt-0.5 text-sm font-bold text-emerald-800 tabular-nums">
         {item.quantity}×
       </span>
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold text-zinc-900">
+      <div className="min-w-[7rem] flex-1 basis-0">
+        <p className="text-sm font-semibold break-words text-zinc-900">
           {item.esMenuDelDia && (
             <span className="mr-1 inline-flex items-center rounded bg-emerald-200 px-1 align-middle text-[9px] font-bold text-emerald-800 uppercase">
               Menú
@@ -543,7 +550,7 @@ function ItemSinEnviar({
       <span className="shrink-0 text-xs font-semibold text-emerald-800 tabular-nums">
         {formatCurrency(item.line_subtotal_cents)}
       </span>
-      <div className="flex shrink-0 items-center gap-1">
+      <div className="ml-auto flex shrink-0 items-center gap-1">
         {userCanEditPrice && !item.esMenuDelDia && (
           <button
             type="button"
