@@ -103,7 +103,7 @@ pregunta «¿esto va como programado?», que hoy no tiene una respuesta obvia.
 
 ## Qué se construye
 
-### FR-001 · Una columna nueva
+### FR-001 · Una columna nueva ✅
 
 Migración **0050**:
 
@@ -118,7 +118,7 @@ siempre significó. Los dos canales escriben la misma y el board, el control y
 
 `scheduled_march_lead_{pickup,delivery}_min` **se conservan**: rigen el canal web.
 
-### FR-002 · La hoja: para hoy, o programado
+### FR-002 · La hoja: para hoy, o programado ✅
 
 Muere `MOSTRAR_PROGRAMADO`. La hoja arranca en **Para hoy**, que es el 95% de los
 encargues, y «Programado» es la puerta aparte para otro día (D8).
@@ -160,7 +160,7 @@ encargue»**.
 En **modo agregar** (spec 125) nada de esto aparece. Las mismas horas se corrigen
 desde el detalle, donde hoy se pide la nota al marchar.
 
-### FR-003 · El server valida distinto según quién carga
+### FR-003 · El server valida distinto según quién carga ✅
 
 `validateScheduledOrder` suma `source: "public" | "staff"`:
 
@@ -172,7 +172,7 @@ desde el detalle, donde hoy se pide la nota al marchar.
 
 `cargarPedidoStaff` pasa `source: "staff"`; el checkout no cambia una coma.
 
-### FR-004 · El momento cero
+### FR-004 · El momento cero ✅
 
 Una función pura, y todo lo demás la usa:
 
@@ -186,7 +186,7 @@ marchaAt(order, business) =
 `shouldMarchNow`, `marchDueScheduledOrders` y el filtro SQL del cron pasan a
 preguntarle a esto.
 
-### FR-005 · Pedido de hoy: el papel ya, el estado después
+### FR-005 · Pedido de hoy: el papel ya, el estado después ✅
 
 Al cargar con «enviar a cocina», se rutea con
 **`routeOrderToCocina(id, businessId, { skipStatusAdvance: true })`** — la opción
@@ -197,7 +197,7 @@ Llegado `marchaAt`, el cron **sólo avanza el estado**: la orden ya tiene comand
 así que `routeOrderToCocina` cortaría por idempotencia sin mover nada. Es un
 UPDATE a `preparing` con la misma guarda optimista (`.in("status", MARCHABLE)`).
 
-### FR-006 · Pedido de otro día: todo junto, a la hora
+### FR-006 · Pedido de otro día: todo junto, a la hora ✅
 
 No se rutea al cargar. Llegado `marchaAt`, el cron hace lo que ya hace hoy:
 `routeOrderToCocina` completo — comandas **y** `preparing` en el mismo gesto.
@@ -205,7 +205,7 @@ No se rutea al cargar. Llegado `marchaAt`, el cron hace lo que ya hace hoy:
 El encargue que **nace con la ventana vencida** (21:10 para cocina 21:15) sale en
 el acto, sin esperar hasta 5 minutos al próximo tick.
 
-### FR-006b · El pedido de otro día pertenece a la jornada en que se prepara
+### FR-006b · El pedido de otro día pertenece a la jornada en que se prepara ✅
 
 `orders.business_day` y `orders.daily_number` los materializa el trigger
 `set_order_daily_number` sobre **`created_at`** (migración 0049). Sin tocar nada,
@@ -220,7 +220,7 @@ el encargue queda **#1 de mañana**, que es lo que corresponde: llegó primero.
 Corolario aceptado: el pedido no aparece en los totales de la jornada en que se
 cargó, sino en la que se trabaja. Es lo correcto para caja y para el pase.
 
-### FR-007 · El papel, igual que hoy pero con el dato bien
+### FR-007 · El papel, igual que hoy pero con el dato bien ✅
 
 - **Comanda** — el banner sigue siendo lo primero del ticket y sigue diciendo
   `ENTREGAR 21:15`, pero la hora sale de `kitchen_at` en vez del texto libre. La
@@ -228,7 +228,7 @@ cargó, sino en la que se trabaja. Es lo correcto para caja y para el pase.
   pedido y **en ninguna de mesa**.
 - **Control** (el papel de Ale) — suma la **hora del pedido**. Hoy no la tiene.
 
-### FR-008 · Las notas vuelven a ser notas
+### FR-008 · Las notas vuelven a ser notas ✅
 
 - `entregaLabel` deja de leer `kitchen_notes`: lee `scheduled_at` y nada más.
 - **«Nota para el pedido»** (`delivery_notes`): el placeholder deja de sugerir
@@ -238,7 +238,7 @@ cargó, sino en la que se trabaja. Es lo correcto para caja y para el pase.
   «21:30». Queda para la instrucción de armado. **Mismo nombre en los dos lados.**
 - Una línea de ayuda manda «sin cebolla» a la nota del ítem.
 
-### FR-009 · «Próximos», agrupado por día
+### FR-009 · «Próximos», agrupado por día ✅
 
 Con D6 entran pedidos de otras fechas, y hoy la sección no distingue. Pasa a
 agrupar: **Hoy** primero, después cada día. La tarjeta dice las tres cosas —
@@ -246,7 +246,7 @@ agrupar: **Hoy** primero, después cada día. La tarjeta dice las tres cosas —
 («comanda impresa»), porque si no un pedido de hoy en «Próximos» parece no haber
 salido nunca.
 
-### FR-010 · La red de seguridad del automatismo
+### FR-010 · La red de seguridad del automatismo ✅
 
 El avance pasa a depender del cron. Si el cron falla, el pedido de otro día **no
 sale** y el de hoy se queda fuera del kanban.
@@ -280,6 +280,42 @@ y la tarjeta en rojo. Idempotente por `orders.march_alerted_at`.
 - **Los pedidos viejos tienen la hora adentro de `kitchen_notes`** y no hay
   backfill posible (en la base hay `T`, `transfirio`, `a`). Al dejar de leer la
   nota, esos pedidos dejan de mostrarla en el board. Aceptable: son del día.
+
+## Estado
+
+**Implementada** (2026-08-27). Migración 0050 aplicada al cloud
+(`tjfufswzsxfujcpoxapx`). `pnpm typecheck`, `pnpm build` y 1822 tests de unidad
+en verde; los `*.integration` siguen rotos por el stack local apagado
+(`supabase.auth.getClaims is not a function`), igual que antes de tocar nada.
+
+| Commit | Qué entró |
+|---|---|
+| `c325bb6` | migración 0050 + tipos regenerados |
+| `3f11e3d` | `marchAtForOrder` y la validación por `source` |
+| `558c6fb` | la persistencia y la jornada del encargue de otro día |
+| `d647778` | el papel sale, el estado espera (`skipStatusAdvance`) |
+| `47d7fc3` | el cron: ventana desde la hora de cocina + avanzar al que ya imprimió |
+| `760158b` | la hoja y las notas |
+| `601c9b3` | «Próximos» encendido |
+| `7ccfd66` | el papel del repartidor |
+| `990c68c` | el banner de la comanda |
+
+**Lo que cambió sobre la marcha:**
+
+- **`skipStatusAdvance` ya existía** (spec 091, la venta de mostrador), así que
+  separar el papel del estado no costó código nuevo — sólo usarlo.
+- **`FR-006b` apareció implementando**: el trigger `set_order_daily_number` saca
+  la jornada de `created_at`, así que el encargue de mañana se llevaba un número
+  de hoy y ese día habría habido dos «#7» en el pase.
+- **`FR-010` quedó a medias, y a propósito.** La mitad client-side está (la
+  tarjeta en rojo, que es la que funciona *aunque el cron esté muerto*). La
+  notificación interna server-side **no**: la emitiría el propio cron, así que no
+  cubre el caso que importa. `orders.march_alerted_at` quedó creada para cuando
+  se haga, desde un cron aparte o desde el board.
+- **Regenerar los tipos destapó** que estaban viejos desde la 0049:
+  `business_day` y `daily_number` son NOT NULL sin default de columna.
+- **Se fueron tres props muertas** de la hoja (`scheduledSlots` y los dos leads
+  por tipo): la grilla de chips era del checkout, y el staff escribe hora libre.
 
 ## Verificación
 
