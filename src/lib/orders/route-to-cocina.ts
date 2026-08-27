@@ -22,6 +22,13 @@ export type RouteOrderResult = {
    * prende cuando de verdad falta el papel y hay que ir a buscarlo.
    */
   control_failed: boolean;
+  /**
+   * La orden **ya tenía comandas**: esta llamada fue no-op por idempotencia
+   * (spec 127). Lo mira el cron, que para un encargue de hoy —cuyo papel ya
+   * salió al cargarlo— tiene que avanzar el estado por su cuenta: el camino
+   * normal lo avanza `routeOrderToCocina`, y por acá no pasa.
+   */
+  already_had_comandas: boolean;
 };
 
 /**
@@ -87,6 +94,7 @@ export async function routeOrderToCocina(
       comanda_ids: [],
       items_without_station: 0,
       control_failed: control.failed,
+      already_had_comandas: true,
     });
   }
 
@@ -245,5 +253,6 @@ export async function routeOrderToCocina(
     comanda_ids: route.comanda_ids,
     items_without_station: withoutStation,
     control_failed: controlFailed,
+    already_had_comandas: false,
   });
 }

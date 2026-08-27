@@ -15,28 +15,47 @@ type DueRow = {
   id: string;
   business_id: string;
   delivery_type: string;
-  scheduled_at: string;
+  scheduled_at: string | null;
+  kitchen_at?: string | null;
   business: {
     scheduled_march_lead_pickup_min: number | null;
     scheduled_march_lead_delivery_min: number | null;
+    scheduled_march_lead_kitchen_min?: number | null;
   } | null;
 };
 
 type Captured = {
   select?: string;
-  or?: string;
+  /** Spec 127: ahora hay dos `.or()` — la política de estados y la ventana. */
+  ors: string[];
   lte?: [string, string];
   in?: [string, string[]];
 };
 
 let rows: DueRow[] = [];
-let captured: Captured = {};
+let captured: Captured = { ors: [] };
 const routed: string[] = [];
+
+/**
+ * Spec 127 — los UPDATE de estado que el cron hace por su cuenta (el encargue
+ * de hoy, cuyo papel ya salió). El builder se vuelve "modo update" apenas se
+ * llama `.update()`, así el `then` resuelve la fila tocada en vez del listado.
+ */
+const updates: Record<string, unknown>[] = [];
 
 function makeFakeService() {
   return {
     from() {
+      let esUpdate = false;
       const builder = {
+        update(patch: Record<string, unknown>) {
+          esUpdate = true;
+          updates.push(patch);
+          return builder;
+        },
+        eq() {
+          return builder;
+        },
         select(cols: string) {
           captured.select = cols;
           return builder;
@@ -49,15 +68,19 @@ function makeFakeService() {
           return builder;
         },
         or(expr: string) {
-          captured.or = expr;
+          captured.ors.push(expr);
           return builder;
         },
         lte(col: string, val: string) {
           captured.lte = [col, val];
           return builder;
         },
-        then(resolve: (v: { data: unknown }) => void) {
-          resolve({ data: rows });
+        then(resolve: (v: { data: unknown; error: unknown }) => void) {
+          resolve(
+            esUpdate
+              ? { data: [{ id: "avanzado" }], error: null }
+              : { data: rows, error: null },
+          );
         },
       };
       return builder;
@@ -69,10 +92,21 @@ vi.mock("@/lib/supabase/service", () => ({
   createSupabaseServiceClient: () => makeFakeService(),
 }));
 
+/** Spec 127: los tests que necesitan el camino "ya tenía comandas" lo prenden. */
+let yaTeniaComandas = false;
+
 vi.mock("./route-to-cocina", () => ({
   routeOrderToCocina: async (orderId: string) => {
     routed.push(orderId);
-    return { ok: true, data: { order_id: orderId, comanda_ids: ["c1"], items_without_station: 0 } };
+    return {
+      ok: true,
+      data: {
+        order_id: orderId,
+        comanda_ids: yaTeniaComandas ? [] : ["c1"],
+        items_without_station: 0,
+        already_had_comandas: yaTeniaComandas,
+      },
+    };
   },
 }));
 
@@ -96,32 +130,41 @@ function row(o: Partial<DueRow> & Pick<DueRow, "id" | "scheduled_at">): DueRow {
 describe("marchDueScheduledOrders", () => {
   beforeEach(() => {
     rows = [];
-    captured = {};
+    captured = { ors: [] };
     routed.length = 0;
+    updates.length = 0;
+    yaTeniaComandas = false;
   });
 
   it("solo pide pagados-sin-tocar o aceptados (política de spec 047)", async () => {
     await marchDueScheduledOrders(NOW);
-    expect(captured.or).toBe(
+    expect(captured.ors).toContain(
       "and(status.eq.pending,payment_status.eq.paid),status.eq.confirmed",
     );
     // Un `pending` impago no matchea ninguna de las dos ramas.
-    expect(captured.or).not.toContain("status.eq.pending,payment_status.eq.pending");
+    expect(captured.ors.join(" ")).not.toContain(
+      "status.eq.pending,payment_status.eq.pending",
+    );
   });
 
   it("no trae pedidos en mesa y acota la ventana con el techo del lead", async () => {
     await marchDueScheduledOrders(NOW);
     expect(captured.in).toEqual(["delivery_type", ["pickup", "delivery"]]);
-    const [col, cutoff] = captured.lte!;
-    expect(col).toBe("scheduled_at");
+    // Spec 127 — la ventana mira las DOS horas: la de cocina cuando está, y la
+    // del pedido sólo cuando no. Cada rama por su lado para que use su índice.
+    const ventana = captured.ors.find((o) => o.includes("kitchen_at"))!;
+    expect(ventana).toBeDefined();
+    const cutoff = ventana.match(/kitchen_at\.lte\.([^,]+)/)![1];
     // 240 min = MAX_MARCH_LEAD_MIN.
     expect(new Date(cutoff).getTime() - NOW.getTime()).toBe(240 * 60_000);
+    expect(ventana).toContain("and(kitchen_at.is.null,scheduled_at.lte.");
   });
 
   it("trae los dos leads del negocio en el join", async () => {
     await marchDueScheduledOrders(NOW);
     expect(captured.select).toContain("scheduled_march_lead_pickup_min");
     expect(captured.select).toContain("scheduled_march_lead_delivery_min");
+    expect(captured.select).toContain("scheduled_march_lead_kitchen_min");
   });
 
   it("un delivery con lead 60 marcha a T−60 pero no a T−61", async () => {
@@ -190,6 +233,62 @@ describe("marchDueScheduledOrders", () => {
       // sin que saliera un papel en cocina era indistinguible de uno sano.
       withoutComanda: 0,
       controlFailed: 0,
+      // spec 127 — el encargue de hoy llega acá con la comanda ya impresa y lo
+      // único que se le hace es avanzar el estado. Éste marchó completo.
+      advancedOnly: 0,
     });
+  });
+
+  // ── Spec 127 · el encargue de hoy: el papel ya salió, falta el kanban ──
+  it("al encargue que ya imprimió su comanda sólo le avanza el estado", async () => {
+    yaTeniaComandas = true;
+    rows = [
+      row({
+        id: "hoy",
+        scheduled_at: "2026-06-26T21:00:00-03:00",
+        kitchen_at: "2026-06-26T20:30:00-03:00",
+        business: {
+          scheduled_march_lead_pickup_min: 40,
+          scheduled_march_lead_delivery_min: 60,
+          scheduled_march_lead_kitchen_min: 40,
+        },
+      }),
+    ];
+    // Marcha a 20:30 − 40 = 19:50, o sea que a las 20:00 ya está en ventana.
+    const res = await marchDueScheduledOrders(NOW);
+    expect(res.considered).toBe(1);
+    expect(res.advancedOnly).toBe(1);
+    expect(updates).toEqual([{ status: "preparing" }]);
+  });
+
+  it("al programado que todavía no imprimió no le toca el estado a mano", async () => {
+    // Camino de siempre: `routeOrderToCocina` crea las comandas Y avanza.
+    rows = [row({ id: "manana", scheduled_at: "2026-06-26T21:00:00-03:00" })];
+    const res = await marchDueScheduledOrders(NOW);
+    expect(res.marched).toBe(1);
+    expect(res.advancedOnly).toBe(0);
+    expect(updates).toEqual([]);
+  });
+
+  it("cuenta hacia atrás desde la hora de cocina, no desde la del pedido", async () => {
+    // Listo 21:15, entrega 23:00 — el viaje es largo. Con lead de cocina 40, la
+    // marcha es 20:35. A las 20:00 (NOW) todavía no.
+    rows = [
+      row({
+        id: "cocina",
+        scheduled_at: "2026-06-26T23:00:00-03:00",
+        kitchen_at: "2026-06-26T21:15:00-03:00",
+        business: {
+          scheduled_march_lead_pickup_min: 40,
+          scheduled_march_lead_delivery_min: 60,
+          scheduled_march_lead_kitchen_min: 40,
+        },
+      }),
+    ];
+    expect((await marchDueScheduledOrders(NOW)).considered).toBe(0);
+
+    // A las 20:35 sí.
+    const alas2035 = new Date("2026-06-26T20:35:00-03:00");
+    expect((await marchDueScheduledOrders(alas2035)).considered).toBe(1);
   });
 });
