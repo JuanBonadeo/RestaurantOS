@@ -4,9 +4,11 @@ import type { WeeklySchedule } from "@/lib/reservations/types";
 
 import {
   DEFAULT_MARCH_LEAD_DELIVERY_MIN,
+  DEFAULT_MARCH_LEAD_KITCHEN_MIN,
   DEFAULT_MARCH_LEAD_PICKUP_MIN,
   filterSlotsByLead,
   isScheduledForLater,
+  marchAtForOrder,
   marchLeadForOrder,
   orderSlotsForDay,
   shouldMarchNow,
@@ -301,5 +303,163 @@ describe("marchLeadForOrder", () => {
         scheduled_march_lead_delivery_min: 0,
       }),
     ).toBe(0);
+  });
+});
+
+// ── Spec 127 · las dos horas del pedido ─────────────────────────────────────
+
+describe("marchAtForOrder (spec 127)", () => {
+  const BUSINESS = {
+    scheduled_march_lead_pickup_min: 40,
+    scheduled_march_lead_delivery_min: 60,
+    scheduled_march_lead_kitchen_min: 30,
+  };
+  // Encargue de hoy: listo 21:15, el cliente lo retira 21:30.
+  const KITCHEN_AT = new Date("2026-06-25T21:15:00-03:00");
+  const SCHEDULED_AT = new Date("2026-06-25T21:30:00-03:00");
+
+  it("con hora de cocina, cuenta hacia atrás desde ella", () => {
+    expect(
+      marchAtForOrder(
+        { kitchen_at: KITCHEN_AT.toISOString(), scheduled_at: SCHEDULED_AT.toISOString(), delivery_type: "pickup" },
+        BUSINESS,
+      ),
+    ).toEqual(new Date("2026-06-25T20:45:00-03:00"));
+  });
+
+  it("el lead de cocina no depende del tipo de entrega", () => {
+    // El viaje ya está dicho en la diferencia entre las dos horas, así que un
+    // delivery con hora de cocina usa el MISMO lead que un retiro.
+    const pickup = marchAtForOrder(
+      { kitchen_at: KITCHEN_AT.toISOString(), scheduled_at: SCHEDULED_AT.toISOString(), delivery_type: "pickup" },
+      BUSINESS,
+    );
+    const delivery = marchAtForOrder(
+      { kitchen_at: KITCHEN_AT.toISOString(), scheduled_at: SCHEDULED_AT.toISOString(), delivery_type: "delivery" },
+      BUSINESS,
+    );
+    expect(delivery).toEqual(pickup);
+  });
+
+  it("sin hora de cocina, el canal web queda intacto: lead por tipo", () => {
+    expect(
+      marchAtForOrder(
+        { kitchen_at: null, scheduled_at: SCHEDULED_AT.toISOString(), delivery_type: "pickup" },
+        BUSINESS,
+      ),
+    ).toEqual(new Date("2026-06-25T20:50:00-03:00")); // −40
+    expect(
+      marchAtForOrder(
+        { kitchen_at: null, scheduled_at: SCHEDULED_AT.toISOString(), delivery_type: "delivery" },
+        BUSINESS,
+      ),
+    ).toEqual(new Date("2026-06-25T20:30:00-03:00")); // −60
+  });
+
+  it("sin ninguna hora, no hay momento de marcha", () => {
+    expect(
+      marchAtForOrder(
+        { kitchen_at: null, scheduled_at: null, delivery_type: "pickup" },
+        BUSINESS,
+      ),
+    ).toBeNull();
+  });
+
+  it("cae al default si la fila del negocio viene incompleta", () => {
+    expect(
+      marchAtForOrder(
+        { kitchen_at: KITCHEN_AT.toISOString(), scheduled_at: null, delivery_type: "pickup" },
+        null,
+      ),
+    ).toEqual(
+      new Date(KITCHEN_AT.getTime() - DEFAULT_MARCH_LEAD_KITCHEN_MIN * 60_000),
+    );
+  });
+});
+
+describe("validateScheduledOrder · source staff (spec 127)", () => {
+  const base = {
+    deliveryType: "pickup" as const,
+    daySlots: TODAY_SLOTS,
+    timezone: TZ,
+    now: NOW, // jueves 12:00
+  };
+
+  it("acepta una hora que NO está en la grilla", () => {
+    // 21:20 no es chip de nada; es el encargue telefónico real.
+    const at = new Date("2026-06-25T21:20:00-03:00");
+    expect(
+      validateScheduledOrder({ ...base, scheduledAt: at, source: "staff" }).ok,
+    ).toBe(true);
+    expect(
+      validateScheduledOrder({ ...base, scheduledAt: at, source: "public" }).ok,
+    ).toBe(false);
+  });
+
+  it("acepta menos de 60 minutos de anticipación", () => {
+    const at = new Date("2026-06-25T12:25:00-03:00"); // 25 min
+    expect(
+      validateScheduledOrder({ ...base, scheduledAt: at, source: "staff" }).ok,
+    ).toBe(true);
+    expect(
+      validateScheduledOrder({ ...base, scheduledAt: at, source: "public" }).ok,
+    ).toBe(false);
+  });
+
+  it("acepta otro día — el encargue programado (D6)", () => {
+    const manana = new Date("2026-06-26T21:00:00-03:00");
+    expect(
+      validateScheduledOrder({ ...base, scheduledAt: manana, source: "staff" }).ok,
+    ).toBe(true);
+    expect(
+      validateScheduledOrder({ ...base, scheduledAt: manana, source: "public" }).ok,
+    ).toBe(false);
+  });
+
+  it("rechaza una hora que ya pasó", () => {
+    const ayer = new Date("2026-06-25T11:00:00-03:00");
+    expect(
+      validateScheduledOrder({ ...base, scheduledAt: ayer, source: "staff" }).ok,
+    ).toBe(false);
+  });
+
+  it("rechaza la mesa, igual que el público", () => {
+    expect(
+      validateScheduledOrder({
+        ...base,
+        deliveryType: "dine_in",
+        scheduledAt: new Date("2026-06-25T21:20:00-03:00"),
+        source: "staff",
+      }).ok,
+    ).toBe(false);
+  });
+
+  it("rechaza una hora de cocina posterior a la del pedido", () => {
+    // El plato no puede estar listo DESPUÉS de que el cliente se lo lleve.
+    expect(
+      validateScheduledOrder({
+        ...base,
+        scheduledAt: new Date("2026-06-25T21:00:00-03:00"),
+        kitchenAt: new Date("2026-06-25T21:30:00-03:00"),
+        source: "staff",
+      }).ok,
+    ).toBe(false);
+  });
+
+  it("acepta la hora de cocina igual a la del pedido", () => {
+    const at = new Date("2026-06-25T21:00:00-03:00");
+    expect(
+      validateScheduledOrder({
+        ...base,
+        scheduledAt: at,
+        kitchenAt: at,
+        source: "staff",
+      }).ok,
+    ).toBe(true);
+  });
+
+  it("sin source explícito se comporta como el público (back-compat)", () => {
+    const at = new Date("2026-06-25T21:20:00-03:00");
+    expect(validateScheduledOrder({ ...base, scheduledAt: at }).ok).toBe(false);
   });
 });

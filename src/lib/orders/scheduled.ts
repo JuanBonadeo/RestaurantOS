@@ -46,6 +46,15 @@ export const DEFAULT_MARCH_LEAD_PICKUP_MIN = 40;
  */
 export const DEFAULT_MARCH_LEAD_DELIVERY_MIN = 60;
 /**
+ * Default de `businesses.scheduled_march_lead_kitchen_min` (spec 127).
+ *
+ * Es el lead que aplica cuando el pedido trae **hora de cocina**: ahí el viaje
+ * ya está expresado en la diferencia entre las dos horas que escribió el
+ * encargado, así que el lead vuelve a ser tiempo de preparación puro y —a
+ * diferencia de los dos de arriba— no depende del tipo de entrega.
+ */
+export const DEFAULT_MARCH_LEAD_KITCHEN_MIN = 40;
+/**
  * Techo del lead configurable (= el check de la migración 0027). Además acota
  * la ventana del filtro SQL del cron: nada que caiga más allá de `now + esto`
  * puede estar en ventana para ningún negocio.
@@ -172,12 +181,24 @@ export function filterSlotsByLead(
 }
 
 export type ScheduledOrderValidation = {
+  /** Hora DEL PEDIDO: cuándo el cliente lo retira o lo recibe. */
   scheduledAt: Date;
   deliveryType: "delivery" | "pickup" | "dine_in";
   /** Chips que el negocio ofrece hoy (`orderSlotsForDay`). */
   daySlots: string[];
   timezone: string;
   now?: Date;
+  /**
+   * Quién carga el pedido (spec 127). El default es `public` a propósito: si
+   * alguien suma un call-site nuevo y se olvida del campo, hereda las reglas
+   * estrictas, no las laxas.
+   */
+  source?: "public" | "staff";
+  /**
+   * Hora DE COCINA: para cuándo el plato tiene que estar listo. Sólo la escribe
+   * el staff; el checkout público expresa una sola hora.
+   */
+  kitchenAt?: Date | null;
 };
 
 export type ScheduledValidationResult =
@@ -204,6 +225,30 @@ export function validateScheduledOrder(
 
   if (input.deliveryType === "dine_in") {
     return { ok: false, error: "Los pedidos en mesa no se programan." };
+  }
+
+  // Spec 127 — la hora de cocina, cuando viene, no puede caer DESPUÉS de la del
+  // pedido: el plato no puede estar listo después de que el cliente se lo lleve.
+  // Vale para los dos orígenes (el público no la manda nunca).
+  if (
+    input.kitchenAt &&
+    input.kitchenAt.getTime() > input.scheduledAt.getTime()
+  ) {
+    return {
+      ok: false,
+      error: "La hora de cocina no puede ser posterior a la del pedido.",
+    };
+  }
+
+  // Spec 127 — el encargue que carga el staff no pasa por la grilla. Las tres
+  // reglas de abajo son del checkout público: son exactamente las que hoy le
+  // impiden al encargado cargar «para las 21:20» a las 20:50. Lo único que se
+  // le exige es que la hora no haya pasado ya.
+  if (input.source === "staff") {
+    if (input.scheduledAt.getTime() <= now.getTime()) {
+      return { ok: false, error: "Esa hora ya pasó." };
+    }
+    return { ok: true };
   }
 
   // Spec 064 — solo el mismo día. Se chequea antes que la anticipación para
@@ -237,6 +282,52 @@ export function validateScheduledOrder(
   }
 
   return { ok: true };
+}
+
+/**
+ * **El momento cero del pedido** (spec 127): cuándo se pone en marcha — pasa a
+ * `preparing` y, si la comanda todavía no salió, se imprime.
+ *
+ * Dos caminos, y el `??` es lo que deja el canal web donde estaba:
+ *
+ * - **Con hora de cocina** (el encargue que carga el staff): `kitchen_at` menos
+ *   el lead de cocina, que no mira el tipo de entrega. El encargado ya dijo para
+ *   cuándo tiene que estar listo; el lead sólo dice cuánto tarda cocina.
+ * - **Sin ella** (el checkout público, que expresa una sola hora): `scheduled_at`
+ *   menos el lead por tipo de la spec 061, tal cual venía.
+ *
+ * `null` = el pedido no difiere nada y marcha cuando lo mandan.
+ */
+export function marchAtForOrder(
+  order: {
+    kitchen_at?: string | Date | null;
+    scheduled_at?: string | Date | null;
+    delivery_type: string;
+  },
+  business: {
+    scheduled_march_lead_pickup_min?: number | null;
+    scheduled_march_lead_delivery_min?: number | null;
+    scheduled_march_lead_kitchen_min?: number | null;
+  } | null,
+): Date | null {
+  const asDate = (v: string | Date | null | undefined): Date | null => {
+    if (!v) return null;
+    const d = v instanceof Date ? v : new Date(v);
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+
+  const kitchenAt = asDate(order.kitchen_at);
+  if (kitchenAt) {
+    const lead =
+      business?.scheduled_march_lead_kitchen_min ??
+      DEFAULT_MARCH_LEAD_KITCHEN_MIN;
+    return new Date(kitchenAt.getTime() - lead * MIN_MS);
+  }
+
+  const scheduledAt = asDate(order.scheduled_at);
+  if (!scheduledAt) return null;
+  const lead = marchLeadForOrder(order.delivery_type, business);
+  return new Date(scheduledAt.getTime() - lead * MIN_MS);
 }
 
 /**
