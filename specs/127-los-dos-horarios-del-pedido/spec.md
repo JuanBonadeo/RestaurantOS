@@ -89,6 +89,12 @@ Como una nota, arriba de todo, igual que hoy. En una mesa no aparece.
 **D6 · Entra el encargue para otro día.** Muere el «sólo hoy» de la spec 064 —
 para el staff. El checkout público lo conserva.
 
+**D7 · La hora del encargue es libre, y no se chequea contra nada.** Ni grilla,
+ni anticipación mínima, ni horario de atención: si el encargado pone las 4 AM de
+un lunes cerrado, entra. Decidido con Juan (2026-08-27) sabiendo que `business_hours`
+está y permitiría avisar — el encargado es el responsable, y un aviso más en hora
+pico no paga. Si algún día molesta, es un `<p>` gris debajo del campo.
+
 ## Qué se construye
 
 ### FR-001 · Una columna nueva
