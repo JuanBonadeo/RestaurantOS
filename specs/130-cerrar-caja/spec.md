@@ -2,7 +2,7 @@
 
 **Issue:** [#201](https://github.com/gachetponzellini/RestaurantOS-app/issues/201) ·
 **Milestone:** Post-demo · Growth & hardening ·
-**Estado:** propuesta (2026-08-27)
+**Estado:** implementada (2026-08-30) · verify en vivo pendiente
 
 **Input:** Juan, 2026-08-27: *"el encargado no debería tener que crear una
 sangría manualmente con la plata total, sino que tendría que haber un btn que
@@ -145,16 +145,16 @@ tocar el resumen por email del cierre (spec 34, sigue por cron).
 
 ## Tasks
 
-1. [ ] Migración `0052` — `cerrar_caja_tx`, con el `+ 1 ms` del retiro (D3).
-2. [ ] `cerrarCaja` en actions + baja de `hacerCorte`; actualizar los 15 tests de integración.
-3. [ ] Query de cuentas abiertas (bloqueo) + pedidos abiertos (aviso).
-4. [ ] `desglose_esperado` con el reparto por dueño (cajón / mozo sin rendir).
-5. [ ] `CerrarCajaModal`: los tres bloques, conteo por billete, casilla de retiro.
-6. [ ] Rendición inline dentro del modal.
-7. [ ] Board: un solo botón «Cerrar caja»; anuncio de lo que se libera.
-8. [ ] `pnpm typecheck` + `pnpm test` en verde.
-9. [ ] Verify en vivo con rol encargado real (nunca service_role).
-10. [ ] Actualizar `wiki/features/caja.md` + `wiki/log.md`.
+1. [x] Migración `0052` — `cerrar_caja_tx`, con el `+ 1 ms` del retiro (D3). Aplicada al cloud y verificada ahí dentro de una transacción que revierte: desfase de 1 ms exacto, 2 mesas liberadas, 2 asignaciones limpias, `OPEN_TABLE_ORDERS:1` cuando hay cuenta abierta.
+2. [x] `cerrarCaja` en actions + baja de `hacerCorte`; los tests de integración pasaron a 22 casos.
+3. [x] `getCuentasAbiertas` (bloqueo, con mesa/mozo/monto) + `getPedidosAbiertosSinMesa` (aviso).
+4. [x] Reparto por dueño en `repartir-efectivo.ts`, servido por `getCierreCajaData` — **no** por `getCajaLiveStats`: el reparto consulta la rendición pendiente de cada mozo y el poll de stats corre cada 30 s por caja desde cada tablet.
+5. [x] `CerrarCajaModal`: los tres bloques, conteo por billete, casilla de retiro.
+6. [x] Rendición inline dentro del modal.
+7. [x] Board: un solo botón «Cerrar caja»; anuncio de lo que se libera.
+8. [x] `pnpm typecheck` limpio · los 34 tests nuevos/tocados de la spec en verde (22 integración + 6 del reparto + 6 del modal) y 1863 de la suite. ⚠️ Quedan **112 rojos preexistentes** en 13 archivos de integración ajenos a caja: su mock de auth define `getUser` y el código usa `getClaims()` desde la spec 106. Tarea aparte.
+9. [ ] Verify en vivo con rol encargado real (nunca service_role) — pendiente de Juan: el agente no ingresa contraseñas.
+10. [x] Actualizar `wiki/features/caja.md` + `wiki/log.md`.
 
 ## Criterios de verificación
 
