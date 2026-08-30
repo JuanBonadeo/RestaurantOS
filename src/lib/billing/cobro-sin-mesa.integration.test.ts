@@ -28,6 +28,12 @@ let CURRENT_USER_ID = "";
 vi.mock("@/lib/supabase/server", () => ({
   createSupabaseServerClient: async () => ({
     auth: {
+      // Identidad de las actions del salón: `getClaims` (spec 106).
+      // `getUser` queda para el código que todavía lo llama.
+      getClaims: async () => ({
+        data: { claims: { sub: CURRENT_USER_ID } },
+        error: null,
+      }),
       getUser: async () => ({
         data: { user: { id: CURRENT_USER_ID } },
         error: null,
