@@ -4,21 +4,34 @@ import userEvent from "@testing-library/user-event";
 
 import type { CierreCajaData } from "@/lib/caja/queries";
 
-const cerrarCaja = vi.fn(async () => ({
-  ok: true as const,
-  data: {
-    corte: {},
-    retiro_cents: 312_400,
-    mesasLiberadas: 0,
-    mozosLimpiados: 0,
-  },
-}));
-const registrarRendicionMozo = vi.fn(async () => ({ ok: true as const, data: {} }));
+// Los mocks declaran los parámetros de la action real: sin eso `vi.fn` infiere
+// una firma sin argumentos y `cerrarCaja.mock.calls[0][0]` no typechequea
+// (tupla vacía). El wrapper con arrow es para que la factory de `vi.mock`,
+// que se hoistea, resuelva la referencia recién al llamarla.
+type CajaActions = typeof import("@/lib/caja/actions");
+
+const cerrarCaja = vi.fn(
+  async (..._args: Parameters<CajaActions["cerrarCaja"]>) => ({
+    ok: true as const,
+    data: {
+      corte: {},
+      retiro_cents: 312_400,
+      mesasLiberadas: 0,
+      mozosLimpiados: 0,
+    },
+  }),
+);
+const registrarRendicionMozo = vi.fn(
+  async (..._args: Parameters<CajaActions["registrarRendicionMozo"]>) => ({
+    ok: true as const,
+    data: {},
+  }),
+);
 
 vi.mock("@/lib/caja/actions", () => ({
-  cerrarCaja: (...args: unknown[]) => cerrarCaja(...(args as [])),
-  registrarRendicionMozo: (...args: unknown[]) =>
-    registrarRendicionMozo(...(args as [])),
+  cerrarCaja: (...args: Parameters<typeof cerrarCaja>) => cerrarCaja(...args),
+  registrarRendicionMozo: (...args: Parameters<typeof registrarRendicionMozo>) =>
+    registrarRendicionMozo(...args),
 }));
 
 let DATA: CierreCajaData;
