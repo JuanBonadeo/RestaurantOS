@@ -5,22 +5,21 @@ import Link from "next/link";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
-  Banknote,
-  CreditCard,
-  Link2,
   Lock,
-  MoreHorizontal,
-  Package,
-  QrCode,
   RefreshCw,
   Settings,
-  Truck,
-  UtensilsCrossed,
   Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Surface } from "@/components/admin/shell/page-shell";
+import { CerrarCajaModal } from "@/components/admin/local/cerrar-caja-modal";
+import {
+  CobrosPorMetodo,
+  METHOD_LABEL,
+  VentasPorOrigen,
+  methodIcon,
+} from "@/components/admin/local/caja-metricas";
 import { SegmentedSelector } from "@/components/admin/local/segmented-selector";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,18 +32,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  hacerCorte,
-  registrarIngreso,
-  registrarSangria,
-} from "@/lib/caja/actions";
+import { registrarIngreso, registrarSangria } from "@/lib/caja/actions";
 import type { CajaPayment } from "@/lib/caja/queries";
 import type {
   CajaConEstado,
   CajaLiveStats,
   CajaMovimiento,
   PaymentMethod,
-  VentaOrigen,
 } from "@/lib/caja/types";
 import { useCajaPreferida } from "@/lib/caja/use-caja-preferida";
 import { useOnActivate } from "@/lib/ui/use-tab-param";
@@ -368,7 +362,7 @@ function CajaCard({
               color: "var(--brand-foreground, white)",
             }}
           >
-            <Lock className="size-3.5" /> Hacer corte
+            <Lock className="size-3.5" /> Cerrar caja
           </button>
         </div>
       </header>
@@ -515,28 +509,13 @@ function CajaCard({
           })
         }
       />
-      <CorteModal
+      <CerrarCajaModal
         open={corteOpen}
         onOpenChange={setCorteOpen}
+        slug={slug}
+        cajaId={caja.id}
         cajaName={caja.name}
-        desglose={stats?.desglose_esperado ?? null}
-        expected={expected}
-        onSubmit={(closing, notes) =>
-          startTransition(async () => {
-            const r = await hacerCorte(caja.id, closing, notes, null, slug);
-            if (!r.ok) {
-              toast.error(r.error);
-              return;
-            }
-            toast.success(
-              r.data.mesasLiberadas > 0
-                ? `Corte registrado — ${r.data.mesasLiberadas} mesas liberadas.`
-                : "Corte registrado",
-            );
-            setCorteOpen(false);
-            onChanged();
-          })
-        }
+        onCerrada={onChanged}
       />
     </div>
   );
@@ -544,133 +523,7 @@ function CajaCard({
 
 // ── Sub-componentes ──────────────────────────────────────────────
 
-// Orden canónico de métodos para el desglose. Las filas con monto > 0 se
-// muestran como barras (ordenadas por monto desc); las que están en $0 se
-// colapsan en una sola línea al pie, para no competir con los cobros reales.
-const COBRO_METHOD_ORDER: PaymentMethod[] = [
-  "cash",
-  "mp_qr",
-  "mp_link",
-  "card_manual",
-  "transfer",
-  "other",
-];
 
-function CobrosPorMetodo({
-  porMetodo,
-}: {
-  porMetodo: Record<PaymentMethod, number>;
-}) {
-  const metodos = COBRO_METHOD_ORDER.map((key) => ({
-    key,
-    label: METHOD_LABEL[key],
-    Icon: methodIcon(key),
-    amount: porMetodo[key] ?? 0,
-  }));
-  const total = metodos.reduce((s, m) => s + m.amount, 0);
-  const activos = metodos
-    .filter((m) => m.amount > 0)
-    .sort((a, b) => b.amount - a.amount);
-  const vacios = metodos.filter((m) => m.amount === 0);
-
-  return (
-    <>
-      <ul className="mt-4 space-y-3.5">
-        {activos.map(({ key, label, Icon, amount }) => {
-          const pct = total > 0 ? (amount / total) * 100 : 0;
-          return (
-            <li key={key}>
-              <div className="flex items-baseline justify-between gap-3 text-sm">
-                <span className="inline-flex items-baseline gap-2 text-zinc-700">
-                  <Icon className="size-3.5 shrink-0 translate-y-px text-zinc-400" />
-                  <span className="font-medium">{label}</span>
-                  <span className="font-semibold tabular-nums text-zinc-900">
-                    {formatCurrency(amount)}
-                  </span>
-                </span>
-                <span className="shrink-0 text-xs font-medium tabular-nums text-zinc-400">
-                  {pct.toFixed(0)}%
-                </span>
-              </div>
-              <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-zinc-100">
-                <div
-                  className="h-full rounded-full"
-                  style={{
-                    width: `${Math.max(pct, 2)}%`,
-                    background: "var(--brand, #18181B)",
-                  }}
-                />
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-      {vacios.length > 0 && (
-        <p className="mt-4 border-t border-zinc-100 pt-3 text-[0.7rem] leading-relaxed text-zinc-400">
-          <span className="font-medium text-zinc-500">Sin movimientos:</span>{" "}
-          {vacios.map((m) => m.label).join(", ")}
-        </p>
-      )}
-    </>
-  );
-}
-
-// Desglose de lo cobrado según de dónde vino el pedido. `otro` solo aparece si
-// hay plata ahí: es el balde de valores viejos/desconocidos de `delivery_type`.
-const ORIGEN_META: Record<
-  VentaOrigen,
-  { label: string; Icon: typeof UtensilsCrossed }
-> = {
-  salon: { label: "Salón", Icon: UtensilsCrossed },
-  delivery: { label: "Delivery", Icon: Truck },
-  takeaway: { label: "Take away", Icon: Package },
-  otro: { label: "Otro", Icon: MoreHorizontal },
-};
-
-const ORIGEN_ORDER: VentaOrigen[] = ["salon", "delivery", "takeaway", "otro"];
-
-function VentasPorOrigen({
-  porOrigen,
-}: {
-  porOrigen: Record<VentaOrigen, number>;
-}) {
-  const total = ORIGEN_ORDER.reduce((s, k) => s + (porOrigen[k] ?? 0), 0);
-  const items = ORIGEN_ORDER.filter(
-    (k) => k !== "otro" || (porOrigen[k] ?? 0) > 0,
-  );
-
-  return (
-    <section className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200/70">
-      <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
-        Cobrado por origen
-      </p>
-      <ul className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
-        {items.map((key) => {
-          const { label, Icon } = ORIGEN_META[key];
-          const amount = porOrigen[key] ?? 0;
-          const pct = total > 0 ? (amount / total) * 100 : 0;
-          return (
-            <li
-              key={key}
-              className="rounded-xl bg-zinc-50 px-3.5 py-3 ring-1 ring-zinc-200/70"
-            >
-              <p className="flex items-center gap-1.5 text-xs font-medium text-zinc-600">
-                <Icon className="size-3.5 shrink-0 text-zinc-400" />
-                {label}
-              </p>
-              <p className="mt-1 text-lg font-bold tracking-tight text-zinc-900 tabular-nums">
-                {formatCurrency(amount)}
-              </p>
-              <p className="text-[0.7rem] tabular-nums text-zinc-400">
-                {pct.toFixed(0)}% del período
-              </p>
-            </li>
-          );
-        })}
-      </ul>
-    </section>
-  );
-}
 
 function MovimientoRow({ mov, href }: { mov: CajaMovimiento; href: string }) {
   const isSangria = mov.kind === "sangria";
@@ -717,25 +570,6 @@ function MovimientoRow({ mov, href }: { mov: CajaMovimiento; href: string }) {
   );
 }
 
-const METHOD_LABEL: Record<PaymentMethod, string> = {
-  cash: "Efectivo",
-  mp_qr: "MercadoPago QR",
-  mp_link: "MercadoPago link",
-  card_manual: "Tarjeta",
-  transfer: "Transferencia",
-  other: "Otro",
-};
-
-function methodIcon(method: PaymentMethod) {
-  switch (method) {
-    case "cash": return Banknote;
-    case "mp_qr": return QrCode;
-    case "mp_link": return Link2;
-    case "card_manual": return CreditCard;
-    case "transfer": return Wallet;
-    default: return MoreHorizontal;
-  }
-}
 
 function CobroRow({ payment, href }: { payment: CajaPayment; href: string }) {
   const Icon = methodIcon(payment.method);
@@ -880,133 +714,6 @@ function MovimientoModal({
   );
 }
 
-function CorteModal({
-  open,
-  onOpenChange,
-  cajaName,
-  desglose,
-  expected,
-  onSubmit,
-}: {
-  open: boolean;
-  onOpenChange: (o: boolean) => void;
-  cajaName: string;
-  desglose: CajaLiveStats["desglose_esperado"] | null;
-  expected: number;
-  onSubmit: (closingCents: number, notes: string | null) => void;
-}) {
-  const [closing, setClosing] = useState("");
-  const [notes, setNotes] = useState("");
-
-  useEffect(() => {
-    if (!open) { setClosing(""); setNotes(""); }
-  }, [open]);
-
-  const cents = closing === "" ? null : Math.max(0, Math.round(Number(closing) * 100));
-  const diff = cents === null ? 0 : cents - expected;
-  const requiresNotes = cents !== null && diff !== 0;
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>
-            Hacer corte
-            <span className="ml-2 text-sm font-normal text-zinc-500">· {cajaName}</span>
-          </DialogTitle>
-        </DialogHeader>
-
-        <div className="rounded-xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70">
-          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
-            Lo que esperás encontrar
-          </p>
-          <p className="mt-1 text-2xl font-semibold tabular-nums text-zinc-900">
-            {formatCurrency(expected)}
-          </p>
-          {/* De dónde sale ese número. Antes decía "cobros + propinas", que no
-              es la cuenta que hace el arqueo: la propina entró al cajón pero es
-              del mozo (spec 098) y los movimientos del período no aparecían por
-              ningún lado. Con un ingreso cargado, el desglose no daba el total
-              que estaba arriba — justo acá, donde se decide si falta plata. */}
-          {desglose && (
-            <dl className="mt-2 grid gap-0.5 text-xs text-zinc-600">
-              {desglose.apertura_cents > 0 && (
-                <div className="flex justify-between gap-3">
-                  <dt>Del corte anterior</dt>
-                  <dd className="tabular-nums">
-                    {formatCurrency(desglose.apertura_cents)}
-                  </dd>
-                </div>
-              )}
-              <div className="flex justify-between gap-3">
-                <dt>Cobros en efectivo, sin propinas</dt>
-                <dd className="tabular-nums">
-                  {formatCurrency(desglose.efectivo_cents)}
-                </dd>
-              </div>
-              {desglose.ingresos_cents > 0 && (
-                <div className="flex justify-between gap-3">
-                  <dt>Ingresos</dt>
-                  <dd className="tabular-nums">
-                    +{formatCurrency(desglose.ingresos_cents)}
-                  </dd>
-                </div>
-              )}
-              {desglose.sangrias_cents > 0 && (
-                <div className="flex justify-between gap-3">
-                  <dt>Sangrías</dt>
-                  <dd className="tabular-nums">
-                    −{formatCurrency(desglose.sangrias_cents)}
-                  </dd>
-                </div>
-              )}
-            </dl>
-          )}
-        </div>
-
-        <div className="mt-4 grid gap-1.5">
-          <Label className="text-sm font-medium">Efectivo contado en caja</Label>
-          <div className="relative">
-            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base font-semibold text-zinc-400">$</span>
-            <Input type="number" value={closing} onChange={(e) => setClosing(e.target.value)} placeholder="0" autoFocus inputMode="decimal" className="pl-7 text-base tabular-nums" />
-          </div>
-        </div>
-
-        {cents !== null && diff !== 0 && (
-          <div className={cn("mt-4 flex items-center justify-between rounded-lg p-3 ring-1", diff < 0 ? "bg-rose-50 ring-rose-200 text-rose-900" : "bg-amber-50 ring-amber-200 text-amber-900")}>
-            <span className="text-sm font-semibold">{diff < 0 ? "Te falta" : "Te sobra"}</span>
-            <span className="text-lg font-bold tabular-nums">{diff > 0 ? "+" : "−"}{formatCurrency(Math.abs(diff))}</span>
-          </div>
-        )}
-
-        {cents !== null && diff === 0 && (
-          <div className="mt-4 flex items-center justify-between rounded-lg bg-emerald-50 p-3 ring-1 ring-emerald-200 text-emerald-900">
-            <span className="text-sm font-semibold">Cuadra perfecto</span>
-            <Banknote className="size-4" />
-          </div>
-        )}
-
-        {requiresNotes && (
-          <div className="mt-3 grid gap-1.5">
-            <Label className="text-sm font-medium">¿Qué pasó?<span className="ml-1 text-rose-600">*</span></Label>
-            <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Vuelto mal dado, billete falso, propina mal cargada…" />
-          </div>
-        )}
-
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button
-            disabled={cents === null || (requiresNotes && notes.trim() === "")}
-            onClick={() => cents !== null && onSubmit(cents, notes.trim() || null)}
-          >
-            <Lock className="mr-2 size-4" />
-            Hacer corte
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 // ── Rendición por empleado ───────────────────────────────────────
 

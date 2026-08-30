@@ -10,6 +10,10 @@ import {
   startOfTodayUtc,
   type AdminOrder,
 } from "@/lib/admin/orders-query";
+import {
+  getCierreCajaData,
+  type CierreCajaData,
+} from "@/lib/caja/queries";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
@@ -125,6 +129,28 @@ export async function getCajaTabData(
   const ctx = await requireOperacionContext(slug);
   if (!ctx.ok) return ctx;
   return actionOk(await loadCaja(ctx.data.businessId));
+}
+
+/**
+ * Todo lo que el modal de **Cerrar caja** necesita (spec 130): la plata del
+ * período, el esperado partido por dueño, las cuentas abiertas que bloquean y
+ * lo que el cierre va a barrer del salón.
+ *
+ * Se pide al abrir el modal y no en el poll de la tab: el reparto por dueño
+ * consulta la rendición pendiente de cada mozo, y colgarlo del tick de 30 s
+ * eran decenas de queries por tablet para un número que se mira una vez por
+ * día.
+ */
+export async function getCierreCajaTabData(
+  slug: string,
+  cajaId: string,
+): Promise<ActionResult<CierreCajaData>> {
+  const ctx = await requireOperacionContext(slug);
+  if (!ctx.ok) return ctx;
+
+  const data = await getCierreCajaData(cajaId, ctx.data.businessId);
+  if (!data) return actionError("Caja no encontrada.");
+  return actionOk(data);
 }
 
 /** Tab **Rendición**: pendientes por mozo, historial, asignaciones y nómina. */
