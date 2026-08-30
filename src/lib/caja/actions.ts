@@ -6,7 +6,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { assignMozoToTable } from "@/lib/mozo/actions";
 import { requireMozoActionContext } from "@/lib/mozo/auth";
-import { clearAssignmentsForBusiness } from "@/lib/mozo/clear-assignments";
 import {
   canAcceptCajaDifference,
   canAssignMozo,
@@ -16,9 +15,14 @@ import {
   canRendirMozo,
 } from "@/lib/permissions/can";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
+import { formatCurrency } from "@/lib/currency";
 import { getBusiness } from "@/lib/tenant";
 
-import { getCajaLiveStats, getRendicionPendienteMozo } from "./queries";
+import {
+  getCajaLiveStats,
+  getCuentasAbiertas,
+  getRendicionPendienteMozo,
+} from "./queries";
 import type { CajaCorte, MozoRendicion, PaymentMethod } from "./types";
 
 type GenericClient = SupabaseClient;
@@ -226,14 +230,39 @@ export async function setCajaDefault(
 
 // ── Corte ─────────────────────────────────────────────────────
 
-export async function hacerCorte(
-  cajaId: string,
-  closing_cash_cents: number,
-  closing_notes: string | null,
-  denomination_count: Record<string, number> | null,
-  businessSlug: string,
-): Promise<ActionResult<{ corte: CajaCorte; mesasLiberadas: number }>> {
-  const business = await getBusiness(businessSlug);
+/**
+ * Cierra la caja: registra el corte, retira el efectivo y —si es la caja
+ * principal— deja el salón en cero. Un botón (spec 130).
+ *
+ * Reemplaza a `hacerCorte`. Antes cerrar el día eran tres pasos sueltos, y el
+ * del medio era el encargado **tipeando la plata entera del día** en una
+ * sangría a mano para que el sistema no creyera que el cajón seguía lleno. Un
+ * dedo mal puesto ahí y el arqueo del día siguiente arrancaba torcido.
+ *
+ * `retirar: false` es el arqueo de mitad de turno: se cuenta sin vaciar.
+ *
+ * La escritura entera va en `cerrar_caja_tx` (migración 0052): un corte sin su
+ * retiro deja al sistema esperando plata que ya no está en el cajón. Acá quedan
+ * las guardas de contexto —rol, techo de diferencia, cuentas abiertas con
+ * nombre y monto— que necesitan leer otras tablas y dar mensajes en castellano.
+ */
+export async function cerrarCaja(input: {
+  cajaId: string;
+  closing_cash_cents: number;
+  closing_notes: string | null;
+  denomination_count: Record<string, number> | null;
+  /** Sacar del cajón lo contado. Destildado = arqueo sin vaciar (D2). */
+  retirar: boolean;
+  businessSlug: string;
+}): Promise<
+  ActionResult<{
+    corte: CajaCorte;
+    retiro_cents: number;
+    mesasLiberadas: number;
+    mozosLimpiados: number;
+  }>
+> {
+  const business = await getBusiness(input.businessSlug);
   if (!business) return actionError("Negocio no encontrado.");
 
   const ctxResult = await requireMozoActionContext(business.id);
@@ -241,78 +270,97 @@ export async function hacerCorte(
   const ctx = ctxResult.data;
 
   if (!canHacerCorte(ctx.role)) {
-    return actionError("Solo encargado o admin pueden hacer un corte de caja.");
+    return actionError("Solo encargado o admin pueden cerrar la caja.");
   }
-  if (closing_cash_cents < 0) {
+  if (input.closing_cash_cents < 0) {
     return actionError("El monto de cierre no puede ser negativo.");
   }
 
   const service = createSupabaseServiceClient() as unknown as GenericClient;
 
-  const caja = await loadCajaForBusiness(service, cajaId, business.id);
+  const caja = await loadCajaForBusiness(service, input.cajaId, business.id);
   if (!caja) return actionError("Caja no encontrada.");
   if (!caja.is_active) return actionError("Caja inactiva.");
 
-  const stats = await getCajaLiveStats(cajaId, business.id);
+  const stats = await getCajaLiveStats(input.cajaId, business.id);
   if (!stats) return actionError("No se pudieron calcular los stats de la caja.");
   const expected_cash_cents = stats.expected_cash_cents;
-  const difference_cents = closing_cash_cents - expected_cash_cents;
+  const difference_cents = input.closing_cash_cents - expected_cash_cents;
 
   if (difference_cents !== 0) {
-    if (!closing_notes || closing_notes.trim() === "") {
+    if (!input.closing_notes || input.closing_notes.trim() === "") {
       return actionError(
         "Hay diferencia con el efectivo esperado. Tenés que registrar el motivo en las notas.",
       );
     }
     if (!canAcceptCajaDifference(ctx.role, difference_cents)) {
       return actionError(
-        "La diferencia excede tu autorización. Pedile al admin que haga el corte.",
+        "La diferencia excede tu autorización. Pedile al admin que cierre la caja.",
       );
     }
   }
 
-  const { data: inserted, error } = await service
-    .from("caja_cortes")
-    .insert({
-      caja_id: cajaId,
-      business_id: business.id,
-      encargado_id: ctx.userId,
-      expected_cash_cents,
-      closing_cash_cents,
-      difference_cents,
-      closing_notes: closing_notes?.trim() || null,
-      denomination_count: denomination_count ?? null,
-    })
-    .select("*")
-    .single();
-
-  if (error) return actionError(`No se pudo registrar el corte: ${error.message}`);
-
-  // Cerrar la caja principal = cerró el día: la distribución de mozos queda
-  // libre para el turno que viene (si no, la asignación es fija y arranca
-  // pegada la de ayer). Solo la principal — el corte del bar puede pasar en
-  // plena cena y no tiene por qué barrer el salón.
-  //
-  // No aborta el corte si falla: la plata ya se registró y es lo que importa;
-  // el encargado siempre puede limpiar a mano desde "Distribuir mozos".
-  let mesasLiberadas = 0;
+  // D7 · La cuenta abierta se nombra: la RPC también bloquea (por la carrera),
+  // pero «OPEN_TABLE_ORDERS:3» no le sirve a nadie a la 1 de la mañana. Acá se
+  // dice qué mesa y cuánto falta cobrar.
   if (caja.is_default) {
-    const cleared = await clearAssignmentsForBusiness(
-      service,
-      business.id,
-      ctx.userId,
-      "Corte de caja",
-    );
-    if (cleared === null) {
-      console.error("hacerCorte: no se pudo limpiar la distribución", cajaId);
-    } else {
-      mesasLiberadas = cleared;
+    const abiertas = await getCuentasAbiertas(business.id);
+    if (abiertas.length > 0) {
+      const detalle = abiertas
+        .slice(0, 3)
+        .map((c) => `Mesa ${c.table_label} (${formatCurrency(c.pendiente_cents)})`)
+        .join(", ");
+      const resto = abiertas.length > 3 ? ` y ${abiertas.length - 3} más` : "";
+      return actionError(
+        abiertas.length === 1
+          ? `No podés cerrar: la ${detalle} todavía tiene la cuenta abierta.`
+          : `No podés cerrar: hay ${abiertas.length} mesas con la cuenta abierta — ${detalle}${resto}.`,
+      );
     }
-    revalidatePath(`/${businessSlug}/mozo`);
   }
 
-  revalidatePath(`/${businessSlug}/admin/operacion`);
-  return actionOk({ corte: inserted as CajaCorte, mesasLiberadas });
+  const { data: rpcData, error } = await service.rpc("cerrar_caja_tx", {
+    p_caja_id: input.cajaId,
+    p_business_id: business.id,
+    p_encargado_id: ctx.userId,
+    p_expected_cash_cents: expected_cash_cents,
+    p_closing_cash_cents: input.closing_cash_cents,
+    p_closing_notes: input.closing_notes,
+    p_denomination_count: input.denomination_count,
+    p_retirar: input.retirar,
+    // D9 · Sólo la principal barre el salón: el cierre del bar puede pasar en
+    // plena cena y no tiene por qué liberar mesas.
+    p_barrer_salon: caja.is_default,
+  });
+
+  if (error) {
+    if (error.message.includes("OPEN_TABLE_ORDERS")) {
+      return actionError(
+        "Se abrió una cuenta mientras cerrabas. Revisá el salón y volvé a intentar.",
+      );
+    }
+    return actionError(`No se pudo cerrar la caja: ${error.message}`);
+  }
+
+  const row = (Array.isArray(rpcData) ? rpcData[0] : rpcData) as {
+    corte: CajaCorte;
+    retiro_id: string | null;
+    mesas_liberadas: number;
+    mozos_limpiados: number;
+  } | null;
+  if (!row) return actionError("No se pudo cerrar la caja.");
+
+  if (caja.is_default) {
+    revalidatePath(`/${input.businessSlug}/mozo`);
+  }
+  revalidatePath(`/${input.businessSlug}/admin/operacion`);
+
+  return actionOk({
+    corte: row.corte,
+    retiro_cents: row.retiro_id ? input.closing_cash_cents : 0,
+    mesasLiberadas: Number(row.mesas_liberadas ?? 0),
+    mozosLimpiados: Number(row.mozos_limpiados ?? 0),
+  });
 }
 
 // ── Movimientos manuales ───────────────────────────────────────

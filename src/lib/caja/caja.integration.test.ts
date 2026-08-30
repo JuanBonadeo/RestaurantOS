@@ -16,6 +16,14 @@ let CURRENT_USER_ID = "";
 vi.mock("@/lib/supabase/server", () => ({
   createSupabaseServerClient: async () => ({
     auth: {
+      // `getClaims` es por dónde entra hoy la identidad en las actions del
+      // salón (spec 106: el hop a GoTrue se pagaba en cada gesto del turno).
+      // El mock viejo sólo tenía `getUser` y este archivo entero fallaba con
+      // "getClaims is not a function" antes de llegar a probar nada.
+      getClaims: async () => ({
+        data: { claims: { sub: CURRENT_USER_ID } },
+        error: null,
+      }),
       getUser: async () => ({
         data: { user: { id: CURRENT_USER_ID } },
         error: null,
@@ -35,12 +43,31 @@ vi.mock("next/cache", () => ({
 }));
 
 const {
-  hacerCorte,
+  cerrarCaja,
   registrarSangria,
   registrarIngreso,
   distribuirSalon,
 } = await import("./actions");
-const { getCajaLiveStats } = await import("./queries");
+const { getCajaLiveStats, getCierreCajaData } = await import("./queries");
+
+/**
+ * Cerrar sin retirar es el arqueo de mitad de turno: contar sin vaciar, que es
+ * lo que hacía el corte de antes. Los casos históricos pasan por acá.
+ */
+const corte = (
+  cajaId: string,
+  closing: number,
+  notes: string | null,
+  slug: string,
+) =>
+  cerrarCaja({
+    cajaId,
+    closing_cash_cents: closing,
+    closing_notes: notes,
+    denomination_count: null,
+    retirar: false,
+    businessSlug: slug,
+  });
 
 describe.skipIf(!dbAvailable)("caja continua (integration)", () => {
   const supabase = createClient(supabaseUrl!, serviceKey!, {
@@ -55,6 +82,7 @@ describe.skipIf(!dbAvailable)("caja continua (integration)", () => {
   let adminId: string;
   let table1: string;
   let table2: string;
+  let openOrderId: string;
 
   const seedUser = async (label: string) => {
     const email = `${TEST_TAG}-${label}@example.test`;
@@ -169,7 +197,7 @@ describe.skipIf(!dbAvailable)("caja continua (integration)", () => {
   it("hacer corte con diff $0 → OK sin notes", async () => {
     CURRENT_USER_ID = encargadoId;
     const expected = 15_000; // 0 + 20k - 5k
-    const r = await hacerCorte(cajaA, expected, null, null, businessSlug);
+    const r = await corte(cajaA, expected, null, businessSlug);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.data.corte.difference_cents).toBe(0);
@@ -184,14 +212,14 @@ describe.skipIf(!dbAvailable)("caja continua (integration)", () => {
 
   it("hacer corte con diff sin notes → falla", async () => {
     CURRENT_USER_ID = encargadoId;
-    const r = await hacerCorte(cajaA, 20_000, null, null, businessSlug);
+    const r = await corte(cajaA, 20_000, null, businessSlug);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toMatch(/diferencia/i);
   });
 
   it("hacer corte con diff + notes (encargado) → OK", async () => {
     CURRENT_USER_ID = encargadoId;
-    const r = await hacerCorte(cajaA, 20_000, "sobrante por vuelto", null, businessSlug);
+    const r = await corte(cajaA, 20_000, "sobrante por vuelto", businessSlug);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.data.corte.difference_cents).toBe(20_000 - 15_000);
@@ -201,20 +229,20 @@ describe.skipIf(!dbAvailable)("caja continua (integration)", () => {
     CURRENT_USER_ID = encargadoId;
     // Nuevo período: last_closing = 20_000, expected = 20_000.
     // Closing = 20_000 + 1_000_000 → diff = 1_000_000 cents = $10.000
-    const r = await hacerCorte(cajaA, 20_000 + 1_000_000, "sobrante grande", null, businessSlug);
+    const r = await corte(cajaA, 20_000 + 1_000_000, "sobrante grande", businessSlug);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toMatch(/excede/i);
   });
 
   it("hacer corte con diff $10k como admin → OK", async () => {
     CURRENT_USER_ID = adminId;
-    const r = await hacerCorte(cajaA, 20_000 + 1_000_000, "sobrante grande", null, businessSlug);
+    const r = await corte(cajaA, 20_000 + 1_000_000, "sobrante grande", businessSlug);
     expect(r.ok).toBe(true);
   });
 
   it("mozo no puede hacer corte → falla permiso", async () => {
     CURRENT_USER_ID = mozoAId;
-    const r = await hacerCorte(cajaA, 0, null, null, businessSlug);
+    const r = await corte(cajaA, 0, null, businessSlug);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toMatch(/encargado|admin/i);
   });
@@ -240,10 +268,9 @@ describe.skipIf(!dbAvailable)("caja continua (integration)", () => {
     CURRENT_USER_ID = encargadoId;
     // table1/table2 quedaron con mozoA del test anterior.
     const stats = await getCajaLiveStats(cajaA, businessId);
-    const r = await hacerCorte(
+    const r = await corte(
       cajaA,
       stats!.expected_cash_cents,
-      null,
       null,
       businessSlug,
     );
@@ -263,16 +290,20 @@ describe.skipIf(!dbAvailable)("caja continua (integration)", () => {
     await supabase.from("cajas").update({ is_default: true }).eq("id", cajaA);
 
     const stats = await getCajaLiveStats(cajaA, businessId);
-    const r = await hacerCorte(
+    const r = await corte(
       cajaA,
       stats!.expected_cash_cents,
-      null,
       null,
       businessSlug,
     );
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.data.mesasLiberadas).toBe(2);
+    // Las dos mesas estaban libres y sólo tenían mozo asignado: se limpia la
+    // distribución, no se libera nada. Los dos números son distintos y el
+    // modal los dice por separado — «se liberan N mesas y se limpia la
+    // distribución de M mozos» (spec 130 · D8).
+    expect(r.data.mesasLiberadas).toBe(0);
+    expect(r.data.mozosLimpiados).toBe(2);
 
     const { data: rows } = await supabase
       .from("tables")
@@ -284,9 +315,258 @@ describe.skipIf(!dbAvailable)("caja continua (integration)", () => {
       .from("tables_audit_log")
       .select("kind, to_value, reason")
       .eq("business_id", businessId)
-      .eq("reason", "Corte de caja");
+      .eq("reason", "Cierre de caja")
+      .eq("kind", "assignment");
     expect(audit).toHaveLength(2);
     expect(audit!.every((a) => a.kind === "assignment")).toBe(true);
     expect(audit!.every((a) => a.to_value === null)).toBe(true);
+  });
+
+  // ── spec 130 · Cerrar caja ───────────────────────────────────────
+
+  // D3 · El retiro es una sangría insertada **después** del corte (+1 ms). Sin
+  // ese desfase la sangría comparte timestamp con el corte y, como el período
+  // se calcula con `>` estricto, no cae ni en el viejo ni en el nuevo: la
+  // plata se evapora del libro sin que nadie la haya sacado.
+  it("cerrar con retiro deja el período nuevo en $0 y la sangría en el libro", async () => {
+    CURRENT_USER_ID = encargadoId;
+    const antes = await getCajaLiveStats(cajaA, businessId);
+    const contado = antes!.expected_cash_cents;
+    expect(contado).toBeGreaterThan(0);
+
+    const r = await cerrarCaja({
+      cajaId: cajaA,
+      closing_cash_cents: contado,
+      closing_notes: null,
+      denomination_count: { "1000": 20, "500": 4 },
+      retirar: true,
+      businessSlug,
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.retiro_cents).toBe(contado);
+
+    const despues = await getCajaLiveStats(cajaA, businessId);
+    expect(despues!.expected_cash_cents).toBe(0);
+
+    // La sangría es una línea del libro como cualquier otra: visible,
+    // corregible y anulable con lo que ya existe (spec 070).
+    const { data: movs } = await supabase
+      .from("caja_movimientos")
+      .select("kind, amount_cents, reason, created_at")
+      .eq("caja_id", cajaA)
+      .eq("reason", "Retiro del cierre de caja");
+    expect(movs).toHaveLength(1);
+    expect(movs![0].kind).toBe("sangria");
+    expect(movs![0].amount_cents).toBe(contado);
+    expect(
+      new Date(movs![0].created_at).getTime() -
+        new Date(r.data.corte.created_at).getTime(),
+    ).toBe(1);
+
+    // Y el conteo por billete deja de ser una columna muerta (D10).
+    expect(r.data.corte.denomination_count).toEqual({ "1000": 20, "500": 4 });
+  });
+
+  it("cerrar sin retirar deja el esperado en lo contado (arqueo de mitad de turno)", async () => {
+    CURRENT_USER_ID = encargadoId;
+    await registrarIngreso(cajaA, 30_000, "fondo", businessSlug);
+
+    const r = await corte(cajaA, 30_000, null, businessSlug);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.retiro_cents).toBe(0);
+
+    const stats = await getCajaLiveStats(cajaA, businessId);
+    expect(stats!.expected_cash_cents).toBe(30_000);
+  });
+
+  // D7 · Cerrar con una mesa abierta es cerrar el día con plata sin cobrar.
+  it("una mesa con la cuenta abierta bloquea el cierre, y el error la nombra", async () => {
+    CURRENT_USER_ID = encargadoId;
+    const { data: orden } = await supabase
+      .from("orders")
+      .insert({
+        business_id: businessId,
+        table_id: table1,
+        lifecycle_status: "open",
+        delivery_type: "dine_in",
+        subtotal_cents: 84_000,
+        total_cents: 84_000,
+        status: "pending",
+        customer_name: "Mesa 1",
+        customer_phone: "000",
+      })
+      .select("id")
+      .single();
+    openOrderId = orden!.id;
+
+    const r = await corte(cajaA, 30_000, null, businessSlug);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error).toMatch(/Mesa 1/);
+      expect(r.error).toMatch(/abierta/i);
+    }
+  });
+
+  // D7 · El delivery abierto avisa pero no bloquea: el repartidor puede estar
+  // en la calle, y ese cobro cayendo en el período nuevo es lo correcto.
+  it("un delivery abierto no bloquea el cierre", async () => {
+    CURRENT_USER_ID = encargadoId;
+    const { data: envio } = await supabase
+      .from("orders")
+      .insert({
+        business_id: businessId,
+        lifecycle_status: "open",
+        delivery_type: "delivery",
+        subtotal_cents: 20_000,
+        total_cents: 20_000,
+        status: "pending",
+        customer_name: "Delivery",
+        customer_phone: "000",
+      })
+      .select("id")
+      .single();
+
+    // La mesa abierta del test anterior se cierra; queda sólo el delivery.
+    await supabase
+      .from("orders")
+      .update({ lifecycle_status: "closed" })
+      .eq("id", openOrderId);
+
+    const data = await getCierreCajaData(cajaA, businessId);
+    expect(data!.cuentas_abiertas).toHaveLength(0);
+    expect(data!.pedidos_abiertos.map((p) => p.origen)).toEqual(["delivery"]);
+
+    const r = await corte(cajaA, 30_000, null, businessSlug);
+    expect(r.ok).toBe(true);
+
+    await supabase.from("orders").delete().eq("id", envio!.id);
+  });
+
+  // D9 · El cierre del bar puede pasar en plena cena: no barre el salón ni
+  // mira si la 12 sigue comiendo.
+  it("la caja del bar cierra con mesas abiertas y no toca el salón", async () => {
+    CURRENT_USER_ID = encargadoId;
+    const { data: cB } = await supabase
+      .from("cajas")
+      .insert({ business_id: businessId, name: "Bar" })
+      .select("id")
+      .single();
+    await supabase
+      .from("orders")
+      .update({ lifecycle_status: "open" })
+      .eq("id", openOrderId);
+    await supabase
+      .from("tables")
+      .update({ operational_status: "ocupada", mozo_id: mozoAId })
+      .eq("id", table1);
+
+    const bar = await getCierreCajaData(cB!.id, businessId);
+    expect(bar!.barre_salon).toBe(false);
+    expect(bar!.cuentas_abiertas).toHaveLength(0);
+
+    const r = await corte(cB!.id, 0, null, businessSlug);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.mesasLiberadas).toBe(0);
+
+    const { data: mesa } = await supabase
+      .from("tables")
+      .select("operational_status, mozo_id")
+      .eq("id", table1)
+      .single();
+    expect(mesa!.operational_status).toBe("ocupada");
+    expect(mesa!.mozo_id).toBe(mozoAId);
+  });
+
+  // D8 · El cierre deja el salón en cero: sin cuentas abiertas, lo que queda
+  // son mesas zombi que arrancarían el día siguiente ocupadas por nadie.
+  it("cerrar la caja principal libera las mesas y limpia la distribución", async () => {
+    CURRENT_USER_ID = encargadoId;
+    await supabase
+      .from("orders")
+      .update({ lifecycle_status: "closed" })
+      .eq("id", openOrderId);
+    await supabase
+      .from("tables")
+      .update({ operational_status: "pidio_cuenta" })
+      .eq("id", table2);
+
+    const previo = await getCierreCajaData(cajaA, businessId);
+    expect(previo!.barre_salon).toBe(true);
+    expect(previo!.salon.mesas_a_liberar).toBe(2);
+    expect(previo!.salon.mozos_asignados).toBe(1);
+
+    const stats = await getCajaLiveStats(cajaA, businessId);
+    const r = await cerrarCaja({
+      cajaId: cajaA,
+      closing_cash_cents: stats!.expected_cash_cents,
+      closing_notes: null,
+      denomination_count: null,
+      retirar: true,
+      businessSlug,
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.mesasLiberadas).toBe(2);
+    expect(r.data.mozosLimpiados).toBe(1);
+
+    const { data: mesas } = await supabase
+      .from("tables")
+      .select("operational_status, mozo_id, current_order_id")
+      .in("id", [table1, table2]);
+    expect(mesas!.every((m) => m.operational_status === "libre")).toBe(true);
+    expect(mesas!.every((m) => m.mozo_id === null)).toBe(true);
+
+    const { data: audit } = await supabase
+      .from("tables_audit_log")
+      .select("kind, from_value, to_value")
+      .eq("business_id", businessId)
+      .eq("reason", "Cierre de caja")
+      .eq("kind", "status");
+    expect(audit).toHaveLength(2);
+    expect(audit!.map((a) => a.from_value).sort()).toEqual([
+      "ocupada",
+      "pidio_cuenta",
+    ]);
+    expect(audit!.every((a) => a.to_value === "libre")).toBe(true);
+  });
+
+  // D5 · Rendir no mueve el efectivo esperado: lo pasa de la columna del mozo
+  // a la del cajón. Antes de contar, la diferencia ya está explicada.
+  it("el mozo sin rendir aparece en el reparto, y el cajón es el resto", async () => {
+    const { data: orden } = await supabase
+      .from("orders")
+      .insert({
+        business_id: businessId,
+        lifecycle_status: "closed",
+        delivery_type: "dine_in",
+        subtotal_cents: 71_200,
+        total_cents: 71_200,
+        status: "delivered",
+        customer_name: "Cobro del mozo",
+        customer_phone: "000",
+      })
+      .select("id")
+      .single();
+    await supabase.from("payments").insert({
+      business_id: businessId,
+      order_id: orden!.id,
+      caja_id: cajaA,
+      method: "cash",
+      amount_cents: 71_200,
+      tip_cents: 0,
+      payment_status: "paid",
+      attributed_mozo_id: mozoAId,
+    });
+
+    const data = await getCierreCajaData(cajaA, businessId);
+    const total = data!.stats.expected_cash_cents;
+    expect(data!.reparto.mozos).toHaveLength(1);
+    expect(data!.reparto.mozos[0].mozo_name).toBe("MozoA");
+    expect(data!.reparto.mozos[0].efectivo_cents).toBe(71_200);
+    expect(data!.reparto.en_cajon_cents).toBe(total - 71_200);
+    expect(data!.reparto.descuadre_cents).toBe(0);
   });
 });

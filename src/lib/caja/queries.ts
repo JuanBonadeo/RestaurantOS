@@ -7,7 +7,8 @@ import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 import { calculateExpectedCash } from "./expected-cash";
 import { calcularRendicionMozo } from "./liquidacion-mozo";
-import { agruparVentasPorOrigen } from "./ventas-por-origen";
+import { repartirEfectivoEsperado, type RepartoEfectivo } from "./reparto-efectivo";
+import { agruparVentasPorOrigen, origenDeDeliveryType } from "./ventas-por-origen";
 import type {
   Caja,
   CajaConEstado,
@@ -1068,4 +1069,242 @@ export async function resolverNombresDeCorreccion(
     out.set(c.id, c.name);
   }
   return out;
+}
+
+// ── Cierre de caja (spec 130) ────────────────────────────────────
+
+/**
+ * Una mesa con la cuenta abierta. Bloquea el cierre de la caja principal:
+ * cerrar el día así es cerrar con plata sin cobrar (D7).
+ */
+export type CuentaAbierta = {
+  order_id: string;
+  order_number: number | null;
+  table_id: string;
+  table_label: string;
+  mozo_name: string | null;
+  total_cents: number;
+  /** Lo que falta cobrar: el total menos lo ya pagado (cuentas divididas). */
+  pendiente_cents: number;
+};
+
+/** Un pedido sin mesa (delivery / take away) todavía abierto. Avisa, no bloquea. */
+export type PedidoAbierto = {
+  order_id: string;
+  order_number: number | null;
+  origen: "delivery" | "takeaway" | "otro";
+  customer_name: string | null;
+  total_cents: number;
+};
+
+export async function getCuentasAbiertas(
+  businessId: string,
+): Promise<CuentaAbierta[]> {
+  const service = db();
+  const { data } = await service
+    .from("orders")
+    .select(
+      "id, order_number, total_cents, total_paid_cents, table_id, tables!orders_table_id_fkey(label, mozo_id)",
+    )
+    .eq("business_id", businessId)
+    .eq("lifecycle_status", "open")
+    .not("table_id", "is", null)
+    .order("order_number", { ascending: true });
+
+  const rows = (data ?? []) as unknown as Array<{
+    id: string;
+    order_number: number | null;
+    total_cents: number;
+    total_paid_cents: number | null;
+    table_id: string;
+    tables:
+      | { label: string; mozo_id: string | null }
+      | { label: string; mozo_id: string | null }[]
+      | null;
+  }>;
+  if (rows.length === 0) return [];
+
+  // El nombre del mozo sale de la asignación de la mesa, en un solo viaje: la
+  // lista se muestra para ir a cobrar, y «Mesa 12» sin dueño no le dice a nadie
+  // a quién buscar.
+  const mozoIds = [
+    ...new Set(
+      rows
+        .map((r) => (Array.isArray(r.tables) ? r.tables[0] : r.tables)?.mozo_id)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const nombres = new Map<string, string>();
+  if (mozoIds.length > 0) {
+    const { data: users } = await service
+      .from("business_users")
+      .select("user_id, full_name")
+      .eq("business_id", businessId)
+      .in("user_id", mozoIds);
+    for (const u of (users ?? []) as Array<{
+      user_id: string;
+      full_name: string | null;
+    }>) {
+      if (u.full_name) nombres.set(u.user_id, u.full_name);
+    }
+  }
+
+  return rows.map((r) => {
+    const mesa = Array.isArray(r.tables) ? r.tables[0] : r.tables;
+    const total = Number(r.total_cents ?? 0);
+    const pagado = Number(r.total_paid_cents ?? 0);
+    return {
+      order_id: r.id,
+      order_number: r.order_number,
+      table_id: r.table_id,
+      table_label: mesa?.label ?? "?",
+      mozo_name: mesa?.mozo_id ? (nombres.get(mesa.mozo_id) ?? null) : null,
+      total_cents: total,
+      pendiente_cents: Math.max(0, total - pagado),
+    };
+  });
+}
+
+export async function getPedidosAbiertosSinMesa(
+  businessId: string,
+): Promise<PedidoAbierto[]> {
+  const service = db();
+  const { data } = await service
+    .from("orders")
+    .select("id, order_number, total_cents, customer_name, delivery_type")
+    .eq("business_id", businessId)
+    .eq("lifecycle_status", "open")
+    .is("table_id", null)
+    .order("order_number", { ascending: true });
+
+  return ((data ?? []) as Array<{
+    id: string;
+    order_number: number | null;
+    total_cents: number;
+    customer_name: string | null;
+    delivery_type: string;
+  }>).map((r) => {
+    const origen = origenDeDeliveryType(r.delivery_type);
+    return {
+      order_id: r.id,
+      order_number: r.order_number,
+      // `salon` acá sería una venta de mostrador sin mesa: entra como "otro"
+      // para no prometer un origen que la lista no puede distinguir (D11).
+      origen: origen === "delivery" || origen === "takeaway" ? origen : "otro",
+      customer_name: r.customer_name,
+      total_cents: Number(r.total_cents ?? 0),
+    };
+  });
+}
+
+/** Todo lo que el modal de cierre necesita, resuelto en un solo viaje. */
+export type CierreCajaData = {
+  stats: CajaLiveStats;
+  /** El esperado partido por dueño (D5). Sólo la principal reparte (D9). */
+  reparto: RepartoEfectivo;
+  /** Bloquean el cierre. Vacío en una caja que no barre el salón. */
+  cuentas_abiertas: CuentaAbierta[];
+  /** Avisan, no bloquean. */
+  pedidos_abiertos: PedidoAbierto[];
+  /** Cuántas mesas se van a liberar y cuántas asignaciones se van a limpiar. */
+  salon: { mesas_a_liberar: number; mozos_asignados: number };
+  /** `is_default`: la caja principal es la que cierra el día (D9). */
+  barre_salon: boolean;
+};
+
+/**
+ * Los números del cierre. Vive aparte de `getCajaLiveStats` a propósito: el
+ * reparto por dueño necesita la rendición pendiente de **cada** mozo (una
+ * consulta de pagos por cabeza) y los stats los pide un poll de 30 s, por caja,
+ * desde cada tablet del local. Colgarlo del poll era pagar 40 queries cada
+ * medio minuto para un número que sólo se mira cuando se cierra el día.
+ */
+export async function getCierreCajaData(
+  cajaId: string,
+  businessId: string,
+): Promise<CierreCajaData | null> {
+  const service = db();
+  const { data: cajaRow } = await service
+    .from("cajas")
+    .select("id, business_id, is_default")
+    .eq("id", cajaId)
+    .maybeSingle();
+  if (!cajaRow) return null;
+  const caja = cajaRow as {
+    business_id: string;
+    is_default: boolean;
+  };
+  if (caja.business_id !== businessId) return null;
+
+  const stats = await getCajaLiveStats(cajaId, businessId);
+  if (!stats) return null;
+
+  // El cierre del bar puede pasar en plena cena: no libera mesas, no pide
+  // rendiciones y no le importa la 12 que sigue comiendo (D9).
+  if (!caja.is_default) {
+    return {
+      stats,
+      reparto: repartirEfectivoEsperado({
+        expected_cash_cents: stats.expected_cash_cents,
+        mozos_sin_rendir: [],
+      }),
+      cuentas_abiertas: [],
+      pedidos_abiertos: [],
+      salon: { mesas_a_liberar: 0, mozos_asignados: 0 },
+      barre_salon: false,
+    };
+  }
+
+  const [pendientes, cuentas, pedidos, salon] = await Promise.all([
+    getRendicionesPendientesTodosLosMozos(businessId),
+    getCuentasAbiertas(businessId),
+    getPedidosAbiertosSinMesa(businessId),
+    contarSalonPorLiberar(businessId),
+  ]);
+
+  return {
+    stats,
+    reparto: repartirEfectivoEsperado({
+      expected_cash_cents: stats.expected_cash_cents,
+      mozos_sin_rendir: pendientes.map((p) => ({
+        mozo_id: p.mozo_id,
+        mozo_name: p.mozo_name,
+        efectivo_cents: p.efectivo_cents,
+      })),
+    }),
+    cuentas_abiertas: cuentas,
+    pedidos_abiertos: pedidos,
+    salon,
+    barre_salon: true,
+  };
+}
+
+/**
+ * Lo que el cierre va a barrer, para poder anunciarlo **antes** de apretar
+ * (D8): hoy el encargado se entera por un toast, cuando ya pasó.
+ */
+async function contarSalonPorLiberar(
+  businessId: string,
+): Promise<{ mesas_a_liberar: number; mozos_asignados: number }> {
+  const service = db();
+  const { data: plans } = await service
+    .from("floor_plans")
+    .select("id")
+    .eq("business_id", businessId);
+  const planIds = ((plans as { id: string }[] | null) ?? []).map((p) => p.id);
+  if (planIds.length === 0) return { mesas_a_liberar: 0, mozos_asignados: 0 };
+
+  const { data } = await service
+    .from("tables")
+    .select("operational_status, mozo_id")
+    .in("floor_plan_id", planIds);
+
+  const rows = (data ?? []) as Array<{
+    operational_status: string;
+    mozo_id: string | null;
+  }>;
+  return {
+    mesas_a_liberar: rows.filter((t) => t.operational_status !== "libre").length,
+    mozos_asignados: rows.filter((t) => t.mozo_id !== null).length,
+  };
 }

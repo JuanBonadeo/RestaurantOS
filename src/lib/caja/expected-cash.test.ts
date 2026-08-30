@@ -134,4 +134,48 @@ describe("calculateExpectedCash", () => {
       }),
     ).toBe(10_000);
   });
+
+  // spec 130 · D3 — el retiro del cierre es una sangría insertada **después**
+  // del corte, así que cae en el período nuevo: la apertura es lo contado y la
+  // sangría se lo lleva entero. El día siguiente arranca con el cajón vacío sin
+  // que nadie tipee un número.
+  it("cerrar con retiro deja el período nuevo en $0", () => {
+    expect(
+      calculateExpectedCash({
+        last_closing_cash_cents: 312_400,
+        payments: [],
+        movimientos: [{ kind: "sangria", amount_cents: 312_400 }],
+      }),
+    ).toBe(0);
+  });
+
+  // La casilla destildada es el arqueo de mitad de turno: se cuenta sin vaciar,
+  // y la plata sigue ahí para el período que arranca.
+  it("cerrar sin retiro deja el período nuevo en lo contado", () => {
+    expect(
+      calculateExpectedCash({
+        last_closing_cash_cents: 312_400,
+        payments: [],
+        movimientos: [],
+      }),
+    ).toBe(312_400);
+  });
+
+  // Si el retiro se anula (spec 070), la plata vuelve a estar esperada: la
+  // sangría sigue en el libro pero deja de mover la caja.
+  it("retiro anulado: el esperado vuelve a lo contado", () => {
+    expect(
+      calculateExpectedCash({
+        last_closing_cash_cents: 312_400,
+        payments: [],
+        movimientos: [
+          {
+            kind: "sangria",
+            amount_cents: 312_400,
+            cancelled_at: "2026-08-30T03:00:00Z",
+          },
+        ],
+      }),
+    ).toBe(312_400);
+  });
 });
