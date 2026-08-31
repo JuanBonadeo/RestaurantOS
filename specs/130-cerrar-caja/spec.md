@@ -2,7 +2,7 @@
 
 **Issue:** [#201](https://github.com/gachetponzellini/RestaurantOS-app/issues/201) ·
 **Milestone:** Post-demo · Growth & hardening ·
-**Estado:** implementada (2026-08-30) · verify en vivo pendiente
+**Estado:** implementada y verificada en vivo (2026-08-31)
 
 **Input:** Juan, 2026-08-27: *"el encargado no debería tener que crear una
 sangría manualmente con la plata total, sino que tendría que haber un btn que
@@ -153,7 +153,7 @@ tocar el resumen por email del cierre (spec 34, sigue por cron).
 6. [x] Rendición inline dentro del modal.
 7. [x] Board: un solo botón «Cerrar caja»; anuncio de lo que se libera.
 8. [x] `pnpm typecheck` limpio · los 34 tests nuevos/tocados de la spec en verde (22 integración + 6 del reparto + 6 del modal) y 1863 de la suite. ⚠️ Quedan **112 rojos preexistentes** en 13 archivos de integración ajenos a caja: su mock de auth define `getUser` y el código usa `getClaims()` desde la spec 106. Tarea aparte.
-9. [ ] Verify en vivo con rol encargado real (nunca service_role) — pendiente de Juan: el agente no ingresa contraseñas.
+9. [x] Verify en vivo en el negocio `demo`, con el rol **encargado** real (Sofía, nunca service_role), entrando por magic link (`scripts/magic-link.mjs`): el modal con la plata del período, el reparto ($54.200 en el cajón + $113.800 de Sofía sin rendir = $168.000), las **4 mesas abiertas bloqueando** el CTA con el monto cuadrado, los 3 pedidos de delivery avisando sin frenar, el anuncio «se liberan 4 mesas y se limpia la distribución de 6 mozos», y un cierre completo en la Caja Bar: conteo por billete → `denomination_count = {"10000": 1}`, sangría «Retiro del cierre de caja» a **+1 ms exacto** del corte, y el período nuevo en **$0** con la sangría visible en el libro. Falta sólo el barrido de mesas en vivo (pedía cerrar las cuentas abiertas del demo); está cubierto por integración y por la verificación de la RPC.
 10. [x] Actualizar `wiki/features/caja.md` + `wiki/log.md`.
 
 ## Criterios de verificación
