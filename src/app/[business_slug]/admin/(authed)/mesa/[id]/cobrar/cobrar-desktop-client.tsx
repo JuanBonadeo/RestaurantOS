@@ -17,6 +17,7 @@ import {
   PageShell,
   Surface,
 } from "@/components/admin/shell/page-shell";
+import { AyudaChip } from "@/components/admin/ayuda-chip";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -356,6 +357,7 @@ export function CobrarDesktopClient({
               Cobrar mesa
             </p>
           </div>
+          <AyudaChip slug={slug} tema="cobrar" />
           <button
             type="button"
             onClick={onClose}
@@ -379,6 +381,7 @@ export function CobrarDesktopClient({
         description="Registrá pagos por sub-cuenta o cobro completo. Cada confirmación queda asentada en la caja seleccionada."
         size="compact"
         back={{ href: `/${slug}/admin/operacion`, label: "Volver al salón" }}
+        action={<AyudaChip slug={slug} tema="cobrar" />}
       />
       {body}
     </PageShell>

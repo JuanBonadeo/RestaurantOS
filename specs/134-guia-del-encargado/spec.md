@@ -1,4 +1,4 @@
-# 133 · La guía del encargado, adentro del panel
+# 134 · La guía del encargado, adentro del panel
 
 **Issue:** [RestaurantOS-Brain#35](https://github.com/gachetponzellini/RestaurantOS-Brain/issues/35) ·
 **Milestone:** sin asignar — Sprint 07 venció el 14-ago y no hay uno posterior ·

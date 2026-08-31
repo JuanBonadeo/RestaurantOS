@@ -33,7 +33,8 @@ export type AdminSection =
   | "proveedores"
   | "facturacion"
   | "rrhh"
-  | "configuracion";
+  | "configuracion"
+  | "ayuda";
 
 export type SectionAccess = "full" | "limited" | "none";
 
@@ -82,6 +83,12 @@ const MATRIX: Record<AdminSection, Record<BusinessRole, SectionAccess>> = {
   // no gestiona fichajes/equipo desde el panel admin.
   rrhh: { admin: "full", encargado: "none", mozo: "none", personal: "none" },
   configuracion: { admin: "full", encargado: "none", mozo: "none", personal: "none" },
+  // Ayuda (spec 134): la guía está ESCRITA para el encargado — su turno, sus
+  // topes, sus carteles. El admin la ve porque ve todo y porque es quien la
+  // manda a leer. El mozo no: su superficie es /mozo y el layout de
+  // `(authed)` ya lo redirige antes de llegar acá; darle un ítem que no puede
+  // abrir sería prometerle una guía que no es la suya.
+  ayuda: { admin: "full", encargado: "full", mozo: "none", personal: "none" },
 };
 
 type AccessOpts = { isPlatformAdmin?: boolean };

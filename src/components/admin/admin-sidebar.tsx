@@ -11,6 +11,7 @@ import {
   Building2,
   CalendarDays,
   ChevronsUpDown,
+  CircleHelp,
   Clock,
   History,
   LayoutDashboard,
@@ -218,6 +219,23 @@ function buildNav(
           label: "Ajustes",
           icon: icon(Settings),
           match: (p) => p.startsWith(`${adminBase}/configuracion`),
+        },
+      ],
+    },
+    // Ayuda (spec 134) va en su propio grupo y al final, no adentro de
+    // "Administración": no es un módulo del panel, es cómo se usa el panel.
+    // Grupo propio y no un item suelto al pie del `<nav>` porque desde acá
+    // baja a los dos lados —rail desktop y drawer mobile— sin duplicar la
+    // lógica en `AdminMobileNav`, que consume estos mismos `groups`.
+    {
+      label: "Ayuda",
+      items: [
+        {
+          section: "ayuda",
+          href: `${adminBase}/ayuda`,
+          label: "Cómo se usa el panel",
+          icon: icon(CircleHelp),
+          match: (p) => p.startsWith(`${adminBase}/ayuda`),
         },
       ],
     },

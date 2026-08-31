@@ -36,6 +36,9 @@ const MOBILE_SECTIONS = new Set<AdminSection>([
   "conversaciones",
   "reportes",
   "facturacion",
+  // Ayuda (spec 134): es justo en el celular donde más se necesita — el
+  // encargado consulta parado en el salón, no sentado frente a la PC.
+  "ayuda",
 ]);
 
 function badgeFor(

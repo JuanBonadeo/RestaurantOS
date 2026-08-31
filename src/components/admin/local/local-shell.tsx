@@ -80,6 +80,7 @@ import {
   getReservasTabData,
 } from "@/app/[business_slug]/admin/(authed)/operacion/actions";
 import { cn } from "@/lib/utils";
+import { AyudaChip } from "@/components/admin/ayuda-chip";
 
 const TABS = [
   "salon",
@@ -101,6 +102,25 @@ type Tab = (typeof TABS)[number];
  * como si estuviera recortado por salón.
  */
 const SALON_FILTERABLE: Tab[] = ["salon", "comandas", "reservas"];
+
+/**
+ * Qué tema de la guía abre el "?" de cada tab — spec 134 D7.
+ *
+ * `comandas` manda a `carteles` porque lo que el encargado necesita ahí no es
+ * cómo se lee una comanda (la lee la cocina), sino qué hacer cuando la
+ * impresión falla o la comandera está caída.
+ *
+ * `rendicion` y `fichaje` no tienen tema todavía —quedaron para la v1.1, con
+ * el dato del primer turno real— y por eso no muestran chip. Un "?" que abre
+ * una página que dice "en preparación" enseña a no volver a tocarlo.
+ */
+const TEMA_POR_TAB: Partial<Record<Tab, string>> = {
+  salon: "mesas",
+  reservas: "reservas",
+  comandas: "carteles",
+  pedidos: "pedidos",
+  caja: "caja",
+};
 
 type ShellProps = {
   slug: string;
@@ -700,6 +720,7 @@ function TabsInner({
   // Con un solo salón no hay nada que elegir.
   const showSalonFilter =
     salones.length > 1 && SALON_FILTERABLE.includes(active);
+  const temaDeAyuda = TEMA_POR_TAB[active];
 
   const tabsBar = (
     <nav
@@ -807,6 +828,10 @@ function TabsInner({
             onClear={clearSalones}
           />
         )}
+        {/* El "?" de la tab activa (spec 134). Va acá y no en el índice de
+            Ayuda porque nadie se acuerda de que la guía existe justo cuando
+            está trabado: tiene que estar en la pantalla del problema. */}
+        {temaDeAyuda && <AyudaChip slug={slug} tema={temaDeAyuda} />}
       </div>
       <div className="flex-1 overflow-auto p-4">
         {mounted("salon") && (

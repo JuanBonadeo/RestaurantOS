@@ -3,6 +3,7 @@ import { fromZonedTime } from "date-fns-tz";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { AdminDayList, type AdminRow } from "@/components/reservations/admin-day-list";
+import { AyudaChip } from "@/components/admin/ayuda-chip";
 import { PageHeader, PageShell } from "@/components/admin/shell/page-shell";
 import { ensureAdminAccess } from "@/lib/admin/context";
 import { getReservationEditContext } from "@/lib/reservations/queries";
@@ -84,6 +85,7 @@ export default async function AdminReservasPage({
         eyebrow="Reservas"
         title="Reservas del día"
         description="Lista por hora con estado actual. Usá el plano y la configuración desde los botones de arriba."
+        action={<AyudaChip slug={business_slug} tema="reservas" />}
       />
       <AdminDayList
         slug={business_slug}
