@@ -12,6 +12,7 @@ import {
   updateReservationDetails,
 } from "@/lib/reservations/booking-actions";
 import { OVERBOOK_HINT } from "@/lib/reservations/edit-window";
+import { useReservationsRealtime } from "@/lib/reservations/use-reservations-realtime";
 import {
   agruparPorDia,
   esUrgente,
@@ -38,6 +39,7 @@ import { cn } from "@/lib/utils";
  */
 export function SolicitudesInbox({
   slug,
+  businessId,
   solicitudes,
   timezone,
   mode = "estricto",
@@ -48,6 +50,8 @@ export function SolicitudesInbox({
   className,
 }: {
   slug: string;
+  /** Para la suscripción en vivo: una solicitud nueva aparece sin recargar. */
+  businessId: string;
   solicitudes: SolicitudEnBandeja[];
   timezone: string;
   mode?: ReservationMode;
@@ -64,6 +68,10 @@ export function SolicitudesInbox({
   // Sin `onChanged` (la página server-side) se recarga sola, igual que la lista
   // del día: resolver una solicitud tiene que verse sin apretar nada más.
   const resincronizar = () => (onChanged ? onChanged() : router.refresh());
+
+  // Spec 135 · D6 — la bandeja no espera un F5: una solicitud que entra por la
+  // web aparece sola, y la que otro encargado resolvió desaparece.
+  useReservationsRealtime({ businessId, onChange: resincronizar });
   const [rechazando, setRechazando] = useState<{ id: string; nombre: string } | null>(null);
   const [motivo, setMotivo] = useState("");
   const [editando, setEditando] = useState<string | null>(null);

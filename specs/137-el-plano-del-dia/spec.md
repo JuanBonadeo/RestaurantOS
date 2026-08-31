@@ -2,7 +2,7 @@
 
 **Issue:** [#208](https://github.com/gachetponzellini/RestaurantOS-app/issues/208) ·
 **Milestone:** Post-demo · Growth & hardening ·
-**Estado:** 📝 spec aprobada (diseño acordado con Juan el 2026-08-31) — lista para implementar
+**Estado:** implementada y verificada en vivo (2026-08-31)
 
 **Input:** Juan, 2026-08-31, sobre el alcance del rediseño de reservas:
 *"rediseño completo, plano incluido"*.
@@ -75,9 +75,12 @@ del salón sigue en Salones. Este plano muestra, no edita el plano.
 ### UI
 
 - **`plano-del-dia.tsx` (nuevo):** el canvas de sólo lectura. Dibuja las mesas
-  con la posición, forma y rotación del `floor_plan`, reusando `TableShape` en
-  un modo estático (hoy sus props asumen el editor: `selected`, `onPointerDown`).
-  Con más de un salón, un selector arriba.
+  con la posición, forma y rotación del `floor_plan`. **No reusa `TableShape`**:
+  ese componente está atado al editor (`EditorTable`, `selected`,
+  `onPointerDown`, sillas dibujadas una por una) y acá el detalle estorba — son
+  70 mesas que hay que leer de un vistazo, y lo que importa es el color. El
+  encuadre sale del rectángulo que ocupan las mesas, con aire alrededor. Con más
+  de un salón, un selector arriba.
 - **Toggle Lista / Plano** en la columna del día (spec 136).
 - **Control de hora** sobre el plano, con los pasos de `horasDelDia`.
 - **Detalle de mesa** al hacer click: quién, hora, personas, y las acciones si
@@ -115,9 +118,19 @@ del salón sigue en Salones. Este plano muestra, no edita el plano.
 
 ## Verificación
 
-- Unit de `plano-del-dia.ts`: bordes del rango (`starts_at` incluido,
-  `ends_at` excluido), mesa con dos reservas en el día, pendientes contra
-  confirmadas, pasos de hora en los dos modos, resumen de genéricas.
-- `pnpm typecheck` + tests en verde.
-- En vivo en `demo` (estricto) y revisando la config de `golf-jcr` (flexible):
-  mover la hora y ver cambiar el salón, confirmar una solicitud desde el plano.
+15 tests nuevos de `plano-del-dia.ts`: bordes del rango (`starts_at` incluido,
+`ends_at` excluido), la pendiente ganándole a la confirmada sobre la misma mesa,
+los estados que no ocupan nada, los pasos de hora en los dos modos y sin config,
+y el resumen de genéricas. `pnpm typecheck` en verde y 1864 unitarios en verde.
+
+### Verificado en vivo (2026-08-31, `demo`, Salón 2)
+
+| Escenario | Resultado |
+|---|---|
+| 1 · toggle | «Lista / Plano» en la columna del día; el plano abre en la primera hora con reservas (13:00) |
+| 2 · la hora manda | movido el control a las 22:00, las 27 mesas quedan libres — las reservas eran de 13:00 a 14:30 |
+| 3 · la solicitud se distingue | mesa 104 punteada en ámbar; las tres confirmadas, azules |
+| 4 · confirmar desde el plano | la 104 pasó a `confirmed` con `decided_at`, quedó azul y la bandeja bajó de 2 a 1 |
+| 7 · click en la mesa | «Mesa 104 — Bandeja Sábado · 4p · 13:00 · sin responder» con Confirmar y Rechazar |
+
+Los datos de prueba del `demo` se borraron al terminar.

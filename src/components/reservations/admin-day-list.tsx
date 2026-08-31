@@ -175,6 +175,7 @@ export function AdminDayList({
   salonIds = [],
   datePath,
   diasConSolicitudes = [],
+  plano,
   onChanged,
 }: {
   slug: string;
@@ -199,6 +200,12 @@ export function AdminDayList({
    */
   diasConSolicitudes?: string[];
   /**
+   * Spec 137 — el plano del día. Cuando viene, la columna ofrece el toggle
+   * «Lista / Plano»; sin él la pantalla queda como estaba (es lo que hace la
+   * tab de Operación, que tiene su propio salón en vivo al lado).
+   */
+  plano?: React.ReactNode;
+  /**
    * Spec 103: cómo re-sincronizarse tras mutar o cambiar de día. Recibe el día
    * pedido. Sin esto se cae al comportamiento histórico —`router.push` para la
    * fecha, `router.refresh()` para las mutaciones—, que es lo que sigue usando
@@ -219,6 +226,7 @@ export function AdminDayList({
   const [pending, start] = useTransition();
 
   const [filter, setFilter] = useState<Filter>("all");
+  const [vista, setVista] = useState<"lista" | "plano">("lista");
   const [search, setSearch] = useState("");
   /** #158 — las canceladas arrancan ocultas; el toggle vive al pie de la lista. */
   const [showCancelled, setShowCancelled] = useState(false);
@@ -587,9 +595,38 @@ export function AdminDayList({
             )}
           </div>
 
+          {/* Spec 137 — Lista o Plano: los mismos datos, otra pregunta. */}
+          {plano && (
+            <div
+              className="inline-flex rounded-full bg-zinc-100/80 p-1 ring-1 ring-zinc-200/60"
+              role="tablist"
+            >
+              {(["lista", "plano"] as const).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  role="tab"
+                  aria-selected={vista === v}
+                  onClick={() => setVista(v)}
+                  className={cn(
+                    "rounded-full px-3.5 py-1.5 text-xs font-medium capitalize transition",
+                    vista === v
+                      ? "bg-white text-zinc-900 shadow-[0_1px_2px_rgba(24,24,27,0.06)]"
+                      : "text-zinc-500 hover:text-zinc-900",
+                  )}
+                >
+                  {v}
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* Filter tabs */}
           <div
-            className="inline-flex rounded-full bg-zinc-100/80 p-1 ring-1 ring-zinc-200/60"
+            className={cn(
+              "inline-flex rounded-full bg-zinc-100/80 p-1 ring-1 ring-zinc-200/60",
+              vista === "plano" && "hidden",
+            )}
             role="tablist"
           >
             {(
@@ -628,8 +665,10 @@ export function AdminDayList({
         </div>
       </div>
 
-      {/* ── List ─────────────────────────────────────────────────────────── */}
-      {filteredRows.length === 0 ? (
+      {/* ── Cuerpo: el plano del día, o la lista ─────────────────────────── */}
+      {vista === "plano" && plano ? (
+        plano
+      ) : filteredRows.length === 0 ? (
         <EmptyState filter={filter} search={search} />
       ) : (
         <ul className="space-y-2.5">
@@ -676,7 +715,7 @@ export function AdminDayList({
       {/* #158 — toggle de canceladas, al pie. Fuera del condicional de la lista
           a propósito: un día enteramente cancelado tiene que poder abrirse, y si
           el botón viviera adentro se vería como un día sin reservas. */}
-      {cancelledInView > 0 && (
+      {vista === "lista" && cancelledInView > 0 && (
         <div className="flex justify-center pt-1">
           <button
             type="button"

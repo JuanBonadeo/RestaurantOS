@@ -3,14 +3,18 @@ import { fromZonedTime } from "date-fns-tz";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { AdminDayList, type AdminRow } from "@/components/reservations/admin-day-list";
+import { PlanoDelDia } from "@/components/reservations/plano-del-dia";
 import { SolicitudesInbox } from "@/components/reservations/solicitudes-inbox";
 import { AyudaChip } from "@/components/admin/ayuda-chip";
 import { PageHeader, PageShell } from "@/components/admin/shell/page-shell";
 import { ensureAdminAccess } from "@/lib/admin/context";
 import { localDate } from "@/lib/reservations/pending-inbox";
+import { horasDelDia } from "@/lib/reservations/plano-del-dia";
 import {
   getPendingInbox,
   getReservationEditContext,
+  getReservationServices,
+  getReservationSettings,
 } from "@/lib/reservations/queries";
 import type { FloorTable } from "@/lib/reservations/types";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
@@ -90,6 +94,23 @@ export default async function AdminReservasPage({
     useService: true,
   });
 
+  // Spec 137 — las horas que ofrece el control del plano salen de la config del
+  // negocio, no de una grilla inventada.
+  const [settings, servicios] = await Promise.all([
+    getReservationSettings(business.id, { useService: true }),
+    mode === "flexible"
+      ? getReservationServices(business.id, { useService: true })
+      : Promise.resolve([]),
+  ]);
+  const horasPlano = horasDelDia({
+    date,
+    timezone: business.timezone,
+    mode,
+    schedule: settings.schedule,
+    services: servicios,
+    reservas: rows,
+  });
+
   // Spec 136 — los días que el navegador de fechas marca con el punto.
   const diasConSolicitudes = [
     ...new Set(
@@ -121,6 +142,17 @@ export default async function AdminReservasPage({
             mode={mode}
             services={services}
             diasConSolicitudes={diasConSolicitudes}
+            plano={
+              <PlanoDelDia
+                slug={business_slug}
+                date={date}
+                timezone={business.timezone}
+                horas={horasPlano}
+                reservas={rows}
+                mesas={activeTables}
+                floorPlans={floorPlans}
+              />
+            }
           />
         </div>
         <aside className="order-1 w-full lg:order-2 lg:sticky lg:top-6 lg:w-[340px] lg:shrink-0">
@@ -134,6 +166,7 @@ export default async function AdminReservasPage({
           </div>
           <SolicitudesInbox
             slug={business_slug}
+            businessId={business.id}
             solicitudes={solicitudes}
             timezone={business.timezone}
             mode={mode}

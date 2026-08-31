@@ -2,7 +2,7 @@
 
 **Issue:** [#207](https://github.com/gachetponzellini/RestaurantOS-app/issues/207) ·
 **Milestone:** Post-demo · Growth & hardening ·
-**Estado:** 📝 spec aprobada (diseño acordado con Juan el 2026-08-31) — lista para implementar
+**Estado:** implementada y verificada en vivo (2026-08-31)
 
 **Input:** Juan, 2026-08-31: *"yo creo que se debería ver mejor la tab de
 reservas"*, y sobre el layout: las dos cosas **juntas en una pantalla**, con la
@@ -118,3 +118,10 @@ página pide dos cosas en vez de una.
 - En vivo en `demo` como Sofía: con solicitudes de dos días distintos, confirmar
   una desde la bandeja y verla aparecer en la lista del día sin recargar; y
   revisar la tab «Reservas» de Operación.
+
+### Verificado en vivo (2026-08-31, `demo`)
+
+Día y bandeja a la vista al mismo tiempo; la tab «Pendientes» ya no está; los
+KPI muestran «Reservas 1 · 4 cubiertos · 1 sin responder»; y el navegador de
+fechas marca con el punto ámbar el sáb 5 y el dom 6, que son los días con
+solicitudes.

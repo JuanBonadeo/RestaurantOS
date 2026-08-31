@@ -402,6 +402,7 @@ function RendicionPanel({
 function ReservasPanel({
   promise,
   slug,
+  businessId,
   timezone,
   salonIds,
   active,
@@ -411,6 +412,7 @@ function ReservasPanel({
 }: {
   promise: Promise<ReservasData>;
   slug: string;
+  businessId: string;
   timezone: string;
   salonIds: string[];
   active: boolean;
@@ -491,6 +493,7 @@ function ReservasPanel({
         </div>
         <SolicitudesInbox
           slug={slug}
+          businessId={businessId}
           solicitudes={solicitudes}
           timezone={timezone}
           mode={data.mode}
@@ -918,6 +921,7 @@ function TabsInner({
                 <ReservasPanel
                   promise={reservas}
                   slug={slug}
+                  businessId={businessId}
                   timezone={timezone}
                   salonIds={salonFilter}
                   active={active === "reservas"}

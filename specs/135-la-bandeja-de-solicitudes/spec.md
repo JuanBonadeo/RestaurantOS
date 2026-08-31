@@ -2,7 +2,7 @@
 
 **Issue:** [#206](https://github.com/gachetponzellini/RestaurantOS-app/issues/206) ·
 **Milestone:** Post-demo · Growth & hardening ·
-**Estado:** 📝 spec aprobada (diseño acordado con Juan el 2026-08-31) — lista para implementar
+**Estado:** implementada y verificada en vivo (2026-08-31)
 
 **Input:** Juan, 2026-08-31: *"habría que rediseñar la pantalla de reservas,
 teniendo en cuenta que ahora tienen que confirmar todas las reservas… que en
@@ -88,7 +88,8 @@ Sin migración. `reservations_pending_idx` (business + starts_at, parcial sobre
 
 ### UI
 
-**`solicitudes-inbox.tsx` (nuevo).** Recibe las solicitudes ya resueltas por el
+**`solicitudes-inbox.tsx` (nuevo).** Se suscribe al realtime de reservas
+(`useReservationsRealtime`, D6), recibe las solicitudes ya resueltas por el
 server y se encarga de: agrupar, pintar, y llamar a las tres acciones. Estados:
 
 - **Con solicitudes:** días y tarjetas, como el mockup acordado.
@@ -142,3 +143,13 @@ del día, para que sirva desde el primer día. La 136 la muda a su columna.
 - En vivo en `demo` como Sofía (encargada): cargar dos solicitudes de días
   distintos desde `/demo/reservar`, verlas juntas en la bandeja mirando hoy,
   confirmar una y rechazar la otra.
+
+### Verificado en vivo (2026-08-31, `demo`)
+
+Tres solicitudes de tres días distintos (hoy, sáb 5, dom 6) aparecen juntas
+mirando hoy, agrupadas por día, con el canal («por la web» / «por el chatbot»),
+las notas, el vencimiento y la ocupación —en `demo`, que es estricto, «70 de 70
+mesas libres»—. Confirmada una desde la bandeja, desaparece sola.
+
+10 tests nuevos de `pending-inbox.ts` (día local con borde de TZ, orden por
+vencimiento, las dos lecturas de ocupación, formateo del «vence en»).
