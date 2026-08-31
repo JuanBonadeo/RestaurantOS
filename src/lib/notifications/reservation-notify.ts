@@ -6,6 +6,11 @@ import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 import { dispatchCustomerMessage } from "./customer-dispatch";
 import {
+  renderReservationBody,
+  reservationWhatsappPayload,
+  type ReservationNotifyEvent,
+} from "./reservation-templates";
+import {
   reservationConfirmedEmail,
   reservationExpiredEmail,
   reservationRejectedEmail,
@@ -41,6 +46,9 @@ async function loadReservationContext(reservationId: string): Promise<{
   brand: BusinessBrand;
   slug: string;
   whenLabel: string;
+  /** Día y hora por separado: los usa el cuerpo de WhatsApp (spec 132). */
+  dateLabel: string;
+  timeLabel: string;
 } | null> {
   const service = createSupabaseServiceClient();
   const { data: reservation } = await service
@@ -59,18 +67,78 @@ async function loadReservationContext(reservationId: string): Promise<{
     .maybeSingle();
   if (!business) return null;
 
-  const whenLabel = formatInTimeZone(
-    new Date(reservation.starts_at),
-    business.timezone ?? DEFAULT_TZ,
-    "dd/MM 'a las' HH:mm 'hs'",
-  );
+  const tz = business.timezone ?? DEFAULT_TZ;
+  const startsAt = new Date(reservation.starts_at);
+  const whenLabel = formatInTimeZone(startsAt, tz, "dd/MM 'a las' HH:mm 'hs'");
 
   return {
     reservation: reservation as ReservationRow,
     brand: resolveBusinessBrand(business),
     slug: business.slug,
     whenLabel,
+    dateLabel: formatInTimeZone(startsAt, tz, "dd/MM"),
+    timeLabel: formatInTimeZone(startsAt, tz, "HH:mm"),
   };
+}
+
+/**
+ * Spec 132 — el payload de WhatsApp de un aviso de reserva.
+ *
+ * Devuelve `undefined` cuando no corresponde mandar WhatsApp: sin teléfono, o
+ * sin `template_name` cargado para ese evento. Lo segundo es a propósito (D4):
+ * un aviso proactivo sin template aprobado por Meta sólo dejaría una fila
+ * `failed` en el outbox, así que ni se intenta — el email sigue saliendo.
+ *
+ * Devuelve `null` cuando el negocio apagó el evento entero (`enabled: false`),
+ * que corta también el mail. El caller distingue los dos casos.
+ */
+async function loadReservationWhatsapp(params: {
+  businessId: string;
+  event: ReservationNotifyEvent;
+  customerName: string;
+  businessName: string;
+  dateLabel: string;
+  timeLabel: string;
+  partySize: number;
+  phone: string | null;
+  reason?: string | null;
+}): Promise<
+  { body: string; template?: { name: string; lang: string; params: string[] } } | null | undefined
+> {
+  const service = createSupabaseServiceClient();
+  const { data } = await service
+    .from("reservation_message_templates")
+    .select("body, enabled, template_name, template_lang")
+    .eq("business_id", params.businessId)
+    .eq("event", params.event)
+    .maybeSingle();
+  const row = data as {
+    body: string;
+    enabled: boolean;
+    template_name: string | null;
+    template_lang: string | null;
+  } | null;
+
+  const body = renderReservationBody({
+    event: params.event,
+    customerName: params.customerName,
+    businessName: params.businessName,
+    dateLabel: params.dateLabel,
+    timeLabel: params.timeLabel,
+    partySize: params.partySize,
+    reason: params.reason,
+    template: row ? { body: row.body, enabled: row.enabled } : null,
+  });
+  return reservationWhatsappPayload({
+    body,
+    phone: params.phone,
+    templateName: row?.template_name ?? null,
+    templateLang: row?.template_lang ?? null,
+    templateParams: [
+      params.customerName,
+      `${params.dateLabel} ${params.timeLabel}`,
+    ],
+  });
 }
 
 /**
@@ -84,6 +152,18 @@ export async function notifyReservationConfirmed(params: {
   try {
     const ctx = await loadReservationContext(params.reservationId);
     if (!ctx) return;
+
+    const wa = await loadReservationWhatsapp({
+      businessId: ctx.reservation.business_id,
+      event: "confirmed",
+      customerName: ctx.reservation.customer_name,
+      businessName: ctx.brand.name,
+      dateLabel: ctx.dateLabel,
+      timeLabel: ctx.timeLabel,
+      partySize: ctx.reservation.party_size,
+      phone: ctx.reservation.customer_phone,
+    });
+    if (wa === null) return;
 
     const manageUrl = `${baseUrl()}/${ctx.slug}/perfil/reservas`;
     const email = reservationConfirmedEmail({
@@ -103,7 +183,7 @@ export async function notifyReservationConfirmed(params: {
         email: ctx.reservation.customer_email,
         phone: ctx.reservation.customer_phone,
       },
-      whatsapp: null,
+      whatsapp: wa ?? null,
       email: {
         subject: email.subject,
         html: email.html,
@@ -128,6 +208,18 @@ export async function notifyReservationRequested(params: {
     const ctx = await loadReservationContext(params.reservationId);
     if (!ctx) return;
 
+    const wa = await loadReservationWhatsapp({
+      businessId: ctx.reservation.business_id,
+      event: "requested",
+      customerName: ctx.reservation.customer_name,
+      businessName: ctx.brand.name,
+      dateLabel: ctx.dateLabel,
+      timeLabel: ctx.timeLabel,
+      partySize: ctx.reservation.party_size,
+      phone: ctx.reservation.customer_phone,
+    });
+    if (wa === null) return; // el negocio apagó este aviso
+
     const manageUrl = `${baseUrl()}/${ctx.slug}/perfil/reservas`;
     const email = reservationRequestedEmail({
       brand: ctx.brand,
@@ -146,7 +238,7 @@ export async function notifyReservationRequested(params: {
         email: ctx.reservation.customer_email,
         phone: ctx.reservation.customer_phone,
       },
-      whatsapp: null,
+      whatsapp: wa ?? null,
       email: {
         subject: email.subject,
         html: email.html,
@@ -168,6 +260,19 @@ export async function notifyReservationRejected(params: {
     const ctx = await loadReservationContext(params.reservationId);
     if (!ctx) return;
 
+    const wa = await loadReservationWhatsapp({
+      businessId: ctx.reservation.business_id,
+      event: "rejected",
+      customerName: ctx.reservation.customer_name,
+      businessName: ctx.brand.name,
+      dateLabel: ctx.dateLabel,
+      timeLabel: ctx.timeLabel,
+      partySize: ctx.reservation.party_size,
+      phone: ctx.reservation.customer_phone,
+      reason: params.reason ?? null,
+    });
+    if (wa === null) return;
+
     const email = reservationRejectedEmail({
       brand: ctx.brand,
       customerName: ctx.reservation.customer_name,
@@ -184,7 +289,7 @@ export async function notifyReservationRejected(params: {
         email: ctx.reservation.customer_email,
         phone: ctx.reservation.customer_phone,
       },
-      whatsapp: null,
+      whatsapp: wa ?? null,
       email: {
         subject: email.subject,
         html: email.html,
@@ -205,6 +310,18 @@ export async function notifyReservationExpired(params: {
     const ctx = await loadReservationContext(params.reservationId);
     if (!ctx) return;
 
+    const wa = await loadReservationWhatsapp({
+      businessId: ctx.reservation.business_id,
+      event: "expired",
+      customerName: ctx.reservation.customer_name,
+      businessName: ctx.brand.name,
+      dateLabel: ctx.dateLabel,
+      timeLabel: ctx.timeLabel,
+      partySize: ctx.reservation.party_size,
+      phone: ctx.reservation.customer_phone,
+    });
+    if (wa === null) return;
+
     const email = reservationExpiredEmail({
       brand: ctx.brand,
       customerName: ctx.reservation.customer_name,
@@ -220,7 +337,7 @@ export async function notifyReservationExpired(params: {
         email: ctx.reservation.customer_email,
         phone: ctx.reservation.customer_phone,
       },
-      whatsapp: null,
+      whatsapp: wa ?? null,
       email: {
         subject: email.subject,
         html: email.html,

@@ -12,6 +12,7 @@ import { getBusiness } from "@/lib/tenant";
 import type { BusinessRole } from "@/lib/admin/context";
 
 import { DELIVERY_NOTIFY_STATUSES } from "./delivery-templates";
+import { RESERVATION_NOTIFY_EVENTS } from "./reservation-templates";
 import {
   NOTIFICATION_CHANNELS,
   NOTIFICATION_EVENT_TYPES,
@@ -263,6 +264,102 @@ export async function setDeliveryTemplate(
 
   if (error) {
     console.error("setDeliveryTemplate", error);
+    return actionError("No pudimos guardar la plantilla.");
+  }
+
+  revalidatePath(`/${businessSlug}/admin`);
+  return actionOk(undefined);
+}
+
+// ── Plantillas de los avisos de reserva (spec 132) ──────────────────────
+
+export type ReservationTemplateRow = {
+  id: string;
+  event: string;
+  body: string;
+  enabled: boolean;
+  template_name: string | null;
+  template_lang: string | null;
+};
+
+/** Lista las plantillas de reserva configuradas del negocio. Admin/encargado. */
+export async function listReservationTemplates(
+  businessSlug: string,
+): Promise<ActionResult<ReservationTemplateRow[]>> {
+  const business = await getBusiness(businessSlug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  if (!canManageNotificationPrefs(ctxResult.data.role)) {
+    return actionError("No tenés permisos para ver las plantillas.");
+  }
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+  const { data, error } = await service
+    .from("reservation_message_templates")
+    .select("id, event, body, enabled, template_name, template_lang")
+    .eq("business_id", business.id);
+
+  if (error) {
+    console.error("listReservationTemplates", error);
+    return actionError("No pudimos cargar las plantillas.");
+  }
+  return actionOk((data ?? []) as ReservationTemplateRow[]);
+}
+
+const SetReservationTemplateInput = z.object({
+  businessSlug: z.string().min(1),
+  event: z.enum(RESERVATION_NOTIFY_EVENTS),
+  body: z.string().trim().min(1, "El mensaje no puede estar vacío.").max(1000),
+  enabled: z.boolean(),
+  // Sin `templateName` el aviso NO sale por WhatsApp (spec 132, D4): un
+  // proactivo sin template aprobado por Meta sólo dejaría una fila `failed`.
+  templateName: z.string().trim().max(120).optional(),
+  templateLang: z.string().trim().max(10).optional(),
+});
+
+/**
+ * Crea o actualiza la plantilla de un evento de reserva. Upsert por
+ * (negocio, evento). Sólo admin/encargado.
+ */
+export async function setReservationTemplate(
+  input: unknown,
+): Promise<ActionResult<void>> {
+  const parsed = SetReservationTemplateInput.safeParse(input);
+  if (!parsed.success) {
+    return actionError(parsed.error.issues[0]?.message ?? "Datos inválidos.");
+  }
+  const { businessSlug, event, body, enabled, templateName, templateLang } =
+    parsed.data;
+
+  const business = await getBusiness(businessSlug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  if (!canManageNotificationPrefs(ctxResult.data.role)) {
+    return actionError("No tenés permisos para editar las plantillas.");
+  }
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+  const { error } = await service
+    .from("reservation_message_templates")
+    .upsert(
+      {
+        business_id: business.id,
+        event,
+        body,
+        enabled,
+        template_name: templateName ? templateName : null,
+        ...(templateLang ? { template_lang: templateLang } : {}),
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "business_id,event" },
+    );
+
+  if (error) {
+    console.error("setReservationTemplate", error);
     return actionError("No pudimos guardar la plantilla.");
   }
 

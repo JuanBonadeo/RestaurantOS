@@ -841,13 +841,13 @@ export async function updateReservationDetails(
     starts_at: string; ends_at: string; status: string;
     service: string | null; floor_plan_id: string | null;
   };
-  if (reservation.status !== "confirmed") {
-    // Spec 131 — misma regla que sentar: primero se decide, después se ajusta.
-    return actionError(
-      reservation.status === "pending"
-        ? "Confirmá la reserva antes de editarla."
-        : "Solo se pueden editar reservas confirmadas.",
-    );
+  // Spec 132 — la solicitud pendiente se edita como cualquier reserva viva:
+  // «te la tomo, pero a las 21:30 y en el salón 2» es UNA decisión, no dos
+  // pasos. Editarla NO la decide: sigue `pending` hasta que el encargado
+  // confirme o rechace, para que el aviso al cliente salga una sola vez y con
+  // los datos finales.
+  if (reservation.status !== "confirmed" && reservation.status !== "pending") {
+    return actionError("Solo se pueden editar reservas activas.");
   }
 
   const isFlexible = settings.mode === "flexible";

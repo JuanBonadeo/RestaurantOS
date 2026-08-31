@@ -1062,9 +1062,11 @@ function ReservationRow({
 
         {/* Actions */}
         <div className="flex flex-wrap items-center gap-2">
-          {/* Spec 131 — una solicitud sólo admite las dos decisiones. Sentar,
-              editar y el resto llegan recién cuando es una reserva de verdad. */}
-          {row.status === "pending" && (
+          {/* Spec 131 — una solicitud se decide: Confirmar o Rechazar.
+              Spec 132 — y se puede ajustar antes de decidirla, porque «te la
+              tomo, pero a las 21:30» es una sola decisión. Sentar y completar
+              siguen llegando recién cuando es una reserva de verdad. */}
+          {row.status === "pending" && !editing && (
             <>
               <button
                 type="button"
@@ -1074,6 +1076,15 @@ function ReservationRow({
               >
                 <Check className="h-3.5 w-3.5" />
                 Confirmar
+              </button>
+              <button
+                type="button"
+                onClick={openEdit}
+                disabled={pending}
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-zinc-100 px-3 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 transition hover:bg-zinc-200 active:scale-[0.97] disabled:opacity-60"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+                Editar
               </button>
               <button
                 type="button"

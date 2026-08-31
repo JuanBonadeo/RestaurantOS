@@ -3204,6 +3204,50 @@ export type Database = {
           },
         ]
       }
+      reservation_message_templates: {
+        Row: {
+          body: string
+          business_id: string
+          created_at: string
+          enabled: boolean
+          event: string
+          id: string
+          template_lang: string
+          template_name: string | null
+          updated_at: string
+        }
+        Insert: {
+          body: string
+          business_id: string
+          created_at?: string
+          enabled?: boolean
+          event: string
+          id?: string
+          template_lang?: string
+          template_name?: string | null
+          updated_at?: string
+        }
+        Update: {
+          body?: string
+          business_id?: string
+          created_at?: string
+          enabled?: boolean
+          event?: string
+          id?: string
+          template_lang?: string
+          template_name?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reservation_message_templates_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       reservation_services: {
         Row: {
           business_id: string

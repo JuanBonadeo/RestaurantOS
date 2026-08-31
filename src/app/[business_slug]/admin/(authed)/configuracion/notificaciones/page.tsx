@@ -1,10 +1,11 @@
 import { notFound } from "next/navigation";
 
-import { Bell, Mail, MessageCircle, Send, Smartphone } from "lucide-react";
+import { Bell, CalendarCheck, Mail, MessageCircle, Send, Smartphone } from "lucide-react";
 
 import { CustomerChannelForm } from "@/components/admin/settings/customer-channel-form";
 import { DeliveryTemplatesForm } from "@/components/admin/settings/delivery-templates-form";
 import { NotificationPreferencesForm } from "@/components/admin/settings/notification-preferences-form";
+import { ReservationTemplatesForm } from "@/components/admin/settings/reservation-templates-form";
 import { SettingsSection } from "@/components/admin/settings/settings-section";
 import { ShiftSummaryForm } from "@/components/admin/settings/shift-summary-form";
 import { WhatsappConfigForm } from "@/components/admin/settings/whatsapp-config-form";
@@ -12,7 +13,8 @@ import { normalizeCustomerChannel } from "@/lib/notifications/customer-channel";
 import { getBusiness, getBusinessSettings } from "@/lib/tenant";
 
 // Ajustes › Notificaciones y mensajes: conexión de WhatsApp, avisos internos,
-// mensajes de delivery al cliente y resumen de cierre por email. Gate: layout.
+// mensajes de delivery y de reserva al cliente, y resumen de cierre por email.
+// Gate: layout.
 export default async function ConfiguracionNotificacionesPage({
   params,
 }: {
@@ -61,6 +63,14 @@ export default async function ConfiguracionNotificacionesPage({
         description="Personalizá el mensaje que recibe el cliente en cada cambio de estado de su pedido."
       >
         <DeliveryTemplatesForm slug={business_slug} />
+      </SettingsSection>
+
+      <SettingsSection
+        icon={<CalendarCheck className="size-5" />}
+        title="Mensajes de reserva al cliente"
+        description="Qué le llega al cliente en cada momento de su reserva: cuando la pide, cuando la confirmás, cuando la rechazás y cuando vence sin respuesta."
+      >
+        <ReservationTemplatesForm slug={business_slug} />
       </SettingsSection>
 
       <SettingsSection
