@@ -12,6 +12,10 @@ import type { Reservation, ReservationStatus } from "@/lib/reservations/types";
 type Row = Reservation & { tables: { label: string } | null };
 
 const STATUS_LABEL: Record<ReservationStatus, string> = {
+  // Spec 131 — mientras el local no la responda es un pedido, y así se lee.
+  pending: "Pendiente de confirmar",
+  rejected: "No pudimos tomarla",
+  expired: "Venció sin confirmar",
   confirmed: "Confirmada",
   seated: "En curso",
   completed: "Completada",
@@ -22,6 +26,9 @@ const STATUS_LABEL: Record<ReservationStatus, string> = {
 // Color tokens use the public-theme palette where available, with mild
 // fallbacks for statuses that don't have a brand-token equivalent.
 const STATUS_DOT: Record<ReservationStatus, string> = {
+  pending: "#C78A3B",
+  rejected: "#C25A5A",
+  expired: "var(--ink-3)",
   confirmed: "var(--primary)",
   seated: "var(--fresh)",
   completed: "var(--ink-3)",
@@ -47,7 +54,10 @@ export function MyReservationsScreen({
     const upcoming: Row[] = [];
     const past: Row[] = [];
     for (const r of reservations) {
-      const isActiveStatus = r.status === "confirmed" || r.status === "seated";
+      // Spec 131 — la pendiente va en "próximas": todavía puede pasar, y es
+      // justo la que el cliente quiere mirar (y cancelar si se arrepiente).
+      const isActiveStatus =
+        r.status === "pending" || r.status === "confirmed" || r.status === "seated";
       const isFuture = new Date(r.starts_at).getTime() > now - 30 * 60_000;
       if (isActiveStatus && isFuture) upcoming.push(r);
       else past.push(r);
@@ -221,8 +231,17 @@ function ReservationCard({
     { locale: es },
   );
   const timeLabel = formatInTimeZone(new Date(row.starts_at), timezone, "HH:mm");
-  const canCancel = row.status === "confirmed" || row.status === "seated";
-  const isClosed = ["completed", "no_show", "cancelled"].includes(row.status);
+  const canCancel =
+    row.status === "pending" ||
+    row.status === "confirmed" ||
+    row.status === "seated";
+  const isClosed = [
+    "completed",
+    "no_show",
+    "cancelled",
+    "rejected",
+    "expired",
+  ].includes(row.status);
 
   return (
     <div

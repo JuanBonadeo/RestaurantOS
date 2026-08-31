@@ -7,7 +7,10 @@ import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { dispatchCustomerMessage } from "./customer-dispatch";
 import {
   reservationConfirmedEmail,
+  reservationExpiredEmail,
+  reservationRejectedEmail,
   reservationReminderEmail,
+  reservationRequestedEmail,
   resolveBusinessBrand,
   type BusinessBrand,
 } from "./customer-email-templates";
@@ -110,6 +113,123 @@ export async function notifyReservationConfirmed(params: {
     });
   } catch (err) {
     console.error("notifyReservationConfirmed", err);
+  }
+}
+
+/**
+ * Spec 131 — acuse de la solicitud, al crear una reserva de cliente. Mismo
+ * canal y mismo best-effort que el resto: lo único distinto es que no dice
+ * "confirmada", porque todavía no lo está.
+ */
+export async function notifyReservationRequested(params: {
+  reservationId: string;
+}): Promise<void> {
+  try {
+    const ctx = await loadReservationContext(params.reservationId);
+    if (!ctx) return;
+
+    const manageUrl = `${baseUrl()}/${ctx.slug}/perfil/reservas`;
+    const email = reservationRequestedEmail({
+      brand: ctx.brand,
+      customerName: ctx.reservation.customer_name,
+      whenLabel: ctx.whenLabel,
+      partySize: ctx.reservation.party_size,
+      manageUrl,
+    });
+
+    await dispatchCustomerMessage({
+      businessId: ctx.reservation.business_id,
+      event: "reservation_requested",
+      refId: ctx.reservation.id,
+      recipient: {
+        name: ctx.reservation.customer_name,
+        email: ctx.reservation.customer_email,
+        phone: ctx.reservation.customer_phone,
+      },
+      whatsapp: null,
+      email: {
+        subject: email.subject,
+        html: email.html,
+        text: email.text,
+        fromName: ctx.brand.name,
+      },
+    });
+  } catch (err) {
+    console.error("notifyReservationRequested", err);
+  }
+}
+
+/** Spec 131 — el local rechazó la solicitud. Best-effort. */
+export async function notifyReservationRejected(params: {
+  reservationId: string;
+  reason?: string | null;
+}): Promise<void> {
+  try {
+    const ctx = await loadReservationContext(params.reservationId);
+    if (!ctx) return;
+
+    const email = reservationRejectedEmail({
+      brand: ctx.brand,
+      customerName: ctx.reservation.customer_name,
+      whenLabel: ctx.whenLabel,
+      reason: params.reason ?? null,
+    });
+
+    await dispatchCustomerMessage({
+      businessId: ctx.reservation.business_id,
+      event: "reservation_rejected",
+      refId: ctx.reservation.id,
+      recipient: {
+        name: ctx.reservation.customer_name,
+        email: ctx.reservation.customer_email,
+        phone: ctx.reservation.customer_phone,
+      },
+      whatsapp: null,
+      email: {
+        subject: email.subject,
+        html: email.html,
+        text: email.text,
+        fromName: ctx.brand.name,
+      },
+    });
+  } catch (err) {
+    console.error("notifyReservationRejected", err);
+  }
+}
+
+/** Spec 131 — la solicitud venció sin respuesta del local. Best-effort. */
+export async function notifyReservationExpired(params: {
+  reservationId: string;
+}): Promise<void> {
+  try {
+    const ctx = await loadReservationContext(params.reservationId);
+    if (!ctx) return;
+
+    const email = reservationExpiredEmail({
+      brand: ctx.brand,
+      customerName: ctx.reservation.customer_name,
+      whenLabel: ctx.whenLabel,
+    });
+
+    await dispatchCustomerMessage({
+      businessId: ctx.reservation.business_id,
+      event: "reservation_expired",
+      refId: ctx.reservation.id,
+      recipient: {
+        name: ctx.reservation.customer_name,
+        email: ctx.reservation.customer_email,
+        phone: ctx.reservation.customer_phone,
+      },
+      whatsapp: null,
+      email: {
+        subject: email.subject,
+        html: email.html,
+        text: email.text,
+        fromName: ctx.brand.name,
+      },
+    });
+  } catch (err) {
+    console.error("notifyReservationExpired", err);
   }
 }
 

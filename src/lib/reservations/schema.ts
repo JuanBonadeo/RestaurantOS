@@ -213,8 +213,26 @@ export type AdminCreateReservationInput = z.infer<typeof AdminCreateReservationI
 export const UpdateReservationStatusInputSchema = z.object({
   business_slug: z.string().min(1),
   id: z.string().uuid(),
+  /**
+   * Estados operativos del día. Spec 131: `pending` / `rejected` / `expired`
+   * quedan afuera a propósito — a una solicitud se la resuelve con
+   * `decideReservation` (o la vence el cron), no cambiándole el estado a mano.
+   */
   status: z.enum(["confirmed", "seated", "completed", "no_show", "cancelled"]),
 });
+
+/**
+ * Spec 131 — la decisión del encargado sobre una solicitud: la toma o no.
+ * El motivo sólo tiene sentido al rechazar y viaja al cliente en el aviso.
+ */
+export const DecideReservationInputSchema = z.object({
+  business_slug: z.string().min(1),
+  id: z.string().uuid(),
+  decision: z.enum(["confirm", "reject"]),
+  reason: z.string().trim().max(200).optional(),
+});
+
+export type DecideReservationInput = z.infer<typeof DecideReservationInputSchema>;
 
 export const SentarReservaInputSchema = z.object({
   business_slug: z.string().min(1),

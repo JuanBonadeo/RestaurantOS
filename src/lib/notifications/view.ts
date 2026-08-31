@@ -130,10 +130,19 @@ export function viewForNotification(n: Notification): NotiView {
     const hora = (p.hora as string | undefined) ?? "";
     const personas = p.personas as number | undefined;
     const nombre = (p.nombre as string | undefined) ?? "cliente";
+    // Spec 131 — la que entra por la web o el chatbot espera una decisión, y el
+    // aviso lo dice: es lo que separa "enterate" de "andá a resolverlo".
+    const pendiente = p.pendiente === true;
     return {
-      tone: "info",
+      tone: pendiente ? "warning" : "info",
       icon: CalendarPlus,
-      title: hora ? `Reserva nueva · ${hora}` : "Reserva nueva",
+      title: pendiente
+        ? hora
+          ? `Reserva a confirmar · ${hora}`
+          : "Reserva a confirmar"
+        : hora
+          ? `Reserva nueva · ${hora}`
+          : "Reserva nueva",
       body: [personas ? `${personas}p` : null, nombre].filter(Boolean).join(" — "),
     };
   }

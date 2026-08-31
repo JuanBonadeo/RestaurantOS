@@ -11,6 +11,7 @@ import { NewReservationModal } from "@/components/admin/local/new-reservation-mo
 import { matchesSalonReserva } from "@/lib/admin/salon-filter";
 import { proximaReserva, reservationDayStats } from "@/lib/reservations/day-stats";
 import {
+  decideReservation,
   sentarReserva,
   updateReservationDetails,
   updateReservationStatus,
@@ -36,6 +37,9 @@ export type AdminRow = Reservation & {
 };
 
 const STATUS_LABEL: Record<ReservationStatus, string> = {
+  pending: "Pendiente",
+  rejected: "Rechazada",
+  expired: "Vencida",
   confirmed: "Confirmada",
   seated: "En mesa",
   completed: "Completada",
@@ -44,6 +48,9 @@ const STATUS_LABEL: Record<ReservationStatus, string> = {
 };
 
 const STATUS_DOT: Record<ReservationStatus, string> = {
+  pending: "bg-amber-500",
+  rejected: "bg-rose-500",
+  expired: "bg-zinc-400",
   confirmed: "bg-blue-500",
   seated: "bg-emerald-500",
   completed: "bg-zinc-400",
@@ -52,6 +59,9 @@ const STATUS_DOT: Record<ReservationStatus, string> = {
 };
 
 const STATUS_RING: Record<ReservationStatus, string> = {
+  pending: "bg-amber-50 text-amber-800 ring-amber-200",
+  rejected: "bg-rose-50 text-rose-700 ring-rose-200",
+  expired: "bg-zinc-100 text-zinc-600 ring-zinc-200",
   confirmed: "bg-blue-50 text-blue-700 ring-blue-200",
   seated: "bg-emerald-50 text-emerald-700 ring-emerald-200",
   completed: "bg-zinc-100 text-zinc-600 ring-zinc-200",
@@ -59,7 +69,7 @@ const STATUS_RING: Record<ReservationStatus, string> = {
   cancelled: "bg-rose-50 text-rose-700 ring-rose-200",
 };
 
-type Filter = "all" | "upcoming" | "seated" | "past";
+type Filter = "all" | "pending" | "upcoming" | "seated" | "past";
 
 /** Spec 097 — lo que manda el panel de edición (lo ausente no se toca). */
 type EditPatch = {
@@ -222,6 +232,12 @@ export function AdminDayList({
     status: "no_show" | "cancelled";
     customerName: string;
   } | null>(null);
+  /** Spec 131 — rechazar una solicitud pide (opcionalmente) un motivo. */
+  const [rejectDialog, setRejectDialog] = useState<{
+    id: string;
+    customerName: string;
+  } | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
 
   const multiSalon = floorPlans.length > 1;
 
@@ -264,6 +280,28 @@ export function AdminDayList({
       });
       if (result.ok) {
         toast.success("Mesa abierta con reserva.");
+        resincronizar();
+      } else {
+        toast.error(result.error);
+      }
+    });
+  }
+
+  /** Spec 131 — la decisión del local sobre una solicitud pendiente. */
+  function handleDecide(id: string, decision: "confirm" | "reject", reason?: string) {
+    start(async () => {
+      const result = await decideReservation({
+        business_slug: slug,
+        id,
+        decision,
+        ...(reason?.trim() ? { reason: reason.trim() } : {}),
+      });
+      if (result.ok) {
+        toast.success(
+          decision === "confirm" ? "Reserva confirmada." : "Reserva rechazada.",
+        );
+        setRejectDialog(null);
+        setRejectReason("");
         resincronizar();
       } else {
         toast.error(result.error);
@@ -339,6 +377,9 @@ export function AdminDayList({
     const now = Date.now();
     let filtered = rows.filter((r) => {
       switch (filter) {
+        // Spec 131 — la bandeja: lo que espera una decisión del local.
+        case "pending":
+          return r.status === "pending";
         case "upcoming":
           return (
             r.status === "confirmed" &&
@@ -347,7 +388,9 @@ export function AdminDayList({
         case "seated":
           return r.status === "seated";
         case "past":
-          return ["completed", "no_show", "cancelled"].includes(r.status);
+          return ["completed", "no_show", "cancelled", "rejected", "expired"].includes(
+            r.status,
+          );
         default:
           return true;
       }
@@ -380,6 +423,12 @@ export function AdminDayList({
     ? matchingRows.filter((r) => r.status === "cancelled").length
     : hiddenCancelled;
 
+  /** Spec 131 — cuántas solicitudes esperan decisión en el día que se mira. */
+  const pendingCount = useMemo(
+    () => rows.filter((r) => r.status === "pending").length,
+    [rows],
+  );
+
   const dateStrip = buildDateStrip(date);
 
   return (
@@ -391,9 +440,14 @@ export function AdminDayList({
           label="Comensales"
           value={String(stats.guests)}
           sub={
-            stats.confirmed > 0 && stats.seated > 0
-              ? `${stats.confirmed} conf · ${stats.seated} mesa`
-              : undefined
+            // Spec 131 — las pendientes ya ocupan lugar: si hay, se dicen.
+            [
+              stats.pending > 0 ? `${stats.pending} pend` : null,
+              stats.confirmed > 0 ? `${stats.confirmed} conf` : null,
+              stats.seated > 0 ? `${stats.seated} mesa` : null,
+            ]
+              .filter(Boolean)
+              .join(" · ") || undefined
           }
         />
         <KpiCard
@@ -544,6 +598,12 @@ export function AdminDayList({
                   v: "all",
                   l: `Todas (${showCancelled ? rows.length : rows.filter((r) => r.status !== "cancelled").length})`,
                 },
+                // Spec 131 — primera y con el contador: es lo único de esta
+                // pantalla que le pide algo al encargado. Si no hay ninguna, no
+                // ocupa lugar.
+                ...(pendingCount > 0
+                  ? [{ v: "pending" as Filter, l: `Pendientes (${pendingCount})` }]
+                  : []),
                 { v: "upcoming", l: "Próximas" },
                 { v: "seated", l: "En mesa" },
                 { v: "past", l: "Pasadas" },
@@ -604,6 +664,11 @@ export function AdminDayList({
                   customerName: r.customer_name,
                 })
               }
+              onConfirmarSolicitud={() => handleDecide(r.id, "confirm")}
+              onRechazarSolicitud={() => {
+                setRejectReason("");
+                setRejectDialog({ id: r.id, customerName: r.customer_name });
+              }}
               onUpdateDetails={(patch, callbacks) =>
                 handleUpdateDetails(r.id, patch, callbacks)
               }
@@ -640,6 +705,58 @@ export function AdminDayList({
           onClose={() => setShowNewReservation(false)}
           onChanged={onChanged ? () => onChanged(date) : undefined}
         />
+      )}
+
+      {/* Spec 131 — rechazar una solicitud: el motivo es opcional y viaja al
+          cliente en el aviso, así "no pudimos tomarla" puede tener una razón. */}
+      {rejectDialog && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40"
+          onClick={() => setRejectDialog(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-bold text-zinc-900">
+              ¿Rechazar la reserva?
+            </h3>
+            <p className="mt-1.5 text-sm text-zinc-600">
+              Le avisamos a{" "}
+              <span className="font-semibold">{rejectDialog.customerName}</span>{" "}
+              que no pudimos tomarla y el lugar queda libre.
+            </p>
+            <label className="mt-4 block text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+              Motivo (opcional)
+            </label>
+            <input
+              type="text"
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              maxLength={200}
+              placeholder="Ej: esa noche tenemos un evento privado"
+              className="mt-1.5 h-10 w-full rounded-xl border-0 bg-zinc-100 px-3 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300"
+            />
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setRejectDialog(null)}
+                disabled={pending}
+                className="flex-1 rounded-xl bg-zinc-100 px-4 py-2.5 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-200 disabled:opacity-60"
+              >
+                Volver
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDecide(rejectDialog.id, "reject", rejectReason)}
+                disabled={pending}
+                className="flex-1 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:opacity-60"
+              >
+                Rechazar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Confirm dialog para acciones destructivas */}
@@ -761,6 +878,8 @@ function ReservationRow({
   onComplete,
   onNoShow,
   onCancel,
+  onConfirmarSolicitud,
+  onRechazarSolicitud,
   onUpdateDetails,
 }: {
   row: AdminRow;
@@ -775,6 +894,9 @@ function ReservationRow({
   onComplete: () => void;
   onNoShow: () => void;
   onCancel: () => void;
+  /** Spec 131 — decisión del local sobre una solicitud pendiente. */
+  onConfirmarSolicitud: () => void;
+  onRechazarSolicitud: () => void;
   onUpdateDetails: (patch: EditPatch, callbacks: EditCallbacks) => void;
 }) {
   const timeStart = formatInTimeZone(
@@ -787,9 +909,13 @@ function ReservationRow({
     timezone,
     "HH:mm",
   );
-  const isSoftClosed = ["completed", "no_show", "cancelled"].includes(
-    row.status,
-  );
+  const isSoftClosed = [
+    "completed",
+    "no_show",
+    "cancelled",
+    "rejected",
+    "expired",
+  ].includes(row.status);
   const salonName = row.tables?.floor_plans?.name ?? null;
   const ago = timeAgo(row.created_at);
 
@@ -936,6 +1062,30 @@ function ReservationRow({
 
         {/* Actions */}
         <div className="flex flex-wrap items-center gap-2">
+          {/* Spec 131 — una solicitud sólo admite las dos decisiones. Sentar,
+              editar y el resto llegan recién cuando es una reserva de verdad. */}
+          {row.status === "pending" && (
+            <>
+              <button
+                type="button"
+                onClick={onConfirmarSolicitud}
+                disabled={pending}
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.97] disabled:opacity-60"
+              >
+                <Check className="h-3.5 w-3.5" />
+                Confirmar
+              </button>
+              <button
+                type="button"
+                onClick={onRechazarSolicitud}
+                disabled={pending}
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-rose-50 px-3 text-xs font-semibold text-rose-700 ring-1 ring-rose-200 transition hover:bg-rose-100 active:scale-[0.97] disabled:opacity-60"
+              >
+                <X className="h-3.5 w-3.5" />
+                Rechazar
+              </button>
+            </>
+          )}
           {row.status === "confirmed" && !editing && (
             <>
               <button

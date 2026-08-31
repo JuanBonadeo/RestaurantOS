@@ -73,6 +73,9 @@ export type ReservationSettings = {
   /** Minutos tras `starts_at` antes de marcar una reserva confirmada como
    *  no_show automáticamente (spec 22). */
   no_show_grace_min: number;
+  /** Spec 131 — minutos antes del turno en que una pendiente vence sin
+   *  respuesta del local. Opcional para compilar sin la columna (default 120). */
+  approval_expiry_min?: number;
   schedule: WeeklySchedule;
   /** Spec 059 — modo de reservas del negocio. Opcional para compilar sin la
    *  columna (default `estricto` en DB). */
@@ -81,10 +84,16 @@ export type ReservationSettings = {
 };
 
 export type ReservationStatus =
+  /** Spec 131 — entró por la web o el chatbot y espera al encargado. */
+  | "pending"
   | "confirmed"
   | "seated"
   | "completed"
   | "no_show"
+  /** Spec 131 — el local la rechazó (`rejection_reason` dice por qué). */
+  | "rejected"
+  /** Spec 131 — venció sin respuesta del local. */
+  | "expired"
   | "cancelled";
 
 export type ReservationSource = "web" | "admin" | "chatbot";
@@ -145,8 +154,16 @@ export type DayServiceOption = {
 /**
  * "Live" statuses: occupy the table and count against availability. Matches
  * the SQL exclusion constraint filter on reservations_no_overlap.
+ *
+ * Spec 131 — `pending` está adentro a propósito: la solicitud **toma el lugar**
+ * mientras espera al encargado, así nadie más se queda con esa mesa ni con esos
+ * cubiertos. Si se rechaza o vence, sale del conjunto y el lugar se libera.
  */
-export const LIVE_RESERVATION_STATUSES: ReservationStatus[] = ["confirmed", "seated"];
+export const LIVE_RESERVATION_STATUSES: ReservationStatus[] = [
+  "pending",
+  "confirmed",
+  "seated",
+];
 
 export type Reservation = {
   id: string;
@@ -167,6 +184,13 @@ export type Reservation = {
   /** Zona/salón de una reserva genérica (sin mesa). Las con-mesa derivan la
    *  zona de la mesa. */
   floor_plan_id?: string | null;
+  // Spec 131 — rastro de la decisión del local sobre una solicitud.
+  /** Motivo del rechazo, si el encargado escribió uno. */
+  rejection_reason?: string | null;
+  /** Cuándo se resolvió la pendiente. */
+  decided_at?: string | null;
+  /** Quién la resolvió. `null` con `decided_at` seteado = venció sola. */
+  decided_by?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -181,5 +205,6 @@ export const DEFAULT_RESERVATION_SETTINGS: Omit<ReservationSettings, "business_i
   advance_days_max: 30,
   max_party_size: 12,
   no_show_grace_min: 30,
+  approval_expiry_min: 120,
   schedule: {},
 };

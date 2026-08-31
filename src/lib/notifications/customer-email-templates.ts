@@ -328,6 +328,83 @@ export function reservationConfirmedEmail(input: {
   };
 }
 
+/**
+ * Spec 131 — acuse de la SOLICITUD. Sale al crear una reserva de cliente, que
+ * ahora nace pendiente: acá no se promete nada, se avisa que el pedido llegó.
+ */
+export function reservationRequestedEmail(input: {
+  brand: BusinessBrand;
+  customerName: string;
+  whenLabel: string;
+  partySize: number;
+  manageUrl?: string;
+}): CustomerEmail {
+  const text =
+    `¡Hola ${input.customerName}! Recibimos tu pedido de reserva en ${input.brand.name} ` +
+    `para el ${input.whenLabel}, mesa para ${input.partySize}. ` +
+    `Falta que el local la confirme — apenas la respondan te avisamos.`;
+  return {
+    subject: `Recibimos tu pedido de reserva — ${input.brand.name}`,
+    text,
+    html: layout({
+      brand: input.brand,
+      heading: "Recibimos tu pedido de reserva",
+      preheader: text,
+      bodyHtml: paragraph(escapeHtml(text)),
+      cta: input.manageUrl
+        ? { label: "Ver mi reserva", url: input.manageUrl }
+        : undefined,
+    }),
+  };
+}
+
+/** Spec 131 — el local rechazó la solicitud, con el motivo si lo escribió. */
+export function reservationRejectedEmail(input: {
+  brand: BusinessBrand;
+  customerName: string;
+  whenLabel: string;
+  reason?: string | null;
+}): CustomerEmail {
+  const motivo = input.reason?.trim();
+  const text =
+    `¡Hola ${input.customerName}! No pudimos tomar tu reserva en ${input.brand.name} ` +
+    `para el ${input.whenLabel}.` +
+    (motivo ? ` Motivo: ${motivo}.` : "") +
+    ` Escribinos y buscamos otro día u horario.`;
+  return {
+    subject: `Sobre tu reserva — ${input.brand.name}`,
+    text,
+    html: layout({
+      brand: input.brand,
+      heading: "No pudimos tomar tu reserva",
+      preheader: text,
+      bodyHtml: paragraph(escapeHtml(text)),
+    }),
+  };
+}
+
+/** Spec 131 — venció sin que el local la respondiera. */
+export function reservationExpiredEmail(input: {
+  brand: BusinessBrand;
+  customerName: string;
+  whenLabel: string;
+}): CustomerEmail {
+  const text =
+    `¡Hola ${input.customerName}! Tu pedido de reserva en ${input.brand.name} ` +
+    `para el ${input.whenLabel} venció sin confirmarse, así que no tenés mesa reservada. ` +
+    `Si querés venir igual, escribinos o probá con otro horario.`;
+  return {
+    subject: `Tu pedido de reserva venció — ${input.brand.name}`,
+    text,
+    html: layout({
+      brand: input.brand,
+      heading: "Tu pedido de reserva venció",
+      preheader: text,
+      bodyHtml: paragraph(escapeHtml(text)),
+    }),
+  };
+}
+
 /** Recordatorio antes del turno, con link de confirmación de asistencia (opt-in). */
 export function reservationReminderEmail(input: {
   brand: BusinessBrand;

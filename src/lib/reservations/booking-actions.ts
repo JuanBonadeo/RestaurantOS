@@ -6,8 +6,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { createNotification } from "@/lib/notifications/create";
-import { notifyReservationConfirmed } from "@/lib/notifications/reservation-notify";
-import { canManageReservations } from "@/lib/permissions/can";
+import {
+  notifyReservationConfirmed,
+  notifyReservationRejected,
+  notifyReservationRequested,
+} from "@/lib/notifications/reservation-notify";
+import { canDecideReservation, canManageReservations } from "@/lib/permissions/can";
 import { customerPhoneKey } from "@/lib/phone";
 import { isTableAvailableForReservation, pickTableExcluding } from "@/lib/reservations/assign-table";
 import {
@@ -34,6 +38,7 @@ import {
 import {
   AdminCreateReservationInputSchema,
   CancelOwnReservationInputSchema,
+  DecideReservationInputSchema,
   CreateFlexibleReservationInputSchema,
   CreateReservationInputSchema,
   SentarReservaInputSchema,
@@ -49,6 +54,15 @@ type GenericClient = SupabaseClient;
 
 const EXCLUSION_VIOLATION = "23P01";
 const MAX_ASSIGN_RETRIES = 5;
+
+/**
+ * Spec 131 — con qué estado nace una reserva. La web y el chatbot **piden**:
+ * quedan `pending` hasta que el encargado las mire. El mostrador **acepta**:
+ * que el local la cargue ya es la confirmación.
+ */
+function initialStatus(source: ReservationSource): "pending" | "confirmed" {
+  return source === "admin" ? "confirmed" : "pending";
+}
 
 /**
  * Autoriza gestionar reservas (crear walk-in, sentar, cambiar estado, editar):
@@ -166,7 +180,7 @@ async function createReservationCommon(
         party_size: ctx.partySize,
         starts_at: start.toISOString(),
         ends_at: end.toISOString(),
-        status: "confirmed",
+        status: initialStatus(ctx.source),
         notes: ctx.notes,
         source: ctx.source,
       })
@@ -210,7 +224,7 @@ async function createReservationCommon(
         party_size: ctx.partySize,
         starts_at: start.toISOString(),
         ends_at: end.toISOString(),
-        status: "confirmed",
+        status: initialStatus(ctx.source),
         notes: ctx.notes,
         source: ctx.source,
       })
@@ -273,7 +287,8 @@ export async function createReservationFromCustomer(
   if (result.ok) {
     revalidatePath(`/${parsed.data.business_slug}/reservar`);
     revalidatePath(`/${parsed.data.business_slug}/admin/reservas`);
-    // spec 27 — avisar al encargado que entró una reserva nueva.
+    // spec 27 — avisar al encargado que entró una reserva nueva. Spec 131: es
+    // una solicitud pendiente de su decisión, y el aviso lo dice.
     await createNotification({
       businessId: business.id,
       targetRole: "encargado",
@@ -283,10 +298,12 @@ export async function createReservationFromCustomer(
         hora: parsed.data.slot,
         personas: parsed.data.party_size,
         nombre: parsed.data.customer_name,
+        pendiente: true,
       },
     });
-    // spec 45 — acuse de reserva al cliente por el canal del negocio (best-effort).
-    await notifyReservationConfirmed({ reservationId: result.data.id });
+    // spec 45 + 131 — acuse de la SOLICITUD al cliente (best-effort). El aviso
+    // de confirmación sale recién cuando el encargado la toma.
+    await notifyReservationRequested({ reservationId: result.data.id });
   }
   return result;
 }
@@ -475,7 +492,7 @@ export async function createFlexibleReservation(
       party_size: data.party_size,
       starts_at: starts.toISOString(),
       ends_at: ends.toISOString(),
-      status: "confirmed",
+      status: initialStatus(data.source),
       notes: data.notes,
       source: data.source,
     })
@@ -503,10 +520,12 @@ export async function createFlexibleReservation(
       hora: data.arrival_time ?? svc.name,
       personas: data.party_size,
       nombre: data.customer_name,
+      pendiente: data.source !== "admin",
     },
   });
   if (data.source !== "admin") {
-    await notifyReservationConfirmed({ reservationId: id });
+    // Spec 131 — nació pendiente: se avisa el pedido, no una confirmación.
+    await notifyReservationRequested({ reservationId: id });
   }
   return actionOk({ id });
 }
@@ -537,6 +556,79 @@ export async function updateReservationStatus(
     return actionError("No pudimos actualizar el estado.");
   }
   revalidatePath(`/${parsed.data.business_slug}/admin/reservas`);
+  return actionOk(null);
+}
+
+/**
+ * Spec 131 — la decisión del local sobre una solicitud: la toma o la rechaza.
+ *
+ * Sólo opera sobre `pending`, y sólo la puede llamar admin/encargado (el mozo
+ * gestiona reservas pero no decide cuáles entran: `canDecideReservation`).
+ *
+ * No re-chequea cupo al confirmar: la pendiente ya venía ocupando el lugar
+ * desde que entró (D2), así que confirmarla no mueve la ocupación ni un
+ * cubierto. Lo que cambia es que el cliente ahora sí tiene reserva.
+ */
+export async function decideReservation(
+  input: unknown,
+): Promise<ActionResult<null>> {
+  const parsed = DecideReservationInputSchema.safeParse(input);
+  if (!parsed.success) {
+    return actionError(parsed.error.issues[0]?.message ?? "Datos inválidos.");
+  }
+  const { business_slug, id, decision, reason } = parsed.data;
+
+  const supabase = await createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return actionError("No autenticado.");
+
+  const business = await getBusinessBySlug(business_slug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const { role, isPlatformAdmin } = await getReservationActor(business.id, user.id);
+  if (!isPlatformAdmin && !canDecideReservation(role)) {
+    return actionError("Sólo el encargado puede confirmar o rechazar reservas.");
+  }
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+  const { data: found } = await service
+    .from("reservations")
+    .select("id, status")
+    .eq("id", id)
+    .eq("business_id", business.id)
+    .maybeSingle();
+  const reservation = found as Pick<Reservation, "id" | "status"> | null;
+  if (!reservation) return actionError("Reserva no encontrada.");
+  if (reservation.status !== "pending") {
+    return actionError("Esa reserva ya no está pendiente.");
+  }
+
+  const motivo = reason?.trim() || null;
+  const { error } = await service
+    .from("reservations")
+    .update({
+      status: decision === "confirm" ? "confirmed" : "rejected",
+      rejection_reason: decision === "reject" ? motivo : null,
+      decided_at: new Date().toISOString(),
+      decided_by: user.id,
+    })
+    .eq("id", reservation.id)
+    .eq("business_id", business.id)
+    .eq("status", "pending");
+  if (error) {
+    console.error("decideReservation", error);
+    return actionError("No pudimos guardar la decisión.");
+  }
+
+  // spec 45 + 131 — recién acá el cliente lee "confirmada".
+  if (decision === "confirm") {
+    await notifyReservationConfirmed({ reservationId: reservation.id });
+  } else {
+    await notifyReservationRejected({ reservationId: reservation.id, reason: motivo });
+  }
+
+  revalidatePath(`/${business_slug}/admin/reservas`);
+  revalidatePath(`/${business_slug}/admin/operacion`);
   return actionOk(null);
 }
 
@@ -576,7 +668,12 @@ export async function sentarReserva(
     customer_phone: string; party_size: number; status: string; notes: string | null;
   };
   if (reservation.status !== "confirmed") {
-    return actionError("Solo se pueden sentar reservas confirmadas.");
+    // Spec 131 — la solicitud todavía no es una reserva: primero se decide.
+    return actionError(
+      reservation.status === "pending"
+        ? "Confirmá la reserva antes de sentarla."
+        : "Solo se pueden sentar reservas confirmadas.",
+    );
   }
   // Spec 059 — reserva GENÉRICA (sin mesa fija, modo flexible): el encargado
   // elige la mesa al sentar (`parsed.data.table_id`). Con mesa fija usa la suya.
@@ -745,7 +842,12 @@ export async function updateReservationDetails(
     service: string | null; floor_plan_id: string | null;
   };
   if (reservation.status !== "confirmed") {
-    return actionError("Solo se pueden editar reservas confirmadas.");
+    // Spec 131 — misma regla que sentar: primero se decide, después se ajusta.
+    return actionError(
+      reservation.status === "pending"
+        ? "Confirmá la reserva antes de editarla."
+        : "Solo se pueden editar reservas confirmadas.",
+    );
   }
 
   const isFlexible = settings.mode === "flexible";
@@ -974,7 +1076,9 @@ export async function cancelOwnReservation(
   const r = reservation as Pick<Reservation, "id" | "business_id" | "user_id" | "starts_at" | "status" | "customer_name"> | null;
   if (!r) return actionError("Reserva no encontrada.");
   if (r.user_id !== user.id) return actionError("Permiso denegado.");
-  if (r.status === "cancelled" || r.status === "completed" || r.status === "no_show") {
+  // Spec 131 — `pending` SÍ se puede cancelar (el cliente se arrepiente antes
+  // de que el local conteste); `rejected` y `expired` son terminales.
+  if (["cancelled", "completed", "no_show", "rejected", "expired"].includes(r.status)) {
     return actionError("La reserva ya no está activa.");
   }
 

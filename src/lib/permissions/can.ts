@@ -268,6 +268,16 @@ export function canManageReservations(role: BusinessRole | null): boolean {
 export const canSeatReservation = canManageReservations;
 
 /**
+ * Spec 131 — decidir una solicitud de reserva (confirmarla o rechazarla). Es
+ * más que gestionarla: compromete el cupo del servicio y le dice que sí o que
+ * no a un cliente. Por eso NO alcanza con ser mozo, a diferencia de
+ * `canManageReservations`.
+ */
+export function canDecideReservation(role: BusinessRole | null): boolean {
+  return role === "admin" || role === "encargado";
+}
+
+/**
  * Configurar el motor de reservas (horarios, buffer, lead time, party size,
  * gracia de no-show). Es config del negocio: admin/encargado. El mozo gestiona
  * reservas pero no cambia las reglas.

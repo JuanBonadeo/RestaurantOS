@@ -229,6 +229,73 @@ describe("computeAvailableSlots", () => {
     ]);
   });
 
+  // Spec 131 — la solicitud pendiente TOMA EL LUGAR: mientras espera al
+  // encargado nadie más puede quedarse con esa mesa.
+  it("una reserva pendiente ocupa la mesa igual que una confirmada", () => {
+    const reservations: Reservation[] = [
+      {
+        id: "r1",
+        business_id: "b1",
+        table_id: "t1",
+        user_id: null,
+        customer_name: "X",
+        customer_phone: "0",
+        party_size: 2,
+        starts_at: "2026-04-21T15:00:00Z", // 12:00 ART
+        ends_at: "2026-04-21T16:30:00Z", // 13:30 ART
+        status: "pending",
+        notes: null,
+        source: "web",
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      },
+    ];
+    const slots = computeAvailableSlots({
+      date: "2026-04-21",
+      partySize: 2,
+      settings: { ...baseSettings, schedule: SCHEDULE_OPEN_TUE },
+      tables: [makeTable({ id: "t1", seats: 4 })],
+      reservations,
+      timezone: TZ,
+      now: new Date("2026-04-21T03:00:00Z"),
+    });
+    expect(slots.map((s) => s.slot)).not.toContain("12:00");
+  });
+
+  // …y una rechazada o vencida lo libera.
+  it("una reserva rechazada o vencida no ocupa nada", () => {
+    for (const status of ["rejected", "expired"] as const) {
+      const reservations: Reservation[] = [
+        {
+          id: "r1",
+          business_id: "b1",
+          table_id: "t1",
+          user_id: null,
+          customer_name: "X",
+          customer_phone: "0",
+          party_size: 2,
+          starts_at: "2026-04-21T15:00:00Z",
+          ends_at: "2026-04-21T16:30:00Z",
+          status,
+          notes: null,
+          source: "web",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ];
+      const slots = computeAvailableSlots({
+        date: "2026-04-21",
+        partySize: 2,
+        settings: { ...baseSettings, schedule: SCHEDULE_OPEN_TUE },
+        tables: [makeTable({ id: "t1", seats: 4 })],
+        reservations,
+        timezone: TZ,
+        now: new Date("2026-04-21T03:00:00Z"),
+      });
+      expect(slots.map((s) => s.slot)).toContain("12:00");
+    }
+  });
+
   it("ignores cancelled / completed reservations", () => {
     const reservations: Reservation[] = [
       {

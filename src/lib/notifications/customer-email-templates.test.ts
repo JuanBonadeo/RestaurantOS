@@ -6,7 +6,10 @@ import {
   orderScheduledEmail,
   orderStatusEmail,
   reservationConfirmedEmail,
+  reservationExpiredEmail,
+  reservationRejectedEmail,
   reservationReminderEmail,
+  reservationRequestedEmail,
   resolveBusinessBrand,
   sanitizeColor,
   type BusinessBrand,
@@ -212,6 +215,52 @@ describe("reservationConfirmedEmail", () => {
       partySize: 2,
     });
     expect(mail.html).not.toContain("<img");
+  });
+});
+
+describe("avisos de la solicitud (spec 131)", () => {
+  it("el acuse del pedido NO dice que quedó confirmada", () => {
+    const mail = reservationRequestedEmail({
+      brand: GOLF,
+      customerName: "Ana",
+      whenLabel: "sáb 19/07 21:00",
+      partySize: 4,
+      manageUrl: "https://x/perfil/reservas",
+    });
+    expect(mail.subject).toContain("Recibimos tu pedido");
+    expect(mail.subject.toLowerCase()).not.toContain("confirmada");
+    expect(mail.text).toContain("Falta que el local la confirme");
+    expect(mail.html).toContain("Ver mi reserva");
+  });
+
+  it("el rechazo lleva el motivo cuando lo hay", () => {
+    const mail = reservationRejectedEmail({
+      brand: GOLF,
+      customerName: "Ana",
+      whenLabel: "sáb 19/07 21:00",
+      reason: "esa noche tenemos un evento privado",
+    });
+    expect(mail.text).toContain("evento privado");
+    expect(mail.html).toContain("No pudimos tomar tu reserva");
+  });
+
+  it("el rechazo sin motivo no deja un 'Motivo:' colgado", () => {
+    const mail = reservationRejectedEmail({
+      brand: GOLF,
+      customerName: "Ana",
+      whenLabel: "sáb 19/07 21:00",
+      reason: "   ",
+    });
+    expect(mail.text).not.toContain("Motivo:");
+  });
+
+  it("el vencimiento dice explícitamente que no hay mesa reservada", () => {
+    const mail = reservationExpiredEmail({
+      brand: GOLF,
+      customerName: "Ana",
+      whenLabel: "sáb 19/07 21:00",
+    });
+    expect(mail.text).toContain("no tenés mesa reservada");
   });
 });
 

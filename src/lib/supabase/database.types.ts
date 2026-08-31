@@ -3264,6 +3264,7 @@ export type Database = {
       reservation_settings: {
         Row: {
           advance_days_max: number
+          approval_expiry_min: number
           buffer_min: number
           business_id: string
           lead_time_min: number
@@ -3276,6 +3277,7 @@ export type Database = {
         }
         Insert: {
           advance_days_max?: number
+          approval_expiry_min?: number
           buffer_min?: number
           business_id: string
           lead_time_min?: number
@@ -3288,6 +3290,7 @@ export type Database = {
         }
         Update: {
           advance_days_max?: number
+          approval_expiry_min?: number
           buffer_min?: number
           business_id?: string
           lead_time_min?: number
@@ -3317,11 +3320,14 @@ export type Database = {
           customer_email: string | null
           customer_name: string
           customer_phone: string
+          decided_at: string | null
+          decided_by: string | null
           ends_at: string
           floor_plan_id: string | null
           id: string
           notes: string | null
           party_size: number
+          rejection_reason: string | null
           service: string | null
           source: string
           starts_at: string
@@ -3338,11 +3344,14 @@ export type Database = {
           customer_email?: string | null
           customer_name: string
           customer_phone: string
+          decided_at?: string | null
+          decided_by?: string | null
           ends_at: string
           floor_plan_id?: string | null
           id?: string
           notes?: string | null
           party_size: number
+          rejection_reason?: string | null
           service?: string | null
           source?: string
           starts_at: string
@@ -3359,11 +3368,14 @@ export type Database = {
           customer_email?: string | null
           customer_name?: string
           customer_phone?: string
+          decided_at?: string | null
+          decided_by?: string | null
           ends_at?: string
           floor_plan_id?: string | null
           id?: string
           notes?: string | null
           party_size?: number
+          rejection_reason?: string | null
           service?: string | null
           source?: string
           starts_at?: string

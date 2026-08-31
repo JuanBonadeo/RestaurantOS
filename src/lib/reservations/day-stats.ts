@@ -29,6 +29,8 @@ export type ReservationDayStats = {
   completed: number;
   noShow: number;
   cancelled: number;
+  /** Spec 131 — solicitudes esperando la decisión del local. */
+  pending: number;
 };
 
 /**
@@ -39,11 +41,15 @@ export type ReservationDayStats = {
  * se fue, pero pasó — si no contara, a las 23:00 con todo cerrado el panel
  * diría 0 comensales, que es la lectura opuesta a la verdadera.
  *
+ * Spec 131: `pending` **sí** cuenta — la solicitud ya tomó el lugar, así que
+ * para el cupo del día es tan real como una confirmada. `rejected` y `expired`
+ * **no**: son lugares que se liberaron.
+ *
  * Las canceladas y los no-show siguen visibles en los chips secundarios y en la
  * lista: se sacan de las **sumas**, no de la vista.
  */
 export function cuentaEnElDia(status: ReservationStatus): boolean {
-  return status !== "cancelled" && status !== "no_show";
+  return !["cancelled", "no_show", "rejected", "expired"].includes(status);
 }
 
 /** Contadores de la cabecera, todos sobre el mismo conjunto. */
@@ -60,6 +66,7 @@ export function reservationDayStats(rows: readonly DayStatsRow[]): ReservationDa
     completed: porEstado("completed"),
     noShow: porEstado("no_show"),
     cancelled: porEstado("cancelled"),
+    pending: porEstado("pending"),
   };
 }
 

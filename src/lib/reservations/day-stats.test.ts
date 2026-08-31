@@ -65,6 +65,20 @@ describe("reservationDayStats", () => {
     expect(stats.noShow).toBe(1);
   });
 
+  // Spec 131 — la solicitud ya tomó el lugar: para el día es tan real como una
+  // confirmada. La rechazada y la vencida, en cambio, liberaron el lugar.
+  it("la pendiente cuenta en el día; la rechazada y la vencida no", () => {
+    const stats = reservationDayStats([
+      fila("pending", 4),
+      fila("confirmed", 2),
+      fila("rejected", 8),
+      fila("expired", 6),
+    ]);
+    expect(stats.total).toBe(2);
+    expect(stats.guests).toBe(6);
+    expect(stats.pending).toBe(1);
+  });
+
   it("sin filas, todo en cero", () => {
     expect(reservationDayStats([])).toEqual({
       total: 0,
@@ -74,6 +88,7 @@ describe("reservationDayStats", () => {
       completed: 0,
       noShow: 0,
       cancelled: 0,
+      pending: 0,
     });
   });
 });

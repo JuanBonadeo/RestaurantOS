@@ -58,11 +58,17 @@ export default async function ReservarConfirmacionPage({
     { locale: es },
   );
   const timeLabel = formatInTimeZone(new Date(reservation.starts_at), tz, "HH:mm");
+  // Spec 131 — la solicitud es cancelable: todavía puede pasar.
   const isCancellable =
-    reservation.status === "confirmed" || reservation.status === "seated";
+    reservation.status === "pending" ||
+    reservation.status === "confirmed" ||
+    reservation.status === "seated";
+  const pendingApproval = reservation.status === "pending";
   const cancelled = reservation.status === "cancelled";
   const completed = reservation.status === "completed";
   const noShow = reservation.status === "no_show";
+  const rejected = reservation.status === "rejected";
+  const expired = reservation.status === "expired";
 
   // Eyebrow + big headline mirroring order-tracking visual hierarchy.
   let eyebrow: string;
@@ -72,6 +78,22 @@ export default async function ReservarConfirmacionPage({
     eyebrow = "Reserva cancelada";
     bigLine = "Cancelada";
     subLine = "Cuando quieras, armá una nueva.";
+  } else if (rejected) {
+    // Spec 131 — el local decidió que no, con el motivo si lo escribió.
+    eyebrow = "Reserva no tomada";
+    bigLine = "Sin lugar";
+    const motivo = reservation.rejection_reason?.trim();
+    subLine = motivo
+      ? `${motivo[0].toUpperCase()}${motivo.slice(1)}. Escribinos y buscamos otro día u horario.`
+      : `No pudimos tomarla. Escribinos y buscamos otro día u horario.`;
+  } else if (expired) {
+    eyebrow = "Pedido vencido";
+    bigLine = "Sin confirmar";
+    subLine = "El local no llegó a responderlo, así que no tenés mesa reservada.";
+  } else if (pendingApproval) {
+    eyebrow = "Solicitud enviada";
+    bigLine = `${dayLabel} · ${timeLabel} hs`;
+    subLine = `Falta que ${business.name} la confirme. Te avisamos apenas la respondan.`;
   } else if (completed) {
     eyebrow = "¡Gracias por la visita!";
     bigLine = "Completada";
@@ -172,7 +194,7 @@ export default async function ReservarConfirmacionPage({
       </div>
 
       {/* Quick stats row (only when active) */}
-      {!cancelled && !completed && !noShow ? (
+      {!cancelled && !completed && !noShow && !rejected && !expired ? (
         <div
           style={{
             display: "grid",

@@ -973,11 +973,13 @@ export function ReservarFlow({
                 fontFamily: "inherit",
               }}
             >
+              {/* Spec 131 — el cliente pide; confirma el local. El botón no
+                  promete lo que todavía no pasó. */}
               {user.isLoggedIn
                 ? submitting
-                  ? "Reservando…"
-                  : "Confirmar reserva"
-                : "Ingresar y reservar"}
+                  ? "Enviando…"
+                  : "Pedir reserva"
+                : "Ingresar y pedir reserva"}
             </button>
           </div>
         </div>

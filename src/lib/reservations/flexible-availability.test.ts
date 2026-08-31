@@ -158,6 +158,17 @@ describe("reservedCovers", () => {
     expect(reservedCovers(res, w)).toBe(5);
   });
 
+  // Spec 131 — el cupo del servicio lo consume también lo que está esperando
+  // decisión: si no, el encargado decidiría sobre lugares ya prometidos.
+  it("la pendiente suma cubiertos; la rechazada y la vencida no", () => {
+    const res = [
+      makeRes({ starts_at: CENA_2100, party_size: 4, status: "pending" }),
+      makeRes({ starts_at: CENA_2100, party_size: 3, status: "rejected" }),
+      makeRes({ starts_at: CENA_2100, party_size: 6, status: "expired" }),
+    ];
+    expect(reservedCovers(res, w)).toBe(4);
+  });
+
   it("filtra por zona cuando se pasa floorPlanId", () => {
     const res = [
       makeRes({ starts_at: CENA_2100, party_size: 4, floor_plan_id: "adentro" }),
