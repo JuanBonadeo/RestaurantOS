@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
+
+import { TimeField24 } from "@/components/ui/time-field-24";
 import { useRouter } from "next/navigation";
 import { Plus, Save, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
@@ -398,19 +400,17 @@ export function FlexibleServicesEditor({
                   className="flex flex-wrap items-center gap-2 rounded-md border bg-background p-2"
                 >
                   <span className="min-w-24 text-sm font-medium">{name}</span>
-                  <Input
-                    type="time"
+                  <TimeField24
                     value={d.opens_at}
-                    onChange={(e) => patchService(name, { opens_at: e.target.value })}
-                    className="w-24"
+                    onChange={(v) => patchService(name, { opens_at: v })}
+                    className="h-8 w-20 rounded-lg border border-input bg-transparent px-2 py-1 text-center text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
                     aria-label={`${name}: abre`}
                   />
                   <span className="text-muted-foreground">–</span>
-                  <Input
-                    type="time"
+                  <TimeField24
                     value={d.closes_at}
-                    onChange={(e) => patchService(name, { closes_at: e.target.value })}
-                    className="w-24"
+                    onChange={(v) => patchService(name, { closes_at: v })}
+                    className="h-8 w-20 rounded-lg border border-input bg-transparent px-2 py-1 text-center text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
                     aria-label={`${name}: cierra`}
                   />
                   <Input

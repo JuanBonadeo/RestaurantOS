@@ -25,6 +25,7 @@ import type {
   ReservationMode,
   ReservationStatus,
 } from "@/lib/reservations/types";
+import { TimeField24 } from "@/components/ui/time-field-24";
 import { cn } from "@/lib/utils";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -1221,14 +1222,13 @@ function ReservationRow({
                 ))}
               </select>
             ) : (
-              <input
-                type="time"
+              <TimeField24
                 value={editTime}
-                onChange={(e) => {
-                  setEditTime(e.target.value);
+                onChange={(v) => {
+                  setEditTime(v);
                   setOverbookAsk(null);
                 }}
-                className="h-9 rounded-xl border-0 bg-white px-2 text-sm font-semibold tabular-nums text-zinc-900 ring-1 ring-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-300"
+                className="h-9 w-20 rounded-xl border-0 bg-white px-2 text-center text-sm font-semibold text-zinc-900 ring-1 ring-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-300"
               />
             )}
           </div>

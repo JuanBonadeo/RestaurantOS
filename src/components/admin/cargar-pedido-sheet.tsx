@@ -29,6 +29,7 @@ import {
   type ClienteDireccion,
   type ClienteMatch,
 } from "@/lib/admin/customers-actions";
+import { TimeField24 } from "@/components/ui/time-field-24";
 import { enviarComanda } from "@/lib/comandas/actions";
 import { formatCurrency } from "@/lib/currency";
 import type { CatalogForMozo, CatalogProduct } from "@/lib/mozo/catalog-query";
@@ -948,12 +949,11 @@ export function CargarPedidoSheet({
                         >
                           Hora de cocina
                         </label>
-                        <input
+                        <TimeField24
                           id="cargar-hora-cocina"
-                          type="time"
                           value={horaCocina}
-                          onChange={(e) => setHoraCocina(e.target.value)}
-                          className="mt-1 block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm tabular-nums focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none"
+                          onChange={setHoraCocina}
+                          className="mt-1 block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none"
                         />
                         <p className="mt-1 text-[11px] text-zinc-500">
                           Para cuándo tiene que estar listo. Sale impresa en la
@@ -967,12 +967,11 @@ export function CargarPedidoSheet({
                         >
                           Hora del pedido
                         </label>
-                        <input
+                        <TimeField24
                           id="cargar-hora-pedido"
-                          type="time"
                           value={horaPedido}
-                          onChange={(e) => setHoraPedido(e.target.value)}
-                          className="mt-1 block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm tabular-nums focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none"
+                          onChange={setHoraPedido}
+                          className="mt-1 block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none"
                         />
                         <p className="mt-1 text-[11px] text-zinc-500">
                           Cuándo lo retira o lo recibe el cliente.

@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useMemo, useState, useTransition } from "react";
+
+import { TimeField24 } from "@/components/ui/time-field-24";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -129,22 +131,18 @@ export function BusinessHoursForm({
 
             {daySlots.map((slot) => (
               <div key={slot._idx} className="flex items-center gap-2">
-                <input
-                  type="time"
+                <TimeField24
                   value={slot.opens_at}
-                  onChange={(e) =>
-                    updateSlot(slot._idx, "opens_at", e.target.value)
-                  }
-                  className="rounded-lg border border-zinc-200 px-2 py-1.5 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900/10"
+                  onChange={(v) => updateSlot(slot._idx, "opens_at", v)}
+                  aria-label="Abre"
+                  className="w-20 rounded-lg border border-zinc-200 px-2 py-1.5 text-center text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900/10"
                 />
                 <span className="text-xs text-zinc-400">a</span>
-                <input
-                  type="time"
+                <TimeField24
                   value={slot.closes_at}
-                  onChange={(e) =>
-                    updateSlot(slot._idx, "closes_at", e.target.value)
-                  }
-                  className="rounded-lg border border-zinc-200 px-2 py-1.5 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900/10"
+                  onChange={(v) => updateSlot(slot._idx, "closes_at", v)}
+                  aria-label="Cierra"
+                  className="w-20 rounded-lg border border-zinc-200 px-2 py-1.5 text-center text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900/10"
                 />
                 <button
                   type="button"

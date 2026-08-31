@@ -7,6 +7,10 @@ import { fromZonedTime } from "date-fns-tz";
 import { toast } from "sonner";
 
 import { I } from "@/components/delivery/primitives";
+import {
+  minutosEstimados,
+  ventanaEstimadaLabel,
+} from "@/lib/orders/entrega-estimada";
 import { formatCurrency } from "@/lib/currency";
 import { createOrder } from "@/lib/orders/create-order";
 import {
@@ -28,6 +32,7 @@ export function CheckoutForm({
   todaySlots = [],
   deliveryFeeCents,
   estimatedMinutes,
+  estimatedPickupMinutes = null,
   savedAddresses = [],
   mpEnabled = false,
   initialName = "",
@@ -45,7 +50,10 @@ export function CheckoutForm({
    */
   todaySlots?: string[];
   deliveryFeeCents: number;
+  /** Piso del estimado de envío (spec 133). Null = default del producto. */
   estimatedMinutes: number | null;
+  /** Piso del estimado de retiro. Null = default del producto. */
+  estimatedPickupMinutes?: number | null;
   savedAddresses?: { id: string; street: string }[];
   mpEnabled?: boolean;
   initialName?: string;
@@ -65,6 +73,17 @@ export function CheckoutForm({
   const [mode, setMode] = useState<"delivery" | "pickup">("delivery");
   const [address, setAddress] = useState("");
   const [apt, setApt] = useState("");
+  // Spec 133 — el estimado sale de la config del negocio, y es una ventana:
+  // «1 h – 1 h 30», no «40 min» clavados. Tres lugares lo muestran y ahora los
+  // tres dicen lo mismo, según lo que el cliente eligió.
+  const estimadoEnvio = ventanaEstimadaLabel(
+    minutosEstimados("delivery", { estimated_delivery_minutes: estimatedMinutes }),
+  );
+  const estimadoRetiro = ventanaEstimadaLabel(
+    minutosEstimados("pickup", { estimated_pickup_minutes: estimatedPickupMinutes }),
+  );
+  const estimadoModo = mode === "delivery" ? estimadoEnvio : estimadoRetiro;
+
   const [notes, setNotes] = useState("");
   const [name, setName] = useState(initialName);
   const [phone, setPhone] = useState(initialPhone);
@@ -569,9 +588,9 @@ export function CheckoutForm({
               {
                 id: "delivery",
                 label: "Envío a domicilio",
-                sub: estimatedMinutes ? `${estimatedMinutes} min` : "30–45 min",
+                sub: estimadoEnvio,
               },
-              { id: "pickup", label: "Retiro en el local", sub: "15–20 min" },
+              { id: "pickup", label: "Retiro en el local", sub: estimadoRetiro },
             ] as const
           ).map((o) => {
             const sel = mode === o.id;
@@ -721,7 +740,7 @@ export function CheckoutForm({
               <div
                 style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}
               >
-                Listo en 15–20 min
+                Listo en {estimadoRetiro}
               </div>
             </div>
           </div>
@@ -747,7 +766,7 @@ export function CheckoutForm({
         >
           {(
             [
-              { id: "now", label: "Lo antes posible", sub: "15–20 min" },
+              { id: "now", label: "Lo antes posible", sub: estimadoModo },
               {
                 id: "scheduled",
                 label: "Programar",

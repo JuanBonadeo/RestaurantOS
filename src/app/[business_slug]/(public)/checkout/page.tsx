@@ -101,6 +101,10 @@ export default async function CheckoutPage({
       todaySlots={todaySlots}
       deliveryFeeCents={Number(business.delivery_fee_cents)}
       estimatedMinutes={business.estimated_delivery_minutes}
+      estimatedPickupMinutes={
+        (business as { estimated_pickup_minutes?: number | null })
+          .estimated_pickup_minutes ?? null
+      }
       savedAddresses={savedAddresses}
       mpEnabled={mpEnabled}
       initialName={initialName}

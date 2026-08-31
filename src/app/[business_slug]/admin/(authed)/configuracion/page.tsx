@@ -41,6 +41,9 @@ export default async function ConfiguracionNegocioPage({
     delivery_fee_cents: Number(business.delivery_fee_cents ?? 0) / 100,
     min_order_cents: Number(business.min_order_cents ?? 0) / 100,
     estimated_delivery_minutes: business.estimated_delivery_minutes,
+    estimated_pickup_minutes:
+      (business as { estimated_pickup_minutes?: number | null })
+        .estimated_pickup_minutes ?? null,
     scheduled_march_lead_pickup_min:
       business.scheduled_march_lead_pickup_min ?? DEFAULT_MARCH_LEAD_PICKUP_MIN,
     scheduled_march_lead_delivery_min:

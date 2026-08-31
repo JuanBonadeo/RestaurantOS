@@ -257,6 +257,7 @@ export type Database = {
           delivery_fee_cents: number
           email: string | null
           estimated_delivery_minutes: number | null
+          estimated_pickup_minutes: number | null
           id: string
           is_active: boolean
           lat: number | null
@@ -301,6 +302,7 @@ export type Database = {
           delivery_fee_cents?: number
           email?: string | null
           estimated_delivery_minutes?: number | null
+          estimated_pickup_minutes?: number | null
           id?: string
           is_active?: boolean
           lat?: number | null
@@ -345,6 +347,7 @@ export type Database = {
           delivery_fee_cents?: number
           email?: string | null
           estimated_delivery_minutes?: number | null
+          estimated_pickup_minutes?: number | null
           id?: string
           is_active?: boolean
           lat?: number | null

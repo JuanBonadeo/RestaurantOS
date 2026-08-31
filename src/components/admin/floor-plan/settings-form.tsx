@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
+
+import { TimeField24 } from "@/components/ui/time-field-24";
 import { Plus, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -251,11 +253,11 @@ export function ReservationSettingsForm({
                     <>
                       {day.slots.map((slot, i) => (
                         <div key={i} className="flex items-center gap-1">
-                          <Input
-                            type="time"
+                          <TimeField24
                             value={slot}
-                            onChange={(e) => updateSlot(key, i, e.target.value)}
-                            className="w-24"
+                            onChange={(v) => updateSlot(key, i, v)}
+                            aria-label="Horario del turno"
+                            className="h-8 w-20 rounded-lg border border-input bg-transparent px-2 py-1 text-center text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
                           />
                           <Button
                             type="button"

@@ -61,6 +61,11 @@ const Schema = z.object({
     .union([z.coerce.number().int().min(0), z.literal("")])
     .transform((v) => (v === "" ? null : v))
     .nullable(),
+  // Spec 133: el piso del estimado de retiro. Vacío = default del producto (40).
+  estimated_pickup_minutes: z
+    .union([z.coerce.number().int().min(0), z.literal("")])
+    .transform((v) => (v === "" ? null : v))
+    .nullable(),
   // Spec 061: cuánto antes de la hora pedida sale la comanda de un programado.
   // El techo (240) es el mismo check que la migración 0027.
   scheduled_march_lead_pickup_min: z.coerce
@@ -346,16 +351,39 @@ export function BusinessProfileForm({
               name="estimated_delivery_minutes"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Tiempo estimado</FormLabel>
+                  <FormLabel>Estimado de envío</FormLabel>
                   <FormControl>
                     <MinutesInput
-                      placeholder="30"
+                      placeholder="60"
                       {...field}
                       value={field.value ?? ""}
                     />
                   </FormControl>
                   <FormMessage />
-                  <p className="text-xs text-zinc-500">Opcional, en min.</p>
+                  <p className="text-xs text-zinc-500">
+                    Vacío = 60 min. Al cliente se le muestra hasta la media hora
+                    siguiente: 60 → «1 h – 1 h 30».
+                  </p>
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="estimated_pickup_minutes"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Estimado de retiro</FormLabel>
+                  <FormControl>
+                    <MinutesInput
+                      placeholder="40"
+                      {...field}
+                      value={field.value ?? ""}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                  <p className="text-xs text-zinc-500">
+                    Vacío = 40 min → «40 min – 1 h».
+                  </p>
                 </FormItem>
               )}
             />

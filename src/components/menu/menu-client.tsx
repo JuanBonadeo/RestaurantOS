@@ -6,6 +6,10 @@ import Link from "next/link";
 
 import { ActiveOrderBanner } from "@/components/menu/active-order-banner";
 import { I, ImageTile, StatusDot } from "@/components/delivery/primitives";
+import {
+  minutosEstimados,
+  ventanaEstimadaLabel,
+} from "@/lib/orders/entrega-estimada";
 import { computeIsOpen, type BusinessHour } from "@/lib/business-hours";
 import type { ActiveOrder } from "@/lib/customers/active-orders";
 import { formatCurrency } from "@/lib/currency";
@@ -177,7 +181,12 @@ export function MenuClient({
   const fee = deliveryFeeCents;
   const min = minOrderCents;
   const hasDelivery = fee > 0 || min > 0 || estimatedMinutes != null;
-  const eta = estimatedMinutes ? `${estimatedMinutes} min` : "30–45 min";
+  // Spec 133 — la misma ventana que el checkout: «1 h – 1 h 30», no un número
+  // clavado. Si el header promete 40 min y el checkout 1 h, el cliente ya
+  // desconfía antes de pedir.
+  const eta = ventanaEstimadaLabel(
+    minutosEstimados("delivery", { estimated_delivery_minutes: estimatedMinutes }),
+  );
 
   const handleSelect = (product: MenuProduct) => {
     setSelected(product);
