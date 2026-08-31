@@ -30,7 +30,9 @@ import type {
 import { getMozosByBusiness } from "@/lib/mozo/queries";
 import type { MozoMember } from "@/lib/mozo/queries";
 import { orderSlotsForDay } from "@/lib/orders/scheduled";
+import type { SolicitudEnBandeja } from "@/lib/reservations/pending-inbox";
 import {
+  getPendingInbox,
   getReservationEditContext,
   getReservationServices,
   getReservationSettings,
@@ -122,6 +124,8 @@ export type ReservasData = {
   /** Spec 097 — modo + servicios del día para el editor de la fila. */
   mode: ReservationMode;
   services: DayServiceOption[];
+  /** Spec 135/136 — la bandeja: solicitudes de cualquier día, no sólo de éste. */
+  solicitudes: SolicitudEnBandeja[];
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -326,7 +330,7 @@ export async function loadRendicion(
 export async function loadReservas(
   businessId: string,
   service: SupabaseClient,
-  window: { date: string; dayStart: Date; dayEnd: Date },
+  window: { date: string; dayStart: Date; dayEnd: Date; timezone: string },
 ): Promise<ReservasData> {
   const [rowsRes, fpRes] = await Promise.all([
     service
@@ -368,6 +372,13 @@ export async function loadReservas(
     { useService: true },
   );
 
+  // Spec 136 — la tab de reservas del operativo lleva la misma bandeja que la
+  // pantalla de reservas. El plano no: al lado está la tab «Mesas» con el salón
+  // en vivo, y dos planos distintos en una pantalla confunden.
+  const solicitudes = await getPendingInbox(businessId, window.timezone, {
+    useService: true,
+  });
+
   return {
     date: window.date,
     rows: (rowsRes.data ?? []) as AdminRow[],
@@ -375,6 +386,7 @@ export async function loadReservas(
     activeTables,
     mode,
     services,
+    solicitudes,
   };
 }
 

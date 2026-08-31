@@ -185,7 +185,12 @@ export async function getReservasTabData(
   const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
 
   return actionOk(
-    await loadReservas(businessId, service(), { date: dia, dayStart, dayEnd }),
+    await loadReservas(businessId, service(), {
+      date: dia,
+      dayStart,
+      dayEnd,
+      timezone,
+    }),
   );
 }
 

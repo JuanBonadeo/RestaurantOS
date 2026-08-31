@@ -21,9 +21,19 @@ import {
 import {
   computeFlexibleAvailability,
   flexibleServiceWindow,
+  reservedCovers,
   type FlexibleAvailability,
   type ReservationForFlexible,
 } from "@/lib/reservations/flexible-availability";
+import { isTableAvailableForReservation } from "@/lib/reservations/assign-table";
+import { DEFAULT_APPROVAL_EXPIRY_MIN, pendingExpiresAt } from "@/lib/reservations/pending-expiry";
+import {
+  localDate,
+  ocupacionPorCubiertos,
+  ocupacionPorMesas,
+  type OcupacionContexto,
+  type SolicitudEnBandeja,
+} from "@/lib/reservations/pending-inbox";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
@@ -348,6 +358,140 @@ export async function getReservationServiceByName(
     matches.find(anyDay) ??
     null
   );
+}
+
+/**
+ * Spec 135 — la bandeja: todas las solicitudes que esperan respuesta, de
+ * cualquier día.
+ *
+ * Es la consulta que la 131 no tenía: la pantalla de reservas carga un día, así
+ * que una solicitud para el sábado no existía hasta que alguien navegaba al
+ * sábado — y mientras tanto vencía sola. El índice parcial
+ * `reservations_pending_idx` (migración 0053) sirve este `eq + gte + order`.
+ */
+export async function getPendingReservations(
+  businessId: string,
+  options: { useService?: boolean; now?: Date } = {},
+): Promise<PendingReservationRow[]> {
+  const supabase = options.useService
+    ? (createSupabaseServiceClient() as unknown as GenericClient)
+    : ((await createSupabaseServerClient()) as unknown as GenericClient);
+  const now = options.now ?? new Date();
+  const { data } = await supabase
+    .from("reservations")
+    .select("*, tables(label, floor_plans(id, name))")
+    .eq("business_id", businessId)
+    .eq("status", "pending")
+    .gte("starts_at", now.toISOString())
+    .order("starts_at", { ascending: true });
+  return (data ?? []) as PendingReservationRow[];
+}
+
+export type PendingReservationRow = Reservation & {
+  tables?: { label: string; floor_plans?: { id: string; name: string } | null } | null;
+};
+
+/**
+ * Spec 135 — las solicitudes con el contexto para decidirlas: cómo viene el
+ * servicio al que entran y cuándo vencen.
+ *
+ * Carga en bloque (una consulta de reservas para todo el rango, una de mesas,
+ * una de servicios) y calcula en memoria con las funciones puras. La
+ * alternativa —preguntar disponibilidad por solicitud— es N consultas para
+ * responder N veces casi lo mismo.
+ */
+export async function getPendingInbox(
+  businessId: string,
+  timezone: string,
+  options: { useService?: boolean; now?: Date } = {},
+): Promise<SolicitudEnBandeja[]> {
+  const now = options.now ?? new Date();
+  const pendings = await getPendingReservations(businessId, { ...options, now });
+  if (pendings.length === 0) return [];
+
+  const settings = await getReservationSettings(businessId, options);
+  const expiryMin = settings.approval_expiry_min ?? DEFAULT_APPROVAL_EXPIRY_MIN;
+
+  // Ventana que cubre todas las solicitudes, con un día de más a cada lado para
+  // que los servicios que cruzan medianoche entren enteros.
+  const desde = new Date(
+    new Date(pendings[0].starts_at).getTime() - 24 * 60 * 60 * 1000,
+  );
+  const ultima = pendings[pendings.length - 1];
+  const hasta = new Date(
+    new Date(ultima.starts_at).getTime() + 48 * 60 * 60 * 1000,
+  );
+
+  const [reservasDelRango, mesas, servicios] = await Promise.all([
+    getReservationsInRange(businessId, desde.toISOString(), hasta.toISOString(), options),
+    getAllReservableTables(businessId, options),
+    settings.mode === "flexible"
+      ? getReservationServices(businessId, options)
+      : Promise.resolve([] as ReservationService[]),
+  ]);
+
+  return pendings.map((reserva) => ({
+    reserva,
+    venceEn: pendingExpiresAt(reserva, expiryMin).toISOString(),
+    ocupacion: contextoDeOcupacion({
+      reserva,
+      mode: settings.mode ?? "estricto",
+      timezone,
+      reservas: reservasDelRango,
+      mesas,
+      servicios,
+    }),
+  }));
+}
+
+/** El contexto de D5: cubiertos del servicio en flexible, mesas libres en estricto. */
+function contextoDeOcupacion(input: {
+  reserva: PendingReservationRow;
+  mode: ReservationMode;
+  timezone: string;
+  reservas: Reservation[];
+  mesas: FloorTable[];
+  servicios: ReservationService[];
+}): OcupacionContexto | null {
+  const { reserva, mode, timezone, reservas, mesas, servicios } = input;
+
+  if (mode === "flexible" && reserva.service) {
+    const date = localDate(reserva.starts_at, timezone);
+    const dow = dayOfWeekFromDate(date);
+    const zoneId = reserva.floor_plan_id ?? reserva.tables?.floor_plans?.id ?? null;
+    const matches = servicios.filter((s) => s.name === reserva.service);
+    const svc =
+      matches.find((s) => s.day_of_week === dow && s.floor_plan_id === zoneId) ??
+      matches.find((s) => s.day_of_week === dow && s.floor_plan_id === null) ??
+      matches.find((s) => s.day_of_week === null && s.floor_plan_id === zoneId) ??
+      matches.find((s) => s.day_of_week === null && s.floor_plan_id === null) ??
+      matches[0];
+    if (!svc) return null;
+    const window = flexibleServiceWindow(date, svc, timezone);
+    if (!window) return null;
+    return ocupacionPorCubiertos(
+      reserva.service,
+      reservedCovers(reservas, window, svc.floor_plan_id),
+      svc.soft_capacity ?? null,
+    );
+  }
+
+  // Estricto: no hay cupo configurado, así que se cuenta lo único cierto —
+  // cuántas mesas quedan libres en la ventana de esta reserva.
+  const activas = mesas.filter((t) => t.status === "active");
+  if (activas.length === 0) return null;
+  const windowStart = new Date(reserva.starts_at);
+  const windowEnd = new Date(reserva.ends_at);
+  const libres = activas.filter((t) =>
+    isTableAvailableForReservation({
+      tableId: t.id,
+      reservations: reservas,
+      windowStart,
+      windowEnd,
+      excludeReservationId: reserva.id,
+    }),
+  ).length;
+  return ocupacionPorMesas(libres, activas.length);
 }
 
 /**

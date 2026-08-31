@@ -45,6 +45,9 @@ vi.mock("@/components/admin/orders-realtime-board", () => ({
 vi.mock("@/components/reservations/admin-day-list", () => ({
   AdminDayList: () => <div data-testid="panel-reservas">RESERVAS</div>,
 }));
+vi.mock("@/components/reservations/solicitudes-inbox", () => ({
+  SolicitudesInbox: () => <div data-testid="panel-solicitudes">SOLICITUDES</div>,
+}));
 
 // Las actions de tab: lo que se verifica es que al entrar a una tab se pida
 // SÓLO lo suyo, en vez de re-correr la ruta entera.
@@ -99,6 +102,7 @@ function shellProps() {
       activeTables: [],
       mode: "estricto",
       services: [],
+      solicitudes: [],
     }),
   } as unknown as React.ComponentProps<typeof LocalShell>;
 }

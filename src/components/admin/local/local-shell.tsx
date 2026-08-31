@@ -45,6 +45,11 @@ const OrdersRealtimeBoard = dynamic(() =>
     (m) => m.OrdersRealtimeBoard,
   ),
 );
+const SolicitudesInbox = dynamic(() =>
+  import("@/components/reservations/solicitudes-inbox").then(
+    (m) => m.SolicitudesInbox,
+  ),
+);
 const AdminDayList = dynamic(() =>
   import("@/components/reservations/admin-day-list").then((m) => m.AdminDayList),
 );
@@ -73,6 +78,7 @@ import type {
 import type { BusinessRole } from "@/lib/admin/context";
 import type { SalonOption } from "@/lib/admin/floor-plan/queries";
 import { salonFilterStorageKey } from "@/lib/admin/salon-filter";
+import { localDate } from "@/lib/reservations/pending-inbox";
 import { useStickyMultiFilter } from "@/lib/ui/use-sticky-filter";
 import { useOnActivate, useTabParam } from "@/lib/ui/use-tab-param";
 import {
@@ -446,22 +452,55 @@ function ReservasPanel({
   });
   reloadRef.current = () => void refetch(diaPedido.current);
 
+  // Spec 136 — mismo layout que /admin/reservas: el día a la izquierda, la
+  // bandeja fija a la derecha. Sin plano: al lado está la tab «Mesas» con el
+  // salón en vivo.
+  const solicitudes = data.solicitudes ?? [];
+  const diasConSolicitudes = [
+    ...new Set(solicitudes.map((s) => localDate(s.reserva.starts_at, timezone))),
+  ];
+
   return (
-    <AdminDayList
-      slug={slug}
-      date={data.date}
-      rows={data.rows}
-      timezone={timezone}
-      floorPlans={data.floorPlans}
-      activeTables={data.activeTables}
-      mode={data.mode}
-      services={data.services}
-      salonIds={salonIds}
-      onChanged={(d) => void refetch(d)}
-      // Embebida en el operativo: el navegador de fechas se queda acá
-      // (`?tab=reservas&date=…`) en vez de saltar a /admin/reservas.
-      datePath={`/${slug}/admin/operacion`}
-    />
+    <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+      <div className="order-2 min-w-0 flex-1 lg:order-1">
+        <AdminDayList
+          slug={slug}
+          date={data.date}
+          rows={data.rows}
+          timezone={timezone}
+          floorPlans={data.floorPlans}
+          activeTables={data.activeTables}
+          mode={data.mode}
+          services={data.services}
+          salonIds={salonIds}
+          diasConSolicitudes={diasConSolicitudes}
+          onChanged={(d) => void refetch(d)}
+          // Embebida en el operativo: el navegador de fechas se queda acá
+          // (`?tab=reservas&date=…`) en vez de saltar a /admin/reservas.
+          datePath={`/${slug}/admin/operacion`}
+        />
+      </div>
+      <aside className="order-1 w-full lg:order-2 lg:w-[340px] lg:shrink-0">
+        <div className="mb-2.5 flex items-center gap-2">
+          <h2 className="text-sm font-semibold text-zinc-900">A confirmar</h2>
+          {solicitudes.length > 0 && (
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
+              {solicitudes.length}
+            </span>
+          )}
+        </div>
+        <SolicitudesInbox
+          slug={slug}
+          solicitudes={solicitudes}
+          timezone={timezone}
+          mode={data.mode}
+          services={data.services}
+          activeTables={data.activeTables}
+          floorPlans={data.floorPlans}
+          onChanged={() => void refetch(diaPedido.current)}
+        />
+      </aside>
+    </div>
   );
 }
 

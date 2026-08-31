@@ -3,10 +3,15 @@ import { fromZonedTime } from "date-fns-tz";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { AdminDayList, type AdminRow } from "@/components/reservations/admin-day-list";
+import { SolicitudesInbox } from "@/components/reservations/solicitudes-inbox";
 import { AyudaChip } from "@/components/admin/ayuda-chip";
 import { PageHeader, PageShell } from "@/components/admin/shell/page-shell";
 import { ensureAdminAccess } from "@/lib/admin/context";
-import { getReservationEditContext } from "@/lib/reservations/queries";
+import { localDate } from "@/lib/reservations/pending-inbox";
+import {
+  getPendingInbox,
+  getReservationEditContext,
+} from "@/lib/reservations/queries";
 import type { FloorTable } from "@/lib/reservations/types";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
@@ -79,24 +84,65 @@ export default async function AdminReservasPage({
     useService: true,
   });
 
+  // Spec 135 — la bandeja no mira la fecha: son todas las solicitudes futuras
+  // sin responder, de cualquier día.
+  const solicitudes = await getPendingInbox(business.id, business.timezone, {
+    useService: true,
+  });
+
+  // Spec 136 — los días que el navegador de fechas marca con el punto.
+  const diasConSolicitudes = [
+    ...new Set(
+      solicitudes.map((s) => localDate(s.reserva.starts_at, business.timezone)),
+    ),
+  ];
+
   return (
     <PageShell width="wide" className="space-y-6">
       <PageHeader
         eyebrow="Reservas"
-        title="Reservas del día"
-        description="Lista por hora con estado actual. Usá el plano y la configuración desde los botones de arriba."
+        title="Reservas"
+        description="El día a la izquierda, las solicitudes que esperan respuesta a la derecha."
         action={<AyudaChip slug={business_slug} tema="reservas" />}
       />
-      <AdminDayList
-        slug={business_slug}
-        date={date}
-        rows={rows}
-        timezone={business.timezone}
-        floorPlans={floorPlans}
-        activeTables={activeTables}
-        mode={mode}
-        services={services}
-      />
+
+      {/* Spec 136 — dos columnas: el día es donde se trabaja, la bandeja es lo
+          que interrumpe. En pantalla chica se apilan con la bandeja arriba, que
+          es lo primero que hay que contestar. */}
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+        <div className="order-2 min-w-0 flex-1 lg:order-1">
+          <AdminDayList
+            slug={business_slug}
+            date={date}
+            rows={rows}
+            timezone={business.timezone}
+            floorPlans={floorPlans}
+            activeTables={activeTables}
+            mode={mode}
+            services={services}
+            diasConSolicitudes={diasConSolicitudes}
+          />
+        </div>
+        <aside className="order-1 w-full lg:order-2 lg:sticky lg:top-6 lg:w-[340px] lg:shrink-0">
+          <div className="mb-2.5 flex items-center gap-2">
+            <h2 className="text-sm font-semibold text-zinc-900">A confirmar</h2>
+            {solicitudes.length > 0 && (
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
+                {solicitudes.length}
+              </span>
+            )}
+          </div>
+          <SolicitudesInbox
+            slug={business_slug}
+            solicitudes={solicitudes}
+            timezone={business.timezone}
+            mode={mode}
+            services={services}
+            activeTables={activeTables}
+            floorPlans={floorPlans}
+          />
+        </aside>
+      </div>
     </PageShell>
   );
 }

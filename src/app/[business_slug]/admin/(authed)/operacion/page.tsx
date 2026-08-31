@@ -84,6 +84,7 @@ export default async function LocalEnVivoPage({
     date: reservasDate,
     dayStart: reservasDayStart,
     dayEnd: reservasDayEnd,
+    timezone: business.timezone,
   });
 
   // /admin/operacion toma full viewport (overlay sobre el sidebar) — sin

@@ -16,7 +16,6 @@ import {
   updateReservationDetails,
   updateReservationStatus,
 } from "@/lib/reservations/booking-actions";
-import { arrivalSlots } from "@/lib/reservations/flexible-availability";
 import { OVERBOOK_HINT } from "@/lib/reservations/edit-window";
 import type {
   DayServiceOption,
@@ -25,7 +24,11 @@ import type {
   ReservationMode,
   ReservationStatus,
 } from "@/lib/reservations/types";
-import { TimeField24 } from "@/components/ui/time-field-24";
+import {
+  ReservationEditPanel,
+  type EditCallbacks,
+  type EditPatch,
+} from "@/components/reservations/reservation-edit-panel";
 import { cn } from "@/lib/utils";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -70,22 +73,7 @@ const STATUS_RING: Record<ReservationStatus, string> = {
   cancelled: "bg-rose-50 text-rose-700 ring-rose-200",
 };
 
-type Filter = "all" | "pending" | "upcoming" | "seated" | "past";
-
-/** Spec 097 — lo que manda el panel de edición (lo ausente no se toca). */
-type EditPatch = {
-  table_id: string | null;
-  party_size: number;
-  time?: string;
-  service?: string;
-  allow_overbook?: boolean;
-};
-
-type EditCallbacks = {
-  onDone: () => void;
-  /** El server pidió confirmar sobrecupo (spec 077): se ofrece "Guardar igual". */
-  onOverbook: (message: string) => void;
-};
+type Filter = "all" | "upcoming" | "seated" | "past";
 
 /* ─── inline icons (kept from original) ─────────────────────────────────── */
 
@@ -186,6 +174,7 @@ export function AdminDayList({
   services = [],
   salonIds = [],
   datePath,
+  diasConSolicitudes = [],
   onChanged,
 }: {
   slug: string;
@@ -203,6 +192,12 @@ export function AdminDayList({
    * que usa la página `/admin/reservas`, que no tiene selector propio).
    */
   salonIds?: string[];
+  /**
+   * Spec 136 — días (YYYY-MM-DD local) con solicitudes sin responder. El
+   * navegador de fechas los marca: es el único lugar donde el estado de otro
+   * día cabe sin ruido.
+   */
+  diasConSolicitudes?: string[];
   /**
    * Spec 103: cómo re-sincronizarse tras mutar o cambiar de día. Recibe el día
    * pedido. Sin esto se cae al comportamiento histórico —`router.push` para la
@@ -378,9 +373,6 @@ export function AdminDayList({
     const now = Date.now();
     let filtered = rows.filter((r) => {
       switch (filter) {
-        // Spec 131 — la bandeja: lo que espera una decisión del local.
-        case "pending":
-          return r.status === "pending";
         case "upcoming":
           return (
             r.status === "confirmed" &&
@@ -424,10 +416,9 @@ export function AdminDayList({
     ? matchingRows.filter((r) => r.status === "cancelled").length
     : hiddenCancelled;
 
-  /** Spec 131 — cuántas solicitudes esperan decisión en el día que se mira. */
-  const pendingCount = useMemo(
-    () => rows.filter((r) => r.status === "pending").length,
-    [rows],
+  const solicitudesPorDia = useMemo(
+    () => new Set(diasConSolicitudes),
+    [diasConSolicitudes],
   );
 
   const dateStrip = buildDateStrip(date);
@@ -435,20 +426,20 @@ export function AdminDayList({
   return (
     <div className="space-y-6">
       {/* ── KPI row ──────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <KpiCard label="Reservas" value={String(stats.total)} />
+      {/* Spec 136 — tres KPI: lo que la pantalla no dice en otro lado. Las
+          reservas y los cubiertos son el mismo número mirado de dos formas, así
+          que van juntos; lo pendiente salió de acá porque tiene su bandeja. */}
+      <div className="grid grid-cols-3 gap-3">
         <KpiCard
-          label="Comensales"
-          value={String(stats.guests)}
+          label="Reservas"
+          value={String(stats.total)}
           sub={
-            // Spec 131 — las pendientes ya ocupan lugar: si hay, se dicen.
             [
-              stats.pending > 0 ? `${stats.pending} pend` : null,
-              stats.confirmed > 0 ? `${stats.confirmed} conf` : null,
-              stats.seated > 0 ? `${stats.seated} mesa` : null,
+              `${stats.guests} cubiertos`,
+              stats.pending > 0 ? `${stats.pending} sin responder` : null,
             ]
               .filter(Boolean)
-              .join(" · ") || undefined
+              .join(" · ")
           }
         />
         <KpiCard
@@ -527,6 +518,16 @@ export function AdminDayList({
                   <span className="font-mono text-base font-semibold tabular-nums">
                     {d.day}
                   </span>
+                  {/* Spec 136 — este día tiene solicitudes sin responder. */}
+                  {solicitudesPorDia.has(d.iso) && (
+                    <span
+                      className={cn(
+                        "absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full",
+                        active ? "bg-amber-300" : "bg-amber-500",
+                      )}
+                      aria-label="Tiene solicitudes sin responder"
+                    />
+                  )}
                 </button>
               );
             })}
@@ -599,12 +600,6 @@ export function AdminDayList({
                   v: "all",
                   l: `Todas (${showCancelled ? rows.length : rows.filter((r) => r.status !== "cancelled").length})`,
                 },
-                // Spec 131 — primera y con el contador: es lo único de esta
-                // pantalla que le pide algo al encargado. Si no hay ninguna, no
-                // ocupa lugar.
-                ...(pendingCount > 0
-                  ? [{ v: "pending" as Filter, l: `Pendientes (${pendingCount})` }]
-                  : []),
                 { v: "upcoming", l: "Próximas" },
                 { v: "seated", l: "En mesa" },
                 { v: "past", l: "Pasadas" },
@@ -920,63 +915,8 @@ function ReservationRow({
   const salonName = row.tables?.floor_plans?.name ?? null;
   const ago = timeAgo(row.created_at);
 
-  // Build floor_plan lookup for table labels
-  const floorPlanMap = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const fp of floorPlans) map.set(fp.id, fp.name);
-    return map;
-  }, [floorPlans]);
-
-  const isFlexible = mode === "flexible";
-
   const [editing, setEditing] = useState(false);
-  const [editPartySize, setEditPartySize] = useState(row.party_size);
-  const [editTableId, setEditTableId] = useState(row.table_id ?? "");
-  const [editTime, setEditTime] = useState(timeStart);
-  const [editService, setEditService] = useState(row.service ?? "");
-  // Spec 077/097 — el cupo es blando para el encargado: el server rechaza una
-  // vez con el aviso y recién entonces aparece "Guardar igual".
-  const [overbookAsk, setOverbookAsk] = useState<string | null>(null);
-
-  /** Horarios de llegada del servicio elegido (modo flexible). */
-  const serviceSlots = useMemo(() => {
-    if (!isFlexible) return [];
-    const svc = services.find((s) => s.name === editService) ?? services[0];
-    if (!svc) return [];
-    return arrivalSlots(svc.opens_at, svc.closes_at);
-  }, [isFlexible, services, editService]);
-
-  function openEdit() {
-    setEditPartySize(row.party_size);
-    setEditTableId(row.table_id ?? "");
-    setEditTime(timeStart);
-    setEditService(row.service ?? services[0]?.name ?? "");
-    setOverbookAsk(null);
-    setEditing(true);
-  }
-
-  function save(allowOverbook: boolean) {
-    // En estricto la mesa es obligatoria; en flexible "" = genérica (sin mesa).
-    if (!isFlexible && !editTableId) return;
-    onUpdateDetails(
-      {
-        table_id: editTableId || null,
-        party_size: editPartySize,
-        ...(editTime && editTime !== timeStart ? { time: editTime } : {}),
-        ...(isFlexible && editService && editService !== row.service
-          ? { service: editService }
-          : {}),
-        ...(allowOverbook ? { allow_overbook: true } : {}),
-      },
-      {
-        onDone: () => {
-          setEditing(false);
-          setOverbookAsk(null);
-        },
-        onOverbook: (message) => setOverbookAsk(message),
-      },
-    );
-  }
+  const openEdit = () => setEditing(true);
 
   return (
     <li
@@ -1152,156 +1092,22 @@ function ReservationRow({
         </div>
       </div>
 
-      {/* ── Inline edit panel ─────────────────────────────────────────── */}
+      {/* Spec 097 — el panel de edición, ahora compartido con la bandeja
+          de solicitudes (spec 135). */}
       {editing && (
-        <div className="mt-3 flex flex-wrap items-end gap-3 rounded-xl bg-zinc-50 p-3 ring-1 ring-zinc-200/60">
-          <div>
-            <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
-              Comensales
-            </label>
-            <input
-              type="number"
-              min={1}
-              max={100}
-              value={editPartySize}
-              onChange={(e) => {
-                const v = parseInt(e.target.value, 10);
-                if (!Number.isNaN(v) && v >= 1) setEditPartySize(v);
-              }}
-              className="h-9 w-16 rounded-xl border-0 bg-white px-2 text-center text-sm font-semibold tabular-nums text-zinc-900 ring-1 ring-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-300"
-            />
-          </div>
-          {/* Spec 097 — servicio (sólo flexible: es donde "el horario" se
-              elige por servicio y no por slot de grilla). */}
-          {isFlexible && services.length > 0 && (
-            <div>
-              <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
-                Servicio
-              </label>
-              <select
-                value={editService}
-                onChange={(e) => {
-                  setEditService(e.target.value);
-                  setOverbookAsk(null);
-                }}
-                className="h-9 rounded-xl border-0 bg-white px-2.5 text-sm font-medium text-zinc-900 ring-1 ring-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-300"
-              >
-                {!services.some((s) => s.name === editService) && (
-                  <option value={editService}>{editService || "—"}</option>
-                )}
-                {services.map((s) => (
-                  <option key={s.name} value={s.name}>
-                    {s.name} ({s.opens_at}–{s.closes_at})
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-          <div>
-            <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
-              {isFlexible ? "Llegada" : "Hora"}
-            </label>
-            {isFlexible && serviceSlots.length > 0 ? (
-              <select
-                value={serviceSlots.includes(editTime) ? editTime : ""}
-                onChange={(e) => {
-                  setEditTime(e.target.value);
-                  setOverbookAsk(null);
-                }}
-                className="h-9 rounded-xl border-0 bg-white px-2.5 text-sm font-semibold tabular-nums text-zinc-900 ring-1 ring-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-300"
-              >
-                {!serviceSlots.includes(editTime) && (
-                  <option value="" disabled>
-                    Elegir hora…
-                  </option>
-                )}
-                {serviceSlots.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <TimeField24
-                value={editTime}
-                onChange={(v) => {
-                  setEditTime(v);
-                  setOverbookAsk(null);
-                }}
-                className="h-9 w-20 rounded-xl border-0 bg-white px-2 text-center text-sm font-semibold text-zinc-900 ring-1 ring-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-300"
-              />
-            )}
-          </div>
-          <div className="min-w-0 flex-1">
-            <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
-              Mesa
-            </label>
-            <select
-              value={editTableId}
-              onChange={(e) => {
-                setEditTableId(e.target.value);
-                setOverbookAsk(null);
-              }}
-              className="h-9 w-full max-w-[240px] rounded-xl border-0 bg-white px-2.5 text-sm font-medium text-zinc-900 ring-1 ring-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-300"
-            >
-              {/* Flexible: la mesa se puede decidir al llegar (spec 059), así que
-                  "sin mesa" es un estado válido y no un formulario incompleto. */}
-              {isFlexible ? (
-                <option value="">Sin mesa (se define al llegar)</option>
-              ) : (
-                !editTableId && (
-                  <option value="" disabled>
-                    Elegir mesa…
-                  </option>
-                )
-              )}
-              {activeTables.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.label} ({t.seats}p)
-                  {multiSalon
-                    ? ` — ${floorPlanMap.get(t.floor_plan_id) ?? ""}`
-                    : ""}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => save(false)}
-              disabled={pending || (!isFlexible && !editTableId)}
-              className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-zinc-900 px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-zinc-800 active:scale-[0.97] disabled:opacity-50"
-            >
-              <Check className="h-3.5 w-3.5" />
-              Guardar
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setEditing(false);
-                setOverbookAsk(null);
-              }}
-              disabled={pending}
-              className="inline-flex h-9 items-center rounded-xl bg-white px-3 text-xs font-semibold text-zinc-600 ring-1 ring-zinc-200 transition hover:bg-zinc-100 active:scale-[0.97] disabled:opacity-50"
-            >
-              Cancelar
-            </button>
-          </div>
-          {overbookAsk && (
-            <div className="w-full rounded-xl bg-amber-50 p-2.5 ring-1 ring-amber-200">
-              <p className="text-xs font-medium text-amber-900">{overbookAsk}</p>
-              <button
-                type="button"
-                onClick={() => save(true)}
-                disabled={pending}
-                className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-lg bg-amber-600 px-3 text-xs font-semibold text-white transition hover:bg-amber-700 active:scale-[0.97] disabled:opacity-50"
-              >
-                <Check className="h-3.5 w-3.5" />
-                Guardar igual
-              </button>
-            </div>
-          )}
-        </div>
+        <ReservationEditPanel
+          row={row}
+          timezone={timezone}
+          mode={mode}
+          services={services}
+          activeTables={activeTables}
+          floorPlans={floorPlans}
+          multiSalon={multiSalon}
+          pending={pending}
+          onSave={onUpdateDetails}
+          onClose={() => setEditing(false)}
+          className="mt-3"
+        />
       )}
     </li>
   );
