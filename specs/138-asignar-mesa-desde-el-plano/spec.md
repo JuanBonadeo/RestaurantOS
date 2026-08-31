@@ -51,10 +51,12 @@ cliente sólo adelanta lo obvio (capacidad) para no hacer ir y volver al server
 por algo que se ve en la mesa. El sobrecupo en flexible sigue pidiendo
 confirmación (`OVERBOOK_HINT`, spec 077).
 
-**D5 · Se entra desde donde se está mirando.** Dos puertas al mismo modo: el
-botón **Asignar mesa** en la tarjeta de la bandeja (sólo si la solicitud no
-tiene mesa) y el mismo botón en el detalle de una mesa del plano. La primera es
-la del que revisa la bandeja; la segunda, la del que ya está mirando el salón.
+**D5 · Se entra desde la bandeja, que es donde está la solicitud sin mesa.** El
+botón **Asignar mesa** aparece en la tarjeta sólo cuando falta la mesa. La
+segunda puerta que se había pensado —el detalle de una mesa del plano— no tiene
+sentido: ese panel muestra la reserva que **ya ocupa** esa mesa, así que ahí
+«asignar» no significa nada. Encender el modo trae el plano al frente si el
+encargado estaba en la lista.
 
 **D6 · Mientras el modo está activo, el plano no hace otra cosa.** El tap
 asigna en vez de abrir el detalle, el borde del plano se marca, y hay una
@@ -108,8 +110,8 @@ no sé qué hice».
 ## Escenarios de aceptación
 
 1. **Dado** una solicitud sin mesa en la bandeja, **cuando** el encargado toca
-   «Asignar mesa», **entonces** el plano entra en modo con el banner y una
-   salida visible.
+   «Asignar mesa», **entonces** el plano pasa al frente y entra en modo, con el
+   banner y una salida visible.
 2. **Dado** el modo activo, **cuando** toca una mesa con lugar, **entonces** la
    mesa queda asignada, se avisa con un toast y el plano la muestra tomada.
 3. **Dado** el modo activo, **cuando** toca una mesa chica para el grupo,
