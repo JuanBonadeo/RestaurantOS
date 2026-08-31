@@ -126,6 +126,8 @@ export type ReservasData = {
   services: DayServiceOption[];
   /** Spec 135/136 — la bandeja: solicitudes de cualquier día, no sólo de éste. */
   solicitudes: SolicitudEnBandeja[];
+  /** Reloj del server, para que la bandeja hidrate sin diferencias. */
+  ahoraIso: string;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -387,6 +389,7 @@ export async function loadReservas(
     mode,
     services,
     solicitudes,
+    ahoraIso: new Date().toISOString(),
   };
 }
 

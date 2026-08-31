@@ -103,6 +103,7 @@ function shellProps() {
       mode: "estricto",
       services: [],
       solicitudes: [],
+      ahoraIso: "2026-08-31T12:00:00.000Z",
     }),
   } as unknown as React.ComponentProps<typeof LocalShell>;
 }

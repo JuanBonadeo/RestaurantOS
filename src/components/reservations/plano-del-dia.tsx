@@ -6,7 +6,17 @@ import { formatInTimeZone } from "date-fns-tz";
 import { Check, X } from "lucide-react";
 import { toast } from "sonner";
 
-import { decideReservation } from "@/lib/reservations/booking-actions";
+import { ElegirMesaBanner } from "@/components/reservations/elegir-mesa-banner";
+import {
+  mesaSirveParaReserva,
+  textoDeAsignacion,
+  textoDelModo,
+} from "@/lib/reservations/asignar-mesa";
+import {
+  decideReservation,
+  updateReservationDetails,
+} from "@/lib/reservations/booking-actions";
+import { OVERBOOK_HINT } from "@/lib/reservations/edit-window";
 import {
   estadoDeMesasEn,
   horaInicial,
@@ -48,6 +58,8 @@ export function PlanoDelDia({
   reservas,
   mesas,
   floorPlans,
+  asignando,
+  onAsignarFin,
   onChanged,
 }: {
   slug: string;
@@ -59,6 +71,14 @@ export function PlanoDelDia({
   reservas: ReservaEnPlano[];
   mesas: FloorTable[];
   floorPlans: Array<{ id: string; name: string }>;
+  /**
+   * Spec 138 — la solicitud que está esperando mesa. Viene de afuera porque el
+   * botón que enciende el modo vive en la bandeja, que es hermana del plano en
+   * la pantalla (spec 136).
+   */
+  asignando?: { id: string; nombre: string; partySize: number } | null;
+  /** Se llama al asignar o al cancelar: la página apaga el modo. */
+  onAsignarFin?: () => void;
   onChanged?: () => void;
 }) {
   const router = useRouter();
@@ -105,6 +125,46 @@ export function PlanoDelDia({
 
   const seleccionada = estado.find((m) => m.mesa.id === elegida) ?? null;
 
+  function asignarMesa(mesa: FloorTable) {
+    if (!asignando) return;
+    const chequeo = mesaSirveParaReserva({
+      mesa,
+      partySize: asignando.partySize,
+    });
+    if (!chequeo.ok) {
+      toast.error(chequeo.motivo);
+      return;
+    }
+    start(async () => {
+      const result = await updateReservationDetails({
+        business_slug: slug,
+        reservation_id: asignando.id,
+        table_id: mesa.id,
+        party_size: asignando.partySize,
+      });
+      if (result.ok) {
+        toast.success(
+          textoDeAsignacion({
+            intent: "assign",
+            etiquetaMesa: mesa.label,
+            nombre: asignando.nombre,
+          }),
+        );
+        onAsignarFin?.();
+        resincronizar();
+        return;
+      }
+      // Sobrecupo en flexible: no es un no, es un «confirmá» (spec 077). Acá no
+      // hay dónde confirmarlo sin sacar al encargado del plano, así que se lo
+      // manda al panel de edición, que sí tiene ese diálogo.
+      toast.error(
+        result.error.endsWith(OVERBOOK_HINT)
+          ? `${result.error} Usá «Editar» en la solicitud.`
+          : result.error,
+      );
+    });
+  }
+
   function decidir(id: string, decision: "confirm" | "reject") {
     start(async () => {
       const result = await decideReservation({
@@ -133,7 +193,25 @@ export function PlanoDelDia({
   }
 
   return (
-    <div className="rounded-2xl bg-white p-4 ring-1 ring-zinc-200/70">
+    <div
+      className={cn(
+        "rounded-2xl bg-white p-4 ring-1",
+        asignando ? "ring-2 ring-indigo-500" : "ring-zinc-200/70",
+      )}
+    >
+      {/* Spec 138 — el plano queda esperando el tap, como en Operación. */}
+      {asignando && (
+        <div className="mb-3">
+          <ElegirMesaBanner
+            texto={textoDelModo({
+              intent: "assign",
+              nombre: asignando.nombre,
+              partySize: asignando.partySize,
+            })}
+            onCancelar={() => onAsignarFin?.()}
+          />
+        </div>
+      )}
       <div className="mb-3 flex flex-wrap items-center gap-3">
         {floorPlans.length > 1 && (
           <select
@@ -190,7 +268,22 @@ export function PlanoDelDia({
             key={m.mesa.id}
             m={m}
             elegida={m.mesa.id === elegida}
-            onClick={() => setElegida(m.mesa.id === elegida ? null : m.mesa.id)}
+            // Con el modo activo, la mesa que no da la capacidad se ve apagada:
+            // que el «no entran» se vea antes del tap, no después.
+            apagada={
+              !!asignando &&
+              !mesaSirveParaReserva({
+                mesa: m.mesa,
+                partySize: asignando.partySize,
+              }).ok
+            }
+            onClick={() => {
+              if (asignando) {
+                asignarMesa(m.mesa);
+                return;
+              }
+              setElegida(m.mesa.id === elegida ? null : m.mesa.id);
+            }}
           />
         ))}
       </svg>
@@ -272,10 +365,13 @@ export function PlanoDelDia({
 function MesaDibujada({
   m,
   elegida,
+  apagada = false,
   onClick,
 }: {
   m: MesaEnElPlano;
   elegida: boolean;
+  /** Spec 138 — no sirve para la solicitud que se está asignando. */
+  apagada?: boolean;
   onClick: () => void;
 }) {
   const { mesa, estado } = m;
@@ -285,6 +381,7 @@ function MesaDibujada({
     RELLENO[estado],
     estado === "pendiente" ? "[stroke-dasharray:5_3]" : "",
     elegida ? "stroke-[3]" : "stroke-[1.5]",
+    apagada ? "opacity-30" : "",
     "cursor-pointer transition",
   );
 

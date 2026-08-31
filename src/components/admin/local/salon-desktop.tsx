@@ -15,7 +15,6 @@ import {
   ClipboardList,
   Clock,
   Keyboard,
-  MapPin,
   MoreVertical,
   MoveRight,
   Pencil,
@@ -33,6 +32,12 @@ import {
   type ModoPanel,
 } from "@/components/admin/local/atajos-help";
 import { NuevaReservaPanel } from "@/components/admin/local/nueva-reserva-panel";
+import { ElegirMesaBanner } from "@/components/reservations/elegir-mesa-banner";
+import {
+  mesaSirveParaReserva,
+  textoDeAsignacion,
+  textoDelModo,
+} from "@/lib/reservations/asignar-mesa";
 import { ReservationsPanel } from "@/components/admin/local/reservations-panel";
 import { SegmentedSelector } from "@/components/admin/local/segmented-selector";
 import { VentaRapidaPanel } from "@/components/admin/local/venta-rapida-panel";
@@ -1106,10 +1111,12 @@ export function SalonDesktop({
     (table: FloorTable) => {
       if (!asignarReservaFor) return;
       const { reservation: res, intent } = asignarReservaFor;
-      if (table.seats < res.party_size) {
-        toast.error(
-          `Mesa ${table.label} tiene ${table.seats} lugares para ${res.party_size} personas.`,
-        );
+      const chequeo = mesaSirveParaReserva({
+        mesa: table,
+        partySize: res.party_size,
+      });
+      if (!chequeo.ok) {
+        toast.error(chequeo.motivo);
         return;
       }
       startTransition(async () => {
@@ -1131,9 +1138,11 @@ export function SalonDesktop({
           return;
         }
         toast.success(
-          intent === "seat"
-            ? `${res.customer_name} sentado en ${table.label}.`
-            : `Mesa ${table.label} asignada a ${res.customer_name}.`,
+          textoDeAsignacion({
+            intent,
+            etiquetaMesa: table.label,
+            nombre: res.customer_name,
+          }),
         );
         setAsignarReservaFor(null);
         void refetchSalon();
@@ -1579,24 +1588,21 @@ export function SalonDesktop({
         <div className="flex min-h-0 flex-col gap-2">
           {/* Modo "elegir mesa": el plano queda esperando un tap (spec 059). */}
           {asignarReservaFor || pickingForNueva ? (
-            <div className="flex items-center gap-2 rounded-xl bg-indigo-600 px-3 py-2 text-white shadow-sm">
-              <MapPin className="h-4 w-4 shrink-0 animate-pulse" />
-              <span className="min-w-0 flex-1 text-sm font-semibold">
-                {asignarReservaFor
-                  ? `${asignarReservaFor.intent === "seat" ? "Tocá dónde sentar a" : "Tocá una mesa para"} ${asignarReservaFor.reservation.customer_name} · ${asignarReservaFor.reservation.party_size}p`
-                  : "Tocá una mesa para la reserva nueva"}
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  setAsignarReservaFor(null);
-                  setPickingForNueva(false);
-                }}
-                className="shrink-0 rounded-lg bg-white/15 px-2.5 py-1 text-xs font-bold transition hover:bg-white/25"
-              >
-                Cancelar
-              </button>
-            </div>
+            <ElegirMesaBanner
+              texto={
+                asignarReservaFor
+                  ? textoDelModo({
+                      intent: asignarReservaFor.intent,
+                      nombre: asignarReservaFor.reservation.customer_name,
+                      partySize: asignarReservaFor.reservation.party_size,
+                    })
+                  : "Tocá una mesa para la reserva nueva"
+              }
+              onCancelar={() => {
+                setAsignarReservaFor(null);
+                setPickingForNueva(false);
+              }}
+            />
           ) : null}
           <div
             className={cn(

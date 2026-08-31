@@ -1,9 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { formatInTimeZone } from "date-fns-tz";
-import { Check, Inbox, Pencil, X } from "lucide-react";
+import { Check, Inbox, MapPin, Pencil, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { ReservationEditPanel } from "@/components/reservations/reservation-edit-panel";
@@ -42,11 +42,13 @@ export function SolicitudesInbox({
   businessId,
   solicitudes,
   timezone,
+  ahoraIso,
   mode = "estricto",
   services = [],
   activeTables = [],
   floorPlans = [],
   onChanged,
+  onAsignarMesa,
   className,
 }: {
   slug: string;
@@ -54,6 +56,13 @@ export function SolicitudesInbox({
   businessId: string;
   solicitudes: SolicitudEnBandeja[];
   timezone: string;
+  /**
+   * El reloj del server. El «vence en …» y los títulos «Hoy»/«Mañana» dependen
+   * de la hora, y si el cliente usara la suya el primer render no coincidiría
+   * con el HTML que llegó — que es exactamente el error de hidratación que esto
+   * evita. Después de montar se pasa al reloj del navegador.
+   */
+  ahoraIso?: string;
   mode?: ReservationMode;
   /** Servicios del negocio (modo flexible), para el panel de edición. */
   services?: DayServiceOption[];
@@ -61,6 +70,15 @@ export function SolicitudesInbox({
   floorPlans?: Array<{ id: string; name: string }>;
   /** Cómo re-sincronizar después de resolver una. */
   onChanged?: () => void;
+  /**
+   * Spec 138 — encender el modo «elegir mesa» en el plano. Sin esto el botón no
+   * aparece (la tab de Operación no tiene plano al lado).
+   */
+  onAsignarMesa?: (solicitud: {
+    id: string;
+    nombre: string;
+    partySize: number;
+  }) => void;
   className?: string;
 }) {
   const router = useRouter();
@@ -76,9 +94,15 @@ export function SolicitudesInbox({
   const [motivo, setMotivo] = useState("");
   const [editando, setEditando] = useState<string | null>(null);
 
-  // `now` se congela al montar: si se recalculara en cada render, los «vence
-  // en» saltarían solos y la lista se reordenaría bajo el dedo.
-  const now = useMemo(() => new Date(), []);
+  // Arranca con el reloj del server (hidratación) y pasa al del cliente una vez
+  // montado. Congelado a propósito: si se recalculara en cada render, los
+  // «vence en» saltarían solos y la lista se reordenaría bajo el dedo.
+  const [now, setNow] = useState(() =>
+    ahoraIso ? new Date(ahoraIso) : new Date(0),
+  );
+  useEffect(() => {
+    setNow(new Date());
+  }, []);
   const dias = useMemo(
     () => agruparPorDia(solicitudes, timezone, now),
     [solicitudes, timezone, now],
@@ -229,6 +253,25 @@ export function SolicitudesInbox({
                         <Check className="h-3.5 w-3.5" />
                         Confirmar
                       </button>
+                      {/* Spec 138 — sólo si le falta mesa y hay un plano al
+                          lado donde elegirla. */}
+                      {onAsignarMesa && !s.reserva.table_id && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onAsignarMesa({
+                              id: s.reserva.id,
+                              nombre: s.reserva.customer_name,
+                              partySize: s.reserva.party_size,
+                            })
+                          }
+                          disabled={pending}
+                          className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-indigo-50 px-2.5 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-200 transition hover:bg-indigo-100 active:scale-[0.97] disabled:opacity-60"
+                        >
+                          <MapPin className="h-3.5 w-3.5" />
+                          Asignar mesa
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => setEditando(s.reserva.id)}

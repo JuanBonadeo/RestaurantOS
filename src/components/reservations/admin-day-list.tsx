@@ -176,6 +176,8 @@ export function AdminDayList({
   datePath,
   diasConSolicitudes = [],
   plano,
+  vista: vistaControlada,
+  onVistaChange,
   onChanged,
 }: {
   slug: string;
@@ -206,6 +208,13 @@ export function AdminDayList({
    */
   plano?: React.ReactNode;
   /**
+   * Spec 138 — la vista puede venir de afuera: encender «asignar mesa» desde la
+   * bandeja tiene que traer el plano a la vista, o el modo se prende donde
+   * nadie lo ve.
+   */
+  vista?: "lista" | "plano";
+  onVistaChange?: (v: "lista" | "plano") => void;
+  /**
    * Spec 103: cómo re-sincronizarse tras mutar o cambiar de día. Recibe el día
    * pedido. Sin esto se cae al comportamiento histórico —`router.push` para la
    * fecha, `router.refresh()` para las mutaciones—, que es lo que sigue usando
@@ -226,7 +235,10 @@ export function AdminDayList({
   const [pending, start] = useTransition();
 
   const [filter, setFilter] = useState<Filter>("all");
-  const [vista, setVista] = useState<"lista" | "plano">("lista");
+  const [vistaInterna, setVistaInterna] = useState<"lista" | "plano">("lista");
+  const vista = vistaControlada ?? vistaInterna;
+  const setVista = (v: "lista" | "plano") =>
+    onVistaChange ? onVistaChange(v) : setVistaInterna(v);
   const [search, setSearch] = useState("");
   /** #158 — las canceladas arrancan ocultas; el toggle vive al pie de la lista. */
   const [showCancelled, setShowCancelled] = useState(false);

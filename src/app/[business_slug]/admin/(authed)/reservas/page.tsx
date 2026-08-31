@@ -2,9 +2,8 @@ import { notFound } from "next/navigation";
 import { fromZonedTime } from "date-fns-tz";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { AdminDayList, type AdminRow } from "@/components/reservations/admin-day-list";
-import { PlanoDelDia } from "@/components/reservations/plano-del-dia";
-import { SolicitudesInbox } from "@/components/reservations/solicitudes-inbox";
+import type { AdminRow } from "@/components/reservations/admin-day-list";
+import { ReservasWorkspace } from "@/components/reservations/reservas-workspace";
 import { AyudaChip } from "@/components/admin/ayuda-chip";
 import { PageHeader, PageShell } from "@/components/admin/shell/page-shell";
 import { ensureAdminAccess } from "@/lib/admin/context";
@@ -127,55 +126,21 @@ export default async function AdminReservasPage({
         action={<AyudaChip slug={business_slug} tema="reservas" />}
       />
 
-      {/* Spec 136 — dos columnas: el día es donde se trabaja, la bandeja es lo
-          que interrumpe. En pantalla chica se apilan con la bandeja arriba, que
-          es lo primero que hay que contestar. */}
-      <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-        <div className="order-2 min-w-0 flex-1 lg:order-1">
-          <AdminDayList
-            slug={business_slug}
-            date={date}
-            rows={rows}
-            timezone={business.timezone}
-            floorPlans={floorPlans}
-            activeTables={activeTables}
-            mode={mode}
-            services={services}
-            diasConSolicitudes={diasConSolicitudes}
-            plano={
-              <PlanoDelDia
-                slug={business_slug}
-                date={date}
-                timezone={business.timezone}
-                horas={horasPlano}
-                reservas={rows}
-                mesas={activeTables}
-                floorPlans={floorPlans}
-              />
-            }
-          />
-        </div>
-        <aside className="order-1 w-full lg:order-2 lg:sticky lg:top-6 lg:w-[340px] lg:shrink-0">
-          <div className="mb-2.5 flex items-center gap-2">
-            <h2 className="text-sm font-semibold text-zinc-900">A confirmar</h2>
-            {solicitudes.length > 0 && (
-              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
-                {solicitudes.length}
-              </span>
-            )}
-          </div>
-          <SolicitudesInbox
-            slug={business_slug}
-            businessId={business.id}
-            solicitudes={solicitudes}
-            timezone={business.timezone}
-            mode={mode}
-            services={services}
-            activeTables={activeTables}
-            floorPlans={floorPlans}
-          />
-        </aside>
-      </div>
+      <ReservasWorkspace
+        slug={business_slug}
+        businessId={business.id}
+        date={date}
+        rows={rows}
+        timezone={business.timezone}
+        floorPlans={floorPlans}
+        activeTables={activeTables}
+        mode={mode}
+        services={services}
+        solicitudes={solicitudes}
+        diasConSolicitudes={diasConSolicitudes}
+        horasPlano={horasPlano}
+        ahoraIso={new Date().toISOString()}
+      />
     </PageShell>
   );
 }

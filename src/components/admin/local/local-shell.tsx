@@ -496,6 +496,9 @@ function ReservasPanel({
           businessId={businessId}
           solicitudes={solicitudes}
           timezone={timezone}
+          // La tab se hidrata con el mismo reloj con el que el server armó los
+          // «vence en» (spec 135).
+          ahoraIso={data.ahoraIso}
           mode={data.mode}
           services={data.services}
           activeTables={data.activeTables}
