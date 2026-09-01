@@ -107,7 +107,7 @@ type Column = {
 const COLUMNS: Column[] = [
   {
     id: "pendiente",
-    label: "Pendiente",
+    label: "Pendientes",
     accent: "bg-amber-500",
     ring: "ring-amber-500/30",
     countBg: "bg-amber-50",
@@ -117,7 +117,7 @@ const COLUMNS: Column[] = [
   },
   {
     id: "en_preparacion",
-    label: "En preparación",
+    label: "En cocina",
     accent: "bg-sky-500",
     ring: "ring-sky-500/30",
     countBg: "bg-sky-50",
