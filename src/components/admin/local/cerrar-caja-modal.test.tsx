@@ -1,8 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import type { CierreCajaData } from "@/lib/caja/queries";
+import type { RendicionMozoPendiente } from "@/lib/caja/types";
 
 // Los mocks declaran los parámetros de la action real: sin eso `vi.fn` infiere
 // una firma sin argumentos y `cerrarCaja.mock.calls[0][0]` no typechequea
@@ -78,6 +79,21 @@ function data(over: Partial<CierreCajaData> = {}): CierreCajaData {
     pedidos_abiertos: [],
     salon: { mesas_a_liberar: 0, mozos_asignados: 0 },
     barre_salon: true,
+    deben_rendir: [],
+    sin_operadores: false,
+    ...over,
+  };
+}
+
+function pendiente(
+  over: Partial<RendicionMozoPendiente> & { mozo_id: string; mozo_name: string },
+): RendicionMozoPendiente {
+  return {
+    efectivo_cents: 71_200,
+    tickets_cents: 0,
+    por_metodo: { ...EMPTY_METODO },
+    total_propinas_cents: 0,
+    pagos_count: 3,
     ...over,
   };
 }
@@ -113,6 +129,10 @@ function abrir() {
  * (D5/D6) — que es lo que hace que la diferencia del arqueo ya venga explicada.
  */
 describe("CerrarCajaModal", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("una mesa con la cuenta abierta bloquea el cierre y se dice cuál", async () => {
     DATA = data({
       cuentas_abiertas: [
@@ -206,7 +226,7 @@ describe("CerrarCajaModal", () => {
     );
   });
 
-  it("el mozo sin rendir aparece con su monto, y se rinde desde el modal", async () => {
+  it("el mozo sin rendir aparece con su monto y **frena** el cierre (139 · D1)", async () => {
     DATA = data({
       reparto: {
         en_cajon_cents: 198_000,
@@ -216,26 +236,112 @@ describe("CerrarCajaModal", () => {
         ],
         descuadre_cents: 0,
       },
+      deben_rendir: [
+        pendiente({ mozo_id: "m1", mozo_name: "Nacho", efectivo_cents: 71_200 }),
+        pendiente({ mozo_id: "m2", mozo_name: "Caro", efectivo_cents: 43_200 }),
+      ],
     });
-    const user = userEvent.setup();
     abrir();
 
     expect(await screen.findByText("Nacho")).toBeInTheDocument();
     expect(screen.getByText("Caro")).toBeInTheDocument();
-    // El total no cambia: rendir mueve plata de columna, no la suma de nuevo.
     expect(screen.getAllByText(/sin rendir/i)).toHaveLength(2);
+    expect(
+      screen.getByText(/Faltan 2 rendiciones para poder cerrar/i),
+    ).toBeInTheDocument();
 
-    await user.click(screen.getAllByRole("button", { name: "Rendir" })[0]);
-    await user.click(
-      screen.getByRole("button", { name: /Registrar rendición/i }),
+    // Aunque el arqueo cuadre perfecto, no se cierra hasta resolverlos.
+    contar("3124");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Cerrar caja/i })).toBeDisabled(),
     );
+  });
+
+  it("la rendición no se autocompleta: el monto se tipea (139 · D2)", async () => {
+    DATA = data({
+      deben_rendir: [
+        pendiente({ mozo_id: "m1", mozo_name: "Nacho", efectivo_cents: 71_200 }),
+      ],
+    });
+    const user = userEvent.setup();
+    abrir();
+
+    await user.click(await screen.findByRole("button", { name: "Rendir" }));
+
+    // Sin número, el botón no se puede apretar: antes esto rendía $71.200 solo.
+    const registrar = screen.getByRole("button", { name: /Registrar rendición/i });
+    expect(registrar).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText(/Efectivo que entrega/i), {
+      target: { value: "712" },
+    });
+    await waitFor(() => expect(registrar).toBeEnabled());
+    await user.click(registrar);
 
     await waitFor(() => expect(registrarRendicionMozo).toHaveBeenCalled());
-    // Sin tocar el monto se rinde lo que debía: 71.200 en centavos.
-    expect(registrarRendicionMozo.mock.calls[0].slice(0, 2)).toEqual([
+    expect(registrarRendicionMozo.mock.calls[0]).toEqual([
       "m1",
       71_200,
+      null,
+      "golf-jcr",
+      "rendida",
     ]);
+  });
+
+  it("«No entregó» exige el motivo y deja la deuda declarada (139 · D1)", async () => {
+    DATA = data({
+      deben_rendir: [
+        pendiente({ mozo_id: "m1", mozo_name: "Nacho", efectivo_cents: 71_200 }),
+      ],
+    });
+    const user = userEvent.setup();
+    abrir();
+
+    await user.click(await screen.findByRole("button", { name: "No entregó" }));
+
+    const marcar = screen.getByRole("button", { name: /Marcar como no entregó/i });
+    expect(marcar).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText(/Por qué/i), {
+      target: { value: "se fue temprano" },
+    });
+    await waitFor(() => expect(marcar).toBeEnabled());
+    await user.click(marcar);
+
+    await waitFor(() => expect(registrarRendicionMozo).toHaveBeenCalled());
+    expect(registrarRendicionMozo.mock.calls[0]).toEqual([
+      "m1",
+      0,
+      "se fue temprano",
+      "golf-jcr",
+      "no_entrego",
+    ]);
+  });
+
+  it("el que cobró sólo con tarjeta también rinde (139 · D4)", async () => {
+    DATA = data({
+      deben_rendir: [
+        pendiente({
+          mozo_id: "m3",
+          mozo_name: "Lucía",
+          efectivo_cents: 0,
+          tickets_cents: 84_400,
+        }),
+      ],
+    });
+    abrir();
+
+    expect(await screen.findByText("Lucía")).toBeInTheDocument();
+    expect(screen.getByText(/sólo tickets/i)).toBeInTheDocument();
+  });
+
+  it("avisa cuando la caja no tiene operador asignado (139 · D3)", async () => {
+    DATA = data({ sin_operadores: true });
+    abrir();
+
+    expect(
+      await screen.findByText(/Nadie figura como operador de esta caja/i),
+    ).toBeInTheDocument();
   });
 
   it("anuncia lo que el cierre va a barrer antes de apretar", async () => {

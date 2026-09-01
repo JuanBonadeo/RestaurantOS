@@ -122,3 +122,42 @@ export async function notifyPrintFailed(params: {
     });
   }
 }
+
+/**
+ * Aviso al admin cuando una rendición deja plata en el aire (spec 139 · D6).
+ *
+ * La diferencia de rendición **no** consume el techo del encargado
+ * (`canAcceptCajaDifference` es del arqueo, no de esto): un faltante de un mozo
+ * no se "acepta", se cobra, y aplicarle el techo trabaría el cierre a la 1 de
+ * la mañana esperando que atienda el admin. A cambio de no trabar, no puede
+ * quedar invisible — de ahí este aviso.
+ *
+ * Se dispara con `no_entrego` (deuda declarada) o con un faltante ≥ el mismo
+ * umbral que el arqueo usa como techo del encargado. Broadcast a `admin`: es el
+ * dueño el que decide qué hacer con esa plata.
+ */
+export async function notifyRendicionPendiente(params: {
+  businessId: string;
+  mozoName: string;
+  estado: "rendida" | "no_entrego";
+  expectedCents: number;
+  deliveredCents: number;
+  differenceCents: number;
+  reason: string | null;
+  actorUserId: string | null;
+}): Promise<void> {
+  await createNotification({
+    businessId: params.businessId,
+    targetRole: "admin",
+    type: "rendicion.pendiente",
+    payload: {
+      mozoName: params.mozoName,
+      estado: params.estado,
+      expectedCents: params.expectedCents,
+      deliveredCents: params.deliveredCents,
+      differenceCents: params.differenceCents,
+      reason: params.reason ?? undefined,
+    },
+    actorUserId: params.actorUserId,
+  });
+}

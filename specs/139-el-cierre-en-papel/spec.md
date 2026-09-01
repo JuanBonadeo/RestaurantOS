@@ -2,8 +2,9 @@
 
 **Issue:** [#210](https://github.com/gachetponzellini/RestaurantOS-app/issues/210) ·
 **Milestone:** Post-demo · Growth & hardening ·
-**Estado:** en diseño (2026-09-01) — la mecánica está cerrada; **el layout del
-papel espera la foto** del ticket que el local usa hoy.
+**Estado:** **parte A implementada y verificada en vivo** (2026-09-01, migración
+`0056` aplicada al cloud). La parte B —el papel— espera la foto del ticket que
+el local usa hoy.
 
 **Input:** Juan, 2026-09-01: *"hay que hacer la spec para la impresión del ticket
 al cierre del turno, y la rendición debería de ser obligatoria y manual. Primero
@@ -432,40 +433,54 @@ preguntas concretas a resolver con la imagen en la mano:
 
 ## Tasks
 
-**A · La rendición obligatoria y manual** — se puede arrancar hoy.
+**A · La rendición obligatoria y manual** — ✅ hecha (2026-09-01).
 
-1. [ ] Migración `0056` (parte A): `mozo_rendiciones.estado`. Aplicar al cloud
-   por MCP y verificar dentro de una transacción que revierte.
-2. [ ] `cerrar_caja_tx`: `UNRENDERED_MOZOS:<n>` bajo `p_barrer_salon`. (El
-   número de cierre y el `resumen` los agrega la parte B, en la misma función.)
-3. [ ] Queries: `getMozosQueDebenRendir(businessId, cajaId)` — cobros en el
-   período, menos los operadores asignados a la caja (D3, D4). Test unitario del
-   filtro con fixtures.
-4. [ ] `registrarRendicionMozo`: `estado`, sin precarga, nota obligatoria en
-   `no_entrego`, notificación al admin.
-5. [ ] Modal: input vacío + botón deshabilitado, botón «No entregó» con motivo,
-   bloqueo del CTA con nombres y montos, aviso de caja sin operadores.
-6. [ ] Tests de integración del bloqueo: cierra sin mozos pendientes, no cierra
-   con uno, cierra con `no_entrego`, el bar cierra siempre.
+1. [x] Migración `0056`: `mozo_rendiciones.estado` (`rendida` / `no_entrego`) +
+   índice `(business_id, mozo_id, created_at desc)`. Aplicada al cloud por MCP y
+   verificada ahí dentro de una transacción que revierte: con 1 pendiente la
+   principal tira `UNRENDERED_MOZOS:1`, el bar cierra igual, y tras resolverlo
+   cierra. (`caja_cortes.numero` y `resumen` quedaron para la parte B, que es
+   quien los usa.)
+2. [x] `cerrar_caja_tx`: guarda `UNRENDERED_MOZOS:<n>` bajo `p_barrer_salon`,
+   con el período de cada mozo contado desde **su** última rendición.
+3. [x] `mozosQueDebenRendir` (`deben-rendir.ts`, pura, 5 tests) +
+   `getOperadoresDeCaja`; `getCierreCajaData` devuelve `deben_rendir` y
+   `sin_operadores`, y el reparto ya no le resta al cajón lo que cobró el
+   operador de la caja.
+4. [x] `registrarRendicionMozo(…, estado)`: `no_entrego` fuerza $0 y exige
+   motivo; `notifyRendicionPendiente` avisa al admin en `no_entrego` o faltante
+   ≥ $5.000, con su vista en el feed (`rendicion.pendiente`).
+5. [x] Modal de cierre: la lista sale de `deben_rendir`, sin precarga del monto,
+   botón «No entregó» con motivo, CTA bloqueado con el detalle, y el aviso de
+   caja sin operadores. La tab Rendición también tiene «No entregó».
+6. [x] Tests: 5 unitarios del filtro, 10 del modal (bloqueo, sin autocompletar,
+   «no entregó», sólo-tickets, sin operadores) y 4 de integración nuevos.
+   ⚠️ Los `*.integration` no corren sin stack local (ruido conocido): la RPC se
+   verificó contra el cloud.
+7. [x] Verify en vivo en `demo` con el rol **encargado** real (Sofía, magic
+   link, nunca service_role): «Falta 1 rendición para poder cerrar», el aviso de
+   que nadie es operador de la caja, el botón de registrar **apagado hasta
+   tipear** el monto, y la rendición de $113.800 quedando en `mozo_rendiciones`
+   con `estado='rendida'`, diferencia $0 y la tab Rendición pasando de 1 a 0.
 
 **B · El papel** — el esqueleto se puede armar; el layout se congela con la foto.
 
-7. [ ] Migración de la parte B: kinds nuevos en `print_jobs`, `corte_id`,
-   `rendicion_id`, `target_check`, único parcial. Sin columnas de impresora.
-9. [ ] `cierre-ticket.ts` + `rendicion-ticket.ts` con fixtures ASCII, incluyendo
-   reimpresión y el caso «no entregó».
-10. [ ] GET del print-agent: los dos kinds, ventana de 12 h, `sanitizeTicketText`
-    en motivos y nombres.
-11. [ ] Insert del job en la RPC (cierre) y en `registrarRendicionMozo`
-    (rendición).
-12. [ ] Reimpresión desde el historial de cortes (`reprint_requested_at`).
-13. [ ] `pnpm typecheck` + suite en verde.
-14. [ ] Verify en vivo en `demo` con el rol **encargado** real (Sofía, magic
-    link, nunca service_role): cerrar la caja bar con un mozo pendiente, ver el
-    bloqueo, rendir a mano, cerrar, y confirmar el `print_job` encolado con su
-    `content_plain` (imprimir de verdad requiere el agente del local).
-15. [ ] Actualizar [`wiki/features/caja.md`](../../../../wiki/features/caja.md)
-    (incluye bajar la deuda «imprimir resumen del corte») + `wiki/log.md`.
+8. [ ] Migración de la parte B: kinds nuevos en `print_jobs`, `corte_id`,
+   `rendicion_id`, `target_check`, único parcial; `caja_cortes.numero` (con
+   backfill) y `caja_cortes.resumen jsonb`. Sin columnas de impresora (D12).
+9. [ ] `cerrar_caja_tx`: número de cierre bajo el lock de `cajas`, `resumen`
+   persistido (+ `mesas_liberadas` / `retiro_cents` agregados por la RPC) e
+   insert del `print_job` del cierre.
+10. [ ] `cierre-ticket.ts` + `rendicion-ticket.ts` con fixtures ASCII,
+    incluyendo reimpresión y el caso «no entregó».
+11. [ ] GET del print-agent: los dos kinds, destino `control_printer_ip`,
+    ventana de 12 h, `sanitizeTicketText` en motivos y nombres.
+12. [ ] Insert del job de rendición en `registrarRendicionMozo`.
+13. [ ] Reimpresión desde el historial de cortes (`reprint_requested_at`).
+14. [ ] `pnpm typecheck` + suite en verde.
+15. [ ] Verify en vivo: cerrar una caja y confirmar el `print_job` encolado con
+    su `content_plain` (imprimir de verdad requiere el agente del local).
+16. [ ] Actualizar `wiki/features/caja.md` + `wiki/log.md`.
 
 ---
 

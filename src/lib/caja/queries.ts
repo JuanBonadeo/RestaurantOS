@@ -7,6 +7,7 @@ import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 import { calculateExpectedCash } from "./expected-cash";
 import { calcularRendicionMozo } from "./liquidacion-mozo";
+import { mozosQueDebenRendir } from "./deben-rendir";
 import { repartirEfectivoEsperado, type RepartoEfectivo } from "./reparto-efectivo";
 import { agruparVentasPorOrigen, origenDeDeliveryType } from "./ventas-por-origen";
 import type {
@@ -1210,6 +1211,18 @@ export type CierreCajaData = {
   salon: { mesas_a_liberar: number; mozos_asignados: number };
   /** `is_default`: la caja principal es la que cierra el día (D9). */
   barre_salon: boolean;
+  /**
+   * Spec 139 · quiénes tienen que rendir antes de cerrar. **Bloquean.** Es
+   * superconjunto de `reparto.mozos`: acá entra también el que cobró todo con
+   * tarjeta (efectivo $0 pero período abierto, D4).
+   */
+  deben_rendir: RendicionMozoPendiente[];
+  /**
+   * La caja no tiene ningún operador asignado (`caja_user_assignments`). Sin
+   * eso, D3 no puede excluir a nadie y el que atiende la caja termina
+   * rindiéndose a sí mismo. Se avisa en el modal.
+   */
+  sin_operadores: boolean;
 };
 
 /**
@@ -1252,21 +1265,29 @@ export async function getCierreCajaData(
       pedidos_abiertos: [],
       salon: { mesas_a_liberar: 0, mozos_asignados: 0 },
       barre_salon: false,
+      deben_rendir: [],
+      sin_operadores: false,
     };
   }
 
-  const [pendientes, cuentas, pedidos, salon] = await Promise.all([
+  const [pendientes, operadores, cuentas, pedidos, salon] = await Promise.all([
     getRendicionesPendientesTodosLosMozos(businessId),
+    getOperadoresDeCaja(cajaId, businessId),
     getCuentasAbiertas(businessId),
     getPedidosAbiertosSinMesa(businessId),
     contarSalonPorLiberar(businessId),
   ]);
 
+  // Spec 139 · D3 — el operador de la caja no rinde, y tampoco se le resta al
+  // cajón: lo que cobró ya está adentro. Antes el reparto le restaba su
+  // efectivo al cajón y el modal mostraba menos plata de la que hay.
+  const debenRendir = mozosQueDebenRendir(pendientes, operadores);
+
   return {
     stats,
     reparto: repartirEfectivoEsperado({
       expected_cash_cents: stats.expected_cash_cents,
-      mozos_sin_rendir: pendientes.map((p) => ({
+      mozos_sin_rendir: debenRendir.map((p) => ({
         mozo_id: p.mozo_id,
         mozo_name: p.mozo_name,
         efectivo_cents: p.efectivo_cents,
@@ -1276,7 +1297,26 @@ export async function getCierreCajaData(
     pedidos_abiertos: pedidos,
     salon,
     barre_salon: true,
+    deben_rendir: debenRendir,
+    sin_operadores: operadores.length === 0,
   };
+}
+
+/**
+ * Los usuarios asignados a una caja (`caja_user_assignments`, spec 07): los que
+ * cobran parados en ella y por eso **no rinden** (spec 139 · D3).
+ */
+export async function getOperadoresDeCaja(
+  cajaId: string,
+  businessId: string,
+): Promise<string[]> {
+  const service = db();
+  const { data } = await service
+    .from("caja_user_assignments")
+    .select("user_id")
+    .eq("caja_id", cajaId)
+    .eq("business_id", businessId);
+  return ((data as { user_id: string }[] | null) ?? []).map((a) => a.user_id);
 }
 
 /**

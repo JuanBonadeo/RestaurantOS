@@ -6,6 +6,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { assignMozoToTable } from "@/lib/mozo/actions";
 import { requireMozoActionContext } from "@/lib/mozo/auth";
+import { notifyRendicionPendiente } from "@/lib/notifications/events";
 import {
   canAcceptCajaDifference,
   canAssignMozo,
@@ -13,17 +14,26 @@ import {
   canMakeSangria,
   canManageCajas,
   canRendirMozo,
+  DIFERENCIA_CAJA_OK_CENTS,
 } from "@/lib/permissions/can";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { formatCurrency } from "@/lib/currency";
 import { getBusiness } from "@/lib/tenant";
 
+import { mozosQueDebenRendir } from "./deben-rendir";
 import {
   getCajaLiveStats,
   getCuentasAbiertas,
+  getOperadoresDeCaja,
+  getRendicionesPendientesTodosLosMozos,
   getRendicionPendienteMozo,
 } from "./queries";
-import type { CajaCorte, MozoRendicion, PaymentMethod } from "./types";
+import type {
+  CajaCorte,
+  MozoRendicion,
+  PaymentMethod,
+  RendicionEstado,
+} from "./types";
 
 type GenericClient = SupabaseClient;
 
@@ -319,6 +329,29 @@ export async function cerrarCaja(input: {
     }
   }
 
+  // Spec 139 · D1/D5 — la caja principal no cierra dejando a un mozo sin
+  // resolver. La RPC bloquea igual (carrera), pero «UNRENDERED_MOZOS:3» no le
+  // sirve a nadie: acá se dice quién falta y cuánto tiene encima.
+  if (caja.is_default) {
+    const pendientes = mozosQueDebenRendir(
+      await getRendicionesPendientesTodosLosMozos(business.id),
+      await getOperadoresDeCaja(input.cajaId, business.id),
+    );
+    if (pendientes.length > 0) {
+      const detalle = pendientes
+        .slice(0, 3)
+        .map((m) => `${m.mozo_name} (${formatCurrency(m.efectivo_cents)})`)
+        .join(", ");
+      const resto =
+        pendientes.length > 3 ? ` y ${pendientes.length - 3} más` : "";
+      return actionError(
+        pendientes.length === 1
+          ? `Falta la rendición de ${detalle}. Registrala o marcá que no entregó.`
+          : `Faltan ${pendientes.length} rendiciones — ${detalle}${resto}. Registralas o marcá quién no entregó.`,
+      );
+    }
+  }
+
   const { data: rpcData, error } = await service.rpc("cerrar_caja_tx", {
     p_caja_id: input.cajaId,
     p_business_id: business.id,
@@ -337,6 +370,11 @@ export async function cerrarCaja(input: {
     if (error.message.includes("OPEN_TABLE_ORDERS")) {
       return actionError(
         "Se abrió una cuenta mientras cerrabas. Revisá el salón y volvé a intentar.",
+      );
+    }
+    if (error.message.includes("UNRENDERED_MOZOS")) {
+      return actionError(
+        "Un mozo cobró mientras cerrabas y le quedó plata sin rendir. Actualizá y volvé a intentar.",
       );
     }
     return actionError(`No se pudo cerrar la caja: ${error.message}`);
@@ -496,11 +534,24 @@ export async function upsertPaymentMethodConfig(
 
 // ── Rendición de mozos ──────────────────────────────────────────
 
+/**
+ * Registra la rendición de un mozo y **cierra su período** (spec 07), ahora con
+ * estado (spec 139 · D1).
+ *
+ * `estado = 'no_entrego'` es la salida para el mozo que se fue: no inventa una
+ * rendición que cuadre ni deja al encargado trabado a la 1 de la mañana — deja
+ * la deuda escrita, con nombre y motivo, y avisa al admin. El monto entregado
+ * se ignora y se persiste en $0: lo que se declara es que no entregó nada.
+ *
+ * Lo que NO hace, a propósito: aplicar `canAcceptCajaDifference`. Ese techo es
+ * del arqueo de caja; un faltante de rendición no se acepta, se cobra (D6).
+ */
 export async function registrarRendicionMozo(
   mozoId: string,
   delivered_cash_cents: number,
   notes: string | null,
   businessSlug: string,
+  estado: RendicionEstado = "rendida",
 ): Promise<ActionResult<{ rendicion: MozoRendicion }>> {
   const business = await getBusiness(businessSlug);
   if (!business) return actionError("Negocio no encontrado.");
@@ -533,9 +584,16 @@ export async function registrarRendicionMozo(
   );
 
   const expected_cash_cents = pendiente.efectivo_cents;
-  const difference_cents = delivered_cash_cents - expected_cash_cents;
+  // Declarar que no entregó es declarar $0: el monto que venga del formulario
+  // no se usa, así no hay dos verdades en la misma fila.
+  const entregado = estado === "no_entrego" ? 0 : delivered_cash_cents;
+  const difference_cents = entregado - expected_cash_cents;
+  const motivo = notes?.trim() || null;
 
-  if (difference_cents !== 0 && (!notes || notes.trim() === "")) {
+  if (estado === "no_entrego" && !motivo) {
+    return actionError("Decí por qué no entregó: queda registrado como deuda.");
+  }
+  if (estado === "rendida" && difference_cents !== 0 && !motivo) {
     return actionError(
       "Hay diferencia entre lo esperado y lo entregado. Registrá el motivo.",
     );
@@ -548,15 +606,34 @@ export async function registrarRendicionMozo(
       mozo_id: mozoId,
       registered_by: ctx.userId,
       expected_cash_cents,
-      delivered_cash_cents,
+      delivered_cash_cents: entregado,
       difference_cents,
-      notes: notes?.trim() || null,
+      notes: motivo,
       por_metodo: pendiente.por_metodo,
+      estado,
     })
     .select("*")
     .single();
 
   if (error) return actionError(`No se pudo registrar la rendición: ${error.message}`);
+
+  // D6 · no traba el cierre, pero no queda invisible: el dueño se entera de la
+  // plata que quedó afuera del cajón. Best-effort, como el resto de la spec 27.
+  const faltanteGrande =
+    difference_cents < 0 &&
+    Math.abs(difference_cents) >= DIFERENCIA_CAJA_OK_CENTS;
+  if (estado === "no_entrego" || faltanteGrande) {
+    await notifyRendicionPendiente({
+      businessId: business.id,
+      mozoName: (mozoUser as { full_name: string | null }).full_name ?? "Un mozo",
+      estado,
+      expectedCents: expected_cash_cents,
+      deliveredCents: entregado,
+      differenceCents: difference_cents,
+      reason: motivo,
+      actorUserId: ctx.userId,
+    });
+  }
 
   revalidatePath(`/${businessSlug}/admin/operacion`);
   return actionOk({ rendicion: inserted as MozoRendicion });

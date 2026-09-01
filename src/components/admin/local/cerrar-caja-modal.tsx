@@ -110,7 +110,12 @@ export function CerrarCajaModal({
   const expected = stats?.expected_cash_cents ?? 0;
   const diff = cents === null ? 0 : cents - expected;
   const requiresNotes = cents !== null && diff !== 0;
-  const bloqueado = (data?.cuentas_abiertas.length ?? 0) > 0;
+  const faltanRendir = data?.deben_rendir ?? [];
+  // Spec 139 · D1 — cerrar el día dejando a un mozo sin resolver deja plata
+  // flotando en una columna que mañana ya no se mira. Resolver puede ser
+  // «rindió» o «no entregó», pero no «lo salteo».
+  const bloqueado =
+    (data?.cuentas_abiertas.length ?? 0) > 0 || faltanRendir.length > 0;
   const puedeCerrar =
     !!data &&
     !bloqueado &&
@@ -236,12 +241,16 @@ export function CerrarCajaModal({
                     {formatCurrency(data.reparto.en_cajon_cents)}
                   </span>
                 </li>
-                {data.reparto.mozos.map((m) => (
+                {/* Spec 139 · D4 — la lista sale de `deben_rendir` y no del
+                    reparto: el que cobró toda la noche con tarjeta tiene $0 de
+                    efectivo y también tiene que cerrar su período. */}
+                {faltanRendir.map((m) => (
                   <MozoPendienteRow
                     key={m.mozo_id}
                     mozoId={m.mozo_id}
                     nombre={m.mozo_name}
                     efectivoCents={m.efectivo_cents}
+                    ticketsCents={m.tickets_cents}
                     slug={slug}
                     onRendido={cargar}
                   />
@@ -260,6 +269,33 @@ export function CerrarCajaModal({
                 Rendir no cambia el total: pasa la plata de la columna del mozo
                 a la del cajón.
               </p>
+
+              {faltanRendir.length > 0 && (
+                <p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900 ring-1 ring-amber-200">
+                  <span className="font-semibold">
+                    {faltanRendir.length === 1
+                      ? "Falta 1 rendición para poder cerrar."
+                      : `Faltan ${faltanRendir.length} rendiciones para poder cerrar.`}
+                  </span>{" "}
+                  Si alguien ya se fue, marcá «No entregó» con el motivo: queda
+                  como deuda a la vista, no como un número inventado.
+                </p>
+              )}
+
+              {data.sin_operadores && (
+                <p className="mt-2 text-xs text-zinc-500">
+                  Nadie figura como operador de esta caja, así que todos los que
+                  cobraron tienen que rendir —{" "}
+                  <Link
+                    href={`/${slug}/admin/operacion?tab=cajas`}
+                    className="font-semibold underline underline-offset-2"
+                    onClick={() => onOpenChange(false)}
+                  >
+                    asigná la caja
+                  </Link>{" "}
+                  a quien la atiende y deja de aparecer en esta lista.
+                </p>
+              )}
 
               {bloqueado && (
                 <div className="mt-4 rounded-xl bg-rose-50 p-4 ring-1 ring-rose-200">
@@ -490,49 +526,71 @@ export function CerrarCajaModal({
 const DENOMINACIONES = [20_000, 10_000, 2_000, 1_000, 500, 200, 100, 50];
 
 /**
- * Un mozo que todavía no rindió, con su monto precargado y su botón (D6).
+ * Un mozo que todavía no rindió, con su monto a la vista y dos salidas (spec
+ * 139 · D1, D2).
  *
  * Se rinde desde acá para que el cierre sea un solo flujo —rendís, contás,
- * retirás— en vez de mandar al encargado a otra tab y volver. No bloquea: el
- * mozo se puede haber ido, pero su plata queda a la vista **antes** de contar,
- * así la diferencia del arqueo ya está explicada cuando aparece.
+ * retirás— en vez de mandar al encargado a otra tab y volver. Y ahora **frena**
+ * el cierre: hasta que cada uno esté resuelto, el botón de cerrar está apagado.
+ *
+ * Las dos salidas son «rindió» (con el monto tipeado, D2) y «no entregó» (con
+ * el motivo, D1). La segunda existe para que la obligación no termine
+ * inventando una rendición que cuadre cuando el mozo ya se fue.
  */
 function MozoPendienteRow({
   mozoId,
   nombre,
   efectivoCents,
+  ticketsCents,
   slug,
   onRendido,
 }: {
   mozoId: string;
   nombre: string;
   efectivoCents: number;
+  ticketsCents: number;
   slug: string;
   onRendido: () => void;
 }) {
-  const [abierto, setAbierto] = useState(false);
+  const [modo, setModo] = useState<null | "rendir" | "no_entrego">(null);
   const [entregado, setEntregado] = useState("");
   const [notas, setNotas] = useState("");
   const [enviando, startTransition] = useTransition();
 
+  // D2 · sin precarga. Antes, el campo vacío rendía el esperado exacto: apretar
+  // el botón sin tocar nada daba siempre diferencia $0, y una conciliación que
+  // se autocompleta no concilia.
   const cents =
-    entregado === "" ? efectivoCents : Math.max(0, Math.round(Number(entregado) * 100));
-  const diff = cents - efectivoCents;
+    entregado === "" ? null : Math.max(0, Math.round(Number(entregado) * 100));
+  const diff = cents === null ? 0 : cents - efectivoCents;
+  const faltaMotivo = notas.trim() === "";
 
-  const rendir = () => {
+  const abrir = (m: "rendir" | "no_entrego") => {
+    setModo((actual) => (actual === m ? null : m));
+    setEntregado("");
+    setNotas("");
+  };
+
+  const registrar = (estado: "rendida" | "no_entrego") => {
+    const monto = estado === "no_entrego" ? 0 : (cents ?? 0);
     startTransition(async () => {
       const r = await registrarRendicionMozo(
         mozoId,
-        cents,
+        monto,
         notas.trim() || null,
         slug,
+        estado,
       );
       if (!r.ok) {
         toast.error(r.error);
         return;
       }
-      toast.success(`${nombre} rindió ${formatCurrency(cents)}`);
-      setAbierto(false);
+      toast.success(
+        estado === "no_entrego"
+          ? `${nombre} quedó como «no entregó»`
+          : `${nombre} rindió ${formatCurrency(monto)}`,
+      );
+      setModo(null);
       onRendido();
     });
   };
@@ -546,20 +604,36 @@ function MozoPendienteRow({
           <span className="shrink-0 text-xs text-zinc-500">· sin rendir</span>
         </span>
         <span className="flex shrink-0 items-center gap-3">
-          <span className="text-sm font-semibold tabular-nums text-zinc-900">
-            {formatCurrency(efectivoCents)}
+          <span className="text-right">
+            <span className="block text-sm font-semibold tabular-nums text-zinc-900">
+              {formatCurrency(efectivoCents)}
+            </span>
+            {/* El que cobró todo con tarjeta rinde $0 de efectivo, pero rinde:
+                cierra su período y entrega los tickets (D4). */}
+            {efectivoCents === 0 && ticketsCents > 0 && (
+              <span className="block text-[0.7rem] text-zinc-500">
+                sólo tickets
+              </span>
+            )}
           </span>
           <button
             type="button"
-            onClick={() => setAbierto((v) => !v)}
+            onClick={() => abrir("rendir")}
             className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-200"
           >
-            {abierto ? "Cancelar" : "Rendir"}
+            {modo === "rendir" ? "Cancelar" : "Rendir"}
+          </button>
+          <button
+            type="button"
+            onClick={() => abrir("no_entrego")}
+            className="rounded-full px-2 py-1 text-xs font-semibold text-zinc-500 underline underline-offset-2 transition hover:text-rose-700"
+          >
+            {modo === "no_entrego" ? "Cancelar" : "No entregó"}
           </button>
         </span>
       </div>
 
-      {abierto && (
+      {modo === "rendir" && (
         <div className="mt-2 grid gap-2 rounded-lg bg-zinc-50 p-3 ring-1 ring-zinc-200/70">
           <Label htmlFor={`rendir-${mozoId}`} className="text-xs font-medium">
             Efectivo que entrega
@@ -573,12 +647,13 @@ function MozoPendienteRow({
               type="number"
               value={entregado}
               onChange={(e) => setEntregado(e.target.value)}
-              placeholder={String(Math.round(efectivoCents / 100))}
+              placeholder="0"
+              autoFocus
               inputMode="decimal"
               className="pl-7 tabular-nums"
             />
           </div>
-          {diff !== 0 && (
+          {cents !== null && diff !== 0 && (
             <>
               <p
                 className={cn(
@@ -599,10 +674,43 @@ function MozoPendienteRow({
           )}
           <Button
             size="sm"
-            disabled={enviando || (diff !== 0 && notas.trim() === "")}
-            onClick={rendir}
+            disabled={
+              enviando || cents === null || (diff !== 0 && faltaMotivo)
+            }
+            onClick={() => registrar("rendida")}
           >
             Registrar rendición
+          </Button>
+        </div>
+      )}
+
+      {modo === "no_entrego" && (
+        <div className="mt-2 grid gap-2 rounded-lg bg-rose-50 p-3 ring-1 ring-rose-200">
+          <p className="text-xs text-rose-900">
+            Queda como deuda de {nombre} por{" "}
+            <span className="font-semibold tabular-nums">
+              {formatCurrency(efectivoCents)}
+            </span>
+            , a la vista en el cierre y avisada al dueño.
+          </p>
+          <Label htmlFor={`no-entrego-${mozoId}`} className="text-xs font-medium">
+            ¿Por qué?<span className="ml-1 text-rose-600">*</span>
+          </Label>
+          <Textarea
+            id={`no-entrego-${mozoId}`}
+            value={notas}
+            onChange={(e) => setNotas(e.target.value)}
+            rows={2}
+            autoFocus
+            placeholder="Se fue temprano, rinde mañana…"
+          />
+          <Button
+            size="sm"
+            variant="destructive"
+            disabled={enviando || faltaMotivo}
+            onClick={() => registrar("no_entrego")}
+          >
+            Marcar como no entregó
           </Button>
         </div>
       )}

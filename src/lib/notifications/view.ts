@@ -16,9 +16,11 @@ import {
   ReceiptText,
   ShoppingBag,
   Trash2,
+  Wallet,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
+import { formatCurrency } from "@/lib/currency";
 import type { Notification } from "@/lib/notifications/queries";
 
 export type NotiTone = "info" | "warning" | "success" | "danger";
@@ -203,6 +205,22 @@ export function viewForNotification(n: Notification): NotiView {
       icon: Printer,
       title: `No se imprimió · ${origen}`,
       body: `${stationName} — revisá la comandera`,
+    };
+  }
+
+  // ── spec 139 ──────────────────────────────────────────────────────
+  if (n.type === "rendicion.pendiente") {
+    const mozoName = (p.mozoName as string | undefined) ?? "Un mozo";
+    const noEntrego = p.estado === "no_entrego";
+    const falta = Math.abs((p.differenceCents as number | undefined) ?? 0);
+    const reason = p.reason as string | undefined;
+    return {
+      tone: "danger",
+      icon: Wallet,
+      title: noEntrego
+        ? `No rindió · ${mozoName}`
+        : `Diferencia de rendición · ${mozoName}`,
+      body: [formatCurrency(falta), reason].filter(Boolean).join(" — "),
     };
   }
 

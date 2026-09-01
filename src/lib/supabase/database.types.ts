@@ -2062,6 +2062,7 @@ export type Database = {
           created_at: string
           delivered_cash_cents: number
           difference_cents: number
+          estado: string
           expected_cash_cents: number
           id: string
           mozo_id: string
@@ -2074,6 +2075,7 @@ export type Database = {
           created_at?: string
           delivered_cash_cents?: number
           difference_cents?: number
+          estado?: string
           expected_cash_cents?: number
           id?: string
           mozo_id: string
@@ -2086,6 +2088,7 @@ export type Database = {
           created_at?: string
           delivered_cash_cents?: number
           difference_cents?: number
+          estado?: string
           expected_cash_cents?: number
           id?: string
           mozo_id?: string

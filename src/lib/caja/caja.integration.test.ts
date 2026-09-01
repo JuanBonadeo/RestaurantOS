@@ -46,9 +46,11 @@ const {
   cerrarCaja,
   registrarSangria,
   registrarIngreso,
+  registrarRendicionMozo,
   distribuirSalon,
 } = await import("./actions");
 const { getCajaLiveStats, getCierreCajaData } = await import("./queries");
+
 
 /**
  * Cerrar sin retirar es el arqueo de mitad de turno: contar sin vaciar, que es
@@ -83,6 +85,11 @@ describe.skipIf(!dbAvailable)("caja continua (integration)", () => {
   let table1: string;
   let table2: string;
   let openOrderId: string;
+
+  /** El efectivo esperado de la caja: cerrar con eso es cerrar sin diferencia. */
+  const esperado = async (cajaId: string) =>
+    (await getCajaLiveStats(cajaId, businessId))!.expected_cash_cents;
+
 
   const seedUser = async (label: string) => {
     const email = `${TEST_TAG}-${label}@example.test`;
@@ -568,5 +575,106 @@ describe.skipIf(!dbAvailable)("caja continua (integration)", () => {
     expect(data!.reparto.mozos[0].efectivo_cents).toBe(71_200);
     expect(data!.reparto.en_cajon_cents).toBe(total - 71_200);
     expect(data!.reparto.descuadre_cents).toBe(0);
+  });
+
+  // ── Spec 139 · la rendición obligatoria ────────────────────────────
+  //
+  // Encadenados con el caso de arriba a propósito: el pago de MozoA que quedó
+  // sin rendir es justo el que ahora tiene que frenar el cierre.
+
+  it("el mozo sin rendir bloquea el cierre de la principal, y el error lo nombra", async () => {
+    CURRENT_USER_ID = encargadoId;
+
+    const data = await getCierreCajaData(cajaA, businessId);
+    expect(data!.deben_rendir.map((m) => m.mozo_name)).toContain("MozoA");
+    expect(data!.sin_operadores).toBe(true);
+
+    const r = await corte(cajaA, await esperado(cajaA), null, businessSlug);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error).toMatch(/MozoA/);
+      expect(r.error).toMatch(/rendición|rendiciones/i);
+    }
+  });
+
+  // D1 · «Resolver» no es «entregar»: si el mozo se fue, la deuda se declara y
+  // el cierre sigue. Lo que no se puede es saltearlo.
+  it("marcar «no entregó» deja la deuda escrita y desbloquea el cierre", async () => {
+    CURRENT_USER_ID = encargadoId;
+
+    const r = await registrarRendicionMozo(
+      mozoAId,
+      0,
+      "se fue temprano",
+      businessSlug,
+      "no_entrego",
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.data.rendicion.estado).toBe("no_entrego");
+      expect(r.data.rendicion.delivered_cash_cents).toBe(0);
+      expect(r.data.rendicion.expected_cash_cents).toBe(71_200);
+      expect(r.data.rendicion.difference_cents).toBe(-71_200);
+      expect(r.data.rendicion.notes).toBe("se fue temprano");
+    }
+
+    const cierre = await corte(cajaA, await esperado(cajaA), null, businessSlug);
+    expect(cierre.ok).toBe(true);
+  });
+
+  // D1 · sin motivo no hay deuda declarada: sería un $0 sin explicación.
+  it("«no entregó» sin motivo se rechaza", async () => {
+    CURRENT_USER_ID = encargadoId;
+    const r = await registrarRendicionMozo(mozoAId, 0, "  ", businessSlug, "no_entrego");
+    expect(r.ok).toBe(false);
+  });
+
+  // D3 · el que atiende la caja cobra directo al cajón: su plata ya está
+  // adentro, y pedirle que se rinda a sí mismo descuadra el reparto.
+  it("el operador asignado a la caja no aparece entre los que deben rendir", async () => {
+    CURRENT_USER_ID = encargadoId;
+
+    const { data: orden } = await supabase
+      .from("orders")
+      .insert({
+        business_id: businessId,
+        lifecycle_status: "closed",
+        delivery_type: "dine_in",
+        subtotal_cents: 10_000,
+        total_cents: 10_000,
+        status: "delivered",
+        customer_name: "Cobro del operador",
+        customer_phone: "000",
+      })
+      .select("id")
+      .single();
+    await supabase.from("payments").insert({
+      business_id: businessId,
+      order_id: orden!.id,
+      caja_id: cajaA,
+      method: "cash",
+      amount_cents: 10_000,
+      tip_cents: 0,
+      payment_status: "paid",
+      attributed_mozo_id: mozoAId,
+    });
+
+    const antes = await getCierreCajaData(cajaA, businessId);
+    expect(antes!.deben_rendir.map((m) => m.mozo_id)).toContain(mozoAId);
+
+    await supabase.from("caja_user_assignments").insert({
+      business_id: businessId,
+      caja_id: cajaA,
+      user_id: mozoAId,
+    });
+
+    const despues = await getCierreCajaData(cajaA, businessId);
+    expect(despues!.deben_rendir.map((m) => m.mozo_id)).not.toContain(mozoAId);
+    expect(despues!.sin_operadores).toBe(false);
+    // Y su efectivo deja de restarse del cajón: ya está adentro.
+    expect(despues!.reparto.mozos.map((m) => m.mozo_id)).not.toContain(mozoAId);
+
+    const cierre = await corte(cajaA, await esperado(cajaA), null, businessSlug);
+    expect(cierre.ok).toBe(true);
   });
 });

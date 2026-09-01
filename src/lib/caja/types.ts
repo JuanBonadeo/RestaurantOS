@@ -165,6 +165,16 @@ export type PaymentMethodConfig = {
   sort_order: number;
 };
 
+/**
+ * Cómo se resolvió la rendición de un mozo (spec 139 · D1).
+ *
+ * `no_entrego` no es una rendición en $0: es una **deuda declarada**. La
+ * distinción importa porque un mozo que cobró todo con tarjeta también entrega
+ * $0, y el papel del cierre, el mail del dueño y cualquier consulta futura
+ * tienen que poder diferenciarlos.
+ */
+export type RendicionEstado = "rendida" | "no_entrego";
+
 export type MozoRendicion = {
   id: string;
   business_id: string;
@@ -175,6 +185,7 @@ export type MozoRendicion = {
   difference_cents: number;
   notes: string | null;
   por_metodo: Record<PaymentMethod, number>;
+  estado: RendicionEstado;
   created_at: string;
 };
 

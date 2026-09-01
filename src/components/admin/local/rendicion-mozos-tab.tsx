@@ -425,11 +425,15 @@ function RendirModal({
   const [, startTransition] = useTransition();
   const [delivered, setDelivered] = useState("");
   const [notes, setNotes] = useState("");
+  // Spec 139 · D1 — la otra salida: el mozo se fue y la plata queda como deuda
+  // declarada, con motivo. No es una rendición en $0.
+  const [noEntrego, setNoEntrego] = useState(false);
 
   useEffect(() => {
     if (!open) {
       setDelivered("");
       setNotes("");
+      setNoEntrego(false);
     }
   }, [open]);
 
@@ -464,7 +468,17 @@ function RendirModal({
           )}
         </div>
 
-        <div className="mt-4 grid gap-1.5">
+        {noEntrego && (
+          <p className="mt-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-900 ring-1 ring-rose-200">
+            Queda como deuda de {pendiente.mozo_name} por{" "}
+            <span className="font-semibold tabular-nums">
+              {formatCurrency(pendiente.efectivo_cents)}
+            </span>
+            , a la vista en el cierre y avisada al dueño.
+          </p>
+        )}
+
+        <div className={cn("mt-4 grid gap-1.5", noEntrego && "hidden")}>
           <Label className="text-sm font-medium">
             Efectivo que entrega
           </Label>
@@ -484,7 +498,7 @@ function RendirModal({
           </div>
         </div>
 
-        {cents !== null && diff !== 0 && (
+        {!noEntrego && cents !== null && diff !== 0 && (
           <div
             className={cn(
               "mt-4 flex items-center justify-between rounded-lg p-3 ring-1",
@@ -503,17 +517,17 @@ function RendirModal({
           </div>
         )}
 
-        {cents !== null && diff === 0 && (
+        {!noEntrego && cents !== null && diff === 0 && (
           <div className="mt-4 flex items-center justify-between rounded-lg bg-emerald-50 p-3 ring-1 ring-emerald-200 text-emerald-900">
             <span className="text-sm font-semibold">Cuadra perfecto</span>
             <CheckCircle2 className="size-4" />
           </div>
         )}
 
-        {requiresNotes && (
+        {(requiresNotes || noEntrego) && (
           <div className="mt-3 grid gap-1.5">
             <Label className="text-sm font-medium">
-              ¿Qué pasó?
+              {noEntrego ? "¿Por qué no entregó?" : "¿Qué pasó?"}
               <span className="ml-1 text-rose-600">*</span>
             </Label>
             <Textarea
@@ -526,35 +540,44 @@ function RendirModal({
         )}
 
         <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancelar
+          <Button
+            variant="ghost"
+            onClick={() => setNoEntrego((v) => !v)}
+            className={cn(noEntrego && "text-zinc-900")}
+          >
+            {noEntrego ? "Volver a rendir" : "No entregó"}
           </Button>
           <Button
+            variant={noEntrego ? "destructive" : "default"}
             disabled={
-              cents === null || (requiresNotes && notes.trim() === "")
+              noEntrego
+                ? notes.trim() === ""
+                : cents === null || (requiresNotes && notes.trim() === "")
             }
             onClick={() =>
-              cents !== null &&
               startTransition(async () => {
                 const r = await registrarRendicionMozo(
                   pendiente.mozo_id,
-                  cents,
+                  noEntrego ? 0 : (cents ?? 0),
                   notes.trim() || null,
                   slug,
+                  noEntrego ? "no_entrego" : "rendida",
                 );
                 if (!r.ok) {
                   toast.error(r.error);
                   return;
                 }
                 toast.success(
-                  `Rendición de ${pendiente.mozo_name} registrada`,
+                  noEntrego
+                    ? `${pendiente.mozo_name} quedó como «no entregó»`
+                    : `Rendición de ${pendiente.mozo_name} registrada`,
                 );
                 onSuccess();
               })
             }
           >
             <CheckCircle2 className="mr-2 size-4" />
-            Registrar rendición
+            {noEntrego ? "Marcar como no entregó" : "Registrar rendición"}
           </Button>
         </DialogFooter>
       </DialogContent>
