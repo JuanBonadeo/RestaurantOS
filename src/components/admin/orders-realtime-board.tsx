@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bell, Clock, Plus } from "lucide-react";
+import { Bell, Plus } from "lucide-react";
 import { toast } from "sonner";
 
 import { getPedidosTabOrders } from "@/app/[business_slug]/admin/(authed)/operacion/actions";
@@ -11,7 +11,6 @@ import {
   aceptarPedidoProgramado,
   confirmarPedido,
 } from "@/lib/orders/confirm-order";
-import { horaLocal, horariosLabel } from "@/lib/orders/entrega";
 import {
   isScheduledForLater,
   marchAtForOrder,
@@ -382,9 +381,10 @@ export function OrdersRealtimeBoard({
   };
 
   // Agendados (spec 31 + 061): pedidos diferidos que todavía no marcharon.
-  // Van a la sección "Próximos", NO al kanban — recién entran a las columnas
-  // cuando marchan (status → preparing, por el cron con el lead del negocio o
-  // por "marchar ahora"). Dos formas de estar acá:
+  // Spec 127 — el agendado **vive en «Nuevos»**, con su chip «Programado», en
+  // vez de en una sección aparte. Sus estados (`pending` / `confirmed`) son los
+  // de esa columna, así que no hace falta moverlo a ningún lado: alcanza con no
+  // sacarlo. Dos formas de estar agendado:
   //  · `pending`   → pago (MP aprobado, listo) o impago (espera que el
   //                  encargado lo acepte; sin eso el cron no lo toma — 047).
   //  · `confirmed` → ya aceptado, esperando su ventana.
@@ -393,53 +393,45 @@ export function OrdersRealtimeBoard({
     () => ({ scheduled_march_lead_kitchen_min: marchLeadKitchenMin }),
     [marchLeadKitchenMin],
   );
-  // Un tick lento sólo para que la tarjeta se encienda sola cuando llega la
-  // hora: sin esto, el encargado que dejó el board abierto ve el pedido en
-  // blanco hasta que algo más lo re-renderiza.
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 30_000);
-    return () => clearInterval(id);
-  }, []);
-
-  const { agendados, byColumn } = useMemo(() => {
+  const byColumn = useMemo(() => {
     const now = new Date();
     const isAgendado = (o: AdminOrder) =>
       !!o.scheduled_at &&
       (o.status === "pending" || o.status === "confirmed") &&
       isScheduledForLater(o.scheduled_at, now);
 
-    // Spec 127 — ordenados por **hora de marcha**, no por la del pedido: es la
-    // que va a pasar primero, y con dos pedidos que se entregan a la misma hora
-    // el que se cocina antes tiene que estar arriba.
-    const proximos = orders.filter(isAgendado).sort((a, b) => {
-      const ma = marchAtForOrder(a, lead)?.getTime() ?? 0;
-      const mb = marchAtForOrder(b, lead)?.getTime() ?? 0;
-      return ma - mb;
-    });
-
     const groups: Record<string, AdminOrder[]> = {};
     for (const col of COLUMNS) groups[col.key] = [];
     for (const order of orders) {
-      // Un agendado no va al kanban aunque esté `confirmed`: su lugar es
-      // Próximos hasta que marche (no ensucia la operación de hoy).
-      if (isAgendado(order)) continue;
       const col = COLUMNS.find((c) => c.statuses.includes(order.status));
       if (col) groups[col.key].push(order);
     }
     // FIFO en las columnas activas: el pedido más viejo arriba (la query trae
     // created_at desc y el realtime hace prepend). "Entregados" queda como
     // historial —el más reciente arriba— igual que en el KDS de comandas.
+    //
+    // Spec 127 — los agendados van **al final** de «Nuevos», ordenados por su
+    // hora de marcha. Por FIFO puro un encargue para mañana cargado a las 10 le
+    // ganaría a un pedido que entró recién, y arriba tiene que estar lo que hay
+    // que atender ahora.
     for (const col of COLUMNS) {
       const asc = col.key !== "delivered";
-      groups[col.key].sort((a, b) =>
-        asc
+      groups[col.key].sort((a, b) => {
+        const aAg = isAgendado(a);
+        const bAg = isAgendado(b);
+        if (aAg !== bAg) return aAg ? 1 : -1;
+        if (aAg && bAg) {
+          const ma = marchAtForOrder(a, lead)?.getTime() ?? 0;
+          const mb = marchAtForOrder(b, lead)?.getTime() ?? 0;
+          return ma - mb;
+        }
+        return asc
           ? a.created_at.localeCompare(b.created_at)
-          : b.created_at.localeCompare(a.created_at),
-      );
+          : b.created_at.localeCompare(a.created_at);
+      });
     }
     groups["delivered"] = groups["delivered"].slice(0, 20);
-    return { agendados: proximos, byColumn: groups };
+    return groups;
   }, [orders, lead]);
 
   const cancelledOrders = useMemo(
@@ -468,37 +460,6 @@ export function OrdersRealtimeBoard({
         timezone={timezone}
         marchLeadKitchenMin={marchLeadKitchenMin}
       />
-
-      {/* Próximos / agendados (spec 31): diferidos pagados esperando su hora.
-          Entran al kanban cuando marchan (cron ~40 min antes o "marchar ahora"). */}
-      {agendados.length > 0 && (
-        <section className="ring-border/60 rounded-2xl bg-violet-50/40 p-4 ring-1">
-          <div className="mb-3 flex items-center gap-2">
-            <Clock className="size-4 text-violet-600" />
-            <h2 className="text-foreground text-base font-bold tracking-tight">
-              Próximos
-            </h2>
-            <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-violet-100 px-2 text-xs font-bold text-violet-700 tabular-nums">
-              {agendados.length}
-            </span>
-            <span className="text-muted-foreground text-xs">
-              esperando su hora
-            </span>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {agendados.map((order) => (
-              <ScheduledOrderCard
-                key={`${order.id}-${tick}`}
-                order={order}
-                timezone={timezone}
-                marchLeadKitchenMin={marchLeadKitchenMin}
-                onMarchNow={() => handleConfirm(order)}
-                onAccept={() => handleAceptarProgramado(order)}
-              />
-            ))}
-          </div>
-        </section>
-      )}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         {COLUMNS.map((col) => {
@@ -547,6 +508,8 @@ export function OrdersRealtimeBoard({
                     timezone={timezone}
                     onAdvance={handleAdvance}
                     onConfirm={handleConfirm}
+                    onAccept={handleAceptarProgramado}
+                    marchLeadKitchenMin={marchLeadKitchenMin}
                     onChanged={() => void refetchOrders()}
                     isNew={newlyArrived.has(order.id)}
                     columnRing={col.ring}
@@ -590,149 +553,4 @@ export function OrdersRealtimeBoard({
   );
 }
 
-/** "vie 26/06 · 13:00 hs" en el TZ del negocio. */
-function formatScheduled(iso: string, timezone: string): string {
-  const d = new Date(iso);
-  const date = new Intl.DateTimeFormat("es-AR", {
-    timeZone: timezone,
-    weekday: "short",
-    day: "2-digit",
-    month: "2-digit",
-  }).format(d);
-  const time = new Intl.DateTimeFormat("es-AR", {
-    timeZone: timezone,
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(d);
-  return `${date} · ${time} hs`;
-}
 
-function ScheduledOrderCard({
-  order,
-  timezone,
-  marchLeadKitchenMin,
-  onMarchNow,
-  onAccept,
-}: {
-  order: AdminOrder;
-  timezone: string;
-  marchLeadKitchenMin: number;
-  onMarchNow: () => void;
-  onAccept: () => void;
-}) {
-  const [marching, setMarching] = useState(false);
-  const [accepting, setAccepting] = useState(false);
-  const itemsLabel = order.items
-    .map((i) => `${i.quantity}× ${i.product_name}`)
-    .join(" · ");
-  // Tres estados posibles (spec 061). El único que necesita un gesto es el
-  // impago sin aceptar: hasta que el encargado lo avale, el cron no lo marcha.
-  const paid = order.payment_status === "paid";
-  const accepted = order.status === "confirmed";
-  const needsAccept = !paid && !accepted;
-  const estado = paid
-    ? { label: "Pagado", className: "text-emerald-700" }
-    : accepted
-      ? { label: "Aceptado · paga al recibir", className: "text-violet-700" }
-      : { label: "Esperando aceptación", className: "text-amber-700" };
-
-  // Spec 127 — a qué hora se pone en marcha, y si esa hora ya pasó. Lo segundo
-  // es la red del automatismo del lado del cliente: el aviso del server sale
-  // del propio cron, así que si el cron **no corre** nadie avisa. Esto sí se ve
-  // igual, porque lo calcula el board que está abierto en el local.
-  const marchAt = marchAtForOrder(order, {
-    scheduled_march_lead_kitchen_min: marchLeadKitchenMin,
-  });
-  const faltanMin = marchAt
-    ? Math.round((marchAt.getTime() - Date.now()) / 60_000)
-    : null;
-  const vencido = faltanMin !== null && faltanMin < 0;
-  const cerca = faltanMin !== null && faltanMin >= 0 && faltanMin <= 15;
-  // El papel del encargue de hoy ya salió al cargarlo: sin decirlo, la tarjeta
-  // en «Próximos» parece un pedido que nunca marchó.
-  const yaImprimio = Boolean(order.kitchen_at) && order.status === "confirmed";
-
-  return (
-    <div
-      className={`flex flex-col gap-2 rounded-xl p-3 ring-1 ${
-        vencido
-          ? "bg-red-50 ring-red-300"
-          : cerca
-            ? "bg-amber-50 ring-amber-300"
-            : "ring-border/60 bg-white"
-      }`}
-    >
-      <div className="flex items-center justify-between gap-2">
-        <span
-          className={`inline-flex items-center gap-1.5 text-sm font-bold ${
-            vencido
-              ? "text-red-700"
-              : cerca
-                ? "text-amber-800"
-                : "text-violet-700"
-          }`}
-        >
-          <Clock className="size-3.5" />
-          {horariosLabel(order, timezone) ??
-            (order.scheduled_at
-              ? formatScheduled(order.scheduled_at, timezone)
-              : "")}
-        </span>
-        <span className="text-muted-foreground text-xs font-medium tabular-nums">
-          #{order.daily_number}
-        </span>
-      </div>
-      {marchAt && (
-        <p
-          className={`text-xs font-medium tabular-nums ${
-            vencido ? "text-red-700" : "text-muted-foreground"
-          }`}
-        >
-          {vencido
-            ? `hace ${Math.abs(faltanMin!)} min que tenía que marchar`
-            : `marcha ${horaLocal(marchAt.toISOString(), timezone)}`}
-          {yaImprimio && " · comanda impresa"}
-        </p>
-      )}
-      <div className="text-foreground text-sm font-semibold">
-        {order.customer_name}
-      </div>
-      {itemsLabel && (
-        <div className="text-muted-foreground line-clamp-2 text-xs">
-          {itemsLabel}
-        </div>
-      )}
-      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-        <span className={`text-xs font-medium ${estado.className}`}>
-          {estado.label}
-        </span>
-        <div className="flex items-center gap-2">
-          {needsAccept && (
-            <Button
-              size="sm"
-              onClick={() => {
-                setAccepting(true);
-                onAccept();
-              }}
-              disabled={accepting || marching}
-            >
-              {accepting ? "Aceptando…" : "Aceptar"}
-            </Button>
-          )}
-          <Button
-            size="sm"
-            variant={needsAccept ? "outline" : "default"}
-            onClick={() => {
-              setMarching(true);
-              onMarchNow();
-            }}
-            disabled={marching || accepting}
-          >
-            {marching ? "Marchando…" : "Marchar ahora"}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}

@@ -13,6 +13,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/currency";
 import { entregaLabel } from "@/lib/orders/entrega";
+import {
+  DEFAULT_MARCH_LEAD_KITCHEN_MIN,
+  isScheduledForLater,
+  marchAtForOrder,
+} from "@/lib/orders/scheduled";
 import type { OrderStatus } from "@/lib/orders/status";
 
 import type { AdminOrder } from "@/lib/admin/orders-query";
@@ -73,6 +78,8 @@ export function OrderCard({
   timezone,
   onAdvance,
   onConfirm,
+  onAccept,
+  marchLeadKitchenMin = DEFAULT_MARCH_LEAD_KITCHEN_MIN,
   onChanged,
   isNew = false,
   columnRing = "ring-border",
@@ -85,6 +92,12 @@ export function OrderCard({
    *  botón "Confirmar" llama acá en lugar de pasar a `confirmed`. La action
    *  resuelve sectores y crea las comandas para cocina. */
   onConfirm?: (order: AdminOrder) => void;
+  /** Avalar un programado sin marcharlo (spec 061): pasa a `confirmed` y el
+   *  cron lo toma a su hora. Sólo lo necesita el programado impago del
+   *  checkout — el que carga el encargado ya nace avalado. */
+  onAccept?: (order: AdminOrder) => void;
+  /** Spec 127 — para saber a qué hora tenía que marchar el agendado. */
+  marchLeadKitchenMin?: number;
   /** Se editaron los ítems del pedido desde el detalle (spec 125). */
   onChanged?: () => void;
   isNew?: boolean;
@@ -112,6 +125,30 @@ export function OrderCard({
   const confirmLabel = order.status === "confirmed" ? "Marchar" : "Confirmar";
   const isPendingDineIn =
     order.status === "pending" && order.delivery_type === "dine_in";
+
+  // Spec 127 — el pedido agendado vive acá, en «Nuevos», con un chip que lo
+  // dice: antes tenía su propia sección y eso movía media pantalla. Sigue
+  // esperando su hora —lo marcha el cron— pero se ve como un pedido más.
+  const agendado = isScheduledForLater(order.scheduled_at);
+  // La red del automatismo, del lado del cliente: un agendado que sigue acá
+  // pasada su hora de marcha es un pedido que el cron no levantó. El aviso del
+  // server lo emitiría el propio cron, así que si el cron **no corre** nadie
+  // avisa; esto se ve igual, porque lo calcula el board abierto en el local.
+  // `useElapsedMinutes` ya re-renderiza la tarjeta cada 30 s.
+  const marchAt = agendado
+    ? marchAtForOrder(order, {
+        scheduled_march_lead_kitchen_min: marchLeadKitchenMin,
+      })
+    : null;
+  const noMarcho = marchAt !== null && marchAt.getTime() < Date.now();
+  // El programado impago del checkout **no marcha solo** hasta que alguien lo
+  // avala (spec 047): sin este gesto se queda esperando para siempre. El que
+  // carga el encargado nace `confirmed`, así que no lo pide.
+  const necesitaAceptar =
+    agendado &&
+    order.status === "pending" &&
+    order.payment_status !== "paid" &&
+    Boolean(onAccept);
 
   const nextForDelivery =
     order.delivery_type === "pickup" && order.status === "ready"
@@ -205,10 +242,29 @@ export function OrderCard({
             </span>
             {entrega ? (
               <span
-                className="inline-flex min-w-0 items-center gap-1 text-xs font-semibold text-violet-700"
-                title={entrega}
+                className={`inline-flex min-w-0 items-center gap-1 text-xs font-semibold ${
+                  noMarcho ? "text-red-700" : "text-violet-700"
+                }`}
+                title={
+                  noMarcho
+                    ? `Tenía que marchar y sigue acá — revisá que salga la comanda`
+                    : agendado
+                      ? `Programado para las ${entrega}`
+                      : entrega
+                }
               >
                 <Clock className="size-3 shrink-0" aria-hidden />
+                {agendado && (
+                  <span
+                    className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${
+                      noMarcho
+                        ? "bg-red-100 text-red-700"
+                        : "bg-violet-100 text-violet-700"
+                    }`}
+                  >
+                    {noMarcho ? "No marchó" : "Programado"}
+                  </span>
+                )}
                 <span className="truncate">{entrega}</span>
               </span>
             ) : (
@@ -280,16 +336,33 @@ export function OrderCard({
               Cobrar
             </Button>
           ) : isPendingOnline && onConfirm ? (
-            <Button
-              size="sm"
-              className="h-8 font-semibold"
-              onClick={(e) => {
-                e.stopPropagation();
-                onConfirm(order);
-              }}
-            >
-              {confirmLabel}
-            </Button>
+            <div className="flex items-center gap-1.5">
+              {necesitaAceptar && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 font-semibold"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAccept!(order);
+                  }}
+                >
+                  Aceptar
+                </Button>
+              )}
+              <Button
+                size="sm"
+                variant={necesitaAceptar ? "outline" : "default"}
+                className="h-8 font-semibold"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onConfirm(order);
+                }}
+              >
+                {/* Sobre un agendado, «Confirmar» es marcharlo antes de hora. */}
+                {agendado ? "Marchar ya" : confirmLabel}
+              </Button>
+            </div>
           ) : (
             advanceLabel &&
             nextForDelivery && (

@@ -43,10 +43,14 @@ const routed: string[] = [];
  */
 const updates: Record<string, unknown>[] = [];
 
+/** Spec 127: qué contesta el SELECT de `comandas` (el chequeo de terminadas). */
+let comandasDelPedido: { status: string; cancelled_at: string | null }[] = [];
+
 function makeFakeService() {
   return {
-    from() {
+    from(tabla: string) {
       let esUpdate = false;
+      const esComandas = tabla === "comandas";
       const builder = {
         update(patch: Record<string, unknown>) {
           esUpdate = true;
@@ -79,7 +83,9 @@ function makeFakeService() {
           resolve(
             esUpdate
               ? { data: [{ id: "avanzado" }], error: null }
-              : { data: rows, error: null },
+              : esComandas
+                ? { data: comandasDelPedido, error: null }
+                : { data: rows, error: null },
           );
         },
       };
@@ -134,6 +140,7 @@ describe("marchDueScheduledOrders", () => {
     routed.length = 0;
     updates.length = 0;
     yaTeniaComandas = false;
+    comandasDelPedido = [{ status: "pendiente", cancelled_at: null }];
   });
 
   it("solo pide pagados-sin-tocar o aceptados (política de spec 047)", async () => {
@@ -259,6 +266,30 @@ describe("marchDueScheduledOrders", () => {
     expect(res.considered).toBe(1);
     expect(res.advancedOnly).toBe(1);
     expect(updates).toEqual([{ status: "preparing" }]);
+  });
+
+  it("no lo baja a Preparando si cocina ya lo terminó", async () => {
+    // El papel salió a las 18:00 y cocina lo despachó a las 19:00; a las 20:35
+    // el pedido sigue en `confirmed` porque ningún gesto de cocina mueve
+    // `orders.status` (ejes independientes, spec 091). Avanzarlo ahí diría que
+    // recién se empieza a preparar algo que ya está hecho.
+    yaTeniaComandas = true;
+    comandasDelPedido = [{ status: "entregado", cancelled_at: null }];
+    rows = [
+      row({
+        id: "ya-hecho",
+        scheduled_at: "2026-06-26T21:00:00-03:00",
+        kitchen_at: "2026-06-26T20:30:00-03:00",
+        business: {
+          scheduled_march_lead_pickup_min: 40,
+          scheduled_march_lead_delivery_min: 60,
+          scheduled_march_lead_kitchen_min: 40,
+        },
+      }),
+    ];
+    const res = await marchDueScheduledOrders(NOW);
+    expect(res.advancedOnly).toBe(0);
+    expect(updates).toEqual([]);
   });
 
   it("al programado que todavía no imprimió no le toca el estado a mano", async () => {

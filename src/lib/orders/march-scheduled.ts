@@ -65,6 +65,27 @@ type DueRow = {
  * que es **idempotente**: si un pedido ya tiene comandas (lo marchó "marchar
  * ahora"), es no-op.
  */
+/**
+ * ¿Cocina ya terminó todo lo de este pedido? (spec 127)
+ *
+ * Hace falta porque el papel puede salir horas antes de que el pedido entre al
+ * kanban: si cocina lo despachó en el medio, el avance a `preparing` llegaría
+ * tarde y mentiría. Una comanda cancelada no cuenta — no hay nada que esperar
+ * de ella.
+ */
+async function comandasTerminadas(
+  service: ReturnType<typeof createSupabaseServiceClient>,
+  orderId: string,
+): Promise<boolean> {
+  const { data } = await service
+    .from("comandas")
+    .select("status, cancelled_at")
+    .eq("order_id", orderId);
+  const vivas = ((data ?? []) as { status: string; cancelled_at: string | null }[])
+    .filter((c) => !c.cancelled_at);
+  return vivas.length > 0 && vivas.every((c) => c.status === "entregado");
+}
+
 export async function marchDueScheduledOrders(
   now: Date = new Date(),
 ): Promise<MarchDueResult> {
@@ -127,6 +148,13 @@ export async function marchDueScheduledOrders(
       // guarda optimista que usa `routeOrderToCocina`, para que un pedido
       // cancelado entre el SELECT y esto no reviva.
       if (res.data.already_had_comandas) {
+        // …salvo que cocina ya lo haya terminado. `orders.status` y
+        // `comandas.status` son ejes independientes (spec 091) y ninguna acción
+        // de cocina mueve el primero, así que un encargue impreso a las 18:00 y
+        // cocinado a las 19:00 sigue en `confirmed` a las 20:35. Bajarlo ahí a
+        // `preparing` diría que se empieza a preparar algo que ya está hecho.
+        if (await comandasTerminadas(service, o.id)) continue;
+
         const { data: advanced, error } = await service
           .from("orders")
           .update({ status: "preparing" })

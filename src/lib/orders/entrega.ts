@@ -37,18 +37,3 @@ export function entregaLabel(
   if (!order.scheduled_at) return null;
   return `${horaLocal(order.scheduled_at, timezone)} hs`;
 }
-
-/**
- * Las dos horas juntas, para la tarjeta de «Próximos»: `21:30 · listo 21:15`.
- * Sin hora de cocina —el pedido que programó el cliente desde la web— es
- * exactamente `entregaLabel`.
- */
-export function horariosLabel(
-  order: { scheduled_at: string | null; kitchen_at: string | null },
-  timezone: string,
-): string | null {
-  const pedido = entregaLabel(order, timezone);
-  if (!pedido) return null;
-  if (!order.kitchen_at) return pedido;
-  return `${pedido} · listo ${horaLocal(order.kitchen_at, timezone)}`;
-}
