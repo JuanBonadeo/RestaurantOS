@@ -2,7 +2,7 @@
 
 **Issue:** [RestaurantOS-Brain#35](https://github.com/gachetponzellini/RestaurantOS-Brain/issues/35) ·
 **Milestone:** sin asignar — Sprint 07 venció el 14-ago y no hay uno posterior ·
-**Estado:** en diseño (2026-08-31)
+**Estado:** implementada y verificada en vivo (2026-09-01)
 
 **Input:** Juan, 2026-08-31: *"vamos a armar una parecida pero para el encargado,
 que sea lo mas simple posible, con un formato parecido"*, sobre la guía del
