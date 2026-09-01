@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  GRUPOS,
   TEMAS,
   estaEscrito,
   pasosDe,
@@ -17,15 +18,51 @@ const RESERVAS = temaPorSlug("reservas")!;
 // puede pudrir sin que nadie se entere.
 
 describe("contenido de la guía · estructura", () => {
-  it("los seis temas están escritos, en el orden del turno", () => {
+  it("los dieciséis temas, en orden y agrupados", () => {
     expect(TEMAS.map((t) => t.slug)).toEqual([
-      "caja",
-      "mesas",
-      "cobrar",
-      "pedidos",
-      "reservas",
+      // Tu turno
+      "caja", "mesas", "cobrar", "comandas", "pedidos", "reservas", "rendicion", "fichaje",
+      // El local
+      "catalogo", "salones", "proveedores", "facturacion",
+      // Los clientes
+      "clientes", "promociones", "conversaciones",
+      // Si algo falla
       "carteles",
     ]);
+  });
+
+  it("todo tema cae en un grupo que el índice pinta", () => {
+    const ids = new Set(GRUPOS.map((g) => g.id));
+    for (const tema of TEMAS) {
+      expect(ids, `${tema.slug} tiene un grupo que no existe`).toContain(tema.grupo);
+    }
+  });
+
+  it("no hay grupos vacíos: uno sin temas no se pinta y sobra", () => {
+    for (const grupo of GRUPOS) {
+      expect(
+        TEMAS.some((t) => t.grupo === grupo.id),
+        `el grupo «${grupo.titulo}» quedó sin temas`,
+      ).toBe(true);
+    }
+  });
+
+  // «Lo importante» es lo único que se lee cuando se entra apurado. Un tema sin
+  // claves deja esa caja vacía; con seis, deja de ser un destaque y pasa a ser
+  // otro párrafo más.
+  it("cada tema tiene entre una y tres claves", () => {
+    for (const tema of TEMAS) {
+      expect(tema.claves.length, `${tema.slug}`).toBeGreaterThan(0);
+      expect(tema.claves.length, `${tema.slug}`).toBeLessThanOrEqual(3);
+    }
+  });
+
+  it("las claves son una línea, no un párrafo", () => {
+    for (const tema of TEMAS) {
+      for (const clave of tema.claves) {
+        expect(clave.length, `${tema.slug}: «${clave}»`).toBeLessThanOrEqual(160);
+      }
+    }
   });
 
   it("ningún tema quedó vacío en ninguno de los dos modos", () => {
@@ -108,8 +145,16 @@ describe("contenido de la guía · navegación", () => {
     expect(temaSiguiente("carteles", "estricto")).toBeUndefined();
   });
 
+  it("encadena a través de los grupos, no sólo dentro de uno", () => {
+    // «fichaje» cierra Tu turno: el siguiente tiene que ser el primero de El
+    // local. Si el encadenado se cortara por grupo, la guía se leería entera
+    // sólo hasta el final del primer bloque.
+    expect(temaSiguiente("fichaje", "estricto")?.slug).toBe("catalogo");
+    expect(temaSiguiente("facturacion", "estricto")?.slug).toBe("clientes");
+  });
+
   it("saltea los temas que todavía no están escritos", () => {
-    // No se usa `TEMAS`: se arma el caso, porque hoy están los seis escritos y
+    // No se usa `TEMAS`: se arma el caso, porque hoy están todos escritos y
     // el salteo se rompería sin que ningún test se queje.
     const vacio: Tema = { ...temaPorSlug("mesas")!, pasos: [] };
     const lista = [temaPorSlug("caja")!, vacio, temaPorSlug("cobrar")!];
@@ -120,6 +165,11 @@ describe("contenido de la guía · navegación", () => {
   });
 
   it("un slug que no existe no devuelve nada", () => {
-    expect(temaPorSlug("rendicion")).toBeUndefined();
+    // Ojo al elegir el ejemplo: acá decía «rendicion», que era inexistente
+    // hasta que la guía creció y pasó a ser un tema — el test lo agarró.
+    // «reportes» y «configuracion» son secciones que el encargado NO ve, así
+    // que difícilmente lleguen a ser temas de SU guía.
+    expect(temaPorSlug("reportes")).toBeUndefined();
+    expect(temaPorSlug("configuracion")).toBeUndefined();
   });
 });

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ChevronRight, CircleAlert, CornerDownRight, TriangleAlert } from "lucide-react";
+import { ArrowLeft, ChevronRight, CircleAlert, CornerDownRight, Star, TriangleAlert } from "lucide-react";
 
 import { PageShell } from "@/components/admin/shell/page-shell";
 import {
@@ -83,6 +83,43 @@ function Captura({ paso }: { paso: Paso }) {
   );
 }
 
+/**
+ * «Lo importante» — spec 134. Va arriba de todo y antes de los pasos.
+ *
+ * El tema se leyó entero una vez, el día que lo abriste con calma. Las otras
+ * veces se entra con el salón lleno, se mira cinco segundos y se sale. Esas
+ * veces esto es lo único que se lee, así que acá va el límite de lo que la
+ * persona puede hacer sola y lo que sale caro si se hace mal — no un resumen.
+ */
+function Claves({ claves }: { claves: string[] }) {
+  return (
+    <section
+      className="mt-6 rounded-2xl bg-white p-5 ring-1 ring-zinc-200/70"
+      aria-labelledby="lo-importante"
+    >
+      <h2
+        id="lo-importante"
+        className="flex items-center gap-2 text-[15px] font-semibold uppercase tracking-[0.12em] text-zinc-500"
+      >
+        <Star className="size-4" strokeWidth={2} style={{ color: "var(--brand)" }} />
+        Lo importante
+      </h2>
+      <ul className="mt-3 space-y-2.5">
+        {claves.map((c) => (
+          <li key={c} className={`flex gap-3 ${PROSA}`}>
+            <span
+              aria-hidden
+              className="mt-[0.6em] size-1.5 shrink-0 rounded-full"
+              style={{ background: "var(--brand)" }}
+            />
+            <span>{c}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 export default async function TemaPage({
   params,
 }: {
@@ -118,6 +155,8 @@ export default async function TemaPage({
 
         <h1 className={`mt-2 ${H1}`}>{tema.titulo}</h1>
         <p className={`mt-2 ${SECUNDARIO}`}>{tema.resumen}</p>
+
+        {tema.claves.length > 0 && <Claves claves={tema.claves} />}
 
         {estaEscrito(tema, modo) ? (
           <ol className={catalogo ? "mt-8 space-y-7" : "mt-8 space-y-8"}>

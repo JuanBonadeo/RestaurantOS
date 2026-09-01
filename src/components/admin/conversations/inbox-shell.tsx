@@ -11,6 +11,7 @@ import type { InboxListItem } from "@/lib/chatbot/inbox-query";
 import { cn } from "@/lib/utils";
 
 import { getInitials } from "./wa-thread";
+import { AyudaChip } from "@/components/admin/ayuda-chip";
 
 const POLL_MS = 10_000;
 
@@ -53,8 +54,9 @@ export function InboxShell({
         )}
       >
         <header className="flex shrink-0 items-center justify-between border-b border-zinc-200 px-4 py-3">
-          <h1 className="text-base font-semibold text-zinc-900">
+          <h1 className="flex items-center gap-1 text-base font-semibold text-zinc-900">
             Conversaciones
+            <AyudaChip slug={slug} tema="conversaciones" />
           </h1>
           <span className="text-[0.7rem] text-zinc-400">{conversations.length}</span>
         </header>

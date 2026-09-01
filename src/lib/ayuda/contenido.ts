@@ -2,8 +2,18 @@ import {
   Wallet,
   LayoutGrid,
   Receipt,
+  ChefHat,
   Truck,
   CalendarDays,
+  HandCoins,
+  Clock,
+  Package,
+  Table2,
+  Building2,
+  FileText,
+  Users,
+  Tag,
+  MessagesSquare,
   TriangleAlert,
   type LucideIcon,
 } from "lucide-react";
@@ -76,11 +86,36 @@ export type Paso = {
  */
 export type TipoTema = "pasos" | "catalogo";
 
+/**
+ * Los cuatro bloques del índice. Con seis temas alcanzaba una lista; con
+ * dieciséis, no: una tira de tarjetas todas iguales obliga a leerlas todas para
+ * encontrar una. El orden es el de la distancia al turno — primero lo que se
+ * hace hoy, último lo que se abre cuando algo se rompió.
+ */
+export type Grupo = "turno" | "local" | "clientes" | "problemas";
+
+export const GRUPOS: { id: Grupo; titulo: string; bajada: string }[] = [
+  { id: "turno", titulo: "Tu turno", bajada: "Lo que hacés todos los días, de la apertura al cierre." },
+  { id: "local", titulo: "El local", bajada: "La carta, el stock, los salones y los papeles. Se tocan cada tanto." },
+  { id: "clientes", titulo: "Los clientes", bajada: "Quiénes son, cómo se les habla y cómo se los trae de vuelta." },
+  { id: "problemas", titulo: "Si algo falla", bajada: "Los carteles del sistema, uno por uno." },
+];
+
 export type Tema = {
   slug: string;
   titulo: string;
   resumen: string;
   icono: LucideIcon;
+  grupo: Grupo;
+  /**
+   * Lo que hay que llevarse aunque no se lea el resto: dos o tres líneas, arriba
+   * de todo y destacadas.
+   *
+   * No es un resumen de los pasos. Es la respuesta a «si esta persona sólo lee
+   * cinco segundos, ¿qué le tiene que quedar?» — casi siempre el límite de lo
+   * que puede hacer sola, o la cosa que si se hace mal cuesta plata.
+   */
+  claves: string[];
   /** Default 'pasos'. */
   tipo?: TipoTema;
   pasos: Paso[];
@@ -112,97 +147,71 @@ export function pasosDe(tema: Tema, modo: ReservationMode): Paso[] {
 // mergear vacía sin prometer nada que no esté (RNF-2).
 
 export const TEMAS: Tema[] = [
-  // ── 1 · Caja ──────────────────────────────────────────────────────────────
+  // ══ Tu turno ═════════════════════════════════════════════════════════════
   {
     slug: "caja",
-    titulo: "Abrir la caja, los movimientos y el cierre",
-    resumen:
-      "Con cuánto arranca el turno, cómo se anota lo que entra y sale, y qué hacer cuando el conteo no da.",
+    titulo: "La caja: movimientos y cierre",
+    resumen: "Lo que entra y sale del cajón, y cómo se cierra el turno cuando el conteo no da.",
     icono: Wallet,
+    grupo: "turno",
+    claves: [
+      "Podés cerrar con una diferencia de hasta $5.000. Más que eso lo cierra el dueño.",
+      "Toda diferencia pide motivo escrito. No lo maquilles: es lo que después la explica.",
+      "Las propinas no están en «En la caja deberías tener». Son del mozo, no del local.",
+    ],
     pasos: [
       {
-        titulo: "Elegí con qué caja estás trabajando",
+        titulo: "Elegí tu caja y mirá los dos números",
         texto:
-          'Arriba de todo están las cajas del local: Caja Principal, Caja Bar, las que haya. Tocá la que tenés adelante. El sistema se acuerda de tu elección, así que el puesto del bar registra siempre en la del bar sin tener que elegirla cada vez. Si no ves ninguna, dice "Sin cajas configuradas" y las crea el dueño desde la configuración.',
-      },
-      {
-        titulo: 'Qué quiere decir "En la caja deberías tener"',
-        texto:
-          "Es la plata que tendría que haber en el cajón en este momento: con lo que quedó del último corte, más lo que se cobró en efectivo, menos lo que sacaste. Las propinas NO están adentro de ese número: son del mozo, no del local. Al lado, «Cobrado en el período» es la venta del turno con todos los métodos juntos — tarjeta, transferencia y efectivo —, que es otra cosa y casi nunca coincide.",
+          'Arriba están las cajas del local; tocá la que tenés adelante y el sistema se la acuerda. «En la caja deberías tener» es la plata que tendría que haber en el cajón ahora. «Cobrado en el período» es la venta del turno con todos los métodos juntos: es otra cosa y casi nunca coincide.',
         imagen: "/ayuda/caja-periodo.png",
-        alt: "La pantalla de Caja, con el recuadro «En la caja deberías tener» a la izquierda y «Cobrado en el período» a la derecha.",
-        // % del ancho y del alto de la captura (1160 × 860).
-        // Van sobre el rótulo y no sobre el número: el círculo mide 28 px y
-        // encima de «$ 168.000» tapaba justo los dígitos que hay que leer.
+        alt: "La pantalla de Caja, con «En la caja deberías tener» a la izquierda y «Cobrado en el período» a la derecha.",
+        // % del ancho y del alto de la captura (1160 × 860): van sobre el
+        // rótulo y no sobre el número, que el círculo tapaba los dígitos.
         marcas: [
           { n: 1, x: 9.5, y: 27.5 },
           { n: 2, x: 56, y: 27.5 },
         ],
-        aviso: {
-          tono: "ojo",
-          texto:
-            "Ese número sube y baja solo con los cobros y las sangrías. Si contás el cajón y no da, la diferencia ya existía: no la genera el cierre, la muestra.",
-        },
       },
       {
-        titulo: "Sacar plata de la caja: Sangría",
+        titulo: "Sacar y meter plata",
         texto:
-          'El botón «Sangría» es para sacar efectivo: depósito en banco, pago a un proveedor, lo que sea. Pide el monto y un motivo, y el motivo es obligatorio — si lo dejás vacío te dice "La sangría requiere un motivo.". Escribí algo que se entienda dentro de tres semanas: «pago proveedor verdulería», no «varios».',
+          '«Sangría» saca efectivo —depósito, pago a proveedor— y pide motivo obligatorio: "La sangría requiere un motivo.". «Ingreso» es al revés, para el cambio que se repone. Escribí motivos que se entiendan dentro de un mes: «pago proveedor verdulería», no «varios».',
       },
       {
-        titulo: "Meter plata en la caja: Ingreso",
+        titulo: "Antes de cerrar, que los mozos rindan",
         texto:
-          'El botón «Ingreso» es al revés: sumar efectivo que entra sin ser una venta. Cambio que trajo el dueño, un vuelto que se repone, plata que vuelve de otra caja. También conviene ponerle motivo, aunque acá el sistema no te lo exija.',
+          'Un mozo que cobró en efectivo tiene esa plata encima hasta que la entrega. Si falta alguno, el cierre te frena con "Falta 1 rendición para poder cerrar.".',
+        verTambien: { tema: "rendicion", texto: "Cómo se toma una rendición" },
       },
       {
-        titulo: "Antes de cerrar: que los mozos rindan",
+        titulo: "Contá, explicá la diferencia y decidí si retirás",
         texto:
-          'Un mozo que cobró en efectivo tiene esa plata encima hasta que la entrega. En «Rendición por empleado» ves quién debe cuánto. Rendir no cambia el total del turno: pasa la plata de la columna del mozo a la del cajón. Si falta alguno, el cierre te frena con "Falta 1 rendición para poder cerrar.".',
-        verTambien: {
-          tema: "carteles",
-          texto: "Lo que puede frenar un cierre, uno por uno",
-        },
-      },
-      {
-        titulo: "Contá el cajón",
-        texto:
-          'Tocá «Cerrar caja» y escribí lo que contaste en «Efectivo contado en el cajón». Si te sirve, «Contar por billete (opcional)» te deja cargar cuántos de mil, cuántos de dos mil, y hace la cuenta sola. Es opcional: si ya contaste a mano, poné el total y listo.',
-      },
-      {
-        titulo: "Si no da: la diferencia y el motivo",
-        texto:
-          'Debajo del monto aparece «Te falta» o «Te sobra» con la diferencia. Cuando hay diferencia el sistema pide que escribas qué pasó: "Hay diferencia con el efectivo esperado. Tenés que registrar el motivo en las notas.". No es burocracia — es lo único que hace que un faltante de mañana se pueda explicar.',
+          'En «Cerrar caja» escribís lo contado —hay un contador por billete si te sirve— y aparece «Te falta» o «Te sobra». Con diferencia, el sistema pide el motivo en las notas. Después, la casilla «Retirar todo el efectivo»: tildada la caja arranca en $0; sin tildar "La caja queda con lo contado — es el arqueo de mitad de turno.".',
         aviso: {
           tono: "peligro",
           texto:
-            'Vos podés cerrar con una diferencia de hasta $5.000. Más que eso, el sistema te frena con "La diferencia excede tu autorización. Pedile al admin que cierre la caja." y hay que llamar al dueño. No lo intentes por partes ni maquilles el conteo: el número que ponés es el que quedó registrado para siempre.',
+            'Arriba de $5.000 de diferencia el sistema te frena: "La diferencia excede tu autorización. Pedile al admin que cierre la caja.". No cambies el conteo para que entre — convertís un faltante explicable en uno escondido.',
         },
-      },
-      {
-        titulo: "Retirar la plata o dejarla",
-        texto:
-          'Antes de confirmar hay una casilla: «Retirar todo el efectivo». Tildada, se lleva todo — "Se registra como sangría del cierre y la caja arranca en $0.". Sin tildar, "La caja queda con lo contado — es el arqueo de mitad de turno.". Se retira todo o nada: no hay retiro parcial. Si estás cortando a mitad del día para contar y seguir, destildala.',
-      },
-      {
-        titulo: "Confirmá",
-        texto:
-          "«Contar y cerrar» cierra el período y arranca uno nuevo. De ahí en más los cobros del turno viejo ya no se tocan: lo que haya que corregir se corrige en el libro, no volviendo a cerrar.",
       },
     ],
   },
-
-  // ── 2 · Mesas ─────────────────────────────────────────────────────────────
   {
     slug: "mesas",
-    titulo: "El salón: abrir, cerrar, anular y pasar de mesa",
-    resumen:
-      "Todo lo que se hace con una mesa desde el mostrador, incluido lo que el mozo no puede hacer solo.",
+    titulo: "El salón",
+    resumen: "Abrir, cobrar, anular y mover mesas, incluido lo que el mozo no puede hacer solo.",
     icono: LayoutGrid,
+    grupo: "turno",
+    claves: [
+      "Anular una mesa y anular un cobro son cosas distintas: si ya se cobró, se anula el cobro.",
+      "Anular, trasladar y repartir el salón son tuyos o del dueño. El mozo no puede.",
+      "Toda anulación pide motivo. Es lo que explica por qué esa venta no está.",
+    ],
     pasos: [
       {
         titulo: "El plano es el salón",
         texto:
-          "Cada figura es una mesa y el color dice cómo está: libre, ocupada, o esperando algo. Abajo de todo está la referencia de colores con cuántas hay de cada una. El número chico adentro de la mesa es hace cuánto que está abierta — sirve para ver de una cuál se está demorando. A la derecha tenés la misma información en lista. Si el local tiene más de un salón, se cambia con las pestañas de arriba.",
+          "Cada figura es una mesa y el color dice cómo está. Abajo está la referencia con cuántas hay de cada una; el número chico adentro es hace cuánto está abierta, que sirve para ver cuál se demora. A la derecha, lo mismo en lista.",
         imagen: "/ayuda/salon-plano.png",
         alt: "El plano del salón con las mesas, la referencia de colores abajo y el panel de ocupadas a la derecha.",
         marcas: [
@@ -212,315 +221,532 @@ export const TEMAS: Tema[] = [
         ],
       },
       {
-        titulo: "Abrir una mesa que llega sin reserva",
+        titulo: "Abrir, cargar y pasar a cobro",
         texto:
-          "Tocá una mesa libre y cargale el pedido: con eso queda abierta. Si esa mesa tiene una reserva más tarde, el sistema te avisa antes — «Podés abrirla igual para un walk-in, pero después vas a necesitar la mesa para esta reserva.» — y elegís «Abrir igual» o buscás otra.",
-      },
-      {
-        titulo: "Sentar una reserva",
-        texto:
-          'Cuando el cliente de una reserva llega, se la sienta en su mesa con «Sentar la reserva». Si todavía no tiene mesa asignada, el sistema te pide elegirla en el plano. Ojo: una reserva que todavía no confirmaste no se puede sentar — te dice "Confirmá la reserva antes de sentarla.".',
-        verTambien: { tema: "reservas", texto: "Cómo se confirma una reserva" },
-      },
-      {
-        titulo: "Cargar y agregar al pedido",
-        texto:
-          "«Cargar pedido» abre la carta para sumar a esa mesa. Se puede volver a cargar todas las veces que haga falta mientras la mesa está abierta: cada tanda sale como una comanda nueva a su sector.",
-      },
-      {
-        titulo: "Cuando pide la cuenta",
-        texto:
-          "La mesa pasa a «Pidió la cuenta» y queda marcada en el plano para que se vea de lejos. De ahí, «Pasar a cobro» abre el cobro con todo lo consumido.",
+          "Tocás una mesa libre, le cargás el pedido y queda abierta; se puede seguir agregando todas las veces que haga falta. Cuando piden la cuenta la mesa se marca en el plano y «Pasar a cobro» abre el cobro con todo lo consumido.",
         verTambien: { tema: "cobrar", texto: "Cómo se cobra una cuenta" },
       },
       {
-        titulo: "Cambiar el mozo de una mesa",
+        titulo: "Si la mesa tenía una reserva",
         texto:
-          "«Transferir mozo» pasa la mesa a otro. Sirve cuando alguien se va antes de terminar el turno o cuando hay que repartir de nuevo el salón. Un mozo sólo puede transferir mesas que son suyas; vos podés mover cualquiera.",
+          "Al abrir una mesa reservada el sistema te avisa antes y podés «Abrir igual» o buscar otra. Para sentar a alguien de una reserva, primero hay que confirmarla.",
+        verTambien: { tema: "reservas", texto: "Confirmar una reserva" },
       },
       {
-        titulo: "Pasar el consumo a otra mesa",
+        titulo: "Mover: de mozo o de mesa",
         texto:
-          '«Trasladar mesa» mueve la cuenta abierta a otra mesa —los clientes se cambiaron de lugar, se juntaron dos grupos—. La mesa de destino tiene que estar libre: si no, te dice "La mesa está ocupada. Cobrala o liberala antes de mover.". Si alguien tocó la mesa mientras la movías, "La mesa cambió mientras la movías. Refrescá e intentá de nuevo.".',
+          '«Transferir mozo» pasa la mesa a otro. «Trasladar mesa» mueve el consumo a otra mesa, que tiene que estar libre — si no, "La mesa está ocupada. Cobrala o liberala antes de mover.". El modo «Distribuir mozos» reparte varias mesas de una antes del servicio.',
       },
       {
         titulo: "Anular una mesa",
         texto:
-          '«Anular mesa» cancela la orden activa y deja la mesa libre. Es para el cliente que se fue sin consumir o para el error de carga. Pide motivo y es obligatorio — "El motivo de anulación es obligatorio." —, con ejemplos como «cliente se fue, error de carga».',
+          'Cancela la orden activa y libera la mesa: es para el cliente que se fue sin consumir o el error de carga. Pide motivo obligatorio, con ejemplos como «cliente se fue, error de carga».',
         aviso: {
           tono: "peligro",
           texto:
-            "Anular borra la venta de esa mesa del turno. Un mozo no puede hacerlo: es tuyo o del dueño. Si la mesa ya se cobró, no se anula acá — se anula el cobro, que es otra cosa y deja el rastro del reembolso.",
+            "Anular borra esa venta del turno y sólo lo podés hacer vos o el dueño. Si la mesa YA se cobró, esto no es lo que buscás: se anula el cobro, que deja el rastro del reembolso.",
         },
-        verTambien: { tema: "cobrar", texto: "Cómo se anula un cobro ya hecho" },
-      },
-      {
-        titulo: "Repartir el salón entre los mozos",
-        texto:
-          "El modo «Distribuir mozos» te deja asignar de una varias mesas a cada uno antes de que arranque el servicio. Es tuyo o del dueño: el mozo no reparte el salón.",
       },
     ],
   },
-
-  // ── 3 · Cobrar ────────────────────────────────────────────────────────────
   {
     slug: "cobrar",
-    titulo: "Cobrar una cuenta: propina, descuento y anular un cobro",
-    resumen:
-      "Cómo se cobra, hasta cuánto descuento podés hacer vos, y cómo se deshace un cobro mal hecho.",
+    titulo: "Cobrar una cuenta",
+    resumen: "Propina, descuento, hasta dónde llegás vos, y cómo se deshace un cobro mal hecho.",
     icono: Receipt,
+    grupo: "turno",
+    claves: [
+      "Tu tope de descuento es 25%. Partirlo en dos cobros no lo saltea.",
+      "Si «Cobrar» se queda pensando, NO lo toques de nuevo: refrescá y mirá cómo quedó.",
+      "Mirá en qué caja va a quedar el cobro antes de confirmar. Es el error más fácil de evitar.",
+    ],
     pasos: [
       {
-        titulo: "Abrí el cobro",
+        titulo: "Abrí el cobro y mirá la caja",
         texto:
-          "Desde la mesa, «Cobrar mesa» o «Pasar a cobro». Se abre al costado, sin salir del salón: la lista de lo consumido a la izquierda y el pago a la derecha.",
-      },
-      {
-        titulo: "Mirá en qué caja va a quedar",
-        texto:
-          "Arriba del pago dice «Caja para registrar el cobro». Ese cobro va a aparecer en esa caja al cierre, así que si estás cobrando desde el bar asegurate de que diga la del bar. Es el error más caro de la noche y el más fácil de evitar: se arregla mirando una línea antes de apretar.",
+          "Desde la mesa, «Cobrar mesa» o «Pasar a cobro»: se abre al costado sin salir del salón. Arriba del pago dice «Caja para registrar el cobro» — si estás en el bar, que diga la del bar, porque ahí es donde va a aparecer al cierre.",
       },
       {
         titulo: "Toda la mesa o dividida",
         texto:
-          "Por defecto se cobra «Mesa completa». Si la mesa se divide, aparecen las sub-cuentas y arriba dice «Elegí una sub-cuenta»: se cobra una por una y el total que falta se ve en «Falta cobrar».",
+          "Por defecto se cobra «Mesa completa». Si se divide, aparecen las sub-cuentas: se cobra una por una y lo que queda se ve en «Falta cobrar».",
       },
       {
-        titulo: "La propina",
+        titulo: "Propina y descuento",
         texto:
-          "Se elige por porcentaje o se escribe el monto. «Sin propina» también es una opción válida y no hay que justificarla. La propina no entra en lo que la caja debería tener: es del mozo.",
-      },
-      {
-        titulo: "El descuento: hasta dónde llegás vos",
-        texto:
-          'Debajo del descuento el sistema te dice «Tu rol permite hasta 25%». Si te pasás, se pone en rojo: «Excede tu autorización · pedile al dueño», y no te deja cobrar. Además el descuento siempre pide motivo — "El descuento requiere un motivo." — y hay una lista para elegir, con «Cortesía de la casa» entre las opciones.',
-        aviso: {
-          tono: "ojo",
-          texto:
-            "El tope es del rol, no de la mesa: no se saltea partiendo el descuento en dos cobros. Si hace falta más, se llama al dueño.",
-        },
+          'La propina se elige por porcentaje o monto, y «Sin propina» es una opción válida. En el descuento el sistema te dice «Tu rol permite hasta 25%»; si te pasás se pone en rojo con «Excede tu autorización · pedile al dueño» y no te deja cobrar. El descuento siempre pide motivo, con «Cortesía de la casa» entre las opciones.',
       },
       {
         titulo: "Cobrar",
         texto:
-          'Elegís el método, confirmás, y el pago queda registrado en la caja. Cuando no falta nada dice «Mesa cobrada» y «Todos los pagos quedaron registrados. Podés volver al salón.». Si el negocio factura, desde ahí mismo sale el comprobante con «Cobrar / Facturar».',
+          'Elegís método, confirmás, y el pago queda asentado en la caja. Cuando no falta nada dice «Mesa cobrada». Si el negocio factura, el comprobante sale desde ahí mismo.',
         aviso: {
           tono: "peligro",
           texto:
-            'Si tocaste «Cobrar» y la pantalla se quedó pensando, NO lo toques de nuevo. El sistema te va a decir "El pago ya se estaba registrando. Refrescá para ver el estado." — refrescá y fijate antes de volver a cobrar, o la mesa queda cobrada dos veces.',
+            'Si tocaste «Cobrar» y no pasó nada, no insistas: te va a decir "El pago ya se estaba registrando. Refrescá para ver el estado.". Refrescá y fijate ANTES de volver a cobrar, o la mesa queda cobrada dos veces.',
         },
       },
       {
-        titulo: "Anular un cobro ya hecho",
+        titulo: "Anular un cobro",
         texto:
-          '«Anular cobro» deshace un cobro mal hecho: pide motivo obligatorio, con ejemplos como «cliente reclamó, pago doble, error de carga». Lo que hace es "Los pagos cobrados se marcan como reembolsados (auditoría) y la mesa vuelve al plano como estaba, con todos sus ítems.". O sea: no borra nada, deja el rastro y te devuelve la mesa para rehacerla.',
-        aviso: {
-          tono: "peligro",
-          texto:
-            "Anular un cobro es tuyo o del dueño, nunca del mozo. Y no sirve para corregir un monto: se anula y se vuelve a cobrar bien, para que la caja y la factura cuenten la misma historia.",
-        },
-      },
-      {
-        titulo: "Si la cuenta no se puede reabrir",
-        texto:
-          'Al anular, la mesa vuelve a estar abierta con su consumo. Si mientras tanto alguien abrió otra cuenta en esa mesa, el sistema te frena: "No pudimos reabrir la cuenta: la mesa ya tiene otra cuenta abierta. Anulá esa primero.". Cerrá o anulá esa otra cuenta y volvé a intentar.',
+          'Pide motivo obligatorio y lo que hace es "Los pagos cobrados se marcan como reembolsados (auditoría) y la mesa vuelve al plano como estaba, con todos sus ítems.". No borra nada: deja rastro y te devuelve la mesa. No sirve para corregir un monto — se anula y se cobra bien.',
+        verTambien: { tema: "facturacion", texto: "Y si ya se había facturado" },
       },
     ],
   },
-
-  // ── 4 · Pedidos online ────────────────────────────────────────────────────
+  {
+    slug: "comandas",
+    titulo: "La cocina y las comanderas",
+    resumen: "Qué está saliendo, qué se demora, y qué hacer cuando una comanda no se imprime.",
+    icono: ChefHat,
+    grupo: "turno",
+    claves: [
+      '"1 comanda no se imprimió" quiere decir que la cocina NO se enteró de ese plato.',
+      '"sin conexión" es la PC de las impresoras caída: no sale ni un ticket hasta que vuelva.',
+      "Editar una comanda reimprime el ticket corregido. Avisale a la cocina igual.",
+    ],
+    pasos: [
+      {
+        titulo: "Las tres columnas",
+        texto:
+          "«Pendientes» son las que la cocina todavía no tomó, «En cocina» las que está haciendo, «Entregadas» las que salieron. Arriba, «Saturación por sector» te dice qué estación está tapada — parrilla, fritera, la que sea.",
+      },
+      {
+        titulo: "La que no se imprimió",
+        texto:
+          'Cuando una comanda falla aparece el aviso "1 comanda no se imprimió" y con «Ver solo las fallidas» las ves todas juntas para reimprimirlas. Mientras no se resuelva, para la cocina ese plato no existe.',
+        aviso: {
+          tono: "peligro",
+          texto:
+            "Antes de reimprimir, chequeá si el papel ya salió. Reimprimir a ciegas hace que se cocine dos veces.",
+        },
+      },
+      {
+        titulo: 'El cartel "sin conexión"',
+        texto:
+          "Es la PC del local que conecta el sistema con las impresoras: apagada, dormida o sin red. Todo lo que cargues sigue funcionando pero no imprime nada. Es lo primero que hay que mirar cuando «no salen las comandas»: prendé esa máquina y las pendientes salen solas.",
+      },
+      {
+        titulo: "Editar o anular una comanda",
+        texto:
+          'Desde las opciones de la comanda se corrige lo que salió mal y con «Guardar y reimprimir» sale el ticket corregido — "Comanda actualizada · se reimprime el ticket corregido.". Si la corrección es urgente, decíselo a la cocina de palabra: el papel nuevo puede llegar después de que empezaron.',
+      },
+    ],
+  },
   {
     slug: "pedidos",
-    titulo: "Los pedidos que entran por la web",
-    resumen:
-      "Los que llegan solos: aceptarlos, corregirlos, cobrarlos y avisar para cuándo están.",
+    titulo: "Los pedidos de la web",
+    resumen: "Delivery y take away: aceptarlos, corregirlos, cobrarlos y avisar para cuándo están.",
     icono: Truck,
+    grupo: "turno",
+    claves: [
+      '«No marchó» en rojo = alguien espera comida que nunca se empezó. Es lo más urgente de la pantalla.',
+      "El motivo de cancelación lo lee el cliente en el seguimiento de su pedido.",
+      "Un pedido ya pagado no se edita: se anula y se rehace.",
+    ],
     pasos: [
       {
         titulo: "Las cinco columnas",
         texto:
-          "Un pedido de la web recorre «Pendientes» → «En cocina» → «Listos» → «En camino» → «Entregados». Se mueve tocando el botón de su tarjeta. Arriba, al lado de «Pedidos online», hay un número: es cuántos hay sin atender. Si tiene número, alguien está esperando.\n\nEn «Pendientes» también esperan los encargues con hora: los reconocés por el cartelito «Programado». No hay que tocarles nada — pasan solos a «En cocina» 40 minutos antes de la hora que le pusiste a cocina. Si es para otro día, además la comanda recién se imprime en ese momento; si es para hoy, el papel ya salió cuando lo cargaste.",
+          "Un pedido recorre «Nuevos» → «Preparando» → «Listos» → «En camino» → «Entregados», y se mueve con el botón de su tarjeta. El número al lado de «Pedidos online» es cuántos hay sin atender: si tiene número, alguien está esperando.",
         imagen: "/ayuda/pedidos-columnas.png",
-        alt: "Las cinco columnas de pedidos online: Pendientes, En cocina, Listos, En camino y Entregados.",
+        alt: "Las cinco columnas de pedidos online: Nuevos, Preparando, Listos, En camino y Entregados.",
         marcas: [
           { n: 1, x: 7, y: 47 },
           { n: 2, x: 43.5, y: 9 },
         ],
       },
       {
-        titulo: "Confirmar un pedido nuevo",
+        titulo: "Confirmar, y los que son para más tarde",
         texto:
-          "Un pedido que entra queda en «Pendientes» hasta que lo mirás. «Confirmar pedido» lo acepta y manda la comanda a cocina. Confirmá recién cuando estés seguro de que se puede hacer: es lo que le avisa al cliente que va en camino.",
-      },
-      {
-        titulo: "Los pedidos para más tarde",
-        texto:
-          "Un pedido encargado para otro momento aparece en «Pendientes» con el chip «Programado» y se queda al final de la columna. No sale a cocina cuando entra: sale cuando corresponde. Aceptarlo lo deja avalado sin marcharlo.",
+          "«Confirmar pedido» lo acepta y manda la comanda a cocina — confirmá cuando estés seguro de que se puede hacer. Los encargados para otro momento quedan en «Nuevos» con el chip «Programado» y no salen a cocina hasta que corresponde.",
       },
       {
         titulo: "El que tenía que salir y sigue ahí",
         texto:
-          'Si un programado se pasó de su hora, la tarjeta se pone en rojo con «No marchó» y el texto "Tenía que marchar y sigue acá — revisá que salga la comanda". Es el aviso más importante de la pantalla: alguien está esperando comida que nunca se empezó. «Marchar ya» lo manda a cocina en el momento.',
+          'Si un programado se pasó de hora, la tarjeta se pone en rojo con «No marchó»: "Tenía que marchar y sigue acá — revisá que salga la comanda". «Marchar ya» lo manda a cocina en el momento.',
         aviso: {
           tono: "peligro",
           texto:
-            "«No marchó» casi siempre significa que la comanda no llegó a la cocina. Antes de marcharlo de nuevo, fijate en Comandas si la impresión falló — si no, la cocina va a recibir dos.",
+            "Casi siempre es que la comanda no llegó. Fijate en Comandas si la impresión falló antes de marcharlo de nuevo, o la cocina recibe dos.",
         },
-        verTambien: { tema: "carteles", texto: "Qué hacer si una comanda no se imprimió" },
+        verTambien: { tema: "comandas", texto: "Las comandas que no se imprimieron" },
       },
       {
-        titulo: "Corregir un pedido antes de cobrarlo",
+        titulo: "Corregir, cobrar, cancelar",
         texto:
-          "Tocando la tarjeta se abre el detalle y ahí se edita: sacar algo que no hay, cambiar cantidades, sumar lo que el cliente pidió por teléfono. También podés dejar una «Nota para cocina (sale en la comanda)». Un pedido ya pagado no se edita: se anula y se rehace.",
-      },
-      {
-        titulo: "Cobrarlo",
-        texto:
-          "Los que pagaron online ya vienen cobrados. Los que pagan al recibir dicen «Efectivo · A cobrar», y desde el detalle se registra el pago con «Cobrar / Facturar», que lo asienta en la caja igual que una mesa.",
-        verTambien: { tema: "caja", texto: "Dónde aparece eso en el cierre" },
-      },
-      {
-        titulo: "Cancelar un pedido",
-        texto:
-          '«Cancelar pedido» pide un «Motivo de cancelación» y sugiere ejemplos: «Sin stock, zona fuera de cobertura, etc.». El cliente lo ve: el motivo que escribas aparece en el seguimiento del pedido, así que escribilo pensando en que lo lee él.',
-      },
-      {
-        titulo: "Cargar un pedido a mano",
-        texto:
-          "El que llama por teléfono se carga con «Cargar pedido», arriba de todo en «Pendientes». Entra al mismo circuito que los de la web y se cobra igual.",
+          'Tocando la tarjeta se abre el detalle: ahí se saca lo que no hay, se cambian cantidades y se deja «Nota para cocina (sale en la comanda)». Los que pagan al recibir dicen «Efectivo · A cobrar» y se cobran desde ahí. Cancelar pide un motivo con ejemplos como «Sin stock, zona fuera de cobertura».',
       },
     ],
   },
-
-  // ── 5 · Reservas ──────────────────────────────────────────────────────────
-  //
-  // D12: los dos modos. NO se escribe un texto común con condicionales: el
-  // encargado ve el suyo y nada más. Lo que se repite entre los dos —confirmar,
-  // sentar, no vino— se repite escrito, que sale más barato que un "si tu local
-  // usa reservas flexibles, saltá al paso 6".
   {
     slug: "reservas",
-    titulo: "Tomar, confirmar y rechazar una reserva",
-    resumen:
-      "El libro del día, las que pide el cliente por la web y qué hacer cuando no hay lugar.",
+    titulo: "Reservas",
+    resumen: "El libro del día, las que pide el cliente por la web, y qué hacer cuando no hay lugar.",
     icono: CalendarDays,
+    grupo: "turno",
+    claves: [
+      "Una solicitud sin responder vence sola y el cliente recibe que no se pudo. Miralas al empezar el turno.",
+      "El motivo del rechazo se lo mandamos al cliente: escribilo pensando en que lo lee él.",
+      "Editar no confirma. Ajustá primero y decidí después, así el cliente recibe un solo aviso.",
+    ],
     pasos: [],
     pasosPorModo: {
       estricto: [
         {
           titulo: "El día, hora por hora",
           texto:
-            "La pantalla abre en el día de hoy y lista las reservas por hora con su estado. Arriba se cambia de fecha y se busca por nombre o teléfono. Si no hay nada, dice «No hay reservas para esta fecha.».",
+            "La pantalla abre en hoy y lista las reservas por hora con su estado. Arriba se cambia de fecha y se busca por nombre o teléfono.",
         },
         {
-          titulo: "Tomar una reserva por teléfono",
+          titulo: "Tomar una por teléfono",
           texto:
-            "«Nueva reserva» pide nombre, teléfono, cuántos son y el horario. Los horarios salen de una grilla fija: elegís uno de los que el local tiene habilitados, no escribís la hora a mano. Si el que te piden no está en la lista, es porque no hay turno ahí.",
-        },
-        {
-          titulo: "Cuando no hay lugar",
-          texto:
-            'Si te dice "Ese horario ya no está disponible." o "Ya no quedan mesas disponibles para ese horario.", el turno está lleno. Ofrecé otro horario de la grilla: forzarlo desde acá no se puede, y está bien que no se pueda — en este modo el cupo es el cupo.',
+            'Pide nombre, teléfono, cuántos son y el horario, que sale de una grilla fija: elegís uno de los habilitados, no escribís la hora a mano. Si el que te piden no está, no hay turno ahí — y forzarlo desde acá no se puede. Está bien que no se pueda: en este modo el cupo es el cupo.',
         },
         {
           titulo: "Las que pide el cliente por la web",
           texto:
-            "Las que entran solas quedan esperando tu respuesta y la fecha se marca con «Tiene solicitudes sin responder». Cada una tiene «Confirmar» y «Rechazar». Hasta que decidas, el cliente sabe que la pediste, no que la tiene.",
-          aviso: {
-            tono: "ojo",
-            texto:
-              "Una solicitud sin responder vence sola y el cliente recibe el aviso de que no se pudo. Miralas al empezar el turno, no al final.",
-          },
+            'Quedan esperando tu respuesta y la fecha se marca con «Tiene solicitudes sin responder». Cada una tiene «Confirmar» y «Rechazar»; al rechazar podés escribir por qué, con un ejemplo: «Ej: esa noche tenemos un evento privado». Hasta que decidas, el cliente sabe que la pidió, no que la tiene.',
         },
         {
-          titulo: "Rechazar bien",
+          titulo: "Cuando llega, y el que no vino",
           texto:
-            'Al rechazar te pregunta «¿Rechazar la reserva?» y te deja escribir por qué, con un ejemplo: «Ej: esa noche tenemos un evento privado». Ese texto le llega al cliente. Una línea amable acá vale más que la reserva que no pudiste darle.',
-        },
-        {
-          titulo: "Ajustar antes de decidir",
-          texto:
-            "Si la querés tomar pero con otra hora, otra mesa o menos gente, editala primero y decidí después: editar no confirma nada. Así el cliente recibe un solo aviso, con los datos que quedaron de verdad.",
-        },
-        {
-          titulo: "Cuando llega",
-          texto:
-            "«Sentar la reserva» la pasa a «En mesa». Si todavía no tiene mesa, elegila en el plano. Una reserva sin confirmar no se sienta: primero se confirma.",
+            "«Sentar la reserva» la pasa a «En mesa» — si no tiene mesa, la elegís en el plano. «No vino» la marca como ausente. Marcalo de verdad: es lo único que después deja ver quién falta seguido.",
           verTambien: { tema: "mesas", texto: "Qué pasa con la mesa cuando la sentás" },
-        },
-        {
-          titulo: "El que no vino",
-          texto:
-            "«No vino» la marca como ausente después de preguntarte «¿Marcar como no vino?». Marcalo de verdad: es lo único que después deja ver quién falta seguido y decidir si a ese teléfono se le pide seña.",
         },
       ],
       flexible: [
         {
           titulo: "El libro del día, por servicio",
           texto:
-            "La pantalla abre en el día de hoy, con las reservas ordenadas por hora dentro de cada servicio — mediodía, cena, el que tenga el local. Arriba se cambia de fecha y se busca por nombre o teléfono.",
+            "La pantalla abre en hoy, con las reservas por hora dentro de cada servicio — mediodía, cena, el que tenga el local. Arriba se cambia de fecha y se busca por nombre o teléfono.",
         },
         {
-          titulo: "Tomar una reserva por teléfono",
+          titulo: "Tomar una por teléfono",
           texto:
-            "«Nueva reserva» pide nombre, teléfono, cuántos son, el servicio y la hora. Acá la hora se escribe: no hay grilla de turnos. La mesa es opcional — se puede tomar ahora y asignar la mesa después, cuando armes el salón.",
+            "Pide nombre, teléfono, cuántos son, el servicio y la hora. Acá la hora se escribe: no hay grilla de turnos. La mesa es opcional — se puede tomar ahora y asignarla después, cuando armes el salón.",
         },
         {
           titulo: "El cupo es blando para vos y duro para el cliente",
           texto:
-            'Cuando el servicio está lleno, al cliente que reserva por la web el sistema lo frena: "Ese servicio ya está completo. Probá otro horario, otra fecha u otro salón.". A vos no: te dice "No quedan mesas libres en ese servicio. Confirmá para reservar igual." y te deja pasar. La diferencia es a propósito — vos sabés que a las 22:30 se libera la que entró a las 20:00, y la web no.',
+            'Con el servicio lleno, al que reserva por la web el sistema lo frena. A vos no: te dice "No quedan mesas libres en ese servicio. Confirmá para reservar igual." y te deja pasar. La diferencia es a propósito — vos sabés que a las 22:30 se libera la que entró a las 20:00, y la web no.',
           aviso: {
             tono: "ojo",
-            texto:
-              "Que puedas sobrevender no quiere decir que convenga. El cartel es para el caso que conocés, no para llenar el libro y ver qué pasa.",
+            texto: "Que puedas sobrevender no quiere decir que convenga. El cartel es para el caso que conocés, no para llenar el libro y ver qué pasa.",
           },
         },
         {
           titulo: "Las que pide el cliente por la web",
           texto:
-            "Las que entran solas quedan esperando tu respuesta y la fecha se marca con «Tiene solicitudes sin responder». Cada una tiene «Confirmar» y «Rechazar». Hasta que decidas, el cliente sabe que la pidió, no que la tiene.",
-          aviso: {
-            tono: "ojo",
-            texto:
-              "Una solicitud sin responder vence sola y el cliente recibe el aviso de que no se pudo. Miralas al empezar el turno, no al final.",
-          },
+            'Quedan esperando tu respuesta y la fecha se marca con «Tiene solicitudes sin responder». Cada una tiene «Confirmar» y «Rechazar»; al rechazar podés escribir por qué, con un ejemplo: «Ej: esa noche tenemos un evento privado». Hasta que decidas, el cliente sabe que la pidió, no que la tiene.',
         },
         {
-          titulo: "Rechazar bien",
+          titulo: "Cuando llega, y el que no vino",
           texto:
-            'Al rechazar te pregunta «¿Rechazar la reserva?» y te deja escribir por qué, con un ejemplo: «Ej: esa noche tenemos un evento privado». Ese texto le llega al cliente. Una línea amable acá vale más que la reserva que no pudiste darle.',
-        },
-        {
-          titulo: "Ajustar antes de decidir",
-          texto:
-            "Si la querés tomar pero con otra hora, otra mesa o menos gente, editala primero y decidí después: editar no confirma nada. Así el cliente recibe un solo aviso, con los datos que quedaron de verdad. La fecha no se cambia: si el cliente quiere otro día, es otra reserva.",
-        },
-        {
-          titulo: "Cuando llega",
-          texto:
-            "«Sentar la reserva» la pasa a «En mesa». Si todavía no tiene mesa asignada —que en este modo es lo normal—, elegila en el plano en ese momento. Una reserva sin confirmar no se sienta: primero se confirma.",
+            "«Sentar la reserva» la pasa a «En mesa»; como en este modo la mesa suele estar sin asignar, la elegís en el plano en ese momento. «No vino» la marca como ausente — marcalo de verdad, es lo único que después deja ver quién falta seguido.",
           verTambien: { tema: "mesas", texto: "Qué pasa con la mesa cuando la sentás" },
-        },
-        {
-          titulo: "El que no vino",
-          texto:
-            "«No vino» la marca como ausente después de preguntarte «¿Marcar como no vino?». Marcalo de verdad: es lo único que después deja ver quién falta seguido y decidir si a ese teléfono se le pide seña.",
         },
       ],
     },
   },
+  {
+    slug: "rendicion",
+    titulo: "La rendición de los mozos",
+    resumen: "La plata que los mozos tienen encima y cómo pasa al cajón antes de cerrar.",
+    icono: HandCoins,
+    grupo: "turno",
+    claves: [
+      "Rendir no cambia el total del turno: pasa la plata de la columna del mozo a la del cajón.",
+      "Sin todas las rendiciones, la caja no cierra.",
+      "El que no entrega queda registrado como deuda, a la vista en el cierre y avisada al dueño.",
+    ],
+    pasos: [
+      {
+        titulo: "Quién debe cuánto",
+        texto:
+          'La pantalla lista los mozos con pagos pendientes del turno y, en cada uno, «Efectivo que debería entregar» con el detalle por método. Si no hay nadie, dice "No hay mozos/encargados con pagos pendientes de rendir.".',
+      },
+      {
+        titulo: "Tomar la entrega",
+        texto:
+          "Escribís en «Efectivo que entrega» lo que te dio y confirmás. Si coincide, listo. Esa plata deja de estar a nombre del mozo y pasa al cajón.",
+      },
+      {
+        titulo: "Cuando no coincide",
+        texto:
+          'Si entrega de menos o de más, el sistema pide «¿Qué pasó?» con ejemplos como «Ej: le di cambio de más, billete falso…». Y si se fue sin rendir, está «Marcar como no entregó», que también pide el porqué.',
+        aviso: {
+          tono: "ojo",
+          texto:
+            "Lo que escribas queda a la vista en el cierre y se le avisa al dueño. Es información, no castigo: un mozo al que le pasa una vez es un mal día, uno al que le pasa siempre es otra conversación.",
+        },
+        verTambien: { tema: "caja", texto: "El cierre de caja" },
+      },
+    ],
+  },
+  {
+    slug: "fichaje",
+    titulo: "Fichaje y asistencia",
+    resumen: "Quién entró, quién salió y quién no fichó todavía.",
+    icono: Clock,
+    grupo: "turno",
+    claves: [
+      "Cada uno ficha con su PIN: no fiches por otro.",
+      '"Sin fichar" a mitad del turno suele ser un olvido, no una ausencia. Preguntá.',
+    ],
+    pasos: [
+      {
+        titulo: "La asistencia del día",
+        texto:
+          '«Asistencia del día» muestra quién está adentro ahora, «Ya salieron» los que terminaron y «Sin fichar» los que todavía no marcaron. Si nadie fichó, dice "No hay nadie fichado todavía.".',
+      },
+      {
+        titulo: "Cómo se ficha",
+        texto:
+          "Con el PIN de cada uno en el teclado numérico. Es de la persona: sirve para las horas trabajadas y para saber quién estaba cuando pasó algo.",
+      },
+    ],
+  },
 
-  // ── 6 · Carteles ──────────────────────────────────────────────────────────
+  // ══ El local ═════════════════════════════════════════════════════════════
+  {
+    slug: "catalogo",
+    titulo: "La carta y el stock",
+    resumen: "Productos, categorías, el stock del bar y de la cocina, y el menú del día.",
+    icono: Package,
+    grupo: "local",
+    claves: [
+      "Marcar «No disponible» saca el producto de la carta sin borrarlo. Es lo que se usa cuando se acabó algo.",
+      "El sector de cocina decide a qué comandera sale el producto. Si está mal, el ticket sale en la impresora equivocada.",
+      "Todo movimiento de stock de cocina pide motivo.",
+    ],
+    pasos: [
+      {
+        titulo: "Cuando se acaba algo",
+        texto:
+          "En la carta, marcar el producto como no disponible lo saca de lo que ve el cliente sin borrarlo ni perder su precio ni su historial. Cuando vuelve a haber, se reactiva. Es lo que hay que usar para «se acabó el pescado», nunca borrarlo.",
+      },
+      {
+        titulo: "Categorías y sectores",
+        texto:
+          'Cada categoría tiene un «Sector de cocina default» —parrilla, fritera, postre— que heredan sus productos y que define a qué comandera sale el ticket. Un producto puede pisar ese default desde su propia ficha. Las categorías también se arrastran para reordenar cómo se ven en la carta.',
+        aviso: {
+          tono: "ojo",
+          texto: "Un producto sin sector no se rutea a ninguna comandera. Si algo «no imprime nunca», mirá esto antes que la impresora.",
+        },
+      },
+      {
+        titulo: "Stock de bar y stock de cocina",
+        texto:
+          'Son dos cosas distintas. El del bar es para productos puntuales que se cuentan por unidad —alfajores, turrón— sin tocar listas globales. El de cocina va por insumos y presentaciones: se carga «Cantidad de envases», en positivo para sumar y en negativo para restar, y "El motivo es obligatorio." con ejemplos como «Merma por vencimiento, conteo físico».',
+      },
+      {
+        titulo: "La merma",
+        texto:
+          "Muestra el porcentaje de pérdida de cada insumo en el período que elijas. Sirve para ver qué se está tirando; no es un inventario contable ni pretende serlo.",
+      },
+      {
+        titulo: "El menú del día",
+        texto:
+          'Se arma con productos fijos y grupos para elegir («Elegir una de:», por ejemplo el grupo Guarnición), con un precio único: "Precio único del combo. No se suman adicionales.". Se marcan los días en que corre y "El menú solo va a aparecer en el catálogo esos días.".',
+      },
+    ],
+  },
+  {
+    slug: "salones",
+    titulo: "Salones y mesas",
+    resumen: "Armar el plano: crear salones, agregar mesas y moverlas cuando cambia el local.",
+    icono: Table2,
+    grupo: "local",
+    claves: [
+      "Borrar un salón borra sus mesas. Las reservas viejas no se borran, pero quedan sin mesa.",
+      "El plano es lo que ve el mozo: si el salón cambió de verdad, cambialo acá el mismo día.",
+    ],
+    pasos: [
+      {
+        titulo: "Crear un salón",
+        texto:
+          'Le ponés nombre y después "podés agregar mesas y subir una foto del plano desde el editor". Tener el salón dibujado parecido a la realidad es lo que hace que el mozo encuentre la mesa sin pensar.',
+      },
+      {
+        titulo: "Las mesas",
+        texto:
+          "Se agregan, se renombran y se arrastran hasta que el plano se parezca al salón. Los nombres son los que va a leer todo el mundo en la comanda y en la cuenta: usá los que ya usa el local, no los que te parezcan prolijos.",
+      },
+      {
+        titulo: "Borrar un salón",
+        texto:
+          'El sistema te avisa: "Las mesas del salón se borran. Las reservas históricas que apuntaban a esas mesas quedan sin mesa asignada (pero no se borran)."',
+        aviso: {
+          tono: "peligro",
+          texto: "Si el salón cambia por una temporada o un evento, conviene editarlo en vez de borrarlo y rehacerlo: borrar deja reservas futuras sin mesa.",
+        },
+      },
+    ],
+  },
+  {
+    slug: "proveedores",
+    titulo: "Proveedores y facturas de compra",
+    resumen: "Quién nos vende qué, y cargar la factura que llega con la mercadería.",
+    icono: Building2,
+    grupo: "local",
+    claves: [
+      "Sacale la foto a la factura cuando llega. Después no aparece.",
+      "Vincular el proveedor con sus insumos es lo que hace que los costos salgan solos.",
+    ],
+    pasos: [
+      {
+        titulo: "Los proveedores",
+        texto:
+          "Se cargan con nombre, CUIT y contacto. Si venís de una lista en Excel, se pueden pegar todos juntos en formato CSV con los encabezados «nombre, cuit, contacto, telefono, email».",
+      },
+      {
+        titulo: "Vincular insumos",
+        texto:
+          "A cada proveedor se le enganchan los insumos que provee. Es lo que después permite saber a quién comprarle y a cuánto, sin buscarlo en un cuaderno.",
+      },
+      {
+        titulo: "Cargar la factura de compra",
+        texto:
+          "«Cargar factura de compra» pide número, monto y una foto de la factura. Hacelo cuando llega la mercadería: es el momento en que el papel está en la mano y en que alguien todavía se acuerda de qué vino.",
+      },
+    ],
+  },
+  {
+    slug: "facturacion",
+    titulo: "Comprobantes",
+    resumen: "Las facturas emitidas, las que fallaron y cómo se anula una mal hecha.",
+    icono: FileText,
+    grupo: "local",
+    claves: [
+      "Una factura no se corrige: se anula con nota de crédito y se emite de nuevo.",
+      "Un rechazo de datos de ARCA no se arregla reintentando. Un error de conexión sí.",
+      "El motivo de anulación es obligatorio y queda en el comprobante.",
+    ],
+    pasos: [
+      {
+        titulo: "Dónde aparecen",
+        texto:
+          'Los comprobantes se emiten desde el cobro y se ven acá — "Los comprobantes aparecen acá al facturar desde el cobro.". Se busca por número o CUIT. Si el negocio todavía no tiene los datos fiscales cargados vas a ver "AFIP no configurado", y eso lo resuelve el dueño.',
+      },
+      {
+        titulo: "Cuando una falla",
+        texto:
+          'El detalle te dice de qué tipo es el problema, y son dos muy distintos: "Error temporario de conexión con el provider: podés reintentar tal cual." se resuelve reintentando; "Rechazo de datos de ARCA: revisá CUIT / datos del comprobante antes de reintentar." no — ahí hay un dato mal y reintentar sin corregirlo vuelve a fallar.',
+      },
+      {
+        titulo: "Anular una factura",
+        texto:
+          '«Anular comprobante» pide motivo —con el ejemplo «factura mal hecha al mozo»— y "Se emite la nota de crédito y la factura queda anulada.". Así se corrige una factura: nunca editándola.',
+        aviso: {
+          tono: "ojo",
+          texto: 'A veces el comprobante queda "en proceso en ARCA" un rato. Eso no es un error: esperá antes de anular o reintentar.',
+        },
+      },
+    ],
+  },
+
+  // ══ Los clientes ═════════════════════════════════════════════════════════
+  {
+    slug: "clientes",
+    titulo: "Los clientes",
+    resumen: "Quién pide, qué pide y hace cuánto que no viene.",
+    icono: Users,
+    grupo: "clientes",
+    claves: [
+      "«Días desde el último» es el dato que dice a quién hay que llamar.",
+      "Un cliente sin direcciones guardadas puede ser de retiro, no un error.",
+    ],
+    pasos: [
+      {
+        titulo: "La ficha",
+        texto:
+          "Cada cliente tiene su historial de pedidos, «Lo que más pide» y «Días desde el último». Con eso sabés qué ofrecerle antes de que pregunte y quién dejó de venir sin avisar.",
+      },
+      {
+        titulo: "Escribirle",
+        texto:
+          "Desde la ficha se abre WhatsApp Web con ese contacto, sin tener que buscar el número. Para hablarles a muchos a la vez, eso son las campañas.",
+        verTambien: { tema: "promociones", texto: "Promos y campañas" },
+      },
+    ],
+  },
+  {
+    slug: "promociones",
+    titulo: "Promos y campañas",
+    resumen: "Códigos de descuento y mensajes para traer de vuelta a los que no vienen.",
+    icono: Tag,
+    grupo: "clientes",
+    claves: [
+      "Una promo activa la puede usar cualquiera en el checkout: revisá el pedido mínimo antes de activarla.",
+      "En una campaña, cada cliente recibe un código personal de un solo uso.",
+      "Los mensajes de campaña los mandás vos, uno por uno, desde WhatsApp.",
+    ],
+    pasos: [
+      {
+        titulo: "Un código de descuento",
+        texto:
+          'Se crea con el código, el tipo de descuento —porcentaje, monto fijo o anular el envío— y opcionalmente un pedido mínimo y una fecha de vencimiento. Mientras está activa, "Los clientes pueden aplicarla en el checkout."; desactivada, "El código existe pero los clientes no pueden usarlo.".',
+        aviso: {
+          tono: "ojo",
+          texto: "Sin pedido mínimo, un 20% se lo lleva también el que pide un café. Poné el mínimo antes de activarla, no después.",
+        },
+      },
+      {
+        titulo: "Una campaña a un grupo",
+        texto:
+          'Elegís a quiénes —todos, o por comportamiento: «No piden hace 30–90 días», «Pidieron 5 o más veces»—, el descuento y el mensaje. "Cada cliente recibe el mensaje con su nombre y un código personal único, de un solo uso."',
+      },
+      {
+        titulo: "Mandarla",
+        texto:
+          "La campaña te arma la lista y, cliente por cliente, abre WhatsApp con el mensaje ya escrito. Vos apretás enviar. Después se marca quién recibió y quién usó su código, así sabés si sirvió.",
+      },
+    ],
+  },
+  {
+    slug: "conversaciones",
+    titulo: "WhatsApp y el bot",
+    resumen: "Las conversaciones con los clientes y cuándo sacarle el teclado al bot.",
+    icono: MessagesSquare,
+    grupo: "clientes",
+    claves: [
+      "Mientras el agente está prendido, el bot contesta y vos no podés escribir.",
+      "Apagalo para atender vos; prendelo de nuevo cuando termines, o el cliente queda sin respuesta automática.",
+    ],
+    pasos: [
+      {
+        titulo: "La bandeja",
+        texto:
+          "Están todas las conversaciones, marcadas con quién las atiende: «El agente (bot) atiende esta conversación» o «La atiende un humano».",
+      },
+      {
+        titulo: "Tomar una conversación",
+        texto:
+          'Con el agente prendido, "El bot atiende. Apagalo para escribirle vos al cliente.". Lo apagás y el cuadro de texto se habilita: "Lo estás atendiendo vos. Prendé el agente para devolvérselo al bot.".',
+        aviso: {
+          tono: "ojo",
+          texto: "Acordate de volver a prenderlo al terminar. Una conversación que quedó en manos de nadie es un cliente esperando.",
+        },
+      },
+    ],
+  },
+
+  // ══ Si algo falla ════════════════════════════════════════════════════════
   //
   // CATÁLOGO: no se numera (ver TipoTema). Cada entrada arranca con la frase
-  // LITERAL que el panel pinta, para que se pueda encontrar con Cmd+F desde la
+  // LITERAL que el panel pinta, para poder encontrarla con Cmd+F desde la
   // pantalla. Si cambiás un mensaje en el código, cambialo acá.
   {
     slug: "carteles",
-    titulo: "Me apareció un cartel: qué significa cada uno",
-    resumen:
-      "La lista de los avisos que puede tirar el panel, con lo que hay que hacer en cada caso.",
+    titulo: "Me apareció un cartel",
+    resumen: "Qué significa cada aviso del sistema y qué hay que hacer.",
     icono: TriangleAlert,
+    grupo: "problemas",
+    claves: [
+      "Buscá acá la frase exacta que estás leyendo en la pantalla.",
+      "Los carteles en rojo cuestan plata si se ignoran. Los amarillos, tiempo.",
+    ],
     tipo: "catalogo",
     pasos: [
       {
@@ -663,6 +889,63 @@ export const TEMAS: Tema[] = [
         titulo: '"Pago registrado. Faltaba el CUIT para la Factura A — emitila desde Facturación."',
         texto:
           "El cobro entró bien, pero la factura A no salió porque falta el CUIT del cliente. Pedile el CUIT y emitila desde la sección Facturación: el pago ya está, lo que falta es el papel.",
+      },
+      {
+        titulo: '"sin conexión" en Comandas',
+        texto:
+          "La PC del local que conecta el sistema con las impresoras está caída. Todo lo que cargues sigue registrándose, pero no sale ni un ticket. Prendé esa máquina: cuando vuelve, las comandas pendientes salen solas.",
+        aviso: {
+          tono: "peligro",
+          texto: "Es lo primero que hay que mirar cuando «no salen las comandas». Mientras esté, avisale a la cocina de palabra.",
+        },
+        verTambien: { tema: "comandas", texto: "La cocina y las comanderas" },
+      },
+      {
+        titulo: '"El motivo es obligatorio." (stock de cocina)',
+        texto:
+          "Estás moviendo stock sin decir por qué. Escribí qué pasó — «merma por vencimiento», «conteo físico» —: sin eso, el número de mañana no se puede explicar.",
+      },
+      {
+        titulo: '"Este insumo no tiene presentaciones cargadas."',
+        texto:
+          "No se le puede cargar stock porque el sistema no sabe en qué viene (bidón, caja, kilo). Se le agrega al menos una presentación desde el catálogo y recién ahí acepta cantidades.",
+      },
+      {
+        titulo: '"AFIP no configurado"',
+        texto:
+          'No se pueden emitir comprobantes porque faltan los datos fiscales: "Para emitir comprobantes electrónicos, primero configurá CUIT y punto de venta.". Lo carga el dueño; no se resuelve desde el mostrador.',
+      },
+      {
+        titulo: '"Rechazo de datos de ARCA: revisá CUIT / datos del comprobante antes de reintentar."',
+        texto:
+          "Hay un dato mal en el comprobante y ARCA lo rechazó. Reintentar tal cual vuelve a fallar: primero corregí el dato (casi siempre el CUIT del cliente).",
+        verTambien: { tema: "facturacion", texto: "Comprobantes, paso a paso" },
+      },
+      {
+        titulo: '"Error temporario de conexión con el provider: podés reintentar tal cual."',
+        texto:
+          "Este sí es el que se arregla reintentando: no hay nada mal cargado, se cayó la conexión. Probá de nuevo en un rato.",
+      },
+      {
+        titulo: '"El comprobante sigue en proceso en ARCA."',
+        texto:
+          "No es un error: la emisión está en curso. Esperá antes de anular o reintentar, o vas a terminar con dos comprobantes por la misma venta.",
+      },
+      {
+        titulo: '"No hay clientes en este segmento todavía. La campaña no se puede lanzar."',
+        texto:
+          "El filtro que elegiste no matchea a nadie — por ejemplo «no piden hace más de 90 días» en un local que abrió hace dos meses. Ampliá el segmento.",
+      },
+      {
+        titulo: '"El agente está atendiendo esta conversación."',
+        texto:
+          "No podés escribirle al cliente porque el bot tiene el teclado. Apagá el agente arriba a la derecha y el cuadro de texto se habilita. Acordate de volver a prenderlo al terminar.",
+        verTambien: { tema: "conversaciones", texto: "WhatsApp y el bot" },
+      },
+      {
+        titulo: '"Las mesas del salón se borran."',
+        texto:
+          "Es el aviso antes de borrar un salón. Las reservas históricas no se borran, pero quedan sin mesa asignada. Si el cambio es temporal, editá el salón en vez de borrarlo.",
       },
     ],
   },

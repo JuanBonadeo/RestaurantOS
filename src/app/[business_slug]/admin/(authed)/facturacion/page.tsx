@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 
 import { FacturacionClient } from "@/components/admin/facturacion/facturacion-client";
+import { AyudaChip } from "@/components/admin/ayuda-chip";
 import { PageHeader, PageShell } from "@/components/admin/shell/page-shell";
 import { ensureAdminAccess } from "@/lib/admin/context";
 import { canSee } from "@/lib/permissions/sections";
@@ -77,6 +78,7 @@ export default async function FacturacionPage({
         eyebrow="Administración"
         title="Facturación"
         description="Comprobantes electrónicos AFIP"
+        action={<AyudaChip slug={business_slug} tema="facturacion" />}
       />
       <FacturacionClient
         slug={business_slug}

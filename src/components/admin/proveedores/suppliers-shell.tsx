@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { AyudaChip } from "@/components/admin/ayuda-chip";
 import { cn } from "@/lib/utils";
 import type { SupplierWithStats } from "@/lib/proveedores/types";
 import { SuppliersList } from "./suppliers-list";
@@ -26,7 +27,10 @@ export function SuppliersShell({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-zinc-900">Proveedores</h1>
+        <div className="flex items-center gap-1">
+          <h1 className="text-xl font-bold text-zinc-900">Proveedores</h1>
+          <AyudaChip slug={slug} tema="proveedores" />
+        </div>
         <div className="inline-flex rounded-lg bg-zinc-100 p-0.5 text-xs font-semibold">
           {(["lista", "estadistica"] as const).map((t) => (
             <button

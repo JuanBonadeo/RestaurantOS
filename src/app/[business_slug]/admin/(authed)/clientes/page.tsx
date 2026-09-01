@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { CustomersListClient } from "@/components/admin/customers/customers-list-client";
+import { AyudaChip } from "@/components/admin/ayuda-chip";
 import { PageShell } from "@/components/admin/shell/page-shell";
 import { ensureAdminAccess } from "@/lib/admin/context";
 import {
@@ -70,9 +71,12 @@ export default async function CustomersPage({
         <p className="text-[0.65rem] font-semibold uppercase tracking-[0.18em] text-zinc-500">
           Clientes
         </p>
-        <h1 className="text-3xl font-semibold tracking-tight text-zinc-900">
-          Tus clientes
-        </h1>
+        <div className="flex items-center gap-1">
+          <h1 className="text-3xl font-semibold tracking-tight text-zinc-900">
+            Tus clientes
+          </h1>
+          <AyudaChip slug={business_slug} tema="clientes" />
+        </div>
         <p className="text-sm text-zinc-600">
           Quién compra, cuánto gasta y cuándo fue su último pedido. Los segmentos se calculan automáticamente.
         </p>

@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { deletePromoCode, togglePromoActive } from "@/lib/admin/promos-actions";
 import { formatPromoDiscount, type PromoCode } from "@/lib/promos/types";
 import { cn } from "@/lib/utils";
+import { AyudaChip } from "@/components/admin/ayuda-chip";
 
 export function PromosListClient({
   slug,
@@ -66,9 +67,12 @@ export function PromosListClient({
           <p className="text-[0.65rem] font-semibold uppercase tracking-[0.18em] text-zinc-500">
             Promociones
           </p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight text-zinc-900">
-            Códigos de descuento
-          </h1>
+          <div className="mt-1 flex items-center gap-1">
+            <h1 className="text-3xl font-semibold tracking-tight text-zinc-900">
+              Códigos de descuento
+            </h1>
+            <AyudaChip slug={slug} tema="promociones" />
+          </div>
           <p className="mt-1 text-sm text-zinc-600">
             Creá un código y compartilo por WhatsApp. Tus clientes lo aplican en el checkout.
           </p>

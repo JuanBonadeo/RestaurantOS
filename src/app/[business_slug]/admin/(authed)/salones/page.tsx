@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { SalonesList } from "@/components/admin/salones/salones-list";
+import { AyudaChip } from "@/components/admin/ayuda-chip";
 import { PageHeader, PageShell } from "@/components/admin/shell/page-shell";
 import { ensureAdminAccess } from "@/lib/admin/context";
 import { getFloorPlansForBusiness } from "@/lib/admin/floor-plan/queries";
@@ -32,6 +33,7 @@ export default async function SalonesPage({
         eyebrow="Operación"
         title="Salones"
         description="Gestioná los planos del local. Cada salón tiene su propio dibujo de mesas y se usa para la toma de pedido y reservas."
+        action={<AyudaChip slug={business_slug} tema="salones" />}
       />
       <SalonesList
         slug={business_slug}

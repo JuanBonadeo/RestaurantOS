@@ -2,7 +2,7 @@
 
 **Issue:** [RestaurantOS-Brain#35](https://github.com/gachetponzellini/RestaurantOS-Brain/issues/35) ·
 **Milestone:** sin asignar — Sprint 07 venció el 14-ago y no hay uno posterior ·
-**Estado:** implementada y verificada en vivo (2026-09-01)
+**Estado:** implementada · v2 amplía a las doce secciones (2026-09-01)
 
 **Input:** Juan, 2026-08-31: *"vamos a armar una parecida pero para el encargado,
 que sea lo mas simple posible, con un formato parecido"*, sobre la guía del
@@ -110,25 +110,49 @@ misma para todos los negocios.
 
 ## Los temas
 
-Seis. El orden es el del turno, no el de la barra de tabs.
+**v1 (2026-09-01)** salió con seis: `caja`, `mesas`, `cobrar`, `pedidos`, `reservas`
+y `carteles`. **v2, el mismo día**, a pedido de Juan: *"habría que seguir ampliando la
+guía, que hable sobre todo, y capaz un poco menos detallado, pero remarcando lo más
+importante"*.
 
-| # | slug | Título en pantalla | Tipo |
-|--:|---|---|---|
-| 1 | `caja` | Abrir la caja, los movimientos y el cierre | pasos |
-| 2 | `mesas` | El salón: abrir, cerrar, anular y pasar de mesa | pasos |
-| 3 | `cobrar` | Cobrar una cuenta: propina, descuento y anular un cobro | pasos |
-| 4 | `pedidos` | Los pedidos que entran por la web | pasos |
-| 5 | `reservas` | Tomar, confirmar y rechazar una reserva | pasos |
-| 6 | `carteles` | Me apareció un cartel: qué significa cada uno | catálogo |
+Los seis cubrían la mitad de lo que el encargado puede abrir: la matriz de
+[`sections.ts`](../../src/lib/permissions/sections.ts) le da **doce** secciones en
+`full`, y faltaban comandas, rendición, fichaje, catálogo, salones, proveedores,
+facturación, clientes, promociones y conversaciones. Ahora son **dieciséis temas**, y
+tres cosas cambian con la escala:
 
-`carteles` es **catálogo**: no se numera. El que tiene un cartel en la pantalla no
-lee del 1 al 12, escanea los títulos hasta encontrar el suyo, y los números le
-dicen que hay un orden que no existe.
+**D13 · Menos profundidad por tema.** Los pasos bajaron de ocho o nueve a cuatro o
+cinco, y cada uno agrupa lo que antes eran dos. Una guía que se lee es mejor que una
+completa que no.
 
-Los tres temas que **no** están y por qué: `comandas` (la mira la cocina, el
-encargado no interviene salvo reimpresión → entra en `carteles`), `rendicion` y
-`fichaje` (son de fin de turno y de RRHH; candidatos claros a la v1.1, después
-del primer turno real).
+**D14 · «Lo importante» arriba de cada tema.** Dos o tres líneas destacadas antes de
+los pasos. **No es un resumen**: es el límite de lo que la persona puede hacer sola y
+lo que sale caro si se hace mal. El tema entero se lee una vez, con calma; las otras
+veces se entra con el salón lleno y se miran cinco segundos, y esas veces esto es lo
+único que se lee.
+
+**D15 · El índice va agrupado.** Con seis alcanzaba una lista; con dieciséis, una tira
+de tarjetas iguales obliga a leerlas todas para encontrar una. Cuatro grupos, ordenados
+por distancia al turno.
+
+| Grupo | Temas |
+|---|---|
+| **Tu turno** | `caja` · `mesas` · `cobrar` · `comandas` · `pedidos` · `reservas` · `rendicion` · `fichaje` |
+| **El local** | `catalogo` · `salones` · `proveedores` · `facturacion` |
+| **Los clientes** | `clientes` · `promociones` · `conversaciones` |
+| **Si algo falla** | `carteles` |
+
+`catalogo` es **un** tema y no tres porque en el panel es **una** pantalla con pestañas
+(carta, stock de bar, stock de cocina, merma, menú del día): partirlo en la guía
+obligaría a saber en cuál de los tres buscar algo que en el panel está en un solo lado.
+Lo mismo con `promociones`, que cubre promos y campañas.
+
+`carteles` sigue siendo **catálogo** y creció a 35 entradas, sin numerar: el que tiene un
+cartel en la pantalla no lee del 1 al 35, escanea los títulos hasta encontrar el suyo.
+
+Sigue afuera lo que el encargado **no puede ver** (`dashboard`, `cajas` como config,
+`reportes`, `rrhh`, `configuracion`): documentar una pantalla a la que no entra sólo
+enseña a pedir permisos.
 
 ## Alcance
 
@@ -190,7 +214,6 @@ del bloque de módulos, visible para admin y encargado. Tema inexistente →
 | Hoja imprimible A4 | CEPRO la necesita porque cubre el caso "no puedo entrar al panel" de un vendedor que está en la calle. El encargado está parado frente a la pantalla. Si el primer turno la pide, es una v1.1 barata. |
 | Guía del mozo | D11. La app del mozo es otra y merece su propia spec. |
 | Guía de admin / dueño | Config, analítica y facturación no las toca el encargado. |
-| Temas `rendicion` y `fichaje` | Candidatos a la v1.1, con el dato del primer turno real. |
 | Buscador y tour de bienvenida | D3. Los spotlights se cierran sin leer y no vuelven. |
 | Guía sin login | Vive detrás de `(authed)`. El caso "no puedo entrar" no lo cubre la guía. |
 | Mover los topes de `can.ts` a config por negocio | Ya está previsto en el propio archivo (`business_settings.permissions`). No es de esta spec. |

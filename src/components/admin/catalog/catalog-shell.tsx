@@ -11,6 +11,7 @@ import { IngredientsTab } from "@/components/admin/catalog/ingredients-tab";
 import { SectoresTab } from "@/components/admin/catalog/sectores-tab";
 import { DailyMenuList } from "@/components/admin/daily-menus/daily-menu-list";
 import { BrandButton } from "@/components/admin/shell/brand-button";
+import { AyudaChip } from "@/components/admin/ayuda-chip";
 import { PageHeader } from "@/components/admin/shell/page-shell";
 import type { BarStockCandidate } from "@/components/admin/stock/stock-bar-tab";
 import { StockTab } from "@/components/admin/stock/stock-tab";
@@ -156,7 +157,12 @@ function TabsInner({
         eyebrow="Gestión"
         title="Productos e inventario"
         description="Tu carta, insumos y costos, más el stock de bebidas y cocina. Todo lo que ofrecés y lo que tenés en el local."
-        action={action}
+        action={
+          <div className="flex items-center gap-1">
+            {action}
+            <AyudaChip slug={slug} tema="catalogo" />
+          </div>
+        }
       />
 
       <nav

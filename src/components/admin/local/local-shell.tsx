@@ -109,23 +109,15 @@ type Tab = (typeof TABS)[number];
  */
 const SALON_FILTERABLE: Tab[] = ["salon", "comandas", "reservas"];
 
-/**
- * Qué tema de la guía abre el "?" de cada tab — spec 134 D7.
- *
- * `comandas` manda a `carteles` porque lo que el encargado necesita ahí no es
- * cómo se lee una comanda (la lee la cocina), sino qué hacer cuando la
- * impresión falla o la comandera está caída.
- *
- * `rendicion` y `fichaje` no tienen tema todavía —quedaron para la v1.1, con
- * el dato del primer turno real— y por eso no muestran chip. Un "?" que abre
- * una página que dice "en preparación" enseña a no volver a tocarlo.
- */
-const TEMA_POR_TAB: Partial<Record<Tab, string>> = {
+/** Qué tema de la guía abre el "?" de cada tab — spec 134 D7. Las siete. */
+const TEMA_POR_TAB: Record<Tab, string> = {
   salon: "mesas",
   reservas: "reservas",
-  comandas: "carteles",
+  comandas: "comandas",
   pedidos: "pedidos",
   caja: "caja",
+  rendicion: "rendicion",
+  fichaje: "fichaje",
 };
 
 type ShellProps = {
@@ -876,7 +868,7 @@ function TabsInner({
         {/* El "?" de la tab activa (spec 134). Va acá y no en el índice de
             Ayuda porque nadie se acuerda de que la guía existe justo cuando
             está trabado: tiene que estar en la pantalla del problema. */}
-        {temaDeAyuda && <AyudaChip slug={slug} tema={temaDeAyuda} />}
+        <AyudaChip slug={slug} tema={temaDeAyuda} />
       </div>
       <div className="flex-1 overflow-auto p-4">
         {mounted("salon") && (
