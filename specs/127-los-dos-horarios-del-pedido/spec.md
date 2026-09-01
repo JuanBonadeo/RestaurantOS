@@ -288,6 +288,34 @@ preparar algo que ya está hecho y entregado.
 El cron ahora mira las comandas antes de avanzar: si están todas `entregado`, no
 toca el estado. Una comanda cancelada no cuenta.
 
+### FR-012 · Un solo nombre por estado ✅
+
+**Pedido de Juan (2026-08-27), al final:** *"acomodar los nombres de los estados
+de los pedidos y de las comandas, unificar el preparando, y capaz al nuevo le
+pondría pendiente"*.
+
+El relevamiento dio peor de lo esperado: el mismo pedido era **«Nuevo»** en el
+board y **«Pendiente»** en su propio detalle, y su estado de cocina se llamaba de
+**tres** formas.
+
+| | Antes | Ahora |
+|---|---|---|
+| board | Nuevos · Preparando | **Pendientes · En cocina** |
+| detalle | Pendiente · Preparando | Pendiente · **En cocina** |
+| historial | Pendiente · En cocina | Pendiente · En cocina |
+| app del mozo | En preparación | **En cocina** |
+| KDS de comandas | Pendiente · En preparación | *(sin cambios, ver abajo)* |
+
+**El KDS conserva «En preparación» a propósito.** Una columna que dice «En
+cocina» **dentro de la pantalla de cocina** es un cartel que dice «acá»: la
+palabra describe *dónde está el pedido*, que es lo que necesita el encargado, no
+el que cocina.
+
+Sólo texto visible — **los valores de la base no se tocan**, así que no hay
+migración ni riesgo. Se alinea también la guía del encargado
+(`lib/ayuda/contenido.ts`), que describe las columnas por nombre y habría quedado
+mintiendo.
+
 ## Qué NO cambia
 
 - **El papel que ve cocina.** Mismo banner, misma posición, mismo formato.
@@ -331,6 +359,7 @@ en verde; los `*.integration` siguen rotos por el stack local apagado
 | `7ccfd66` | el papel del repartidor |
 | `990c68c` | el banner de la comanda |
 | `41d2461` | el chip «Programado» en «Nuevos» + la guarda del estado (FR-011) |
+| `1742831` | un solo nombre por estado en todas las pantallas (FR-012) |
 
 **Lo que cambió sobre la marcha:**
 
