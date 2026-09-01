@@ -238,24 +238,55 @@ cargó, sino en la que se trabaja. Es lo correcto para caja y para el pase.
   «21:30». Queda para la instrucción de armado. **Mismo nombre en los dos lados.**
 - Una línea de ayuda manda «sin cebolla» a la nota del ítem.
 
-### FR-009 · «Próximos», agrupado por día ✅
+### FR-009 · El agendado vive en «Nuevos», con su chip ✅
 
-Con D6 entran pedidos de otras fechas, y hoy la sección no distingue. Pasa a
-agrupar: **Hoy** primero, después cada día. La tarjeta dice las tres cosas —
-`21:30 · listo 21:15 · marcha 20:35`— y si el papel ya salió lo aclara
-(«comanda impresa»), porque si no un pedido de hoy en «Próximos» parece no haber
-salido nunca.
+> **Corregido con Juan (2026-08-27)**, después de verlo andando: *"si un pedido
+> está programado, que quede en la parte de pendientes, y que diga que está
+> programado, así no cambia tanto la ui"*. La primera versión le daba su propia
+> sección encendida; movía media pantalla para algo que es un pedido más.
 
-### FR-010 · La red de seguridad del automatismo ✅
+**La sección «Próximos» se va.** El agendado ya tiene los estados de esa columna
+(`pending` / `confirmed`), así que alcanzó con **dejar de sacarlo** del kanban.
+La tarjeta suma un chip **«Programado»** al lado de la hora, y nada más.
+
+Dos cosas que había que rescatar de la sección que se fue:
+
+- **El orden.** Los agendados van al final de «Nuevos», entre ellos por hora de
+  marcha. Por FIFO puro un encargue para mañana cargado a las 10 le ganaría a un
+  pedido que entró recién, y arriba tiene que estar lo que se atiende ahora.
+- **El «Aceptar».** El programado impago del checkout no marcha hasta que alguien
+  lo avala (spec 047); sin ese botón se quedaba esperando para siempre. Bajó a la
+  tarjeta, al lado de «Marchar ya».
+
+### FR-010 · La red de seguridad del automatismo ✅ (la mitad que importa)
 
 El avance pasa a depender del cron. Si el cron falla, el pedido de otro día **no
 sale** y el de hoy se queda fuera del kanban.
 
-Entonces: pasado `marchaAt` + margen, si la orden sigue sin comandas **o** sin
-avanzar → `createNotification({ type: "pedido.no_marcho", targetRole: "encargado" })`
-y la tarjeta en rojo. Idempotente por `orders.march_alerted_at`.
+**Lo que está:** el chip del agendado pasa a rojo y dice **«No marchó»** cuando
+su hora de marcha ya pasó y el pedido sigue en «Nuevos». Es la mitad que
+funciona *aunque el cron esté muerto*, porque la calcula el board abierto en el
+local (la tarjeta ya se re-renderiza sola cada 30 s).
 
-**No es el mecanismo, es el detector.**
+**Lo que no está, y por qué:** la notificación interna server-side. La emitiría
+el propio cron, así que no cubre el caso que importa —que el cron no corra—.
+`orders.march_alerted_at` quedó creada para cuando se haga desde afuera.
+
+### FR-011 · El estado no retrocede sobre lo que cocina ya hizo ✅
+
+**Apareció revisando cómo el cambio de estado interfiere con las comandas.**
+`orders.status` y `comandas.status` son **ejes independientes** por decisión de
+la spec 091, y ninguna acción de cocina mueve el primero. Hasta acá no
+importaba: el pedido llegaba a `preparing` en el mismo gesto que creaba las
+comandas.
+
+Con el papel saliendo **antes** que el estado aparece un caso que antes no
+existía: comanda impresa a las 18:00, cocina la despacha a las 19:00, y a las
+20:35 el cron bajaba el pedido a `preparing` — el kanban decía que se empieza a
+preparar algo que ya está hecho y entregado.
+
+El cron ahora mira las comandas antes de avanzar: si están todas `entregado`, no
+toca el estado. Una comanda cancelada no cuenta.
 
 ## Qué NO cambia
 
@@ -299,6 +330,7 @@ en verde; los `*.integration` siguen rotos por el stack local apagado
 | `601c9b3` | «Próximos» encendido |
 | `7ccfd66` | el papel del repartidor |
 | `990c68c` | el banner de la comanda |
+| `41d2461` | el chip «Programado» en «Nuevos» + la guarda del estado (FR-011) |
 
 **Lo que cambió sobre la marcha:**
 

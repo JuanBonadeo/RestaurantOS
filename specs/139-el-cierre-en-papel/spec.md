@@ -72,11 +72,10 @@ Tres cosas que salen de ahí y que la spec asume:
 - **`caja_user_assignments` está vacía en todos lados.** La D3 se apoya en una
   tabla que hoy nadie llenó — sin cargarla, el encargado se rinde a sí mismo
   todas las noches. Cargar las asignaciones es parte del rollout, no un extra.
-- **Ninguna caja de golf tiene comandera fiscal**, así que el fallback de la
-  D12 no puede terminar ahí: la única térmica configurada del local es la
-  `control_printer_ip` del negocio (`.210`, contra `.211–.214` que son cocina,
-  parrilla, fritera y postres). Esa es la del mostrador, y es la que tiene que
-  recibir el papel.
+- **Ninguna caja de golf tiene comandera fiscal.** La única térmica configurada
+  del local es la `control_printer_ip` del negocio (`.210`, contra `.211–.214`
+  que son cocina, parrilla, fritera y postres). Es la del mostrador, y es la que
+  recibe el papel (D12).
 
 MaxiRest —que es contra lo que compite esto— rendía por empleado **× forma de
 cobro** (`mxren`) al cerrar el turno, con estado *pendiente / rendida /
@@ -197,27 +196,24 @@ agente imprime lo que le llega, el POST confirma por `comanda_id` y
 recompilado en el local** — que con las PCs de golf, por TeamViewer, no es un
 detalle menor.
 
-**D12 · La comandera es la de la caja, y recién al final la del mostrador.** El
-papel del cierre sale donde está parado el que cierra. La cadena, en orden:
+**D12 · El papel sale por la comandera de control.** Decisión de Juan
+(2026-09-01): *"el papel debería de imprimirse en la comandera de control"*.
+`businesses.control_printer_ip` — la del mostrador, la misma que escupe el
+control que se lleva el repartidor. **Sin columnas nuevas y sin cadena de
+fallbacks**: es la única térmica que los dos locales reales tienen configurada
+hoy (golf `192.168.100.210`, kcc `192.168.10.210`, contra `.211–.214` que son
+cocina, parrilla, fritera y postres), así que el día 1 imprime sin que nadie
+configure nada.
 
-1. `cajas.cierre_printer_ip` — lo específico gana, y `cierre_printer_enabled =
-   false` apaga el papel de esa caja sin perder la IP.
-2. `cajas.fiscal_printer_ip` de **la misma caja** — es la térmica de ese puesto
-   de cobro; si ya imprime facturas ahí, el cierre sale ahí.
-3. `businesses.control_printer_ip` — la del mostrador.
+Rompe a propósito la regla de la factura (084 · D3: comandera por caja, sin
+fallback al negocio), y el motivo es que acá no aplica: el papel del cierre no
+sale «donde está parado el que cobra» sino donde está el mostrador, que es
+donde se arma el sobre. Si más adelante un local con dos puestos necesita
+separarlas, se agrega `cajas.cierre_printer_ip` como override — aditivo, sin
+tocar nada de esto.
 
-El paso 3 rompe la regla de la factura (084 · D3: sin fallback al negocio) a
-propósito, y con evidencia: **ninguna caja de golf tiene fiscal cargada**, y la
-única impresora configurada del local es justamente esa (`.210`, mientras
-`.211–.214` son cocina, parrilla, fritera y postres). Sin ese paso, el día 1 no
-imprime nada en el único local que lo necesita. El riesgo que la 084 evitaba
-—que un papel sensible salga en cocina— no aplica: `control_printer_ip` es la
-del mostrador por definición (es donde sale el control que se lleva el
-repartidor).
-
-Nunca cae a las `stations`: si no hay ninguna de las tres, no imprime y el modal
-lo dice (D16). `resolveCierrePrinter(caja, business)`, puro, al lado de
-[`fiscal-printer.ts`](../../src/lib/print/fiscal-printer.ts).
+Si el negocio no tiene `control_printer_ip` (o está apagada), no imprime y el
+modal lo dice (D16).
 
 **D13 · El papel del cierre caduca a las 12 h.** La cuenta y la factura esperan
 indefinidamente a que alguien configure la impresora, y está bien: son de una
@@ -403,8 +399,8 @@ preguntas concretas a resolver con la imagen en la mano:
 ## Alcance
 
 **Incluye — Parte A (no depende de la foto):**
-- Migración `0056`: `mozo_rendiciones.estado` + `caja_cortes.numero` (con
-  backfill) + `caja_cortes.resumen jsonb` + `cajas.cierre_printer_*`.
+- Migración `0056`: `mozo_rendiciones.estado`. (`caja_cortes.numero` y
+  `caja_cortes.resumen` entran con la parte B, que es quien los usa.)
 - `cerrar_caja_tx`: guarda `UNRENDERED_MOZOS`, número de cierre, snapshot,
   insert del `print_job` del cierre.
 - `registrarRendicionMozo`: `estado`, monto tipeado obligatorio, notificación al
@@ -417,8 +413,8 @@ preguntas concretas a resolver con la imagen en la mano:
 **Incluye — Parte B (layout sujeto a la foto):**
 - `print_jobs`: `kind in ('cierre','rendicion')`, `corte_id` / `rendicion_id`,
   `target_check` extendido, único parcial por `corte_id`.
-- `src/lib/print/cierre-ticket.ts` + `rendicion-ticket.ts` (builders puros) y
-  `cierre-printer.ts` (resolución, pura).
+- Destino: `businesses.control_printer_ip`, sin columnas nuevas (D12).
+- `src/lib/print/cierre-ticket.ts` + `rendicion-ticket.ts` (builders puros).
 - GET del print-agent: los dos kinds nuevos, con la ventana de 12 h del cierre.
 - Reimpresión desde el historial de cortes.
 - Tests: builders con fixtures ASCII, resolución de impresora, bloqueo por
@@ -438,12 +434,10 @@ preguntas concretas a resolver con la imagen en la mano:
 
 **A · La rendición obligatoria y manual** — se puede arrancar hoy.
 
-1. [ ] Migración `0056` (parte A): `mozo_rendiciones.estado`,
-   `caja_cortes.numero` + backfill, `caja_cortes.resumen`. Aplicar al cloud por
-   MCP y verificar dentro de una transacción que revierte.
-2. [ ] `cerrar_caja_tx`: `UNRENDERED_MOZOS:<n>` bajo `p_barrer_salon`, número de
-   cierre bajo el lock de `cajas`, `resumen` persistido (+ `mesas_liberadas` /
-   `retiro_cents` agregados por la propia RPC).
+1. [ ] Migración `0056` (parte A): `mozo_rendiciones.estado`. Aplicar al cloud
+   por MCP y verificar dentro de una transacción que revierte.
+2. [ ] `cerrar_caja_tx`: `UNRENDERED_MOZOS:<n>` bajo `p_barrer_salon`. (El
+   número de cierre y el `resumen` los agrega la parte B, en la misma función.)
 3. [ ] Queries: `getMozosQueDebenRendir(businessId, cajaId)` — cobros en el
    período, menos los operadores asignados a la caja (D3, D4). Test unitario del
    filtro con fixtures.
@@ -456,11 +450,8 @@ preguntas concretas a resolver con la imagen en la mano:
 
 **B · El papel** — el esqueleto se puede armar; el layout se congela con la foto.
 
-7. [ ] Migración `0056` (parte B): kinds nuevos en `print_jobs`, `corte_id`,
-   `rendicion_id`, `target_check`, único parcial, `cajas.cierre_printer_*`.
-8. [ ] `cierre-printer.ts` + tests de la cadena de tres (ip propia → fiscal de
-   la caja → control del negocio), con `enabled = false` cortando en cada
-   escalón y «ninguna» → `null`.
+7. [ ] Migración de la parte B: kinds nuevos en `print_jobs`, `corte_id`,
+   `rendicion_id`, `target_check`, único parcial. Sin columnas de impresora.
 9. [ ] `cierre-ticket.ts` + `rendicion-ticket.ts` con fixtures ASCII, incluyendo
    reimpresión y el caso «no entregó».
 10. [ ] GET del print-agent: los dos kinds, ventana de 12 h, `sanitizeTicketText`
