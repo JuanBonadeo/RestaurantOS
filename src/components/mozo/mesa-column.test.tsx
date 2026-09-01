@@ -88,7 +88,7 @@ describe("MesaColumn (spec 111)", () => {
   it("de lo enviado muestra los modificadores elegidos y el estado de cocina", () => {
     renderColumna();
     expect(screen.getByText("Papas fritas · A punto")).toBeInTheDocument();
-    expect(screen.getByText("En preparación")).toBeInTheDocument();
+    expect(screen.getByText("En cocina")).toBeInTheDocument();
     expect(screen.getByText("Cocina")).toBeInTheDocument();
   });
 

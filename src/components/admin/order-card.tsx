@@ -26,7 +26,7 @@ import { OrderDetailSheet } from "./order-detail-sheet";
 
 const NEXT_LABEL: Partial<Record<OrderStatus, string>> = {
   pending: "Confirmar",
-  confirmed: "Preparar",
+  confirmed: "A cocina",
   preparing: "Listo",
   ready: "En camino",
   on_the_way: "Entregar",

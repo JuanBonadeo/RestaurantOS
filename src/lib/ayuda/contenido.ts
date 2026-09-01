@@ -339,7 +339,7 @@ export const TEMAS: Tema[] = [
       {
         titulo: "Las cinco columnas",
         texto:
-          "Un pedido de la web recorre «Pendientes» → «En cocina» → «Listos» → «En camino» → «Entregados». Se mueve tocando el botón de su tarjeta. Arriba, al lado de «Pedidos online», hay un número: es cuántos hay sin atender. Si tiene número, alguien está esperando.\n\nEn «Pendientes» también esperan los encargues con hora: los reconocés por el cartelito «Programado». Ésos marchan solos —la comanda sale sola antes de la hora que le pusiste a cocina— y no hay que tocarles nada.",
+          "Un pedido de la web recorre «Pendientes» → «En cocina» → «Listos» → «En camino» → «Entregados». Se mueve tocando el botón de su tarjeta. Arriba, al lado de «Pedidos online», hay un número: es cuántos hay sin atender. Si tiene número, alguien está esperando.\n\nEn «Pendientes» también esperan los encargues con hora: los reconocés por el cartelito «Programado». No hay que tocarles nada — pasan solos a «En cocina» 40 minutos antes de la hora que le pusiste a cocina. Si es para otro día, además la comanda recién se imprime en ese momento; si es para hoy, el papel ya salió cuando lo cargaste.",
         imagen: "/ayuda/pedidos-columnas.png",
         alt: "Las cinco columnas de pedidos online: Pendientes, En cocina, Listos, En camino y Entregados.",
         marcas: [
@@ -350,12 +350,12 @@ export const TEMAS: Tema[] = [
       {
         titulo: "Confirmar un pedido nuevo",
         texto:
-          "Un pedido que entra queda en «Nuevos» hasta que lo mirás. «Confirmar pedido» lo acepta y manda la comanda a cocina. Confirmá recién cuando estés seguro de que se puede hacer: es lo que le avisa al cliente que va en camino.",
+          "Un pedido que entra queda en «Pendientes» hasta que lo mirás. «Confirmar pedido» lo acepta y manda la comanda a cocina. Confirmá recién cuando estés seguro de que se puede hacer: es lo que le avisa al cliente que va en camino.",
       },
       {
         titulo: "Los pedidos para más tarde",
         texto:
-          "Un pedido encargado para otro momento aparece en «Nuevos» con el chip «Programado» y se queda al final de la columna. No sale a cocina cuando entra: sale cuando corresponde. Aceptarlo lo deja avalado sin marcharlo.",
+          "Un pedido encargado para otro momento aparece en «Pendientes» con el chip «Programado» y se queda al final de la columna. No sale a cocina cuando entra: sale cuando corresponde. Aceptarlo lo deja avalado sin marcharlo.",
       },
       {
         titulo: "El que tenía que salir y sigue ahí",
@@ -387,7 +387,7 @@ export const TEMAS: Tema[] = [
       {
         titulo: "Cargar un pedido a mano",
         texto:
-          "El que llama por teléfono se carga con «Cargar pedido», arriba de todo en «Nuevos». Entra al mismo circuito que los de la web y se cobra igual.",
+          "El que llama por teléfono se carga con «Cargar pedido», arriba de todo en «Pendientes». Entra al mismo circuito que los de la web y se cobra igual.",
       },
     ],
   },

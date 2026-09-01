@@ -77,7 +77,7 @@ function effectiveUnitPriceCents(c: CartItem): number {
  * Spec 127 — la hoja tiene dos modos, y el default es el 95% de los encargues.
  *
  * - **Para hoy**: la comanda sale ahora (es lo que ya funcionaba) y las dos
- *   horas, si se cargan, sólo dicen cuándo el pedido entra a «Preparando».
+ *   horas, si se cargan, sólo dicen cuándo el pedido entra a «En cocina».
  * - **Programado**: por definición es para OTRO día. El papel no sale hoy; sale
  *   ese día, 40 min antes de la hora de cocina.
  *
@@ -556,9 +556,9 @@ export function CargarPedidoSheet({
           toast.success(
             // Spec 127 — con horas, el papel sale igual pero el pedido todavía
             // no entra al kanban: decirlo evita que el encargado lo busque en
-            // «Preparando» y crea que no marchó.
+            // «En cocina» y crea que no marchó.
             hayHoras
-              ? `Pedido #${r.data.daily_number} enviado a cocina · entra a Preparando a las ${marchaLabel}`
+              ? `Pedido #${r.data.daily_number} enviado a cocina · entra a «En cocina» a las ${marchaLabel}`
               : `Pedido #${r.data.daily_number} cargado y enviado a cocina`,
           );
         }
@@ -988,8 +988,8 @@ export function CargarPedidoSheet({
                           ? "Cargá las dos horas del encargue."
                           : "Sin horas, el pedido es para ahora."
                         : esProgramado
-                          ? `La comanda sale sola a las ${marchaLabel}, y ahí pasa a Preparando.`
-                          : `La comanda sale ahora. El pedido pasa a Preparando a las ${marchaLabel}.`}
+                          ? `La comanda sale sola a las ${marchaLabel}, y ahí pasa a «En cocina».`
+                          : `La comanda sale ahora. El pedido pasa a «En cocina» a las ${marchaLabel}.`}
                     </p>
                   </section>
                 </>

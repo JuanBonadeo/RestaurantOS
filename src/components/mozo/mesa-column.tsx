@@ -45,7 +45,7 @@ import {
 
 const KITCHEN_LABEL: Record<KitchenItemStatus, string> = {
   pending: "Pendiente",
-  preparing: "En preparación",
+  preparing: "En cocina",
   ready: "Listo",
   delivered: "Entregado",
 };

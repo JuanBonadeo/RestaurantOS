@@ -65,7 +65,7 @@ type Detail = {
 const STATUS_LABEL: Record<OrderStatus, string> = {
   pending: "Pendiente",
   confirmed: "Confirmado",
-  preparing: "Preparando",
+  preparing: "En cocina",
   ready: "Listo",
   on_the_way: "En camino",
   delivered: "Entregado",

@@ -38,17 +38,17 @@ type Column = {
 const COLUMNS: Column[] = [
   {
     key: "new",
-    label: "Nuevos",
+    label: "Pendientes",
     statuses: ["pending", "confirmed"],
     accent: "bg-blue-500",
     ring: "ring-blue-500/30",
     countBg: "bg-blue-50",
     countText: "text-blue-700",
-    emptyHint: "Sin pedidos nuevos",
+    emptyHint: "Sin pedidos pendientes",
   },
   {
     key: "preparing",
-    label: "Preparando",
+    label: "En cocina",
     statuses: ["preparing"],
     accent: "bg-amber-500",
     ring: "ring-amber-500/30",

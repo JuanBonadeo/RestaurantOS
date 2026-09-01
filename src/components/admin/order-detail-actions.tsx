@@ -20,7 +20,7 @@ import { updateOrderStatus } from "@/lib/orders/update-status";
 
 const NEXT_LABEL: Partial<Record<OrderStatus, string>> = {
   pending: "Confirmar",
-  confirmed: "Preparar",
+  confirmed: "A cocina",
   preparing: "Marcar listo",
   ready: "En camino",
   on_the_way: "Entregar",
