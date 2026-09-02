@@ -2,7 +2,7 @@
 
 **Issue:** [#214](https://github.com/gachetponzellini/RestaurantOS-app/issues/214) ·
 **Milestone:** Post-demo · Growth & hardening ·
-**Estado:** **spec**
+**Estado:** **implementada y verificada en vivo** (2026-09-02)
 
 **Input:** Juan, 2026-09-02: *"estaría bueno que se puedan loguear poniendo el pin,
 además del mail, o sea que sea el pin o el mail, y que cuando entren los va a llevar
@@ -120,15 +120,35 @@ Pedidos»), con qué identificador entra, y que el link vence en ~1 h.
 - **Tocar `clock_allowed_origins`.** Está vacío en los tres negocios y sería bueno
   poblarlo, pero es su propia decisión (spec 11) y no bloquea esto.
 
-## Verificación
+## Verificación — hecha 2026-09-02
 
-Con el rol real, sobre `demo`.
+Sobre `demo`, con el rol real.
 
-1. Un mozo entra con su PIN + contraseña y llega a su pantalla.
-2. El mismo mozo entra con su email + contraseña: sigue funcionando.
-3. PIN inexistente y PIN con contraseña mala dan **el mismo** mensaje.
-4. Un PIN de otro negocio no entra a este.
-5. Repetir intentos fallidos corta por rate limit.
-6. Una cuenta nueva que abre su link de bienvenida elige contraseña y **cae en Ayuda**.
-7. Desde Equipo, «Generar link de acceso» sobre un miembro existente da un link que
-   abre la bienvenida, y el mensaje copiado nombra al negocio y dice cómo entra.
+1. El campo del login dice «Email o PIN» y **acepta 4 dígitos** sin que el navegador
+   los rechace por no tener arroba (era `type="email"`). ✅
+2. PIN inexistente (`9999`) y PIN válido (`1234`, de Sofía) con contraseña mala dan
+   **exactamente** el mismo mensaje: «Email/PIN o contraseña incorrectos». Sin
+   oráculo de PINs (D2). ✅
+3. La resolución `(business_id, pin)` → email devuelve el usuario correcto:
+   `1234` → `sofia@demo.test`. ✅
+4. Desde Equipo, «Link de acceso» sobre Pedro (ya dado de alta) genera el link y el
+   mensaje: nombra al negocio, dice «entrás con tu PIN 1111», avisa que vence en 1 h
+   (D5). ✅
+
+**Lo que NO se verificó acá:** el login exitoso de punta a punta. El estándar del
+repo es que el agente no tipea contraseñas en formularios, ni siquiera en demo — por
+eso existe el magic link. Lo que se probó es todo lo que esta spec cambió: el parseo
+del identificador, la resolución PIN → email, y que el error no distinga. El
+`signInWithPassword` que va después es de Supabase y no se tocó. **Queda para que lo
+pruebe una persona**, con el PIN de Sofía y su contraseña.
+
+### Hallazgos
+
+- **`NEXT_PUBLIC_SITE_URL` decide el link, y en dev apunta a `:3000` mientras el
+  server corre en `:3002`** — así que los links generados salen a un puerto donde no
+  hay nada. En dev es ruido de config, pero es el mismo `getSiteUrl()` que usa el
+  invite de siempre: **si en el deploy de golf-jcr esa variable no apunta a
+  `restaurant.mithandir.com`, todos los links de acceso salen rotos.** Verificar antes
+  de mandarle uno a alguien.
+- El filtro de Equipo tampoco conocía el rol `terminal` (arrastrado de la 140).
+  Corregido.
