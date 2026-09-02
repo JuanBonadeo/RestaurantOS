@@ -138,6 +138,27 @@ export const GRUPOS: { id: Grupo; titulo: string; bajada: string }[] = [
   },
 ];
 
+/**
+ * Un video de Loom arriba del tema (spec 134 D21).
+ *
+ * `url` es el link de compartir de Loom (`https://www.loom.com/share/<id>`); el
+ * embed se arma solo. Dos reglas que no son de estilo:
+ *
+ *  - **El video NO reemplaza los pasos.** Van abajo, completos, siempre. Un
+ *    video no se puede buscar con Cmd+F, no se puede consultar con el salón
+ *    lleno sin auriculares, y el asistente no lo lee.
+ *  - **Un video es más caro de mantener que un párrafo.** Cuando cambia una
+ *    pantalla, el texto se corrige en un minuto y el video hay que regrabarlo.
+ *    Por eso hay video sólo donde la secuencia importa más que el detalle.
+ */
+export type Video = {
+  url: string;
+  /** Qué se ve, para el que decide si lo mira. */
+  titulo: string;
+  /** Ej. "2 min". Que se sepa antes de tocar play. */
+  duracion?: string;
+};
+
 export type Tema = {
   slug: string;
   titulo: string;
@@ -155,6 +176,8 @@ export type Tema = {
   claves: string[];
   /** Default 'pasos'. */
   tipo?: TipoTema;
+  /** Loom del tema. Opcional: se van grabando de a poco. */
+  video?: Video;
   pasos: Paso[];
   /**
    * D12 — sólo lo usa `reservas`. El modo es por negocio (`estricto` /
@@ -1191,6 +1214,14 @@ export const TEMAS: Tema[] = [
 ];
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+/** El `src` del iframe a partir del link de compartir de Loom. Devuelve null si
+ *  el link no tiene la forma esperada, así una URL mal pegada no rompe la
+ *  página: simplemente no se pinta el video. */
+export function loomEmbedSrc(url: string): string | null {
+  const m = url.match(/loom\.com\/(?:share|embed)\/([a-zA-Z0-9]+)/);
+  return m ? `https://www.loom.com/embed/${m[1]}?hide_owner=true&hide_share=true` : null;
+}
 
 export function temaPorSlug(slug: string): Tema | undefined {
   return TEMAS.find((t) => t.slug === slug);

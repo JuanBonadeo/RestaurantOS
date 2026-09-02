@@ -28,5 +28,10 @@ export const H2 = "text-[22px] font-semibold leading-snug text-zinc-900 sm:text-
 /** Ancho de LECTURA: 60-70 caracteres. Va en los párrafos y los títulos. */
 export const TEXTO = "max-w-[68ch]";
 
-/** Ancho de la PÁGINA. La captura llega hasta acá. */
+/** Ancho de la PÁGINA cuando el tema tiene capturas. La imagen llega hasta acá. */
 export const PAGINA = "mx-auto w-full max-w-[1180px]";
+
+/** Ancho de la página cuando el tema es sólo texto. Más angosto y centrado: el
+ *  ancho grande existe para las capturas, y sin ellas deja el texto contra la
+ *  izquierda con media pantalla vacía al lado. */
+export const PAGINA_TEXTO = "mx-auto w-full max-w-[860px]";

@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   GRUPOS,
   TEMAS,
+  loomEmbedSrc,
   estaEscrito,
   pasosDe,
   temaPorSlug,
@@ -141,6 +142,25 @@ describe("contenido de la guía · estructura", () => {
     }
     for (const archivo of enDisco) {
       expect(usadas, `${archivo} no lo usa ningún tema`).toContain(archivo);
+    }
+  });
+
+  // Los links de Loom se pegan a mano al terminar de grabar. Si uno viene mal,
+  // la página no puede romperse: simplemente no se pinta el video.
+  it("el embed de Loom acepta el link de compartir y descarta la basura", () => {
+    expect(loomEmbedSrc("https://www.loom.com/share/abc123XYZ")).toContain(
+      "loom.com/embed/abc123XYZ",
+    );
+    expect(loomEmbedSrc("https://www.loom.com/embed/abc123XYZ")).toContain(
+      "loom.com/embed/abc123XYZ",
+    );
+    expect(loomEmbedSrc("https://youtube.com/watch?v=x")).toBeNull();
+    expect(loomEmbedSrc("pegué cualquier cosa")).toBeNull();
+  });
+
+  it("todo tema con video tiene título, para saber qué se va a mirar", () => {
+    for (const tema of TEMAS) {
+      if (tema.video) expect(tema.video.titulo.trim(), tema.slug).toBeTruthy();
     }
   });
 

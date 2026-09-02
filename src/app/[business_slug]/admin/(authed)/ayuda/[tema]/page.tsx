@@ -7,16 +7,18 @@ import { Captura } from "../captura";
 import { PageShell } from "@/components/admin/shell/page-shell";
 import {
   estaEscrito,
+  loomEmbedSrc,
   pasosDe,
   temaPorSlug,
   temaSiguiente,
   type Aviso,
+  type Video,
 } from "@/lib/ayuda/contenido";
 import { getReservationSettings } from "@/lib/reservations/queries";
 import type { ReservationMode } from "@/lib/reservations/types";
 import { getBusiness } from "@/lib/tenant";
 
-import { H1, H2, PAGINA, PROSA, SECUNDARIO, TEXTO } from "../estilos";
+import { H1, H2, PAGINA, PAGINA_TEXTO, PROSA, SECUNDARIO, TEXTO } from "../estilos";
 
 // Un tema de la guía — spec 134 (RestaurantOS-Brain#35).
 //
@@ -90,6 +92,35 @@ function Claves({ claves }: { claves: string[] }) {
   );
 }
 
+/**
+ * El video del tema — spec 134 D21.
+ *
+ * `loading="lazy"`: el iframe de Loom trae su propio player y no tiene que
+ * pesar en una guía que se abre para leer dos frases. Y va ARRIBA de los pasos
+ * pero nunca en lugar de ellos: abajo está todo escrito.
+ */
+function VideoDelTema({ video }: { video: Video }) {
+  const src = loomEmbedSrc(video.url);
+  if (!src) return null;
+  return (
+    <figure className="mt-8 max-w-[900px]">
+      <div className="relative w-full overflow-hidden rounded-2xl bg-zinc-900 pt-[56.25%] ring-1 ring-zinc-200">
+        <iframe
+          src={src}
+          title={video.titulo}
+          loading="lazy"
+          allowFullScreen
+          className="absolute inset-0 size-full"
+        />
+      </div>
+      <figcaption className={`mt-2 ${SECUNDARIO}`}>
+        {video.titulo}
+        {video.duracion ? ` · ${video.duracion}` : ""} · abajo está todo escrito.
+      </figcaption>
+    </figure>
+  );
+}
+
 export default async function TemaPage({
   params,
 }: {
@@ -113,9 +144,15 @@ export default async function TemaPage({
   // Un catálogo se escanea; una secuencia se sigue. Ver TipoTema.
   const catalogo = tema.tipo === "catalogo";
 
+  // La página se hizo ancha para que entren las capturas (D20). En un tema que
+  // no tiene ninguna, ese ancho no compra nada: deja el texto contra la
+  // izquierda con media pantalla vacía al lado. Ahí se vuelve a una medida
+  // centrada, que es lo que corresponde a una página de puro texto.
+  const conCapturas = pasos.some((paso) => Boolean(paso.imagen));
+
   return (
     <PageShell width="wide" className="px-4 py-10 sm:px-8 lg:px-12 lg:py-14">
-      <div className={PAGINA}>
+      <div className={conCapturas ? PAGINA : PAGINA_TEXTO}>
         <Link
           href={base}
           className="inline-flex min-h-12 items-center gap-2 text-[17px] font-medium text-zinc-600 transition hover:text-zinc-900"
@@ -128,8 +165,16 @@ export default async function TemaPage({
 
         {tema.claves.length > 0 && <Claves claves={tema.claves} />}
 
+        {tema.video && <VideoDelTema video={tema.video} />}
+
         {estaEscrito(tema, modo) ? (
-          <ol className={catalogo ? "mt-10 space-y-8" : "mt-12 space-y-12 lg:space-y-16"}>
+          <ol
+            className={
+              catalogo
+                ? "mt-10 space-y-8 lg:columns-2 lg:gap-10 lg:space-y-0 [&>li]:break-inside-avoid lg:[&>li]:mb-8"
+                : "mt-12 space-y-12 lg:space-y-16"
+            }
+          >
             {pasos.map((paso, i) => (
               <li
                 key={paso.titulo}
