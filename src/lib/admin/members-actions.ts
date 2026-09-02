@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { buildAccessMessage } from "@/lib/admin/access-message";
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
@@ -598,4 +599,124 @@ function getSiteUrl(): string {
   const rootDomain = process.env.ROOT_DOMAIN ?? "localhost:3000";
   const proto = rootDomain.includes("localhost") ? "http" : "https";
   return `${proto}://${rootDomain}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Spec 142 · D5 — el link de acceso para alguien que YA está dado de alta.
+// ─────────────────────────────────────────────────────────────────────
+
+export type AccessLinkPayload = {
+  link: string;
+  email: string;
+  pin: string | null;
+  fullName: string | null;
+  yaTienePassword: boolean;
+  businessName: string;
+  /** Ya armado con `buildAccessMessage`: es lo que el admin copia y manda. */
+  message: string;
+};
+
+/**
+ * Genera un magic link para un miembro existente.
+ *
+ * El flujo completo —link → `/bienvenida` → la persona elige su contraseña— ya
+ * existía, pero **sólo al crear** el miembro (`inviteBusinessMemberByAdmin`).
+ * Para alguien ya dado de alta no había ningún camino, y es justamente el caso
+ * que hace falta para rotar las contraseñas de arranque del padrón migrado de
+ * MaxiRest: 38 personas en golf-jcr y 48 en kcc, todas con `<slug><PIN>`.
+ *
+ * Si nunca pasó por la bienvenida, el link la lleva ahí a elegir contraseña. Si
+ * ya tiene, lo deja entrar directo — sirve igual para el que se la olvidó, que
+ * es el otro motivo por el que un admin necesita esto.
+ */
+export async function generateAccessLink(
+  input: unknown,
+): Promise<ActionResult<AccessLinkPayload>> {
+  const parsed = z
+    .object({
+      business_slug: z.string().min(1),
+      user_id: z.string().min(1),
+    })
+    .safeParse(input);
+  if (!parsed.success) return actionError("Datos inválidos.");
+  const { business_slug, user_id } = parsed.data;
+
+  const guard = await assertCanManage(business_slug);
+  if (!guard.ok) return actionError(guard.error);
+
+  const service = svc();
+
+  const { data: business } = await service
+    .from("businesses")
+    .select("name")
+    .eq("id", guard.businessId)
+    .maybeSingle();
+
+  const { data: member } = await service
+    .from("business_users")
+    .select("pin, full_name, disabled_at")
+    .eq("business_id", guard.businessId)
+    .eq("user_id", user_id)
+    .maybeSingle();
+  if (!member) return actionError("Esa persona no es del equipo.");
+  if ((member as { disabled_at: string | null }).disabled_at) {
+    return actionError("Esa cuenta está deshabilitada. Reactivala primero.");
+  }
+
+  const { data: authUser, error: authErr } =
+    await service.auth.admin.getUserById(user_id);
+  if (authErr || !authUser.user?.email) {
+    return actionError("Esa cuenta no tiene email para generar el link.");
+  }
+  const email = authUser.user.email;
+  const yaTienePassword = Boolean(
+    (authUser.user.user_metadata as Record<string, unknown> | null)
+      ?.welcomed_at,
+  );
+
+  const siteUrl = getSiteUrl();
+  // Sin contraseña todavía → a elegirla. Con contraseña → al panel, y que cada
+  // page-gate lo mande a lo suyo según el rol.
+  const next = yaTienePassword
+    ? `/${business_slug}/admin`
+    : `/${business_slug}/admin/bienvenida`;
+
+  const { data: linkData, error: linkErr } =
+    await service.auth.admin.generateLink({
+      type: "magiclink",
+      email,
+      options: { redirectTo: `${siteUrl}${next}` },
+    });
+  const hashed = linkData?.properties?.hashed_token;
+  if (linkErr || !hashed) {
+    console.error("generateAccessLink", linkErr);
+    return actionError("No pudimos generar el link. Probá de nuevo.");
+  }
+
+  // Mismo `/auth/confirm` + verifyOtp que el resto: el action_link crudo de
+  // Supabase no sirve porque no hay code_verifier (PKCE) en el navegador del
+  // que lo recibe.
+  const link = `${siteUrl}/auth/confirm?token_hash=${encodeURIComponent(
+    hashed,
+  )}&type=magiclink&next=${encodeURIComponent(next)}`;
+
+  const pin = (member as { pin: string | null }).pin;
+  const businessName =
+    (business as { name: string } | null)?.name ?? business_slug;
+
+  return actionOk({
+    link,
+    email,
+    pin,
+    fullName: (member as { full_name: string | null }).full_name,
+    yaTienePassword,
+    businessName,
+    message: buildAccessMessage({
+      businessName,
+      link,
+      pin,
+      email,
+      yaTienePassword,
+    }),
+  });
 }
