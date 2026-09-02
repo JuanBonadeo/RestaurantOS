@@ -2,7 +2,8 @@
 
 **Issue:** [#211](https://github.com/gachetponzellini/RestaurantOS-app/issues/211) ·
 **Milestone:** Post-demo · Growth & hardening ·
-**Estado:** **spec v2** — sin implementar. La v1 resolvía esto reusando el rol
+**Estado:** **implementada y verificada en vivo** (2026-09-02, migración `0058`
+aplicada al cloud). La v1 de esta spec resolvía el problema reusando el rol
 `mozo`; se descartó, ver [D1](#d1--sí-va-un-rol-nuevo-terminal).
 
 **Input:** Juan, 2026-09-02. Primero: *"como en la etapa 1, los mozos no van a
@@ -249,10 +250,10 @@ el camino para recuperarlo es el PIN por acción (No-objetivos).
   hasta que existan los móviles. Los tests tienen que cubrirlo aunque el local
   todavía no lo use.
 
-## Verificación
+## Verificación — hecha 2026-09-02
 
-Con el rol real, nunca service_role. Hace falta crear una cuenta `terminal` en el
-negocio demo (no existe hoy).
+Con el rol real (`terminal@demo.test`, creada para esto y sumada al `TEAM` del
+seed), nunca service_role.
 
 ```
 node scripts/magic-link.mjs terminal@demo.test "/demo/admin/operacion"
@@ -264,11 +265,20 @@ node scripts/magic-link.mjs terminal@demo.test "/demo/admin/operacion"
 3. Sigue rebotada en `/demo/admin`, `/demo/admin/reportes` y el resto.
 4. Toca una mesa libre → abre la carga de pedido (D4).
 5. Transfiere una mesa asignada a Lucía, sin ser origen (D6).
-6. Distribuye mesas desde el plano (D7).
-7. Ficha con el PIN de Pedro desde el tab Fichaje.
-8. Carga y cobra una mesa asignada a Lucía: el cobro queda atribuido a **Lucía**
-   y aparece en su rendición pendiente, no en la de la terminal (D5).
-9. **La terminal no aparece** en la paleta de «Distribuir mozos» ni en el panel de
-   rendiciones pendientes del encargado (D1).
-10. Pedro (rol `mozo`) sigue exactamente como hoy: entra a `/mozo`, ve sus mesas,
-    y `/demo/admin/operacion` lo sigue rebotando.
+6. Abre «Distribuir mozos» desde el plano (D7). ✅
+7. Ficha con el PIN de un mozo desde el tab Fichaje — se fichó a Diego. ✅
+8. Carga un ítem en la mesa T5, asignada a **Sofía**, y la cobra: `payments` queda
+   con `operated_by` = Terminal Salón y `attributed_mozo_id` = **Sofía Encargada**
+   (D5). Con el orden viejo las dos columnas habrían dicho «Terminal». ✅
+9. **La terminal no aparece** en la paleta de «Distribuir mozos» — sólo Pedro,
+   Lucía y Diego (D1). ✅
+10. Tampoco en «sin fichar» del tab Fichaje: una PC no ficha. Salió al verificar,
+    se corrigió en `getTodaySummary`. ✅
+
+### Lo que sólo apareció en vivo
+
+`elegirMozoAtribuido` había quedado exportada desde `cobro-actions.ts`, que es
+`"use server"` — y ahí **todo export tiene que ser async**. `pnpm typecheck` pasa
+igual: lo caza el bundler, con la página ya abierta. Se mudó a
+`lib/billing/atribucion-mozo.ts`, que además es donde corresponde que viva una
+función pura. Vale como recordatorio de por qué el verify en vivo no es opcional.
