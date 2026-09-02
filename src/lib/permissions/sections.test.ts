@@ -112,6 +112,11 @@ describe("sectionAccess / rol terminal (spec 140)", () => {
     expect(sectionAccess("operacion", "terminal")).toBe("limited");
   });
 
+  it("ve la Ayuda: ahí la manda la bienvenida a aprender el sistema (spec 142)", () => {
+    expect(sectionAccess("ayuda", "terminal")).toBe("full");
+    expect(sectionAccess("ayuda", "mozo")).toBe("full");
+  });
+
   it("no ve ninguna otra sección del panel", () => {
     const otras: AdminSection[] = [
       "dashboard",
@@ -130,7 +135,6 @@ describe("sectionAccess / rol terminal (spec 140)", () => {
       "facturacion",
       "rrhh",
       "configuracion",
-      "ayuda",
     ];
     for (const s of otras) {
       expect(sectionAccess(s, "terminal"), s).toBe("none");
@@ -154,8 +158,16 @@ describe("hasAnySection", () => {
     expect(hasAnySection("terminal")).toBe(true);
   });
 
-  it("mozo y personal no: su superficie no es el panel", () => {
-    expect(hasAnySection("mozo")).toBe(false);
+  it("el mozo entra, pero sólo a la Ayuda (spec 142)", () => {
+    // Antes daba false y el layout lo rebotaba entero. Ahora la guía es suya,
+    // así que el panel lo deja pasar — y cada otra página lo sigue rebotando
+    // por su propio gate.
+    expect(hasAnySection("mozo")).toBe(true);
+    expect(canSee("operacion", "mozo")).toBe(false);
+    expect(canSee("dashboard", "mozo")).toBe(false);
+  });
+
+  it("personal no entra: no opera el sistema", () => {
     expect(hasAnySection("personal")).toBe(false);
   });
 

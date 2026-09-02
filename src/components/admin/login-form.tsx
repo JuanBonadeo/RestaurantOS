@@ -19,7 +19,10 @@ import { Input } from "@/components/ui/input";
 import { signIn } from "@/lib/auth/sign-in";
 
 const Schema = z.object({
-  email: z.string().email("Email inválido."),
+  // Spec 142: email o PIN de 4 dígitos. El formato lo decide
+  // `parseIdentificador` en el server; acá sólo se exige que haya algo, para
+  // que un PIN no rebote antes de salir del navegador.
+  email: z.string().min(1, "Poné tu email o tu PIN."),
   password: z.string().min(1, "Ingresá la contraseña."),
 });
 
@@ -63,12 +66,17 @@ export function LoginForm({ slug }: { slug: string }) {
           name="email"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Email</FormLabel>
+              <FormLabel>Email o PIN</FormLabel>
               <FormControl>
+                {/* `type="text"`, no `email`: el navegador rechazaría "1234"
+                    por no tener arroba. `autoComplete="username"` porque eso
+                    es lo que es ahora — un identificador, no una casilla. */}
                 <Input
-                  type="email"
-                  autoComplete="email"
+                  type="text"
+                  inputMode="text"
+                  autoComplete="username"
                   autoFocus
+                  placeholder="tu@email.com o tus 4 dígitos"
                   {...field}
                 />
               </FormControl>

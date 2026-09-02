@@ -79,6 +79,33 @@ export async function limitChatbotTurn(
   return { success: contact.success && business.success };
 }
 
+// Login del panel (spec 142). Con el PIN como identificador, el espacio de
+// identidades de un negocio pasa a ser 10.000 números — y golf-jcr tiene 38
+// PINs activos, o sea que 1 de cada 263 acierta a alguien. La contraseña sigue
+// siendo lo que autentica, pero sin un techo por IP nada impide recorrer el
+// espacio entero probando contraseñas comunes contra cada PIN.
+//
+// Dos niveles: una ráfaga corta tolerable (el que se equivoca tipeando) y un
+// techo por hora que hace inviable la enumeración.
+const LOGIN_PER_IP_PER_MIN = Number(process.env.LOGIN_RL_PER_IP_PER_MIN ?? 10);
+const LOGIN_PER_IP_PER_HOUR = Number(process.env.LOGIN_RL_PER_IP_PER_HOUR ?? 60);
+
+export async function limitLogin(ip: string): Promise<LimitResult> {
+  const burst = getLimiter(
+    "pedidos:login:min",
+    Ratelimit.slidingWindow(LOGIN_PER_IP_PER_MIN, "1 m"),
+  );
+  const hourly = getLimiter(
+    "pedidos:login:hour",
+    Ratelimit.slidingWindow(LOGIN_PER_IP_PER_HOUR, "1 h"),
+  );
+  // Sin Upstash configurado → degradación elegante, igual que el resto.
+  if (!burst || !hourly) return { success: true };
+
+  const [a, b] = await Promise.all([burst.limit(ip), hourly.limit(ip)]);
+  return { success: a.success && b.success };
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // SPEC 25 (PENDING) — limitador de envío de códigos por WhatsApp, DESACTIVADO.
 // Preservado (comentado) hasta reactivar la verificación. Dos niveles por

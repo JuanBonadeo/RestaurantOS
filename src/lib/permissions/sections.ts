@@ -202,8 +202,12 @@ const MATRIX: Record<AdminSection, Record<BusinessRole, SectionAccess>> = {
   ayuda: {
     admin: "full",
     encargado: "full",
-    mozo: "none",
-    terminal: "none",
+    // Spec 142 · D4: se abre para el salón, porque al terminar la bienvenida
+    // se los manda acá a aprender el sistema. OJO — el contenido de hoy está
+    // escrito para el encargado (spec 134); la guía del mozo es su propia
+    // spec. Esto abre la puerta, no la llena.
+    mozo: "full",
+    terminal: "full",
     personal: "none",
   },
 };

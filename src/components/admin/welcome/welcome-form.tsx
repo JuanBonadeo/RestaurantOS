@@ -111,7 +111,10 @@ export function WelcomeForm({
         return;
       }
       toast.success("Listo, bienvenido.");
-      router.replace(`/${businessSlug}/admin`);
+      // Spec 142 · D4 — recién creó su contraseña: lo que necesita no es el
+      // panel vacío sino saber qué hacer con él. Sólo acá, al terminar la
+      // bienvenida; en los logins siguientes entra derecho a lo suyo.
+      router.replace(`/${businessSlug}/admin/ayuda`);
       router.refresh();
     } finally {
       setSubmitting(false);
