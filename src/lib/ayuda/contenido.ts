@@ -525,7 +525,7 @@ export const TEMAS: Tema[] = [
         alt: "La pestaña Rendición, con los mozos del turno y la tabla de últimas rendiciones.",
         marcas: [
           { n: 1, x: 12, y: 20.5 },
-          { n: 2, x: 61, y: 33.5 },
+          { n: 2, x: 55, y: 33.5 },
         ],
       },
       {
@@ -684,9 +684,9 @@ export const TEMAS: Tema[] = [
         imagen: "/ayuda/cat-stock.png",
         alt: "La pestaña Stock con sus cuatro sub-pestañas —Bebidas, Cocina, Bar y Merma— y la tabla de productos con stock y mínimo.",
         marcas: [
-          { n: 1, x: 15, y: 31.3 },
-          { n: 2, x: 64, y: 49 },
-          { n: 3, x: 75, y: 49 },
+          { n: 1, x: 10, y: 31.3 },
+          { n: 2, x: 58, y: 49 },
+          { n: 3, x: 70, y: 49 },
         ],
       },
       {
@@ -733,7 +733,7 @@ export const TEMAS: Tema[] = [
         alt: "La pestaña Costeo con el margen promedio, los productos con y sin receta, y la tabla de food cost por producto.",
         marcas: [
           { n: 1, x: 17, y: 34 },
-          { n: 2, x: 84, y: 55.5 },
+          { n: 2, x: 78, y: 55.5 },
         ],
       },
       {

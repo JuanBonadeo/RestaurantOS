@@ -2,6 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, ChevronRight, CircleAlert, CornerDownRight, Star, TriangleAlert } from "lucide-react";
 
+import { Captura } from "../captura";
+
 import { PageShell } from "@/components/admin/shell/page-shell";
 import {
   estaEscrito,
@@ -9,7 +11,6 @@ import {
   temaPorSlug,
   temaSiguiente,
   type Aviso,
-  type Paso,
 } from "@/lib/ayuda/contenido";
 import { getReservationSettings } from "@/lib/reservations/queries";
 import type { ReservationMode } from "@/lib/reservations/types";
@@ -49,37 +50,6 @@ function AvisoBox({ aviso }: { aviso: Aviso }) {
       <Icono className="mt-0.5 size-[22px] shrink-0" strokeWidth={1.75} />
       <p className="text-[18px] font-medium leading-[1.6]">{aviso.texto}</p>
     </div>
-  );
-}
-
-// La captura con los círculos numerados encima. Los números NO reemplazan al
-// texto: marcan dónde mirar, y el qué hacer está en el paso. El círculo lleva
-// anillo blanco porque abajo puede haber cualquier color de la pantalla real.
-function Captura({ paso }: { paso: Paso }) {
-  return (
-    <figure className="relative mt-4">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={paso.imagen}
-        alt={paso.alt ?? ""}
-        className="w-full rounded-xl ring-1 ring-zinc-200"
-      />
-      {(paso.marcas ?? []).map((m) => (
-        <span
-          key={m.n}
-          aria-hidden
-          style={{
-            left: `${m.x}%`,
-            top: `${m.y}%`,
-            background: "var(--brand)",
-            color: "var(--brand-foreground)",
-          }}
-          className="absolute grid size-7 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full text-[15px] font-bold shadow-md ring-2 ring-white"
-        >
-          {m.n}
-        </span>
-      ))}
-    </figure>
   );
 }
 
@@ -184,7 +154,13 @@ export default async function TemaPage({
                 <div className="min-w-0 flex-1">
                   <h2 className={H2}>{paso.titulo}</h2>
                   <p className={`mt-2 ${PROSA}`}>{paso.texto}</p>
-                  {paso.imagen && <Captura paso={paso} />}
+                  {paso.imagen && (
+                    <Captura
+                      src={paso.imagen}
+                      alt={paso.alt ?? ""}
+                      marcas={paso.marcas}
+                    />
+                  )}
                   {paso.aviso && <AvisoBox aviso={paso.aviso} />}
                   {paso.verTambien && (
                     <Link

@@ -133,6 +133,14 @@ encontrar cómo se marca un producto agotado.
 numerados como dato. Un test exige que **todo tema de Operación y Catálogo tenga al menos
 una**: el pedido «bien visual» deja de depender de que alguien se acuerde.
 
+**D19 · La captura rompe la columna, y se abre a pantalla completa.** Una captura de
+1160 px metida en una columna de 68 caracteres se ve a menos de la mitad, y a ese tamaño
+no se lee un rótulo: la imagen estaba de adorno. Ahora el **texto** se queda en 68ch —eso
+es D6 y no se toca— pero la **imagen** se sale hacia los costados hasta donde da la
+página (~800 px en desktop, borde a borde en mobile), y tocándola se abre a resolución
+completa sobre un fondo oscuro, con Esc y clic afuera para cerrar. Los círculos son
+porcentajes, así que caen bien en los dos tamaños sin recalcular nada.
+
 | Grupo | Temas |
 |---|---|
 | **Operación** | `caja` · `mesas` · `cobrar` · `comandas` · `pedidos` · `reservas` · `rendicion` · `fichaje` |
