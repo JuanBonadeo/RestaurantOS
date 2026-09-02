@@ -100,6 +100,12 @@ Regla: **`cuenta_corriente` se excluye de «Cobrado» y se muestra como una lín
 propia, «Fiado del período»**. El arqueo (`expected_cash`) no se toca: ya ignora
 todo lo que no sea `cash`.
 
+Y una precisión que salió de dibujar la pantalla: **el fiado sí se asienta en una
+caja** — es una fila de `payments`, que exige `caja_id`, y el cobro sigue pidiendo
+elegirla. Lo que no hace es **sumar al arqueo**. Decirlo como «no entra a la caja»
+contradice el selector de caja que está tres centímetros más arriba en la misma
+pantalla; la palabra es **arqueo**.
+
 ### D4 · El saldo se **deriva**, no se lleva en un libro paralelo
 
 Sin tabla de asientos. El saldo de un cliente es:
