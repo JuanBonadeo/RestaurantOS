@@ -2,7 +2,7 @@
 
 **Issue:** [RestaurantOS-Brain#35](https://github.com/gachetponzellini/RestaurantOS-Brain/issues/35) ·
 **Milestone:** sin asignar — Sprint 07 venció el 14-ago y no hay uno posterior ·
-**Estado:** implementada · v2 amplía a las doce secciones (2026-09-01)
+**Estado:** implementada · v3 enfoca en Operación y Catálogo (2026-09-02)
 
 **Input:** Juan, 2026-08-31: *"vamos a armar una parecida pero para el encargado,
 que sea lo mas simple posible, con un formato parecido"*, sobre la guía del
@@ -110,49 +110,54 @@ misma para todos los negocios.
 
 ## Los temas
 
-**v1 (2026-09-01)** salió con seis: `caja`, `mesas`, `cobrar`, `pedidos`, `reservas`
-y `carteles`. **v2, el mismo día**, a pedido de Juan: *"habría que seguir ampliando la
-guía, que hable sobre todo, y capaz un poco menos detallado, pero remarcando lo más
-importante"*.
+Tres pasadas el mismo fin de semana. **v1**: seis temas. **v2**: dieciséis, para que
+hablara de todo el panel. **v3**, pedido de Juan: *"que enfoques la guía para usar el
+sistema en la parte de operación, y catálogo, que sea bien visual"*.
 
-Los seis cubrían la mitad de lo que el encargado puede abrir: la matriz de
-[`sections.ts`](../../src/lib/permissions/sections.ts) le da **doce** secciones en
-`full`, y faltaban comandas, rendición, fichaje, catálogo, salones, proveedores,
-facturación, clientes, promociones y conversaciones. Ahora son **dieciséis temas**, y
-tres cosas cambian con la escala:
+La v2 trataba las dieciséis pantallas como iguales, y no lo son: el encargado **vive**
+en Operación y **mantiene** Catálogo; el resto lo abre cada tanto. La v3 acomoda la guía
+a eso.
 
-**D13 · Menos profundidad por tema.** Los pasos bajaron de ocho o nueve a cuatro o
-cinco, y cada uno agrupa lo que antes eran dos. Una guía que se lee es mejor que una
-completa que no.
+**D16 · Dos grupos son el centro, y se nota.** El índice arranca con **Operación** —una
+pestaña, un tema— y sigue con **Catálogo**. Los dos van ilustrados pantalla por pantalla;
+«Lo demás del panel» se queda en texto. No es que el resto importe menos: es que ahí no
+se aprende mirando, se lee una vez y se resuelve.
 
-**D14 · «Lo importante» arriba de cada tema.** Dos o tres líneas destacadas antes de
-los pasos. **No es un resumen**: es el límite de lo que la persona puede hacer sola y
-lo que sale caro si se hace mal. El tema entero se lee una vez, con calma; las otras
-veces se entra con el salón lleno y se miran cinco segundos, y esas veces esto es lo
-único que se lee.
+**D17 · Catálogo se abre en cuatro temas.** «Productos e inventario» es una pantalla con
+siete pestañas, pero adentro hay cuatro trabajos que no se parecen: mantener la carta
+(`carta`), armar el combo (`menu-del-dia`), contar lo que hay (`stock`) y mirar cuánto
+deja cada plato (`costeo`). Con un solo tema había que leer sobre food cost para
+encontrar cómo se marca un producto agotado.
 
-**D15 · El índice va agrupado.** Con seis alcanzaba una lista; con dieciséis, una tira
-de tarjetas iguales obliga a leerlas todas para encontrar una. Cuatro grupos, ordenados
-por distancia al turno.
+**D18 · Una captura por pantalla, del negocio `demo`.** Quince, con los círculos
+numerados como dato. Un test exige que **todo tema de Operación y Catálogo tenga al menos
+una**: el pedido «bien visual» deja de depender de que alguien se acuerde.
 
 | Grupo | Temas |
 |---|---|
-| **Tu turno** | `caja` · `mesas` · `cobrar` · `comandas` · `pedidos` · `reservas` · `rendicion` · `fichaje` |
-| **El local** | `catalogo` · `salones` · `proveedores` · `facturacion` |
-| **Los clientes** | `clientes` · `promociones` · `conversaciones` |
+| **Operación** | `caja` · `mesas` · `cobrar` · `comandas` · `pedidos` · `reservas` · `rendicion` · `fichaje` |
+| **Catálogo** | `carta` · `menu-del-dia` · `stock` · `costeo` |
+| **Lo demás del panel** | `salones` · `proveedores` · `facturacion` · `clientes` · `promociones` · `conversaciones` |
 | **Si algo falla** | `carteles` |
 
-`catalogo` es **un** tema y no tres porque en el panel es **una** pantalla con pestañas
-(carta, stock de bar, stock de cocina, merma, menú del día): partirlo en la guía
-obligaría a saber en cuál de los tres buscar algo que en el panel está en un solo lado.
-Lo mismo con `promociones`, que cubre promos y campañas.
-
-`carteles` sigue siendo **catálogo** y creció a 35 entradas, sin numerar: el que tiene un
-cartel en la pantalla no lee del 1 al 35, escanea los títulos hasta encontrar el suyo.
+`carteles` sigue siendo catálogo, sin numerar, y creció a 37 entradas.
 
 Sigue afuera lo que el encargado **no puede ver** (`dashboard`, `cajas` como config,
-`reportes`, `rrhh`, `configuracion`): documentar una pantalla a la que no entra sólo
-enseña a pedir permisos.
+`reportes`, `rrhh`, `configuracion`).
+
+### Lo que las capturas corrigieron
+
+Sacar las quince capturas obligó a mirar pantallas que hasta ahí sólo se habían leído en
+el código, y aparecieron tres cosas que el texto decía mal:
+
+- **Stock tiene cuatro sub-pestañas**, no dos: Bebidas, Cocina, Bar y Merma. La v2
+  hablaba de «stock de bar y stock de cocina» y se olvidaba de Bebidas, que es la más
+  grande (137 productos en `demo`).
+- **El cartel de la comandera caída** es *"Agente de impresión sin conexión (sin señal)"*,
+  no *"sin conexión"* a secas, que era lo que la guía mandaba a buscar con Cmd+F.
+- **Los métodos de pago muestran recargo** ya calculado —«Tarjeta +10% · $26.400» sobre
+  una cuenta de $24.000—. No estaba escrito en ningún lado y es lo que el encargado le
+  dice al cliente antes de cobrar.
 
 ## Alcance
 

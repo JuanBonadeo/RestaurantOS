@@ -8,6 +8,9 @@ import {
   HandCoins,
   Clock,
   Package,
+  UtensilsCrossed,
+  Boxes,
+  TrendingUp,
   Table2,
   Building2,
   FileText,
@@ -92,13 +95,38 @@ export type TipoTema = "pasos" | "catalogo";
  * encontrar una. El orden es el de la distancia al turno — primero lo que se
  * hace hoy, último lo que se abre cuando algo se rompió.
  */
-export type Grupo = "turno" | "local" | "clientes" | "problemas";
+export type Grupo = "operacion" | "catalogo" | "resto" | "problemas";
 
+/**
+ * Los dos primeros grupos son **el centro de la guía**: Operación es el turno y
+ * Catálogo es lo que se vende. Ahí es donde el encargado usa el sistema de
+ * verdad, y por eso son los que van ilustrados pantalla por pantalla.
+ *
+ * «Lo demás del panel» existe para que la guía no mienta por omisión, pero se
+ * escribe más corto: son pantallas que se abren de vez en cuando y casi siempre
+ * con tiempo.
+ */
 export const GRUPOS: { id: Grupo; titulo: string; bajada: string }[] = [
-  { id: "turno", titulo: "Tu turno", bajada: "Lo que hacés todos los días, de la apertura al cierre." },
-  { id: "local", titulo: "El local", bajada: "La carta, el stock, los salones y los papeles. Se tocan cada tanto." },
-  { id: "clientes", titulo: "Los clientes", bajada: "Quiénes son, cómo se les habla y cómo se los trae de vuelta." },
-  { id: "problemas", titulo: "Si algo falla", bajada: "Los carteles del sistema, uno por uno." },
+  {
+    id: "operacion",
+    titulo: "Operación",
+    bajada: "El turno completo: las siete pestañas de la pantalla donde pasás el día.",
+  },
+  {
+    id: "catalogo",
+    titulo: "Catálogo",
+    bajada: "Lo que vendés y lo que tenés: la carta, el menú del día, el stock y los costos.",
+  },
+  {
+    id: "resto",
+    titulo: "Lo demás del panel",
+    bajada: "Salones, clientes, promos, proveedores y comprobantes. Se abren cada tanto.",
+  },
+  {
+    id: "problemas",
+    titulo: "Si algo falla",
+    bajada: "Los carteles del sistema, uno por uno, con la frase exacta que ves en pantalla.",
+  },
 ];
 
 export type Tema = {
@@ -153,7 +181,7 @@ export const TEMAS: Tema[] = [
     titulo: "La caja: movimientos y cierre",
     resumen: "Lo que entra y sale del cajón, y cómo se cierra el turno cuando el conteo no da.",
     icono: Wallet,
-    grupo: "turno",
+    grupo: "operacion",
     claves: [
       "Podés cerrar con una diferencia de hasta $5.000. Más que eso lo cierra el dueño.",
       "Toda diferencia pide motivo escrito. No lo maquilles: es lo que después la explica.",
@@ -164,7 +192,7 @@ export const TEMAS: Tema[] = [
         titulo: "Elegí tu caja y mirá los dos números",
         texto:
           'Arriba están las cajas del local; tocá la que tenés adelante y el sistema se la acuerda. «En la caja deberías tener» es la plata que tendría que haber en el cajón ahora. «Cobrado en el período» es la venta del turno con todos los métodos juntos: es otra cosa y casi nunca coincide.',
-        imagen: "/ayuda/caja-periodo.png",
+        imagen: "/ayuda/op-caja.png",
         alt: "La pantalla de Caja, con «En la caja deberías tener» a la izquierda y «Cobrado en el período» a la derecha.",
         // % del ancho y del alto de la captura (1160 × 860): van sobre el
         // rótulo y no sobre el número, que el círculo tapaba los dígitos.
@@ -201,7 +229,7 @@ export const TEMAS: Tema[] = [
     titulo: "El salón",
     resumen: "Abrir, cobrar, anular y mover mesas, incluido lo que el mozo no puede hacer solo.",
     icono: LayoutGrid,
-    grupo: "turno",
+    grupo: "operacion",
     claves: [
       "Anular una mesa y anular un cobro son cosas distintas: si ya se cobró, se anula el cobro.",
       "Anular, trasladar y repartir el salón son tuyos o del dueño. El mozo no puede.",
@@ -212,7 +240,7 @@ export const TEMAS: Tema[] = [
         titulo: "El plano es el salón",
         texto:
           "Cada figura es una mesa y el color dice cómo está. Abajo está la referencia con cuántas hay de cada una; el número chico adentro es hace cuánto está abierta, que sirve para ver cuál se demora. A la derecha, lo mismo en lista.",
-        imagen: "/ayuda/salon-plano.png",
+        imagen: "/ayuda/op-salon.png",
         alt: "El plano del salón con las mesas, la referencia de colores abajo y el panel de ocupadas a la derecha.",
         marcas: [
           { n: 1, x: 37, y: 23 },
@@ -254,7 +282,7 @@ export const TEMAS: Tema[] = [
     titulo: "Cobrar una cuenta",
     resumen: "Propina, descuento, hasta dónde llegás vos, y cómo se deshace un cobro mal hecho.",
     icono: Receipt,
-    grupo: "turno",
+    grupo: "operacion",
     claves: [
       "Tu tope de descuento es 25%. Partirlo en dos cobros no lo saltea.",
       "Si «Cobrar» se queda pensando, NO lo toques de nuevo: refrescá y mirá cómo quedó.",
@@ -264,7 +292,24 @@ export const TEMAS: Tema[] = [
       {
         titulo: "Abrí el cobro y mirá la caja",
         texto:
-          "Desde la mesa, «Cobrar mesa» o «Pasar a cobro»: se abre al costado sin salir del salón. Arriba del pago dice «Caja para registrar el cobro» — si estás en el bar, que diga la del bar, porque ahí es donde va a aparecer al cierre.",
+          "Desde la mesa, «Cobrar mesa» o «Pasar a cobro». A la izquierda, «Falta cobrar» con lo que queda; abajo, «Caja para registrar el cobro» — si estás en el bar, que diga la del bar, porque ahí es donde va a aparecer al cierre.",
+        imagen: "/ayuda/op-cobrar.png",
+        alt: "La pantalla de cobro: falta cobrar, la caja donde se registra, y los métodos de pago numerados.",
+        marcas: [
+          { n: 1, x: 15, y: 27 },
+          { n: 2, x: 16, y: 44 },
+          { n: 3, x: 84, y: 36 },
+        ],
+      },
+      {
+        titulo: "El método, y el recargo que trae",
+        texto:
+          "Los métodos están numerados para elegirlos con el teclado: Efectivo, Tarjeta, Link de Mercado Pago, QR de Mercado Pago, Transferencia y Otro. Los que tienen recargo lo muestran ahí mismo y ya calculado — «Tarjeta +10% · $26.400» sobre una cuenta de $24.000. Decile al cliente el número final antes de confirmar, no después.",
+        aviso: {
+          tono: "ojo",
+          texto:
+            "El recargo lo configura el dueño por método. Si un cliente discute el total, el número de la pantalla es el que se cobra: no lo redondees a mano.",
+        },
       },
       {
         titulo: "Toda la mesa o dividida",
@@ -299,7 +344,7 @@ export const TEMAS: Tema[] = [
     titulo: "La cocina y las comanderas",
     resumen: "Qué está saliendo, qué se demora, y qué hacer cuando una comanda no se imprime.",
     icono: ChefHat,
-    grupo: "turno",
+    grupo: "operacion",
     claves: [
       '"1 comanda no se imprimió" quiere decir que la cocina NO se enteró de ese plato.',
       '"sin conexión" es la PC de las impresoras caída: no sale ni un ticket hasta que vuelva.',
@@ -310,6 +355,13 @@ export const TEMAS: Tema[] = [
         titulo: "Las tres columnas",
         texto:
           "«Pendientes» son las que la cocina todavía no tomó, «En cocina» las que está haciendo, «Entregadas» las que salieron. Arriba, «Saturación por sector» te dice qué estación está tapada — parrilla, fritera, la que sea.",
+        imagen: "/ayuda/op-comandas.png",
+        alt: "La pantalla de Comandas con la saturación por sector arriba y las columnas Pendientes, En cocina y Entregadas.",
+        marcas: [
+          { n: 1, x: 17, y: 17 },
+          { n: 2, x: 11, y: 31.5 },
+          { n: 3, x: 20, y: 46 },
+        ],
       },
       {
         titulo: "La que no se imprimió",
@@ -322,9 +374,9 @@ export const TEMAS: Tema[] = [
         },
       },
       {
-        titulo: 'El cartel "sin conexión"',
+        titulo: 'El cartel "Agente de impresión sin conexión (sin señal)"',
         texto:
-          "Es la PC del local que conecta el sistema con las impresoras: apagada, dormida o sin red. Todo lo que cargues sigue funcionando pero no imprime nada. Es lo primero que hay que mirar cuando «no salen las comandas»: prendé esa máquina y las pendientes salen solas.",
+          "Aparece arriba de todo, en rojo. Es la PC del local que conecta el sistema con las impresoras: apagada, dormida o sin red. Todo lo que cargues sigue funcionando pero no imprime nada. Es lo primero que hay que mirar cuando «no salen las comandas»: prendé esa máquina y las pendientes salen solas.",
       },
       {
         titulo: "Editar o anular una comanda",
@@ -338,7 +390,7 @@ export const TEMAS: Tema[] = [
     titulo: "Los pedidos de la web",
     resumen: "Delivery y take away: aceptarlos, corregirlos, cobrarlos y avisar para cuándo están.",
     icono: Truck,
-    grupo: "turno",
+    grupo: "operacion",
     claves: [
       '«No marchó» en rojo = alguien espera comida que nunca se empezó. Es lo más urgente de la pantalla.',
       "El motivo de cancelación lo lee el cliente en el seguimiento de su pedido.",
@@ -349,7 +401,7 @@ export const TEMAS: Tema[] = [
         titulo: "Las cinco columnas",
         texto:
           "Un pedido recorre «Nuevos» → «Preparando» → «Listos» → «En camino» → «Entregados», y se mueve con el botón de su tarjeta. El número al lado de «Pedidos online» es cuántos hay sin atender: si tiene número, alguien está esperando.",
-        imagen: "/ayuda/pedidos-columnas.png",
+        imagen: "/ayuda/op-pedidos.png",
         alt: "Las cinco columnas de pedidos online: Nuevos, Preparando, Listos, En camino y Entregados.",
         marcas: [
           { n: 1, x: 7, y: 47 },
@@ -384,7 +436,7 @@ export const TEMAS: Tema[] = [
     titulo: "Reservas",
     resumen: "El libro del día, las que pide el cliente por la web, y qué hacer cuando no hay lugar.",
     icono: CalendarDays,
-    grupo: "turno",
+    grupo: "operacion",
     claves: [
       "Una solicitud sin responder vence sola y el cliente recibe que no se pudo. Miralas al empezar el turno.",
       "El motivo del rechazo se lo mandamos al cliente: escribilo pensando en que lo lee él.",
@@ -397,6 +449,8 @@ export const TEMAS: Tema[] = [
           titulo: "El día, hora por hora",
           texto:
             "La pantalla abre en hoy y lista las reservas por hora con su estado. Arriba se cambia de fecha y se busca por nombre o teléfono.",
+          imagen: "/ayuda/op-reservas.png",
+          alt: "La pestaña Reservas con el listado del día.",
         },
         {
           titulo: "Tomar una por teléfono",
@@ -420,6 +474,8 @@ export const TEMAS: Tema[] = [
           titulo: "El libro del día, por servicio",
           texto:
             "La pantalla abre en hoy, con las reservas por hora dentro de cada servicio — mediodía, cena, el que tenga el local. Arriba se cambia de fecha y se busca por nombre o teléfono.",
+          imagen: "/ayuda/op-reservas.png",
+          alt: "La pestaña Reservas con el listado del día.",
         },
         {
           titulo: "Tomar una por teléfono",
@@ -454,7 +510,7 @@ export const TEMAS: Tema[] = [
     titulo: "La rendición de los mozos",
     resumen: "La plata que los mozos tienen encima y cómo pasa al cajón antes de cerrar.",
     icono: HandCoins,
-    grupo: "turno",
+    grupo: "operacion",
     claves: [
       "Rendir no cambia el total del turno: pasa la plata de la columna del mozo a la del cajón.",
       "Sin todas las rendiciones, la caja no cierra.",
@@ -465,11 +521,22 @@ export const TEMAS: Tema[] = [
         titulo: "Quién debe cuánto",
         texto:
           'La pantalla lista los mozos con pagos pendientes del turno y, en cada uno, «Efectivo que debería entregar» con el detalle por método. Si no hay nadie, dice "No hay mozos/encargados con pagos pendientes de rendir.".',
+        imagen: "/ayuda/op-rendicion.png",
+        alt: "La pestaña Rendición, con los mozos del turno y la tabla de últimas rendiciones.",
+        marcas: [
+          { n: 1, x: 12, y: 20.5 },
+          { n: 2, x: 61, y: 33.5 },
+        ],
       },
       {
         titulo: "Tomar la entrega",
         texto:
           "Escribís en «Efectivo que entrega» lo que te dio y confirmás. Si coincide, listo. Esa plata deja de estar a nombre del mozo y pasa al cajón.",
+      },
+      {
+        titulo: "Las que ya se tomaron",
+        texto:
+          "Abajo, «Últimas rendiciones» deja la constancia: qué se esperaba, qué entregó cada uno, la diferencia —«OK» cuando cerró— y quién la registró. Es el lugar donde mirar si alguien pregunta.",
       },
       {
         titulo: "Cuando no coincide",
@@ -489,7 +556,7 @@ export const TEMAS: Tema[] = [
     titulo: "Fichaje y asistencia",
     resumen: "Quién entró, quién salió y quién no fichó todavía.",
     icono: Clock,
-    grupo: "turno",
+    grupo: "operacion",
     claves: [
       "Cada uno ficha con su PIN: no fiches por otro.",
       '"Sin fichar" a mitad del turno suele ser un olvido, no una ausencia. Preguntá.',
@@ -499,6 +566,8 @@ export const TEMAS: Tema[] = [
         titulo: "La asistencia del día",
         texto:
           '«Asistencia del día» muestra quién está adentro ahora, «Ya salieron» los que terminaron y «Sin fichar» los que todavía no marcaron. Si nadie fichó, dice "No hay nadie fichado todavía.".',
+        imagen: "/ayuda/op-fichaje.png",
+        alt: "La pestaña Fichaje con la asistencia del día y el teclado para marcar con PIN.",
       },
       {
         titulo: "Cómo se ficha",
@@ -509,55 +578,188 @@ export const TEMAS: Tema[] = [
   },
 
   // ══ El local ═════════════════════════════════════════════════════════════
+  // ══ Catálogo ═════════════════════════════════════════════════════════════
+  //
+  // «Productos e inventario» es UNA pantalla con siete pestañas, pero adentro
+  // hay cuatro trabajos que no se parecen en nada: mantener la carta, armar el
+  // menú del día, contar lo que hay, y mirar cuánto deja cada plato. Un solo
+  // tema con siete pasos obligaba a leer sobre food cost para encontrar cómo se
+  // marca un producto agotado.
   {
-    slug: "catalogo",
-    titulo: "La carta y el stock",
-    resumen: "Productos, categorías, el stock del bar y de la cocina, y el menú del día.",
+    slug: "carta",
+    titulo: "La carta: productos, categorías y sectores",
+    resumen: "Lo que el cliente ve, cómo se ordena y a qué comandera sale cada cosa.",
     icono: Package,
-    grupo: "local",
+    grupo: "catalogo",
     claves: [
-      "Marcar «No disponible» saca el producto de la carta sin borrarlo. Es lo que se usa cuando se acabó algo.",
-      "El sector de cocina decide a qué comandera sale el producto. Si está mal, el ticket sale en la impresora equivocada.",
-      "Todo movimiento de stock de cocina pide motivo.",
+      "Cuando se acaba algo, marcalo «No disponible». No lo borres.",
+      "El sector decide a qué comandera sale el producto. Sin sector, no se imprime en ningún lado.",
     ],
     pasos: [
       {
+        titulo: "Las siete pestañas",
+        texto:
+          "Arriba está todo el catálogo con su número al lado: Productos, Categorías, Sectores, Menú del día, Insumos, Costeo y Stock. Los tres primeros son la carta; los últimos tres, lo que hay en el local y cuánto cuesta.",
+        imagen: "/ayuda/cat-productos.png",
+        alt: "La pantalla Productos e inventario con sus siete pestañas y la lista de productos.",
+        marcas: [
+          { n: 1, x: 14, y: 22.5 },
+          { n: 2, x: 58, y: 30.5 },
+          { n: 3, x: 11, y: 36 },
+        ],
+      },
+      {
         titulo: "Cuando se acaba algo",
         texto:
-          "En la carta, marcar el producto como no disponible lo saca de lo que ve el cliente sin borrarlo ni perder su precio ni su historial. Cuando vuelve a haber, se reactiva. Es lo que hay que usar para «se acabó el pescado», nunca borrarlo.",
+          "Con el filtro «Disponibles / No disponibles» ves de una qué está caído. Marcar un producto como no disponible lo saca de lo que ve el cliente sin borrarlo: mantiene su precio, su receta y su historial, y cuando vuelve a haber se reactiva en un toque. Borrarlo es lo que no hay que hacer.",
       },
       {
-        titulo: "Categorías y sectores",
+        titulo: "Categorías: el orden de la carta",
         texto:
-          'Cada categoría tiene un «Sector de cocina default» —parrilla, fritera, postre— que heredan sus productos y que define a qué comandera sale el ticket. Un producto puede pisar ese default desde su propia ficha. Las categorías también se arrastran para reordenar cómo se ven en la carta.',
+          "Las categorías son cómo se agrupa la carta para el cliente, y se arrastran para reordenarlas. Cada una lleva un «Sector de cocina default» que heredan sus productos.",
+        imagen: "/ayuda/cat-categorias.png",
+        alt: "La pestaña Categorías, con las categorías agrupadas por supercategoría.",
+      },
+      {
+        titulo: "Sectores: a qué comandera sale cada cosa",
+        texto:
+          "Los sectores son las estaciones del local —cocina, parrilla, fritera, postres y café— y son los que deciden en qué impresora sale cada comanda. Un producto hereda el sector de su categoría y puede pisarlo desde su propia ficha.",
+        imagen: "/ayuda/cat-sectores.png",
+        alt: "La pestaña Sectores, con las estaciones del local.",
         aviso: {
-          tono: "ojo",
-          texto: "Un producto sin sector no se rutea a ninguna comandera. Si algo «no imprime nunca», mirá esto antes que la impresora.",
+          tono: "peligro",
+          texto:
+            "Un producto sin sector no se rutea a ninguna comandera: se vende y la cocina nunca se entera. Si algo «no imprime nunca», mirá esto antes que la impresora.",
         },
+        verTambien: { tema: "comandas", texto: "Las comandas y las impresoras" },
+      },
+    ],
+  },
+  {
+    slug: "menu-del-dia",
+    titulo: "El menú del día",
+    resumen: "Armar el combo, ponerle precio único y elegir qué días corre.",
+    icono: UtensilsCrossed,
+    grupo: "catalogo",
+    claves: [
+      "El precio del menú es único: los adicionales de los productos no se suman.",
+      "Si no marcás los días, no aparece. El menú sólo se ve los días que elegiste.",
+    ],
+    pasos: [
+      {
+        titulo: "Qué lleva adentro",
+        texto:
+          'Se arma con productos fijos —los que van sí o sí— y grupos para elegir, del tipo «Elegir una de:» con las guarniciones adentro. El cliente arma su plato dentro de lo que vos habilitaste.',
+        imagen: "/ayuda/cat-menu-del-dia.png",
+        alt: "La pestaña Menú del día con los menús cargados.",
       },
       {
-        titulo: "Stock de bar y stock de cocina",
+        titulo: "El precio",
         texto:
-          'Son dos cosas distintas. El del bar es para productos puntuales que se cuentan por unidad —alfajores, turrón— sin tocar listas globales. El de cocina va por insumos y presentaciones: se carga «Cantidad de envases», en positivo para sumar y en negativo para restar, y "El motivo es obligatorio." con ejemplos como «Merma por vencimiento, conteo físico».',
+          'Es uno solo para todo el combo: "Precio único del combo. No se suman adicionales.". Aunque el cliente elija la guarnición más cara, paga lo mismo — eso es lo que lo hace un menú y no una lista de platos.',
+      },
+      {
+        titulo: "Los días que corre",
+        texto:
+          'Marcás los días de la semana y "El menú solo va a aparecer en el catálogo esos días.". Es el olvido más común: se carga el menú un jueves, no se marcan los días, y nadie lo ve nunca.',
+      },
+    ],
+  },
+  {
+    slug: "stock",
+    titulo: "El stock y la merma",
+    resumen: "Bebidas, cocina, bar y lo que se tira. Qué contar en cada uno.",
+    icono: Boxes,
+    grupo: "catalogo",
+    claves: [
+      "Son tres stocks distintos: Bebidas, Cocina y Bar. No se mezclan.",
+      "Todo movimiento de cocina pide motivo. Es lo que después explica el número.",
+      "El número en rojo o amarillo es que está por debajo del mínimo que vos fijaste.",
+    ],
+    pasos: [
+      {
+        titulo: "Los tres stocks y la merma",
+        texto:
+          "Adentro de Stock hay cuatro pestañas y conviene no confundirlas. «Bebidas» es lo que se vende cerrado y se cuenta por unidad. «Cocina» va por insumos, en envases. «Bar» son productos puntuales —alfajores, turrón— que se cuentan aparte sin tocar las listas grandes. «Merma» es el reporte de lo que se perdió.",
+        imagen: "/ayuda/cat-stock.png",
+        alt: "La pestaña Stock con sus cuatro sub-pestañas —Bebidas, Cocina, Bar y Merma— y la tabla de productos con stock y mínimo.",
+        marcas: [
+          { n: 1, x: 15, y: 31.3 },
+          { n: 2, x: 64, y: 49 },
+          { n: 3, x: 75, y: 49 },
+        ],
+      },
+      {
+        titulo: "El stock y el mínimo",
+        texto:
+          "Cada fila tiene lo que hay y el mínimo que vos definiste. Cuando el stock baja del mínimo, el número se pinta y el sistema lo cuenta en el aviso del menú lateral. El mínimo es tuyo: ponelo en lo que tardás en reponer, no en cero.",
+      },
+      {
+        titulo: "Cargar movimientos de cocina",
+        texto:
+          'Se carga «Cantidad de envases» —"Positivo para sumar, negativo para restar."— y "El motivo es obligatorio.", con ejemplos como «Merma por vencimiento, conteo físico». Si un insumo no acepta cantidades es porque no tiene presentaciones cargadas: se le agrega al menos una desde Insumos.',
+      },
+      {
+        titulo: "Insumos: en qué viene cada cosa",
+        texto:
+          "La pestaña «Insumos» es la lista de materia prima con sus presentaciones: el envase en que se compra y cuánto trae. Es lo que hace posible cargar stock de cocina en envases en vez de en gramos, y lo que alimenta el costo de cada receta.",
+        imagen: "/ayuda/cat-insumos.png",
+        alt: "La pestaña Insumos, con la materia prima y sus presentaciones.",
+        verTambien: { tema: "costeo", texto: "De acá sale el costo de cada plato" },
       },
       {
         titulo: "La merma",
         texto:
-          "Muestra el porcentaje de pérdida de cada insumo en el período que elijas. Sirve para ver qué se está tirando; no es un inventario contable ni pretende serlo.",
-      },
-      {
-        titulo: "El menú del día",
-        texto:
-          'Se arma con productos fijos y grupos para elegir («Elegir una de:», por ejemplo el grupo Guarnición), con un precio único: "Precio único del combo. No se suman adicionales.". Se marcan los días en que corre y "El menú solo va a aparecer en el catálogo esos días.".',
+          "Muestra el porcentaje de pérdida de cada insumo en el período que elijas. Sirve para ver qué se está tirando y en qué estación; no es un inventario contable ni pretende serlo.",
       },
     ],
   },
+  {
+    slug: "costeo",
+    titulo: "Costos y margen",
+    resumen: "Cuánto cuesta cada plato, cuánto deja, y cuáles se están vendiendo a pérdida.",
+    icono: TrendingUp,
+    grupo: "catalogo",
+    claves: [
+      "Un margen en rojo es un plato que se vende a pérdida. Es lo primero que hay que mirar acá.",
+      "Sólo se puede costear lo que tiene receta cargada. El resto figura «sin receta».",
+    ],
+    pasos: [
+      {
+        titulo: "Los tres números de arriba",
+        texto:
+          '«Margen promedio» es cuánto deja la carta en general; «Con receta» cuántos productos se pueden costear; «Sin receta» los que no —"sin food cost calculable"—. Si el segundo número es chico, el margen promedio dice poco: está mirando una parte de la carta.',
+        imagen: "/ayuda/cat-costeo.png",
+        alt: "La pestaña Costeo con el margen promedio, los productos con y sin receta, y la tabla de food cost por producto.",
+        marcas: [
+          { n: 1, x: 17, y: 34 },
+          { n: 2, x: 84, y: 55.5 },
+        ],
+      },
+      {
+        titulo: "La tabla, ordenada por margen",
+        texto:
+          "Cada fila tiene el precio de venta, el food cost y el margen en porcentaje y en pesos. Ordenada por margen, arriba de todo quedan los peores. Los negativos van en rojo.",
+      },
+      {
+        titulo: "Un margen negativo",
+        texto:
+          "Quiere decir que ese plato cuesta más de lo que se cobra: cada vez que se vende, el local pierde plata. Casi siempre es una de dos cosas: subió un insumo y no se tocó el precio, o la receta está cargada con cantidades equivocadas. Las dos se arreglan, pero hay que mirarlo.",
+        aviso: {
+          tono: "ojo",
+          texto:
+            "Antes de correr a cambiar precios, revisá la receta: un margen de −90% suele ser un error de carga (gramos donde iban kilos) y no un plato regalado.",
+        },
+      },
+    ],
+  },
+
   {
     slug: "salones",
     titulo: "Salones y mesas",
     resumen: "Armar el plano: crear salones, agregar mesas y moverlas cuando cambia el local.",
     icono: Table2,
-    grupo: "local",
+    grupo: "resto",
     claves: [
       "Borrar un salón borra sus mesas. Las reservas viejas no se borran, pero quedan sin mesa.",
       "El plano es lo que ve el mozo: si el salón cambió de verdad, cambialo acá el mismo día.",
@@ -589,7 +791,7 @@ export const TEMAS: Tema[] = [
     titulo: "Proveedores y facturas de compra",
     resumen: "Quién nos vende qué, y cargar la factura que llega con la mercadería.",
     icono: Building2,
-    grupo: "local",
+    grupo: "resto",
     claves: [
       "Sacale la foto a la factura cuando llega. Después no aparece.",
       "Vincular el proveedor con sus insumos es lo que hace que los costos salgan solos.",
@@ -617,7 +819,7 @@ export const TEMAS: Tema[] = [
     titulo: "Comprobantes",
     resumen: "Las facturas emitidas, las que fallaron y cómo se anula una mal hecha.",
     icono: FileText,
-    grupo: "local",
+    grupo: "resto",
     claves: [
       "Una factura no se corrige: se anula con nota de crédito y se emite de nuevo.",
       "Un rechazo de datos de ARCA no se arregla reintentando. Un error de conexión sí.",
@@ -652,7 +854,7 @@ export const TEMAS: Tema[] = [
     titulo: "Los clientes",
     resumen: "Quién pide, qué pide y hace cuánto que no viene.",
     icono: Users,
-    grupo: "clientes",
+    grupo: "resto",
     claves: [
       "«Días desde el último» es el dato que dice a quién hay que llamar.",
       "Un cliente sin direcciones guardadas puede ser de retiro, no un error.",
@@ -676,7 +878,7 @@ export const TEMAS: Tema[] = [
     titulo: "Promos y campañas",
     resumen: "Códigos de descuento y mensajes para traer de vuelta a los que no vienen.",
     icono: Tag,
-    grupo: "clientes",
+    grupo: "resto",
     claves: [
       "Una promo activa la puede usar cualquiera en el checkout: revisá el pedido mínimo antes de activarla.",
       "En una campaña, cada cliente recibe un código personal de un solo uso.",
@@ -709,7 +911,7 @@ export const TEMAS: Tema[] = [
     titulo: "WhatsApp y el bot",
     resumen: "Las conversaciones con los clientes y cuándo sacarle el teclado al bot.",
     icono: MessagesSquare,
-    grupo: "clientes",
+    grupo: "resto",
     claves: [
       "Mientras el agente está prendido, el bot contesta y vos no podés escribir.",
       "Apagalo para atender vos; prendelo de nuevo cuando termines, o el cliente queda sin respuesta automática.",
@@ -891,7 +1093,7 @@ export const TEMAS: Tema[] = [
           "El cobro entró bien, pero la factura A no salió porque falta el CUIT del cliente. Pedile el CUIT y emitila desde la sección Facturación: el pago ya está, lo que falta es el papel.",
       },
       {
-        titulo: '"sin conexión" en Comandas',
+        titulo: '"Agente de impresión sin conexión (sin señal)"',
         texto:
           "La PC del local que conecta el sistema con las impresoras está caída. Todo lo que cargues sigue registrándose, pero no sale ni un ticket. Prendé esa máquina: cuando vuelve, las comandas pendientes salen solas.",
         aviso: {
@@ -899,6 +1101,18 @@ export const TEMAS: Tema[] = [
           texto: "Es lo primero que hay que mirar cuando «no salen las comandas». Mientras esté, avisale a la cocina de palabra.",
         },
         verTambien: { tema: "comandas", texto: "La cocina y las comanderas" },
+      },
+      {
+        titulo: "Un margen en rojo en Costeo",
+        texto:
+          "Ese plato cuesta más de lo que se cobra: cada vez que se vende, el local pierde. Antes de tocar el precio, revisá la receta — un −90% suele ser gramos cargados donde iban kilos.",
+        verTambien: { tema: "costeo", texto: "Costos y margen" },
+      },
+      {
+        titulo: "Un stock en rojo o amarillo",
+        texto:
+          "Está por debajo del mínimo que vos fijaste para ese producto. No frena nada, pero es el aviso de reponer. El mismo número aparece en el menú lateral, al lado de «Productos e inventario».",
+        verTambien: { tema: "stock", texto: "El stock y la merma" },
       },
       {
         titulo: '"El motivo es obligatorio." (stock de cocina)',

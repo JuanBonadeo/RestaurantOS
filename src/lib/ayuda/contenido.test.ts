@@ -1,3 +1,6 @@
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -18,17 +21,33 @@ const RESERVAS = temaPorSlug("reservas")!;
 // puede pudrir sin que nadie se entere.
 
 describe("contenido de la guía · estructura", () => {
-  it("los dieciséis temas, en orden y agrupados", () => {
+  it("los diecinueve temas, en orden y agrupados", () => {
     expect(TEMAS.map((t) => t.slug)).toEqual([
-      // Tu turno
+      // Operación — las siete pestañas del turno
       "caja", "mesas", "cobrar", "comandas", "pedidos", "reservas", "rendicion", "fichaje",
-      // El local
-      "catalogo", "salones", "proveedores", "facturacion",
-      // Los clientes
-      "clientes", "promociones", "conversaciones",
+      // Catálogo — lo que se vende y lo que hay
+      "carta", "menu-del-dia", "stock", "costeo",
+      // Lo demás del panel
+      "salones", "proveedores", "facturacion", "clientes", "promociones", "conversaciones",
       // Si algo falla
       "carteles",
     ]);
+  });
+
+  // El pedido de Juan fue "enfocá la guía en operación y catálogo, bien
+  // visual". Esto lo vuelve verificable: si alguien agrega pasos a esos dos
+  // grupos sin captura, el test avisa antes de que la guía se vuelva un muro
+  // de texto donde justamente no tiene que serlo.
+  it("los temas de Operación y Catálogo abren con una captura", () => {
+    const foco = TEMAS.filter((t) => t.grupo === "operacion" || t.grupo === "catalogo");
+    expect(foco.length).toBeGreaterThan(0);
+    for (const tema of foco) {
+      const pasos = pasosDe(tema, "estricto");
+      expect(
+        pasos.some((paso) => Boolean(paso.imagen)),
+        `«${tema.titulo}» no tiene ni una captura`,
+      ).toBe(true);
+    }
   });
 
   it("todo tema cae en un grupo que el índice pinta", () => {
@@ -54,6 +73,24 @@ describe("contenido de la guía · estructura", () => {
     for (const tema of TEMAS) {
       expect(tema.claves.length, `${tema.slug}`).toBeGreaterThan(0);
       expect(tema.claves.length, `${tema.slug}`).toBeLessThanOrEqual(3);
+    }
+  });
+
+  // El renderer imprime `texto` tal cual: no hay markdown. Un `**negrita**` se
+  // ve con los asteriscos puestos, que fue exactamente lo que pasó la primera
+  // vez que se escribió el tema de stock. Para destacar se usan «comillas».
+  it("no hay markdown en el texto: el renderer no lo interpreta", () => {
+    const todos: Paso[] = TEMAS.flatMap((t) => [
+      ...t.pasos,
+      ...Object.values(t.pasosPorModo ?? {}).flat(),
+    ]);
+    for (const paso of todos) {
+      expect(paso.texto, `${paso.titulo}`).not.toMatch(/\*\*|__|^[-*] |\[.+\]\(.+\)/m);
+    }
+    for (const tema of TEMAS) {
+      for (const clave of tema.claves) {
+        expect(clave, tema.slug).not.toMatch(/\*\*|__/);
+      }
     }
   });
 
@@ -84,6 +121,26 @@ describe("contenido de la guía · estructura", () => {
           paso.verTambien.tema,
         );
       }
+    }
+  });
+
+  // Las capturas se sacan a mano y se pegan a mano: los dos errores posibles
+  // son apuntar a un PNG que no existe (hueco en la guía) y dejar un PNG que
+  // ya nadie usa (peso muerto que igual se despliega).
+  it("cada captura referenciada existe, y cada PNG está referenciado", () => {
+    const dir = join(process.cwd(), "public", "ayuda");
+    const enDisco = new Set(readdirSync(dir).filter((f) => f.endsWith(".png")));
+    const usadas = new Set(
+      TEMAS.flatMap((t) => [...t.pasos, ...Object.values(t.pasosPorModo ?? {}).flat()])
+        .map((paso) => paso.imagen)
+        .filter((x): x is string => Boolean(x))
+        .map((ruta) => ruta.replace("/ayuda/", "")),
+    );
+    for (const usada of usadas) {
+      expect(enDisco, `la guía apunta a ${usada}, que no está en public/ayuda`).toContain(usada);
+    }
+    for (const archivo of enDisco) {
+      expect(usadas, `${archivo} no lo usa ningún tema`).toContain(archivo);
     }
   });
 
@@ -149,8 +206,8 @@ describe("contenido de la guía · navegación", () => {
     // «fichaje» cierra Tu turno: el siguiente tiene que ser el primero de El
     // local. Si el encadenado se cortara por grupo, la guía se leería entera
     // sólo hasta el final del primer bloque.
-    expect(temaSiguiente("fichaje", "estricto")?.slug).toBe("catalogo");
-    expect(temaSiguiente("facturacion", "estricto")?.slug).toBe("clientes");
+    expect(temaSiguiente("fichaje", "estricto")?.slug).toBe("carta");
+    expect(temaSiguiente("costeo", "estricto")?.slug).toBe("salones");
   });
 
   it("saltea los temas que todavía no están escritos", () => {
