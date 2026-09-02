@@ -61,8 +61,14 @@ describe("renderDeliveryMessage", () => {
     expect(render({ customerPhone: "  " })).toBeNull();
   });
 
-  it("un estado no notificable (pending/confirmed) no produce mensaje", () => {
-    expect(render({ status: "pending" })).toBeNull();
+  // Spec 139 — `pending` pasó a notificar: es el acuse de que el pedido entró.
+  // `confirmed` sigue sin avisar (el cliente ya sabe que el local lo tomó
+  // cuando cambia el seguimiento, y el aviso útil es el de «preparando»).
+  it("el acuse de `pending` sí produce mensaje", () => {
+    expect(render({ status: "pending" })).toContain("Recibimos tu pedido");
+  });
+
+  it("un estado no notificable (confirmed) no produce mensaje", () => {
     expect(render({ status: "confirmed" })).toBeNull();
   });
 
@@ -98,7 +104,14 @@ describe("shouldNotifyDeliveryStatus (agnóstico de canal)", () => {
   });
 
   it("estado no notificable → false", () => {
-    expect(shouldNotifyDeliveryStatus({ status: "pending", deliveryType: "delivery" })).toBe(false);
+    expect(shouldNotifyDeliveryStatus({ status: "confirmed", deliveryType: "delivery" })).toBe(false);
+  });
+
+  // Spec 139 — el acuse es para lo online: en el salón el mozo está ahí.
+  it("el acuse sale en delivery y retiro, no en salón", () => {
+    expect(shouldNotifyDeliveryStatus({ status: "pending", deliveryType: "delivery" })).toBe(true);
+    expect(shouldNotifyDeliveryStatus({ status: "pending", deliveryType: "pickup" })).toBe(true);
+    expect(shouldNotifyDeliveryStatus({ status: "pending", deliveryType: "dine_in" })).toBe(false);
   });
 });
 
@@ -130,11 +143,43 @@ describe("renderDeliveryBody (sin exigir teléfono, para email)", () => {
 });
 
 describe("isDeliveryNotifyStatus / defaults", () => {
-  it("reconoce los 5 estados notificables", () => {
-    for (const s of ["preparing", "ready", "on_the_way", "delivered", "cancelled"]) {
+  it("reconoce los 7 estados notificables", () => {
+    for (const s of [
+      "pending",
+      "preparing",
+      "ready",
+      "on_the_way",
+      "delivered",
+      "cancelled",
+      "rejected",
+    ]) {
       expect(isDeliveryNotifyStatus(s)).toBe(true);
       expect(DEFAULT_DELIVERY_TEMPLATES[s as keyof typeof DEFAULT_DELIVERY_TEMPLATES]).toBeTruthy();
     }
-    expect(isDeliveryNotifyStatus("pending")).toBe(false);
+    expect(isDeliveryNotifyStatus("confirmed")).toBe(false);
+  });
+
+  // Spec 139 — el rechazo lleva el motivo, y sin motivo no queda una frase
+  // colgada. Es un aviso, no un estado del pedido.
+  it("el rechazo incluye el motivo cuando lo hay", () => {
+    const conMotivo = renderDeliveryBody({
+      status: "rejected",
+      deliveryType: "delivery",
+      customerName: "Ana",
+      orderNumber: 42,
+      businessName: "Golf",
+      motivo: "ya estamos cerrando la cocina",
+    });
+    expect(conMotivo).toContain("Motivo: ya estamos cerrando la cocina.");
+
+    const sinMotivo = renderDeliveryBody({
+      status: "rejected",
+      deliveryType: "delivery",
+      customerName: "Ana",
+      orderNumber: 42,
+      businessName: "Golf",
+    })!;
+    expect(sinMotivo).not.toContain("Motivo:");
+    expect(sinMotivo).not.toContain("  ");
   });
 });

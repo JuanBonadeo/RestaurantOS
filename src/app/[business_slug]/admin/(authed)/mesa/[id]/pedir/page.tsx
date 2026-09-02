@@ -7,6 +7,7 @@ import {
   getComandasByOrder,
 } from "@/lib/comandas/queries";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
+import { canSee } from "@/lib/permissions/sections";
 import { getBusiness } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
@@ -27,13 +28,9 @@ export default async function AdminPedirPage({
   if (!business) notFound();
 
   const ctx = await ensureAdminAccess(business.id, business_slug);
-  // Solo encargado / admin / platform admin. Si es mozo, lo mandamos al
-  // pedir de la misma mesa en su propia UI (no al panel admin).
-  if (
-    !ctx.isPlatformAdmin &&
-    ctx.role !== "admin" &&
-    ctx.role !== "encargado"
-  ) {
+  // Spec 140: el gate sale de la matriz. La `terminal` opera desde el panel y
+  // rebotarla a la UI móvil del mozo la sacaría del flujo a mitad de la carga.
+  if (!canSee("operacion", ctx.role, { isPlatformAdmin: ctx.isPlatformAdmin })) {
     redirect(`/${business_slug}/mozo/mesa/${tableId}/pedir`);
   }
 

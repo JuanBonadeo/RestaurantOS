@@ -8,7 +8,10 @@ import {
   canAnularFactura,
   canApplyDiscount,
   canCancelItem,
+  canAssignMozo,
   canCargarPedido,
+  canCargarPedidoMesa,
+  canConfirmOrder,
   canCorregirCobro,
   canCrearPedidoFlash,
   canHacerCorte,
@@ -20,8 +23,11 @@ import {
   canMoveTable,
   canModifyPostEnvio,
   canOverrideItemPrice,
+  canDecideReservation,
   canRendirMozo,
   canSeatReservation,
+  canTransferTable,
+  canTransitionMesa,
 } from "./can";
 
 describe("permissions / canMoveTable", () => {
@@ -233,5 +239,75 @@ describe("permissions / canConfigureReservations", () => {
 
   it("sin membership (null) no puede", () => {
     expect(canConfigureReservations(null)).toBe(false);
+  });
+});
+
+// ── Spec 140 · el rol `terminal` ────────────────────────────────────────
+//
+// La terminal es el puesto compartido del salón, no una persona. Opera el
+// salón entero (cualquier mesa, no "la suya") pero no toca nada de plata de
+// supervisión: ni cortes, ni sangrías, ni correcciones, ni anulaciones.
+
+describe("permissions / rol terminal (spec 140)", () => {
+  it("opera el salón: carga pedidos de mesa, transfiere cualquier mesa y asigna mozos", () => {
+    expect(canCargarPedidoMesa("terminal")).toBe(true);
+    expect(canTransferTable("terminal", false, false)).toBe(true);
+    expect(canAssignMozo("terminal")).toBe(true);
+    expect(canManageReservations("terminal")).toBe(true);
+  });
+
+  it("transfiere sin ser origen ni reclamar para sí — a diferencia del mozo", () => {
+    // El mozo necesita una de las dos; la terminal no tiene mesas propias.
+    expect(canTransferTable("mozo", false, false)).toBe(false);
+    expect(canTransferTable("terminal", false, false)).toBe(true);
+  });
+
+  it("no toca la plata de supervisión", () => {
+    expect(canHacerCorte("terminal")).toBe(false);
+    expect(canMakeSangria("terminal")).toBe(false);
+    expect(canCorregirCobro("terminal")).toBe(false);
+    expect(canRendirMozo("terminal")).toBe(false);
+    expect(canAcceptCajaDifference("terminal", 1)).toBe(false);
+    expect(canManageCajas("terminal")).toBe(false);
+  });
+
+  it("no anula ni corrige lo ya enviado", () => {
+    expect(canCancelItem("terminal")).toBe(false);
+    expect(canModifyPostEnvio("terminal")).toBe(false);
+    expect(canMarkRotura("terminal")).toBe(false);
+    expect(canOverrideItemPrice("terminal")).toBe(false);
+    expect(canAnularFactura("terminal")).toBe(false);
+    expect(canTransitionMesa("terminal", "ocupada", "libre")).toBe(false);
+  });
+
+  it("no carga pedidos de mostrador ni confirma los que entran solos", () => {
+    // Lo de mesa sí (arriba); esto es la cola de delivery/take-away.
+    expect(canCargarPedido("terminal")).toBe(false);
+    expect(canConfirmOrder("terminal")).toBe(false);
+    expect(canCrearPedidoFlash("terminal")).toBe(false);
+  });
+
+  it("aplica el mismo descuento que el mozo, no el del encargado", () => {
+    expect(canApplyDiscount("terminal", DESCUENTO_BAJO_PCT)).toBe(true);
+    expect(canApplyDiscount("terminal", DESCUENTO_BAJO_PCT + 1)).toBe(false);
+    expect(canApplyDiscount("terminal", DESCUENTO_MEDIO_PCT)).toBe(false);
+  });
+
+  it("no decide ni configura reservas, sólo las gestiona", () => {
+    expect(canDecideReservation("terminal")).toBe(false);
+    expect(canConfigureReservations("terminal")).toBe(false);
+  });
+
+  it("no cambia nada para el mozo: sigue con las reglas de su mesa", () => {
+    expect(canCargarPedidoMesa("mozo")).toBe(true);
+    expect(canTransferTable("mozo", true, false)).toBe(true);
+    expect(canTransferTable("mozo", false, true)).toBe(true);
+    expect(canAssignMozo("mozo")).toBe(false);
+  });
+
+  it("`personal` sigue sin operar nada", () => {
+    expect(canCargarPedidoMesa("personal")).toBe(false);
+    expect(canTransferTable("personal", true, true)).toBe(false);
+    expect(canAssignMozo("personal")).toBe(false);
   });
 });

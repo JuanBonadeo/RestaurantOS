@@ -27,7 +27,14 @@ const DEFAULT_TZ = "America/Argentina/Buenos_Aires";
  */
 export async function notifyDeliveryStatusChange(params: {
   orderId: string;
+  /**
+   * El estado que dispara el aviso. Casi siempre es el estado nuevo del pedido;
+   * `rejected` (spec 139) es la excepción: el pedido queda `cancelled`, pero el
+   * aviso que se manda es el del rechazo, que es otra noticia.
+   */
   toStatus: string;
+  /** Spec 139 — el motivo del rechazo, que viaja al cliente. */
+  motivo?: string;
 }): Promise<void> {
   try {
     const service = createSupabaseServiceClient();
@@ -60,6 +67,7 @@ export async function notifyDeliveryStatusChange(params: {
 
     const body = renderDeliveryBody({
       status: params.toStatus,
+      motivo: params.motivo,
       deliveryType: order.delivery_type,
       customerName: order.customer_name,
       orderNumber: order.order_number,

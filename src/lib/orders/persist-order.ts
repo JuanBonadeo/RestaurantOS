@@ -5,6 +5,7 @@ import { menuDisponibleHoy } from "@/lib/daily-menus/disponible-hoy";
 import { currentDayOfWeek } from "@/lib/day-of-week";
 import { formatCurrency } from "@/lib/currency";
 import { createNotification } from "@/lib/notifications/create";
+import { notifyDeliveryStatusChange } from "@/lib/notifications/delivery-notify";
 import { createPreference } from "@/lib/payments/mercadopago";
 import { customerPhoneKey } from "@/lib/phone";
 import { validatePromoCode } from "@/lib/promos/validate";
@@ -887,6 +888,12 @@ export async function persistOrder(
         totalCents,
       },
     });
+
+    // Spec 139 — y el acuse al cliente. Hasta acá el primer aviso que recibía
+    // era `preparing`: entre que pedía y que el local marchaba, silencio —
+    // justo el tramo en el que su pedido está esperando una decisión.
+    // Best-effort, como el resto de los avisos.
+    await notifyDeliveryStatusChange({ orderId: order.id, toStatus: "pending" });
   }
 
   // Auto-march (spec 047): ningún pedido marcha a cocina al crearse. Nace en

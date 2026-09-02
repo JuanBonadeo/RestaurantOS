@@ -215,7 +215,9 @@ export const TEMAS: Tema[] = [
       {
         titulo: "Sacar y meter plata",
         texto:
-          '«Sangría» saca efectivo —depósito, pago a proveedor— y pide motivo obligatorio: "La sangría requiere un motivo.". «Ingreso» es al revés, para el cambio que se repone. Escribí motivos que se entiendan dentro de un mes: «pago proveedor verdulería», no «varios».',
+          '«Sangría» saca efectivo —depósito, pago a proveedor— y el motivo tiene asterisco rojo: es obligatorio, y sin él no te deja registrar. «Ingreso» es el mismo formulario al revés, para el cambio que se repone. Escribí motivos que se entiendan dentro de un mes: «pago proveedor verdulería», no «varios».',
+        imagen: "/ayuda/det-caja-sangria.png",
+        alt: "El formulario de sangría: monto, y motivo marcado como obligatorio con un asterisco rojo.",
       },
       {
         titulo: "Antes de cerrar, que los mozos rindan",
@@ -622,7 +624,10 @@ export const TEMAS: Tema[] = [
       {
         titulo: "Cuando se acaba algo",
         texto:
-          "Con el filtro «Disponibles / No disponibles» ves de una qué está caído. Marcar un producto como no disponible lo saca de lo que ve el cliente sin borrarlo: mantiene su precio, su receta y su historial, y cuando vuelve a haber se reactiva en un toque. Borrarlo es lo que no hay que hacer.",
+          "Marcar un producto como no disponible lo saca de lo que ve el cliente sin borrarlo: mantiene su precio, su receta y su historial, y cuando vuelve a haber se reactiva en un toque. El filtro de arriba —Todos, Disponibles, No disponibles— te muestra de una qué está caído, que es lo que conviene repasar antes de abrir. Borrar el producto es lo que NO hay que hacer.",
+        imagen: "/ayuda/det-carta-nodisponibles.png",
+        alt: "El filtro de disponibilidad de la carta, con «No disponibles» seleccionado.",
+        marcas: [{ n: 1, x: 68, y: 56 }],
       },
       {
         titulo: "Categorías: el orden de la carta",
@@ -701,9 +706,16 @@ export const TEMAS: Tema[] = [
         ],
       },
       {
-        titulo: "El stock y el mínimo",
+        titulo: "El stock, el mínimo y lo que hay que reponer",
         texto:
-          "Cada fila tiene lo que hay y el mínimo que vos definiste. Cuando el stock baja del mínimo, el número se pinta y el sistema lo cuenta en el aviso del menú lateral. El mínimo es tuyo: ponelo en lo que tardás en reponer, no en cero.",
+          "Cada fila tiene lo que hay, el mínimo que vos definiste y una columna Estado. Arriba dice cuántos insumos están activos y cuántos «con alerta», y los filtros Todos / Alertas / Agotados te dejan ver sólo lo que falta: es la lista de compras del día, sin buscarla a mano. El mínimo es tuyo — ponelo en lo que tardás en reponer, no en cero.",
+        imagen: "/ayuda/det-stock-cocina.png",
+        alt: "El stock de cocina con el contador de insumos con alerta, los filtros Todos, Alertas y Agotados, y la columna Estado.",
+        marcas: [
+          { n: 1, x: 23, y: 56 },
+          { n: 2, x: 68, y: 54 },
+          { n: 3, x: 75, y: 72 },
+        ],
       },
       {
         titulo: "Cargar movimientos de cocina",

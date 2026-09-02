@@ -12,6 +12,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/currency";
+import { tonoDeEspera } from "@/lib/orders/espera";
 import { entregaLabel } from "@/lib/orders/entrega";
 import {
   DEFAULT_MARCH_LEAD_KITCHEN_MIN,
@@ -65,10 +66,19 @@ function formatElapsed(minutes: number): string {
   return `${days} d`;
 }
 
-function elapsedTone(min: number, isTerminal: boolean): string {
-  if (isTerminal) return "text-muted-foreground";
-  if (min >= 30) return "text-rose-700";
-  if (min >= 15) return "text-amber-700";
+/**
+ * Spec 139 — el color del contador. La escala la decide `tonoDeEspera`, que le
+ * da su propia (más corta) al pedido que todavía nadie confirmó: no es lo mismo
+ * esperar 12 minutos en cocina que esperar 12 minutos a que alguien lo mire.
+ */
+function elapsedTone(
+  min: number,
+  isTerminal: boolean,
+  esperandoDecision: boolean,
+): string {
+  const tono = tonoDeEspera({ minutos: min, esperandoDecision, terminal: isTerminal });
+  if (tono === "grave") return "text-rose-700";
+  if (tono === "demorado") return "text-amber-700";
   return "text-muted-foreground";
 }
 
@@ -78,6 +88,7 @@ export function OrderCard({
   timezone,
   onAdvance,
   onConfirm,
+  onReject,
   onAccept,
   marchLeadKitchenMin = DEFAULT_MARCH_LEAD_KITCHEN_MIN,
   onChanged,
@@ -92,6 +103,8 @@ export function OrderCard({
    *  botón "Confirmar" llama acá en lugar de pasar a `confirmed`. La action
    *  resuelve sectores y crea las comandas para cocina. */
   onConfirm?: (order: AdminOrder) => void;
+  /** Spec 139 — el local no toma este pedido. Pide motivo y le avisa al cliente. */
+  onReject?: (order: AdminOrder) => void;
   /** Avalar un programado sin marcharlo (spec 061): pasa a `confirmed` y el
    *  cron lo toma a su hora. Sólo lo necesita el programado impago del
    *  checkout — el que carga el encargado ya nace avalado. */
@@ -269,7 +282,7 @@ export function OrderCard({
               </span>
             ) : (
               <span
-                className={`text-xs font-medium tabular-nums ${elapsedTone(elapsed, isTerminal)}`}
+                className={`text-xs font-medium tabular-nums ${elapsedTone(elapsed, isTerminal, isPendingOnline)}`}
               >
                 {formatElapsed(elapsed)}
               </span>
@@ -362,6 +375,22 @@ export function OrderCard({
                 {/* Sobre un agendado, «Confirmar» es marcharlo antes de hora. */}
                 {agendado ? "Marchar ya" : confirmLabel}
               </Button>
+              {/* Spec 139 — la otra mitad de la decisión. Antes sólo se podía
+                  decir que sí; decir que no era «cancelar», que para el cliente
+                  es otra cosa. */}
+              {onReject && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 font-semibold text-rose-700 hover:bg-rose-50 hover:text-rose-800"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onReject(order);
+                  }}
+                >
+                  Rechazar
+                </Button>
+              )}
             </div>
           ) : (
             advanceLabel &&

@@ -9,6 +9,7 @@ import { getPendingOrderCount } from "@/lib/admin/orders-query";
 import { getLowKitchenStockCount } from "@/lib/ingredients/queries";
 import { countUnread, listForUser } from "@/lib/notifications/queries";
 import { getLowStockCount } from "@/lib/stock/queries";
+import { hasAnySection } from "@/lib/permissions/sections";
 import { getBusiness, getBusinessSettings } from "@/lib/tenant";
 
 export default async function AdminAuthedLayout({
@@ -24,11 +25,15 @@ export default async function AdminAuthedLayout({
 
   const ctx = await ensureAdminAccess(business.id, business_slug);
 
-  // Hard gate: el mozo NO entra al panel admin. Su superficie es /mozo
-  // (Mis mesas). Cubre todas las páginas bajo /admin/(authed)/* con un
-  // único redirect — más simple que repetirlo en cada page. El platform
-  // admin pasa siempre, aunque no tenga rol asignado.
-  if (!ctx.isPlatformAdmin && ctx.role === "mozo") {
+  // Hard gate: quien no ve ninguna sección del panel no entra. Cubre todas las
+  // páginas bajo /admin/(authed)/* con un único redirect — más simple que
+  // repetirlo en cada page. El platform admin pasa siempre, aunque no tenga rol.
+  //
+  // Spec 140: antes esto era una blacklist (`role === "mozo"` → afuera) y por
+  // eso la celda `operacion: "limited"` del mozo nunca llegaba a evaluarse.
+  // Ahora manda la matriz, que es lo que deja entrar a `terminal` —el puesto
+  // compartido del salón— sin abrirle la puerta al mozo, que sigue en /mozo.
+  if (!ctx.isPlatformAdmin && !hasAnySection(ctx.role)) {
     redirect(`/${business_slug}/mozo`);
   }
 

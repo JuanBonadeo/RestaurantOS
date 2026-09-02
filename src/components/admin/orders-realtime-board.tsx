@@ -11,6 +11,7 @@ import {
   aceptarPedidoProgramado,
   confirmarPedido,
 } from "@/lib/orders/confirm-order";
+import { rechazarPedido } from "@/lib/orders/rechazar-pedido";
 import {
   isScheduledForLater,
   marchAtForOrder,
@@ -133,6 +134,10 @@ export function OrdersRealtimeBoard({
 }) {
   const [orders, setOrders] = useState<AdminOrder[]>(initialOrders);
   const [newlyArrived, setNewlyArrived] = useState<Set<string>>(new Set());
+  // Spec 139 — rechazar pide motivo: es lo que el cliente va a leer.
+  const [rechazando, setRechazando] = useState<AdminOrder | null>(null);
+  const [motivoRechazo, setMotivoRechazo] = useState("");
+  const [rechazoEnCurso, setRechazoEnCurso] = useState(false);
   const [soundUnlocked, setSoundUnlocked] = useState(false);
   // Spec 054 — sheet para cargar a mano un pedido para llevar/delivery.
   const [cargarOpen, setCargarOpen] = useState(false);
@@ -309,6 +314,36 @@ export function OrdersRealtimeBoard({
           ),
         );
       }
+    },
+    [slug, fetchOrder],
+  );
+
+  /**
+   * Spec 139 — el local no toma el pedido. Pide motivo (le llega al cliente) y,
+   * si estaba pagado, dispara el reembolso por Mercado Pago.
+   */
+  const handleReject = useCallback(
+    async (order: AdminOrder, motivo: string) => {
+      const result = await rechazarPedido({
+        order_id: order.id,
+        business_slug: slug,
+        motivo,
+      });
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      const devuelto =
+        result.data.refund === "refunded"
+          ? " · plata devuelta"
+          : result.data.refund === "manual"
+            ? " · ⚠️ la devolución quedó pendiente, hacela por Mercado Pago"
+            : "";
+      toast.success(`Pedido #${order.daily_number} rechazado${devuelto}`);
+      const fresh = await fetchOrder(order.id);
+      setOrders((prev) =>
+        prev.map((o) => (o.id === order.id ? (fresh ?? o) : o)),
+      );
     },
     [slug, fetchOrder],
   );
@@ -508,6 +543,10 @@ export function OrdersRealtimeBoard({
                     timezone={timezone}
                     onAdvance={handleAdvance}
                     onConfirm={handleConfirm}
+                    onReject={(o) => {
+                      setMotivoRechazo("");
+                      setRechazando(o);
+                    }}
                     onAccept={handleAceptarProgramado}
                     marchLeadKitchenMin={marchLeadKitchenMin}
                     onChanged={() => void refetchOrders()}
@@ -548,6 +587,74 @@ export function OrdersRealtimeBoard({
             ))}
           </div>
         </details>
+      )}
+
+      {/* Spec 139 — el motivo del rechazo es lo que el cliente va a leer, así
+          que se pide siempre. */}
+      {rechazando && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
+          onClick={() => !rechazoEnCurso && setRechazando(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-bold text-zinc-900">
+              ¿Rechazar el pedido #{rechazando.daily_number}?
+            </h3>
+            <p className="mt-1.5 text-sm text-zinc-600">
+              Le avisamos a{" "}
+              <span className="font-semibold">{rechazando.customer_name}</span>{" "}
+              que no pudimos tomarlo.
+              {rechazando.payment_status === "paid" && (
+                <>
+                  {" "}
+                  Como ya pagó, se le devuelve la plata por Mercado Pago.
+                </>
+              )}
+            </p>
+            <label className="mt-4 block text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+              Motivo
+            </label>
+            <input
+              type="text"
+              value={motivoRechazo}
+              onChange={(e) => setMotivoRechazo(e.target.value)}
+              maxLength={200}
+              autoFocus
+              placeholder="Ej: ya estamos cerrando la cocina"
+              className="mt-1.5 h-10 w-full rounded-xl border-0 bg-zinc-100 px-3 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300"
+            />
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setRechazando(null)}
+                disabled={rechazoEnCurso}
+                className="flex-1 rounded-xl bg-zinc-100 px-4 py-2.5 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-200 disabled:opacity-60"
+              >
+                Volver
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!motivoRechazo.trim()) {
+                    toast.error("Decile al cliente por qué.");
+                    return;
+                  }
+                  setRechazoEnCurso(true);
+                  await handleReject(rechazando, motivoRechazo);
+                  setRechazoEnCurso(false);
+                  setRechazando(null);
+                }}
+                disabled={rechazoEnCurso}
+                className="flex-1 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:opacity-60"
+              >
+                Rechazar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

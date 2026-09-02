@@ -2,7 +2,7 @@
 
 **Issue:** [#212](https://github.com/gachetponzellini/RestaurantOS-app/issues/212) ·
 **Milestone:** Post-demo · Growth & hardening ·
-**Estado:** 📝 spec aprobada (decisiones tomadas por Juan el 2026-08-31) — lista para implementar
+**Estado:** implementada y verificada en vivo (2026-09-02)
 
 **Input:** Juan, 2026-08-31: *"lo mismo que hicimos de que las reservas, de que
 se tienen que confirmar, lo vamos a hacer con los pedidos ahora"*.
@@ -74,11 +74,12 @@ mano, que es como se ve hoy.
 
 ## Alcance
 
-### Datos — migración `0056_aviso_de_pedido_recibido.sql`
+### Datos — migraciones `0056` y `0057`
 
-`delivery_message_templates_status_check` acepta `pending`. Es la única
-consecuencia de D2: el acuse es un estado notificable más, con su plantilla
-editable en Ajustes › Notificaciones, como los otros cinco.
+`delivery_message_templates_status_check` acepta `pending` (el acuse) y
+`rejected` (el aviso del rechazo). Los dos son estados **notificables**, no
+estados del pedido: por dentro un rechazo sigue siendo `cancelled`. Cada uno
+trae su plantilla editable en Ajustes › Notificaciones, como los otros cinco.
 
 ### Dominio
 
@@ -139,8 +140,28 @@ editable en Ajustes › Notificaciones, como los otros cinco.
 
 ## Verificación
 
-- Unit: los dos pasos de D1 según estado, el cuerpo del acuse y del rechazo, y
-  el umbral de la espera que molesta.
-- `pnpm typecheck` + tests en verde.
-- En vivo en `demo`: hacer un pedido online, ver el seguimiento diciendo la
-  verdad, confirmarlo desde el board, y rechazar otro con motivo.
+`pnpm typecheck` en verde y **1918 tests unitarios** en verde. Nuevos: la escala
+de espera (`espera.test.ts`, con el caso de que los mismos minutos en cocina no
+son noticia) y, en las plantillas, el acuse, el rechazo con y sin motivo, y que
+el acuse no sale en salón.
+
+### Verificado en vivo (2026-09-02, `demo`)
+
+| Escenario | Resultado |
+|---|---|
+| 1 · el seguimiento no miente | pedido recién hecho: **«Esperando que el local lo confirme»**, donde antes decía «El local confirmó tu pedido» |
+| 2 · acuse | se encoló *«Recibimos tu pedido #15. Te avisamos apenas Restaurante Demo lo confirme.»* |
+| 3 · confirmar | el primer paso pasó a **«Confirmado»** y el pedido a «Están preparando la comida» |
+| 4 · rechazar con motivo | quedó `cancelled` + `lifecycle_status` + `cancelled_at` + motivo, y salió *«No pudimos tomar tu pedido #14. Motivo: ya estamos cerrando la cocina.»* |
+| 7 · la espera se ve | el contador de la tarjeta pendiente usa la escala corta |
+
+Los avisos quedan `failed` con «falta el template aprobado por Meta», que es lo
+esperado en el `demo` y el comportamiento que ya tenían los de delivery.
+
+**Lo que NO se pudo probar en vivo: el reembolso (escenarios 5 y 6).** Ningún
+negocio tiene pagos por Mercado Pago todavía (0 de 14 en `golf-jcr`), y no
+correspondía crear un cobro real para probarlo. El camino está escrito sobre
+`refundPayment()`, que ya usa —y ya probó— la cancelación del cliente. Queda
+para verificar cuando se prenda el cobro online.
+
+Los datos de prueba del `demo` se borraron al terminar.

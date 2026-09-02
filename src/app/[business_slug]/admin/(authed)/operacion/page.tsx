@@ -7,6 +7,7 @@ import { ensureAdminAccess } from "@/lib/admin/context";
 import { getSalonOptions } from "@/lib/admin/floor-plan/queries";
 import { startOfTodayUtc } from "@/lib/admin/orders-query";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
+import { canSee } from "@/lib/permissions/sections";
 import { getBusiness } from "@/lib/tenant";
 
 import {
@@ -36,8 +37,10 @@ export default async function LocalEnVivoPage({
   // ningún boundary de streaming (un redirect() post-stream fallaría y
   // expondría contenido protegido).
   const ctx = await ensureAdminAccess(business.id, business_slug);
-  // Solo encargado / admin / platform admin. Mozo opera desde /mozo.
-  if (!ctx.isPlatformAdmin && ctx.role !== "admin" && ctx.role !== "encargado") {
+  // Spec 140: el gate sale de la matriz de secciones. Entran admin,
+  // encargado y `terminal` (el puesto compartido del salón); el mozo no,
+  // su superficie es /mozo.
+  if (!canSee("operacion", ctx.role, { isPlatformAdmin: ctx.isPlatformAdmin })) {
     redirect(`/${business_slug}/mozo`);
   }
 

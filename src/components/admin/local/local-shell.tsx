@@ -24,10 +24,14 @@ import { Check, ChevronDown, MapPin } from "lucide-react";
 // server, y Pedidos online, que está montado siempre para no tirar su realtime—.
 // Las otras cinco son las que se difieren de verdad.
 const CajaAdminBoard = dynamic(() =>
-  import("@/components/admin/local/caja-admin-board").then((m) => m.CajaAdminBoard),
+  import("@/components/admin/local/caja-admin-board").then(
+    (m) => m.CajaAdminBoard,
+  ),
 );
 const ComandasKanban = dynamic(() =>
-  import("@/components/admin/local/comandas-kanban").then((m) => m.ComandasKanban),
+  import("@/components/admin/local/comandas-kanban").then(
+    (m) => m.ComandasKanban,
+  ),
 );
 const FichajeTab = dynamic(() =>
   import("@/components/admin/local/fichaje-tab").then((m) => m.FichajeTab),
@@ -51,7 +55,9 @@ const SolicitudesInbox = dynamic(() =>
   ),
 );
 const AdminDayList = dynamic(() =>
-  import("@/components/reservations/admin-day-list").then((m) => m.AdminDayList),
+  import("@/components/reservations/admin-day-list").then(
+    (m) => m.AdminDayList,
+  ),
 );
 import { ErrorBoundary } from "@/components/shared/error-boundary";
 import {
@@ -99,6 +105,28 @@ const TABS = [
 ] as const;
 
 type Tab = (typeof TABS)[number];
+
+/**
+ * Qué tabs ve cada rol (spec 140 · D2). Sin entrada acá = las ve todas.
+ *
+ * `terminal` es el puesto compartido del salón: opera mesas y comandas,
+ * gestiona la agenda del día y deja que el personal fiche con su PIN. No ve la
+ * plata de supervisión —caja, rendición— ni la cola de pedidos de mostrador.
+ *
+ * Rendición además no tendría qué mostrar: con una cuenta compartida por todo
+ * el salón, "lo mío" no existe. La plata se atribuye al mozo de cada mesa y la
+ * rendición la mira el encargado desde su propia pantalla.
+ *
+ * Se le pasa a `useTabParam` como lista de válidas, así un `?tab=caja` escrito
+ * a mano cae al default en vez de abrir la tab.
+ */
+const TABS_POR_ROL: Partial<Record<BusinessRole, readonly Tab[]>> = {
+  terminal: ["salon", "reservas", "comandas", "fichaje"],
+};
+
+function tabsVisibles(role: BusinessRole): readonly Tab[] {
+  return TABS_POR_ROL[role] ?? TABS;
+}
 
 /**
  * Tabs a las que aplica el filtro por salón (spec 065, FR-002).
@@ -276,10 +304,7 @@ function PedidosPanel({
   timezone: string;
   active: boolean;
 }) {
-  const {
-    initialOrders,
-    marchLeadKitchenMin,
-  } = use(promise);
+  const { initialOrders, marchLeadKitchenMin } = use(promise);
   return (
     <OrdersRealtimeBoard
       businessId={businessId}
@@ -451,7 +476,9 @@ function ReservasPanel({
   // salón en vivo.
   const solicitudes = data.solicitudes ?? [];
   const diasConSolicitudes = [
-    ...new Set(solicitudes.map((s) => localDate(s.reserva.starts_at, timezone))),
+    ...new Set(
+      solicitudes.map((s) => localDate(s.reserva.starts_at, timezone)),
+    ),
   ];
 
   return (
@@ -620,7 +647,7 @@ function SalonSelector({
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full z-50 mt-1.5 min-w-52 rounded-xl bg-white p-1 shadow-lg ring-1 ring-zinc-200">
+        <div className="absolute top-full left-0 z-50 mt-1.5 min-w-52 rounded-xl bg-white p-1 shadow-lg ring-1 ring-zinc-200">
           <button
             type="button"
             onClick={onClear}
@@ -685,7 +712,9 @@ function TabsInner({
   // de tab no dispara ningún request (spec 101). Antes era `router.replace`, o
   // sea una navegación soft que re-ejecutaba la page entera — las 7 promesas,
   // ~30 queries — para pintar una sola tab.
-  const [active, setTab] = useTabParam<Tab>("tab", "salon", TABS);
+  const visibles = useMemo(() => tabsVisibles(role), [role]);
+  const ve = useCallback((t: Tab) => visibles.includes(t), [visibles]);
+  const [active, setTab] = useTabParam<Tab>("tab", "salon", visibles);
 
   // Keep-alive: una tab se monta la PRIMERA vez que se entra y de ahí en más se
   // esconde con CSS en vez de desmontarse (es lo que ya hacía Pedidos para no
@@ -735,7 +764,9 @@ function TabsInner({
   // que ninguna tab re-corre la ruta ya no se revalida nunca.
   const [salonData, setSalonData] = useState<SalonData | null>(null);
   const [cajaData, setCajaData] = useState<CajaData | null>(null);
-  const [rendicionData, setRendicionData] = useState<RendicionData | null>(null);
+  const [rendicionData, setRendicionData] = useState<RendicionData | null>(
+    null,
+  );
   const [reservasData, setReservasData] = useState<ReservasData | null>(null);
   const [fichajeData, setFichajeData] = useState<FichajeData | null>(null);
 
@@ -793,38 +824,56 @@ function TabsInner({
       {/* Comandas va SIN pill: el contador de "activas" no coincidía con lo que
           se ve en el kanban de la tab, así que un número mal es peor que
           ninguno. La tab muestra el estado real. */}
-      <TabButton active={active === "comandas"} onClick={() => setTab("comandas")}>
+      <TabButton
+        active={active === "comandas"}
+        onClick={() => setTab("comandas")}
+      >
         Comandas
       </TabButton>
-      <TabButton
-        active={active === "pedidos"}
-        onClick={() => setTab("pedidos")}
-        count={<Pill promise={pedidos} compute={(d) => countPedidosNuevos(d.initialOrders)} />}
-      >
-        Pedidos online
-      </TabButton>
-      <TabButton
-        active={active === "caja"}
-        onClick={() => setTab("caja")}
-        count={
-          <Pill promise={caja} override={cajaData} compute={(d) => countCajas(d.cajas)} />
-        }
-      >
-        Caja
-      </TabButton>
-      <TabButton
-        active={active === "rendicion"}
-        onClick={() => setTab("rendicion")}
-        count={
-          <Pill
-            promise={rendicion}
-            override={rendicionData}
-            compute={(d) => countRendicionesPendientes(d.rendicionPendientes)}
-          />
-        }
-      >
-        Rendición
-      </TabButton>
+      {ve("pedidos") && (
+        <TabButton
+          active={active === "pedidos"}
+          onClick={() => setTab("pedidos")}
+          count={
+            <Pill
+              promise={pedidos}
+              compute={(d) => countPedidosNuevos(d.initialOrders)}
+            />
+          }
+        >
+          Pedidos online
+        </TabButton>
+      )}
+      {ve("caja") && (
+        <TabButton
+          active={active === "caja"}
+          onClick={() => setTab("caja")}
+          count={
+            <Pill
+              promise={caja}
+              override={cajaData}
+              compute={(d) => countCajas(d.cajas)}
+            />
+          }
+        >
+          Caja
+        </TabButton>
+      )}
+      {ve("rendicion") && (
+        <TabButton
+          active={active === "rendicion"}
+          onClick={() => setTab("rendicion")}
+          count={
+            <Pill
+              promise={rendicion}
+              override={rendicionData}
+              compute={(d) => countRendicionesPendientes(d.rendicionPendientes)}
+            />
+          }
+        >
+          Rendición
+        </TabButton>
+      )}
       <TabButton
         active={active === "fichaje"}
         onClick={() => setTab("fichaje")}
@@ -842,7 +891,7 @@ function TabsInner({
   );
 
   return (
-    <div className="fixed inset-x-0 bottom-0 top-14 z-30 flex flex-col bg-zinc-50 transition-[left] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] md:left-[var(--admin-sidebar-width,60px)] md:top-0">
+    <div className="fixed inset-x-0 top-14 bottom-0 z-30 flex flex-col bg-zinc-50 transition-[left] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] md:top-0 md:left-[var(--admin-sidebar-width,60px)]">
       {/* El selector va pegado a las tabs, NO en la esquina derecha: ahí flota
           la campana de notificaciones del panel admin y se chocaban.
 
@@ -895,20 +944,23 @@ function TabsInner({
           </div>
         )}
         {/* Pedidos online: SIEMPRE montado (oculto con CSS) para que su
-            suscripción realtime no se caiga al cambiar de tab. */}
-        <div className={paneClass("pedidos")}>
-          <ErrorBoundary fallback={<TabLoadError />}>
-            <Suspense fallback={<TabContentSkeleton />}>
-              <PedidosPanel
-                promise={pedidos}
-                slug={slug}
-                businessId={businessId}
-                timezone={timezone}
-                active={active === "pedidos"}
-              />
-            </Suspense>
-          </ErrorBoundary>
-        </div>
+            suscripción realtime no se caiga al cambiar de tab. Salvo que el rol
+            no lo vea (spec 140): ahí no se monta y no abre su channel. */}
+        {ve("pedidos") && (
+          <div className={paneClass("pedidos")}>
+            <ErrorBoundary fallback={<TabLoadError />}>
+              <Suspense fallback={<TabContentSkeleton />}>
+                <PedidosPanel
+                  promise={pedidos}
+                  slug={slug}
+                  businessId={businessId}
+                  timezone={timezone}
+                  active={active === "pedidos"}
+                />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
+        )}
         {mounted("reservas") && (
           <div className={paneClass("reservas")}>
             <ErrorBoundary fallback={<TabLoadError />}>
@@ -944,7 +996,7 @@ function TabsInner({
             </ErrorBoundary>
           </div>
         )}
-        {mounted("caja") && (
+        {ve("caja") && mounted("caja") && (
           <div className={paneClass("caja")}>
             <ErrorBoundary fallback={<TabLoadError money />}>
               <Suspense fallback={<TabContentSkeleton />}>
@@ -959,7 +1011,7 @@ function TabsInner({
             </ErrorBoundary>
           </div>
         )}
-        {mounted("rendicion") && (
+        {ve("rendicion") && mounted("rendicion") && (
           <div className={paneClass("rendicion")}>
             <ErrorBoundary fallback={<TabLoadError money />}>
               <Suspense fallback={<TabContentSkeleton />}>
@@ -1014,8 +1066,10 @@ function TabButton({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "relative inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-semibold transition sm:px-4",
-        active ? "bg-zinc-100 text-zinc-900" : "text-zinc-500 hover:text-zinc-900",
+        "relative inline-flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold whitespace-nowrap transition sm:px-4",
+        active
+          ? "bg-zinc-100 text-zinc-900"
+          : "text-zinc-500 hover:text-zinc-900",
       )}
     >
       {children}

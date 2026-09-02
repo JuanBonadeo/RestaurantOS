@@ -60,7 +60,18 @@ export function OrderTracking({
   wasPaid?: boolean;
 }) {
   const stepLabels = [
-    { key: "received", label: "Recibido", sub: "El local confirmó tu pedido" },
+    // Spec 139 — el primer paso decía «El local confirmó tu pedido» también
+    // mientras el pedido estaba `pending`, o sea antes de que nadie del local
+    // lo abriera. El paso es el mismo; lo que cambia es que ahora dice la
+    // verdad en cada estado.
+    {
+      key: "received",
+      label: status === "pending" ? "Recibido" : "Confirmado",
+      sub:
+        status === "pending"
+          ? "Esperando que el local lo confirme"
+          : "El local tomó tu pedido",
+    },
     { key: "cooking", label: "En cocina", sub: "Están preparando la comida" },
     {
       key: "delivery",

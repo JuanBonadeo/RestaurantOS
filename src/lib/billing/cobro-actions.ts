@@ -119,15 +119,51 @@ async function loadCaja(
 }
 
 /**
- * Atribuye la propina al mozo que atendió: derivado server-side desde
- * order_items.loaded_by del último item activo cargado en la order
- * (R10 de CU-03). Fallback: mozo_id de la mesa asociada a la order.
+ * A quién se le atribuye la plata de una mesa: al **mozo asignado a la mesa**,
+ * y sólo si no hay ninguno, al último que cargó items.
+ *
+ * Spec 140 · D5 — antes era al revés (`loaded_by` primero, la mesa de fallback).
+ * Con el rol `terminal` —una PC compartida por todo el salón— `loaded_by` es
+ * siempre la misma cuenta, y como toda mesa cobrada tiene al menos un item, el
+ * fallback a la mesa no se alcanzaba nunca: la rendición de cada mozo daba $0 y
+ * la recaudación entera quedaba atribuida a la terminal. La rendición se arma
+ * filtrando exactamente por este campo (`getRendicionPendienteMozo`).
+ *
+ * También arregla un caso que ya existía sin terminal: cada item que el
+ * encargado cargaba desde el panel le pasaba a él la propina de esa mesa.
+ *
+ * Lo que no tiene mesa (mostrador, delivery) sigue cayendo en `loaded_by`, que
+ * ahí es la respuesta correcta: la cargó quien la cargó.
  */
+export function elegirMozoAtribuido(input: {
+  mesaMozoId: string | null;
+  lastLoadedBy: string | null;
+}): string | null {
+  return input.mesaMozoId ?? input.lastLoadedBy;
+}
+
 async function deriveAttributedMozo(
   service: GenericClient,
   orderId: string,
 ): Promise<string | null> {
-  // 1. Intentar loaded_by del último item activo.
+  // 1. El mozo de la mesa de la order — la fuente de verdad de la atribución.
+  const { data: orderRow } = await service
+    .from("orders")
+    .select("table_id")
+    .eq("id", orderId)
+    .maybeSingle();
+  let mesaMozoId: string | null = null;
+  const tableId = (orderRow as { table_id: string | null } | null)?.table_id;
+  if (tableId) {
+    const { data: tableRow } = await service
+      .from("tables")
+      .select("mozo_id")
+      .eq("id", tableId)
+      .maybeSingle();
+    mesaMozoId = (tableRow as { mozo_id: string | null } | null)?.mozo_id ?? null;
+  }
+
+  // 2. `loaded_by` del último item activo, para lo que no tiene mesa asignada.
   const { data } = await service
     .from("order_items")
     .select("loaded_by, cancelled_at")
@@ -137,24 +173,10 @@ async function deriveAttributedMozo(
     .order("id", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (data) {
-    const mozoId = (data as { loaded_by: string | null }).loaded_by;
-    if (mozoId) return mozoId;
-  }
+  const lastLoadedBy =
+    (data as { loaded_by: string | null } | null)?.loaded_by ?? null;
 
-  // 2. Fallback: mozo_id de la mesa de la order.
-  const { data: orderRow } = await service
-    .from("orders")
-    .select("table_id")
-    .eq("id", orderId)
-    .maybeSingle();
-  if (!orderRow?.table_id) return null;
-  const { data: tableRow } = await service
-    .from("tables")
-    .select("mozo_id")
-    .eq("id", (orderRow as { table_id: string }).table_id)
-    .maybeSingle();
-  return (tableRow as { mozo_id: string | null } | null)?.mozo_id ?? null;
+  return elegirMozoAtribuido({ mesaMozoId, lastLoadedBy });
 }
 
 /**

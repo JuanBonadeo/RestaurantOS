@@ -20,7 +20,9 @@ export type MozoContext = {
 
 /**
  * Espejo de ensureAdminAccess pero para la vista operativa de salón.
- * Roles permitidos: admin, encargado, mozo. El platform admin entra siempre.
+ * Roles permitidos: admin, encargado, mozo y `terminal` (spec 140 — el puesto
+ * compartido del salón, que opera las mismas mesas desde el panel). El
+ * platform admin entra siempre.
  *
  * No es un superset del admin: existe por separado para que el día que admin
  * agregue restricciones de billing o setup, no rompa la operación de salón.
@@ -73,7 +75,10 @@ export const ensureMozoAccess = cache(async function ensureMozoAccess(
 
   const rawRole = membershipRow?.role ?? null;
   const isAllowedRole =
-    rawRole === "admin" || rawRole === "encargado" || rawRole === "mozo";
+    rawRole === "admin" ||
+    rawRole === "encargado" ||
+    rawRole === "mozo" ||
+    rawRole === "terminal";
   if (!isAllowedRole && !isPlatformAdmin) {
     redirect(`/${businessSlug}/admin/login`);
   }
@@ -151,7 +156,10 @@ export async function requireMozoActionContext(
 
   const rawRole = membershipRow?.role ?? null;
   const isAllowedRole =
-    rawRole === "admin" || rawRole === "encargado" || rawRole === "mozo";
+    rawRole === "admin" ||
+    rawRole === "encargado" ||
+    rawRole === "mozo" ||
+    rawRole === "terminal";
   if (!isAllowedRole && !isPlatformAdmin) {
     return actionError("No tenés permisos para esta operación.");
   }

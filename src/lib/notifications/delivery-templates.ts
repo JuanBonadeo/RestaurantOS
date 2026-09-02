@@ -6,9 +6,10 @@
  * (estado no notificable, take-away en "en camino", pedido en salón, sin
  * teléfono, o plantilla deshabilitada por el dueño).
  *
- * El estado "nuevo" (el cliente cargó el pedido y el bot respondió) NO genera un
- * WhatsApp acá: esa confirmación la da el propio bot. El primer aviso de estado
- * es `preparing`. Ver proposal §6ª pregunta abierta.
+ * Spec 139 — el primer aviso ya no es `preparing`: `pending` es el **acuse**,
+ * que sale al crear el pedido online. Antes, entre que el cliente pedía y que
+ * el local marchaba, no le llegaba nada — justo el tramo donde el pedido está
+ * esperando una decisión. El bot sigue respondiendo lo suyo por su lado.
  *
  * Placeholders soportados: {cliente} {numero} {negocio} {hora} (hora en
  * timezone del negocio). Dinero no aplica acá; horarios en timezone AR.
@@ -17,22 +18,31 @@
 import { formatInTimeZone } from "date-fns-tz";
 
 export const DELIVERY_NOTIFY_STATUSES = [
+  // Spec 139 — el acuse: sale al crear el pedido online, antes de que el local
+  // lo confirme. Es el tramo en el que el cliente no recibía nada.
+  "pending",
   "preparing",
   "ready",
   "on_the_way",
   "delivered",
   "cancelled",
+  // Spec 139 — el rechazo del local. No es un estado de `orders` (por dentro es
+  // `cancelled`): es un aviso propio, porque «no pudimos tomarlo» y «se
+  // canceló» no son la misma noticia para el cliente.
+  "rejected",
 ] as const;
 
 export type DeliveryNotifyStatus = (typeof DELIVERY_NOTIFY_STATUSES)[number];
 
 /** Etiquetas legibles por estado, para la UI de edición de plantillas. */
 export const DELIVERY_STATUS_LABELS: Record<DeliveryNotifyStatus, string> = {
+  pending: "Recibido, sin confirmar",
   preparing: "Preparando",
   ready: "Listo",
   on_the_way: "En camino",
   delivered: "Entregado",
   cancelled: "Cancelado",
+  rejected: "No lo pudimos tomar",
 };
 
 export function isDeliveryNotifyStatus(
@@ -42,6 +52,8 @@ export function isDeliveryNotifyStatus(
 }
 
 export const DEFAULT_DELIVERY_TEMPLATES: Record<DeliveryNotifyStatus, string> = {
+  pending:
+    "¡Hola {cliente}! 📝 Recibimos tu pedido #{numero}. Te avisamos apenas {negocio} lo confirme.",
   preparing: "¡Hola {cliente}! 👨‍🍳 Estamos preparando tu pedido #{numero}.",
   ready: "Tu pedido #{numero} ya está listo. 🙌",
   on_the_way: "Tu pedido #{numero} salió y está en camino. 🛵",
@@ -49,6 +61,8 @@ export const DEFAULT_DELIVERY_TEMPLATES: Record<DeliveryNotifyStatus, string> = 
     "Tu pedido #{numero} fue entregado. ¡Gracias por elegir {negocio}! 🙏",
   cancelled:
     "Tu pedido #{numero} fue cancelado. Ante cualquier duda, escribinos. 🙏",
+  rejected:
+    "¡Hola {cliente}! No pudimos tomar tu pedido #{numero}. {motivo} Perdón, y gracias por escribirnos. 🙏",
 };
 
 const DEFAULT_TZ = "America/Argentina/Buenos_Aires";
@@ -60,13 +74,19 @@ function fillPlaceholders(
     numero: number | string;
     negocio: string;
     hora: string;
+    /** Spec 139 — sólo en el rechazo; vacío en el resto. */
+    motivo?: string;
   },
 ): string {
   return body
     .replaceAll("{cliente}", vars.cliente)
     .replaceAll("{numero}", String(vars.numero))
     .replaceAll("{negocio}", vars.negocio)
-    .replaceAll("{hora}", vars.hora);
+    .replaceAll("{hora}", vars.hora)
+    .replaceAll("{motivo}", vars.motivo ? `Motivo: ${vars.motivo}.` : "")
+    // Un placeholder vacío deja dos espacios y delata la costura.
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
 }
 
 /**
@@ -98,6 +118,8 @@ export function renderDeliveryBody(input: {
   customerName: string;
   orderNumber: number;
   businessName: string;
+  /** Spec 139 — el motivo que escribió el encargado al rechazar. */
+  motivo?: string | null;
   template?: { body: string; enabled: boolean } | null;
   timezone?: string;
   now?: Date;
@@ -118,6 +140,7 @@ export function renderDeliveryBody(input: {
     numero: input.orderNumber,
     negocio: input.businessName,
     hora,
+    motivo: input.motivo ?? undefined,
   });
 }
 

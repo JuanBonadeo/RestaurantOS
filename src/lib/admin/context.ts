@@ -6,7 +6,19 @@ import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
-export type BusinessRole = "admin" | "encargado" | "mozo" | "personal";
+/**
+ * Roles de una membresía. `terminal` (spec 140) no es una persona: es el puesto
+ * compartido del salón —una PC que usan todos los mozos cuando no tienen móvil
+ * propio—. Por eso queda afuera de las listas que enumeran mozos
+ * (`getMozosByBusiness`, las rendiciones pendientes): no se le asignan mesas ni
+ * se le pide que rinda. La plata se atribuye al `mozo_id` de cada mesa.
+ */
+export type BusinessRole =
+  | "admin"
+  | "encargado"
+  | "mozo"
+  | "terminal"
+  | "personal";
 
 export type AdminContext = {
   /**

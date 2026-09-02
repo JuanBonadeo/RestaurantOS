@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { canAnularFactura, canCrearPedidoFlash } from "./can";
-import { canSee, sectionAccess, type AdminSection } from "./sections";
+import {
+  canSee,
+  hasAnySection,
+  sectionAccess,
+  type AdminSection,
+} from "./sections";
 
 describe("sectionAccess / canSee", () => {
   it("el admin ve todo en full", () => {
@@ -84,8 +89,12 @@ describe("sectionAccess / canSee", () => {
   });
 
   describe("mozo / personal", () => {
-    it("el mozo solo ve operación (salón), recortada", () => {
-      expect(sectionAccess("operacion", "mozo")).toBe("limited");
+    // Spec 140: esta celda decía "limited" y nunca se cumplió — el layout de
+    // `(authed)` redirigía al mozo antes de evaluarla. Ahora que el gate
+    // delega en la matriz, decir "limited" lo dejaría entrar al panel de
+    // verdad. Quien opera Operación desde el salón es `terminal`.
+    it("el mozo no ve el panel: su superficie es /mozo", () => {
+      expect(sectionAccess("operacion", "mozo")).toBe("none");
       expect(canSee("dashboard", "mozo")).toBe(false);
       expect(canSee("reportes", "mozo")).toBe(false);
     });
@@ -95,5 +104,63 @@ describe("sectionAccess / canSee", () => {
       expect(canSee("operacion", "personal")).toBe(false);
       expect(canSee("chatbot", "personal")).toBe(false);
     });
+  });
+});
+
+describe("sectionAccess / rol terminal (spec 140)", () => {
+  it("sólo ve Operación, y recortada", () => {
+    expect(sectionAccess("operacion", "terminal")).toBe("limited");
+  });
+
+  it("no ve ninguna otra sección del panel", () => {
+    const otras: AdminSection[] = [
+      "dashboard",
+      "pedidos",
+      "cajas",
+      "catalogo",
+      "salones",
+      "reservas",
+      "clientes",
+      "promociones",
+      "campanas",
+      "chatbot",
+      "conversaciones",
+      "reportes",
+      "proveedores",
+      "facturacion",
+      "rrhh",
+      "configuracion",
+      "ayuda",
+    ];
+    for (const s of otras) {
+      expect(sectionAccess(s, "terminal"), s).toBe("none");
+      expect(canSee(s, "terminal"), s).toBe(false);
+    }
+  });
+
+  it("el mozo NO entra a operación: su superficie es /mozo", () => {
+    // La celda decía "limited" desde la spec 14, pero era letra muerta — el
+    // layout lo redirigía antes. Ahora que el gate delega en `canSee`, la
+    // matriz tiene que decir la verdad o el mozo se colaría al panel.
+    expect(sectionAccess("operacion", "mozo")).toBe("none");
+    expect(canSee("operacion", "mozo")).toBe(false);
+  });
+});
+
+describe("hasAnySection", () => {
+  it("admin, encargado y terminal entran al panel", () => {
+    expect(hasAnySection("admin")).toBe(true);
+    expect(hasAnySection("encargado")).toBe(true);
+    expect(hasAnySection("terminal")).toBe(true);
+  });
+
+  it("mozo y personal no: su superficie no es el panel", () => {
+    expect(hasAnySection("mozo")).toBe(false);
+    expect(hasAnySection("personal")).toBe(false);
+  });
+
+  it("el platform admin entra aunque no tenga rol", () => {
+    expect(hasAnySection(null, { isPlatformAdmin: true })).toBe(true);
+    expect(hasAnySection(null)).toBe(false);
   });
 });

@@ -11,6 +11,13 @@ import type { OperationalStatus } from "@/lib/mozo/state-machine";
 // que pre-llenamos nosotros. **Pendiente validación cliente**: cuando vuelva
 // la matriz firmada, se ajustan acá una sola vez.
 //
+// Spec 140 — el rol `terminal`: el puesto compartido del salón (una PC que usan
+// todos los mozos cuando no tienen móvil). Regla general: **se comporta como el
+// mozo, salvo que opera el salón entero en vez de "sus" mesas**, porque no tiene
+// mesas propias. Lo que es de supervisión (cortes, sangrías, correcciones,
+// anulaciones) sigue afuera: los helpers `admin || encargado` la dejan en false
+// por default, que es lo correcto, y por eso la mayoría no se toca.
+//
 // Si en el futuro hace falta soportar thresholds por business (ej: un local
 // quiere autorizar al encargado hasta $10.000 de diferencia), se mueve a
 // `business_settings.permissions JSONB` y los helpers cargan los límites en
@@ -91,7 +98,10 @@ export function canApplyDiscount(role: BusinessRole, percent: number): boolean {
   if (percent < 0) return false;
   if (role === "admin") return true;
   if (role === "encargado") return percent <= DESCUENTO_MEDIO_PCT;
-  if (role === "mozo") return percent <= DESCUENTO_BAJO_PCT;
+  // La terminal cobra igual que el mozo: mismo tope, misma cortesía de mesa.
+  if (role === "mozo" || role === "terminal") {
+    return percent <= DESCUENTO_BAJO_PCT;
+  }
   return false;
 }
 
@@ -173,6 +183,11 @@ export function canTransitionMesa(
 /**
  * Quién puede transferir una mesa.
  * - admin/encargado: siempre.
+ * - terminal: siempre (spec 140). `isOrigen`/`isSelfClaim` se comparan contra el
+ *   usuario de la sesión, y la sesión de la terminal no es el `mozo_id` de
+ *   ninguna mesa —están asignadas a personas— ni nadie transfiere una mesa
+ *   *hacia* la terminal. Con la regla del mozo no podría mover ni una: la
+ *   restricción dejaría de proteger y pasaría a bloquear todo.
  * - mozo: si es el origen (su mesa) O si reclama la mesa para sí mismo
  *   (auto-transfer). Ambos casos generan notificaciones y audit log.
  */
@@ -181,7 +196,9 @@ export function canTransferTable(
   isOrigen: boolean,
   isSelfClaim: boolean = false,
 ): boolean {
-  if (role === "admin" || role === "encargado") return true;
+  if (role === "admin" || role === "encargado" || role === "terminal") {
+    return true;
+  }
   if (role === "mozo") return isOrigen || isSelfClaim;
   return false;
 }
@@ -190,9 +207,15 @@ export function canTransferTable(
  * Asignar/cambiar/limpiar el `mozo_id` de una mesa fuera del flujo de
  * transferencia (ej: encargado pre-asigna mesas antes del servicio). Mozo no
  * puede asignar mesas a otros — solo se auto-asigna por walk-in (CU-09 R2).
+ *
+ * La terminal sí (spec 140 · D7): es el puesto de coordinación del salón, y es
+ * la asignación la que decide de quién es la plata de cada mesa. Sin esto, cada
+ * walk-in que se sienta necesitaría al encargado en la otra máquina — fricción
+ * justo en hora pico. El costo es que el audit log dice "terminal" y no qué
+ * persona lo hizo: se acepta mientras la cuenta sea compartida.
  */
 export function canAssignMozo(role: BusinessRole): boolean {
-  return role === "admin" || role === "encargado";
+  return role === "admin" || role === "encargado" || role === "terminal";
 }
 
 /**
@@ -242,11 +265,31 @@ export function canCrearPedidoFlash(role: BusinessRole): boolean {
  * Cargar a mano un pedido para llevar / delivery SIN mesa desde operación
  * (spec 054) — el pedido de mostrador o telefónico, que hoy sólo entra
  * automático por la carta pública. Es operación de mostrador: encargado/admin.
- * En fase 1 el mozo no carga pedidos del board (está en salón, opera mesas);
- * sumarlo es un ajuste posterior de este helper.
+ * El mozo y la terminal están en salón, operan mesas.
+ *
+ * Ojo: esto NO es cargarle el pedido a una mesa. Para eso está
+ * `canCargarPedidoMesa`, que es otra cosa y otro círculo de gente.
  */
 export function canCargarPedido(role: BusinessRole): boolean {
   return role === "admin" || role === "encargado";
+}
+
+/**
+ * Cargarle el pedido a una **mesa** — el acto central del servicio de salón.
+ *
+ * Spec 140 · D4: hasta acá esto compartía helper con el pedido de mostrador de
+ * arriba, y el plano lo usaba para decidir si tocar una mesa abre la carga
+ * (`salon-desktop.tsx`). Con un solo helper, abrirle Operación a la terminal la
+ * dejaba entrar a una pantalla de sólo lectura: veía el salón y no podía cargar
+ * nada. Son dos permisos distintos y ahora son dos funciones.
+ */
+export function canCargarPedidoMesa(role: BusinessRole): boolean {
+  return (
+    role === "admin" ||
+    role === "encargado" ||
+    role === "mozo" ||
+    role === "terminal"
+  );
 }
 
 // ── Reservas (spec 22) ──────────────────────────────────────────
@@ -261,7 +304,12 @@ export function canCargarPedido(role: BusinessRole): boolean {
  * que guardar el caso por separado.
  */
 export function canManageReservations(role: BusinessRole | null): boolean {
-  return role === "admin" || role === "encargado" || role === "mozo";
+  return (
+    role === "admin" ||
+    role === "encargado" ||
+    role === "mozo" ||
+    role === "terminal"
+  );
 }
 
 /** Sentar una reserva confirmada = parte de gestionarla. Alias semántico. */

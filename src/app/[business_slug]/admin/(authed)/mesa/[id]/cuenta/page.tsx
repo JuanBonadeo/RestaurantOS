@@ -6,6 +6,7 @@ import { CuentaClient } from "@/app/[business_slug]/mozo/mesa/[id]/cuenta/cuenta
 import { ensureAdminAccess } from "@/lib/admin/context";
 import { getCuentaForTable } from "@/lib/billing/cuenta-query";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
+import { canSee } from "@/lib/permissions/sections";
 import { getBusiness } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
@@ -25,11 +26,9 @@ export default async function AdminCuentaPage({
   if (!business) notFound();
 
   const ctx = await ensureAdminAccess(business.id, business_slug);
-  if (
-    !ctx.isPlatformAdmin &&
-    ctx.role !== "admin" &&
-    ctx.role !== "encargado"
-  ) {
+  // Spec 140: el gate sale de la matriz. La `terminal` opera desde el panel y
+  // rebotarla a la UI móvil del mozo la sacaría del flujo a mitad de la carga.
+  if (!canSee("operacion", ctx.role, { isPlatformAdmin: ctx.isPlatformAdmin })) {
     redirect(`/${business_slug}/mozo/mesa/${tableId}/cuenta`);
   }
 

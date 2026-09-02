@@ -8,6 +8,7 @@ import { getCajasConEstado, getLibroDeMovimientos } from "@/lib/caja/queries";
 import type { LibroTipo, PaymentMethod } from "@/lib/caja/types";
 import { getMozosByBusiness } from "@/lib/mozo/queries";
 import { canCorregirCobro } from "@/lib/permissions/can";
+import { canSee } from "@/lib/permissions/sections";
 import { getBusiness } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
@@ -45,7 +46,8 @@ export default async function MovimientosPage({
   const ctx = await ensureAdminAccess(business.id, business_slug);
   // El libro es de quien audita la caja: encargado y admin. El mozo opera
   // desde /mozo y no ve la caja de nadie más.
-  if (!ctx.isPlatformAdmin && ctx.role !== "admin" && ctx.role !== "encargado") {
+  // Mismo gate que la página de Operación (spec 140).
+  if (!canSee("operacion", ctx.role, { isPlatformAdmin: ctx.isPlatformAdmin })) {
     redirect(`/${business_slug}/mozo`);
   }
 
