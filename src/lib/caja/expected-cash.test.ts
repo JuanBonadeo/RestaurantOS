@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { calculateExpectedCash } from "./expected-cash";
+import { calculateExpectedCash, separarRetiroDelCierre } from "./expected-cash";
 
 describe("calculateExpectedCash", () => {
   it("sin movimientos ni payments: devuelve last_closing_cash", () => {
@@ -177,5 +177,63 @@ describe("calculateExpectedCash", () => {
         ],
       }),
     ).toBe(312_400);
+  });
+});
+
+describe("separarRetiroDelCierre", () => {
+  const arrastre = 262_000_00;
+  const retiro = {
+    kind: "sangria" as const,
+    amount_cents: arrastre,
+    corte_id: "corte-1",
+  };
+
+  it("deja el turno nuevo arrancando en $0 y sin movimientos propios", () => {
+    const r = separarRetiroDelCierre(arrastre, [retiro]);
+    expect(r.apertura_cents).toBe(0);
+    expect(r.retiro_cierre_cents).toBe(arrastre);
+    expect(r.del_turno).toEqual([]);
+  });
+
+  it("no cambia el efectivo esperado: es el mismo sumando del otro lado", () => {
+    const movimientos = [
+      retiro,
+      { kind: "sangria" as const, amount_cents: 5_000_00, corte_id: null },
+      { kind: "ingreso" as const, amount_cents: 2_000_00, corte_id: null },
+    ];
+    const payments = [
+      { method: "cash" as const, amount_cents: 30_000_00, tip_cents: 1_000_00 },
+    ];
+
+    const antes = calculateExpectedCash({
+      last_closing_cash_cents: arrastre,
+      payments,
+      movimientos,
+    });
+    const r = separarRetiroDelCierre(arrastre, movimientos);
+    const despues = calculateExpectedCash({
+      last_closing_cash_cents: r.apertura_cents,
+      payments,
+      movimientos: r.del_turno,
+    });
+
+    expect(despues).toBe(antes);
+  });
+
+  it("un retiro anulado (spec 070) no mueve la caja: el arrastre vuelve", () => {
+    const r = separarRetiroDelCierre(arrastre, [
+      { ...retiro, cancelled_at: "2026-09-02T00:00:00Z" },
+    ]);
+    expect(r.apertura_cents).toBe(arrastre);
+    expect(r.retiro_cierre_cents).toBe(0);
+    expect(r.del_turno).toEqual([]);
+  });
+
+  it("sin cierre atado, el arrastre y los movimientos quedan como están", () => {
+    const mov = { kind: "sangria" as const, amount_cents: 1_000_00 };
+    const r = separarRetiroDelCierre(arrastre, [mov]);
+    expect(r.apertura_cents).toBe(arrastre);
+    expect(r.retiro_cierre_cents).toBe(0);
+    expect(r.del_turno).toEqual([mov]);
   });
 });

@@ -5,7 +5,7 @@ import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
-import { calculateExpectedCash } from "./expected-cash";
+import { calculateExpectedCash, separarRetiroDelCierre } from "./expected-cash";
 import { calcularRendicionMozo } from "./liquidacion-mozo";
 import { mozosQueDebenRendir } from "./deben-rendir";
 import { repartirEfectivoEsperado, type RepartoEfectivo } from "./reparto-efectivo";
@@ -161,6 +161,12 @@ export async function getMovimientosPeriodoActual(
     )
     .eq("caja_id", cajaId)
     .eq("business_id", businessId)
+    // Spec 130 · El retiro del cierre cae en este período por un milisegundo
+    // (0052) pero es la última línea del corte anterior, no el primer
+    // movimiento del turno: la app lo netea contra la apertura, así que
+    // listarlo acá sería contar la misma plata dos veces en pantalla. Sigue
+    // visible —y anulable— en el libro (spec 070).
+    .is("corte_id", null)
     .order("created_at", { ascending: true });
 
   if (ultimoCorte) {
@@ -299,7 +305,7 @@ export async function getCajaLiveStats(
   // anulados (spec 070): siguen en el libro, pero no mueven la caja.
   let movQuery = service
     .from("caja_movimientos")
-    .select("kind, amount_cents, cancelled_at")
+    .select("kind, amount_cents, cancelled_at, corte_id")
     .eq("caja_id", cajaId);
   movQuery = movQuery.gt("created_at", periodoDesdeFecha);
 
@@ -326,11 +332,27 @@ export async function getCajaLiveStats(
       delivery_type: ord?.delivery_type ?? "",
     };
   });
-  const movimientos = (movimientosRes.data ?? []) as Array<{
+  const movimientosDelPeriodo = (movimientosRes.data ?? []) as Array<{
     kind: "sangria" | "ingreso";
     amount_cents: number;
     cancelled_at: string | null;
+    corte_id: string | null;
   }>;
+
+  // Spec 130 · El retiro del cierre se netea contra la apertura en vez de
+  // contarse como movimiento del turno nuevo: `expected_cash_cents` da
+  // exactamente lo mismo (es el mismo sumando del otro lado de la cuenta) pero
+  // el turno arranca en $0 en vez de mostrar «$262.000 del corte anterior» y,
+  // abajo, la sangría que lo vacía — que es lo que se leyó como «el sistema me
+  // pide un saldo anterior» (Golf, 2/9).
+  const {
+    apertura_cents,
+    retiro_cierre_cents,
+    del_turno: movimientos,
+  } = separarRetiroDelCierre(
+    ultimoCorte?.closing_cash_cents ?? 0,
+    movimientosDelPeriodo,
+  );
 
   const ventas_por_metodo: Record<PaymentMethod, number> = { ...EMPTY_BY_METHOD };
   let total_ventas_cents = 0;
@@ -346,7 +368,6 @@ export async function getCajaLiveStats(
     total_propinas_cents += p.tip_cents;
   }
 
-  const apertura_cents = ultimoCorte?.closing_cash_cents ?? 0;
   const expected_cash_cents = calculateExpectedCash({
     last_closing_cash_cents: apertura_cents,
     payments,
@@ -359,6 +380,7 @@ export async function getCajaLiveStats(
   const vivos = movimientos.filter((m) => !m.cancelled_at);
   const desglose_esperado = {
     apertura_cents,
+    retiro_cierre_cents,
     efectivo_cents: payments
       .filter((p) => p.method === "cash")
       .reduce((acc, p) => acc + p.amount_cents - p.tip_cents, 0),

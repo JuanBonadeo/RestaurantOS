@@ -388,6 +388,31 @@ export async function cerrarCaja(input: {
   } | null;
   if (!row) return actionError("No se pudo cerrar la caja.");
 
+  // Spec 130 · El retiro es la última línea del corte, no el primer movimiento
+  // del turno que arranca: `corte_id` es lo que se lo dice a la app (0059), que
+  // lo netea contra la apertura para que el turno nuevo empiece en $0 en vez de
+  // anunciar «$262.000 del corte anterior» con la sangría que lo vacía tres
+  // líneas más abajo.
+  //
+  // Va acá y no adentro de `cerrar_caja_tx` a propósito: esa función es corte +
+  // retiro + salón + rendiciones en una sola transacción, y reescribirla por
+  // una etiqueta es riesgo que no paga. Si este update falla, el cierre ya está
+  // hecho y la plata bien contada — se pierde el rótulo, nada más — así que se
+  // loguea y no se le arruina el cierre al encargado.
+  if (row.retiro_id) {
+    const { error: rotuloError } = await service
+      .from("caja_movimientos")
+      .update({ corte_id: row.corte.id })
+      .eq("id", row.retiro_id);
+    if (rotuloError) {
+      console.error(
+        "[cerrarCaja] el retiro quedó sin atar a su corte",
+        { retiro_id: row.retiro_id, corte_id: row.corte.id },
+        rotuloError,
+      );
+    }
+  }
+
   if (caja.is_default) {
     revalidatePath(`/${input.businessSlug}/mozo`);
   }

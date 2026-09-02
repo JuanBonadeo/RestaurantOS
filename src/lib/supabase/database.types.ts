@@ -505,6 +505,7 @@ export type Database = {
           cancelled_at: string | null
           cancelled_by: string | null
           cancelled_reason: string | null
+          corte_id: string | null
           created_at: string
           created_by: string | null
           id: string
@@ -518,6 +519,7 @@ export type Database = {
           cancelled_at?: string | null
           cancelled_by?: string | null
           cancelled_reason?: string | null
+          corte_id?: string | null
           created_at?: string
           created_by?: string | null
           id?: string
@@ -531,6 +533,7 @@ export type Database = {
           cancelled_at?: string | null
           cancelled_by?: string | null
           cancelled_reason?: string | null
+          corte_id?: string | null
           created_at?: string
           created_by?: string | null
           id?: string
@@ -557,6 +560,13 @@ export type Database = {
             columns: ["cancelled_by"]
             isOneToOne: false
             referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "caja_movimientos_corte_id_fkey"
+            columns: ["corte_id"]
+            isOneToOne: false
+            referencedRelation: "caja_cortes"
             referencedColumns: ["id"]
           },
           {
