@@ -25,6 +25,12 @@ export type MozoPalette = {
   text: string;
   /** Ring class para chip outline (ring-sky-300). */
   ring: string;
+  /**
+   * Variante oscura (nivel 700) del mismo color, para TEXTO sobre fondo claro:
+   * el nombre del mozo debajo de la mesa en el plano. El `solid` es un 500 —
+   * alcanza para un punto o un relleno, no para una letra chica.
+   */
+  ink: string;
 };
 
 const MOZO_PALETTES: MozoPalette[] = [
@@ -34,6 +40,7 @@ const MOZO_PALETTES: MozoPalette[] = [
     bg: "bg-sky-100",
     text: "text-sky-800",
     ring: "ring-sky-300",
+    ink: "#0369a1",
   },
   {
     solid: "#6366f1",
@@ -41,6 +48,7 @@ const MOZO_PALETTES: MozoPalette[] = [
     bg: "bg-indigo-100",
     text: "text-indigo-800",
     ring: "ring-indigo-300",
+    ink: "#4338ca",
   },
   {
     solid: "#8b5cf6",
@@ -48,6 +56,7 @@ const MOZO_PALETTES: MozoPalette[] = [
     bg: "bg-violet-100",
     text: "text-violet-800",
     ring: "ring-violet-300",
+    ink: "#6d28d9",
   },
   {
     solid: "#d946ef",
@@ -55,6 +64,7 @@ const MOZO_PALETTES: MozoPalette[] = [
     bg: "bg-fuchsia-100",
     text: "text-fuchsia-800",
     ring: "ring-fuchsia-300",
+    ink: "#a21caf",
   },
   {
     solid: "#ec4899",
@@ -62,6 +72,7 @@ const MOZO_PALETTES: MozoPalette[] = [
     bg: "bg-pink-100",
     text: "text-pink-800",
     ring: "ring-pink-300",
+    ink: "#be185d",
   },
   {
     solid: "#06b6d4",
@@ -69,6 +80,7 @@ const MOZO_PALETTES: MozoPalette[] = [
     bg: "bg-cyan-100",
     text: "text-cyan-800",
     ring: "ring-cyan-300",
+    ink: "#0e7490",
   },
   {
     solid: "#3b82f6",
@@ -76,6 +88,7 @@ const MOZO_PALETTES: MozoPalette[] = [
     bg: "bg-blue-100",
     text: "text-blue-800",
     ring: "ring-blue-300",
+    ink: "#1d4ed8",
   },
   {
     solid: "#a855f7",
@@ -83,6 +96,7 @@ const MOZO_PALETTES: MozoPalette[] = [
     bg: "bg-purple-100",
     text: "text-purple-800",
     ring: "ring-purple-300",
+    ink: "#7e22ce",
   },
 ];
 
@@ -106,6 +120,15 @@ export function mozoPalette(userId: string): MozoPalette {
  */
 export function mozoColor(userId: string): string {
   return mozoPalette(userId).solid;
+}
+
+/**
+ * Color del NOMBRE del mozo en el plano. Mismo color que su punto en la
+ * leyenda, dos escalones más oscuro para que una letra chica se lea sobre el
+ * fondo del salón.
+ */
+export function mozoInkColor(userId: string): string {
+  return mozoPalette(userId).ink;
 }
 
 export function initialsFromName(name: string): string {

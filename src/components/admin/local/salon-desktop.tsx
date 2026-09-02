@@ -105,7 +105,8 @@ import {
   updateReservationDetails,
 } from "@/lib/reservations/booking-actions";
 import { useReservationsRealtime } from "@/lib/reservations/use-reservations-realtime";
-import { initialsFromName, mozoColor, mozoPalette } from "@/lib/mozo/colors";
+import { mozoColor, mozoInkColor, mozoPalette } from "@/lib/mozo/colors";
+import { buildMozoShortNames } from "@/lib/mozo/mozo-short-name";
 import type { MozoMember } from "@/lib/mozo/queries";
 import { type OperationalStatus } from "@/lib/mozo/state-machine";
 import { useTablesRealtime } from "@/lib/mozo/use-tables-realtime";
@@ -376,6 +377,12 @@ export function SalonDesktop({
       if (res.ok) {
         setServerData(res.data);
         onServerDataRef.current?.(res.data);
+      } else {
+        // Sin toast (es un refresh de fondo), pero tampoco en silencio: un
+        // error de permisos no es transitorio, se repite en cada refetch y
+        // deja el plano congelado sin que nadie se entere. Que quede en la
+        // consola es lo que faltó para ver el bug de la terminal.
+        console.error("refetchSalon", res.error);
       }
     } catch {
       // swallow: refresh de fondo, sin toast ni rollback.
@@ -913,6 +920,11 @@ export function SalonDesktop({
     }
     return m;
   }, [mozos]);
+
+  // Cómo se llama cada mozo EN EL PLANO: «Juan», o «Juan B.» si hay dos
+  // Juanes. Se calcula sobre el equipo entero —no sobre los que hoy tienen
+  // mesas— para que el rótulo no cambie a mitad del turno.
+  const mozoShortNameById = useMemo(() => buildMozoShortNames(mozos), [mozos]);
 
   const tableLabelById = useMemo(() => {
     const m: Record<string, string> = {};
@@ -1460,9 +1472,9 @@ export function SalonDesktop({
       const effectiveMozoId = distribuirOpen
         ? (localAssign[t.id] ?? null)
         : t.mozo_id;
-      const mozoName = effectiveMozoId
-        ? mozoNameById.get(effectiveMozoId)
-        : null;
+      const mozoLabel = effectiveMozoId
+        ? mozoShortNameById.get(effectiveMozoId)
+        : undefined;
       out[t.id] = {
         reservation: reservation
           ? {
@@ -1485,8 +1497,9 @@ export function SalonDesktop({
         // Spec 067: sólo lo consume el plano si el salón tiene activado
         // «mostrar el nombre del cliente».
         customerName: tableDisplayName(reservation, order) ?? undefined,
-        mozoInitial: mozoName ? initialsFromName(mozoName) : undefined,
+        mozoLabel,
         mozoColor: effectiveMozoId ? mozoColor(effectiveMozoId) : undefined,
+        mozoInk: effectiveMozoId ? mozoInkColor(effectiveMozoId) : undefined,
         delay:
           delay && delay.level >= 1
             ? {
@@ -1503,7 +1516,7 @@ export function SalonDesktop({
     orderByTable,
     planReservationByTable,
     delayByTable,
-    mozoNameById,
+    mozoShortNameById,
     distribuirOpen,
     localAssign,
     now,
@@ -1521,13 +1534,16 @@ export function SalonDesktop({
     const entries = Array.from(counts.entries())
       .map(([id, count]) => ({
         id,
-        name: mozoNameById.get(id) ?? "Mozo",
+        // El mismo rótulo que dice la mesa, para que leyenda y plano no se
+        // llamen distinto; el nombre completo queda en el `title`.
+        name: mozoShortNameById.get(id) ?? "Mozo",
+        fullName: mozoNameById.get(id) ?? "Mozo",
         color: mozoColor(id),
         count,
       }))
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
     return { entries, sinAsignar };
-  }, [activeTables, mozoNameById]);
+  }, [activeTables, mozoNameById, mozoShortNameById]);
 
   return (
     <div className="flex h-full flex-col gap-4">
@@ -2279,7 +2295,13 @@ function MozosLegend({
   entries,
   sinAsignar,
 }: {
-  entries: { id: string; name: string; color: string; count: number }[];
+  entries: {
+    id: string;
+    name: string;
+    fullName: string;
+    color: string;
+    count: number;
+  }[];
   sinAsignar: number;
 }) {
   if (entries.length === 0 && sinAsignar === 0) return null;
@@ -2289,7 +2311,7 @@ function MozosLegend({
         <span
           key={m.id}
           className="inline-flex items-center gap-1.5 text-[11px] font-medium text-zinc-700"
-          title={`${m.name} · ${m.count} mesa${m.count === 1 ? "" : "s"}`}
+          title={`${m.fullName} · ${m.count} mesa${m.count === 1 ? "" : "s"}`}
         >
           <span
             aria-hidden

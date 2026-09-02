@@ -10,10 +10,8 @@ import {
   startOfTodayUtc,
   type AdminOrder,
 } from "@/lib/admin/orders-query";
-import {
-  getCierreCajaData,
-  type CierreCajaData,
-} from "@/lib/caja/queries";
+import { getCierreCajaData, type CierreCajaData } from "@/lib/caja/queries";
+import { sectionAccess } from "@/lib/permissions/sections";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
@@ -51,13 +49,26 @@ type OperacionCtx = { businessId: string; timezone: string };
  *    bypass), así que sin esto un autenticado ajeno al negocio leería el plano,
  *    las reservas con teléfono, la caja y la nómina pasando un slug foráneo. Es
  *    la lección de la 2da ronda de review de la spec 052.
- * 2. **Rol** — el mismo que aplica `operacion/page.tsx`: sólo encargado, admin o
- *    platform admin. El mozo opera desde `/mozo` y no tiene por qué leer la
- *    caja del turno ni lo que rindieron sus compañeros. Sin esta capa la action
- *    sería una puerta de atrás a una pantalla que la UI le niega.
+ * 2. **Rol** — el mismo que aplica `operacion/page.tsx`, y por el mismo camino:
+ *    la matriz de secciones. El mozo opera desde `/mozo` y no tiene por qué
+ *    leer la caja del turno ni lo que rindieron sus compañeros. Sin esta capa
+ *    la action sería una puerta de atrás a una pantalla que la UI le niega.
+ *
+ *    Acá había una lista de roles escrita a mano —admin o encargado— que se
+ *    quedó vieja cuando la spec 140 sumó `terminal`, la compu del salón: el
+ *    page-gate (que sí lee la matriz) la dejaba entrar, pero TODOS sus refetch
+ *    volvían "No tenés permisos". Y como `refetchSalon` se traga el error —es
+ *    un refresh de fondo—, el síntoma no era un cartel sino un plano
+ *    **congelado**: asignabas los mozos y no aparecían hasta recargar. La
+ *    matriz es una sola: si la página abre, sus datos también.
+ *
+ * `soloSupervision` marca las tabs que la terminal NO ve (caja, rendición,
+ * pedidos de mostrador — spec 140 · D2): ahí sigue haciendo falta acceso
+ * `full`, o sea encargado/admin.
  */
 async function requireOperacionContext(
   slug: string,
+  opts: { soloSupervision?: boolean } = {},
 ): Promise<ActionResult<OperacionCtx>> {
   const business = await getBusiness(slug);
   if (!business) return actionError("Negocio no encontrado.");
@@ -66,7 +77,9 @@ async function requireOperacionContext(
   if (!ctx.ok) return ctx;
 
   const { role, isPlatformAdmin } = ctx.data;
-  if (!isPlatformAdmin && role !== "admin" && role !== "encargado") {
+  const access = sectionAccess("operacion", role, { isPlatformAdmin });
+  const alcanza = opts.soloSupervision ? access === "full" : access !== "none";
+  if (!alcanza) {
     return actionError("No tenés permisos para esta operación.");
   }
 
@@ -117,7 +130,9 @@ export async function getSalonTabData(
 export async function getPedidosTabOrders(
   slug: string,
 ): Promise<ActionResult<AdminOrder[]>> {
-  const ctx = await requireOperacionContext(slug);
+  const ctx = await requireOperacionContext(slug, {
+    soloSupervision: true,
+  });
   if (!ctx.ok) return ctx;
   return actionOk(await getTodayOrders(ctx.data.businessId, ctx.data.timezone));
 }
@@ -126,7 +141,9 @@ export async function getPedidosTabOrders(
 export async function getCajaTabData(
   slug: string,
 ): Promise<ActionResult<CajaData>> {
-  const ctx = await requireOperacionContext(slug);
+  const ctx = await requireOperacionContext(slug, {
+    soloSupervision: true,
+  });
   if (!ctx.ok) return ctx;
   return actionOk(await loadCaja(ctx.data.businessId));
 }
@@ -145,7 +162,9 @@ export async function getCierreCajaTabData(
   slug: string,
   cajaId: string,
 ): Promise<ActionResult<CierreCajaData>> {
-  const ctx = await requireOperacionContext(slug);
+  const ctx = await requireOperacionContext(slug, {
+    soloSupervision: true,
+  });
   if (!ctx.ok) return ctx;
 
   const data = await getCierreCajaData(cajaId, ctx.data.businessId);
@@ -157,7 +176,9 @@ export async function getCierreCajaTabData(
 export async function getRendicionTabData(
   slug: string,
 ): Promise<ActionResult<RendicionData>> {
-  const ctx = await requireOperacionContext(slug);
+  const ctx = await requireOperacionContext(slug, {
+    soloSupervision: true,
+  });
   if (!ctx.ok) return ctx;
   return actionOk(await loadRendicion(ctx.data.businessId, service()));
 }

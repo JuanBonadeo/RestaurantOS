@@ -59,7 +59,11 @@ describe("FloorPlanViewer — punto de demora (spec 30)", () => {
 
   it("sin demora (sin delayLevel) no dibuja punto", () => {
     const { container } = render(
-      <FloorPlanViewer plan={plan} tables={[makeTable()]} extras={{ t1: {} }} />,
+      <FloorPlanViewer
+        plan={plan}
+        tables={[makeTable()]}
+        extras={{ t1: {} }}
+      />,
     );
     expect(delayDots(container)).toHaveLength(0);
   });
@@ -104,6 +108,55 @@ describe("FloorPlanViewer — punto de demora (spec 30)", () => {
     fireEvent.mouseEnter(dot!);
     expect(queryByText("Parrilla")).not.toBeNull();
     expect(queryByText("+23 min de demora")).not.toBeNull();
+  });
+});
+
+describe("FloorPlanViewer — el mozo de la mesa", () => {
+  it("escribe el nombre debajo de la mesa, no un círculo con iniciales", () => {
+    const extras: Record<string, TableExtra> = {
+      t1: { mozoLabel: "Juan B.", mozoColor: "#6366f1", mozoInk: "#4338ca" },
+    };
+    const { container, getByText } = render(
+      <FloorPlanViewer plan={plan} tables={[makeTable()]} extras={extras} />,
+    );
+
+    const nombre = getByText("Juan B.");
+    // Debajo del borde de abajo de la mesa (height = 100), no adentro.
+    expect(Number(nombre.getAttribute("y"))).toBeGreaterThan(100);
+    // Con el color del mozo, el mismo que su punto en la leyenda.
+    expect(nombre.getAttribute("fill")).toBe("#4338ca");
+    // El badge viejo (círculo con las iniciales) no está más.
+    expect(container.querySelector('circle[fill="#6366f1"]')).toBeNull();
+  });
+
+  it("una mesa girada no deja el nombre acostado", () => {
+    const extras: Record<string, TableExtra> = { t1: { mozoLabel: "Sofía" } };
+    const { getByText } = render(
+      <FloorPlanViewer
+        plan={plan}
+        tables={[makeTable({ rotation: 90 })]}
+        extras={extras}
+      />,
+    );
+
+    // El nombre cuelga del grupo que ubica la mesa, no del que la rota.
+    const grupo = getByText("Sofía").closest("g")!;
+    expect(grupo.getAttribute("transform")).not.toContain("rotate");
+  });
+
+  it("mesa sin mozo asignado: sin rótulo", () => {
+    const { container } = render(
+      <FloorPlanViewer
+        plan={plan}
+        tables={[makeTable()]}
+        extras={{ t1: {} }}
+      />,
+    );
+    // Sólo el label de la mesa; ningún texto extra colgando abajo.
+    const textos = Array.from(container.querySelectorAll("text")).map(
+      (t) => t.textContent,
+    );
+    expect(textos).toEqual(["12"]);
   });
 });
 

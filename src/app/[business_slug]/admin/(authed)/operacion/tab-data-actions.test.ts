@@ -157,6 +157,44 @@ describe("gate de rol de las actions de operación (spec 103)", () => {
   }
 });
 
+describe("la terminal del salón (spec 140 · D2)", () => {
+  // El page-gate deja entrar a `terminal` a Operación en modo "limited": ve el
+  // plano, las reservas, las comandas y el fichaje. Las actions tenían una
+  // lista de roles a mano —admin o encargado— que no se enteró, así que todos
+  // sus refetch volvían "No tenés permisos". Como `refetchSalon` se los traga,
+  // el síntoma era un plano congelado: asignabas los mozos y no aparecían
+  // hasta recargar la página.
+  const suyas = [
+    ["salón", () => getSalonTabData("golf"), loadSalon],
+    ["reservas", () => getReservasTabData("golf", "2026-08-08"), loadReservas],
+    ["fichaje", () => getFichajeTabData("golf"), loadFichaje],
+  ] as const;
+
+  for (const [nombre, call, loader] of suyas) {
+    it(`${nombre}: la terminal refresca su tab`, async () => {
+      rol = "terminal";
+      const res = await call();
+      expect(res.ok).toBe(true);
+      expect(loader).toHaveBeenCalledTimes(1);
+    });
+  }
+
+  const ajenas = [
+    ["caja", () => getCajaTabData("golf"), loadCaja],
+    ["rendición", () => getRendicionTabData("golf"), loadRendicion],
+  ] as const;
+
+  for (const [nombre, call, loader] of ajenas) {
+    it(`${nombre}: la plata de supervisión sigue fuera de su alcance`, async () => {
+      rol = "terminal";
+      const res = await call();
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.error).toMatch(/permisos/i);
+      expect(loader).not.toHaveBeenCalled();
+    });
+  }
+});
+
 describe("getReservasTabData", () => {
   it("un date inválido cae en hoy, no en una ventana sin sentido", async () => {
     await getReservasTabData("golf", "no-es-fecha");

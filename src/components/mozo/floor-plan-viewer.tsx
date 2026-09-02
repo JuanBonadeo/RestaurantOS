@@ -5,9 +5,16 @@ import { useState } from "react";
 import { fitNameToTable } from "@/lib/mozo/table-display-name";
 
 import { DELAY_COLORS } from "@/lib/comandas/mesa-demora";
-import type { FloorPlan, FloorTable, OperationalStatus } from "@/lib/reservations/types";
+import type {
+  FloorPlan,
+  FloorTable,
+  OperationalStatus,
+} from "@/lib/reservations/types";
 
-const STATUS_COLORS: Record<OperationalStatus, { fill: string; stroke: string }> = {
+const STATUS_COLORS: Record<
+  OperationalStatus,
+  { fill: string; stroke: string }
+> = {
   libre: { fill: "#f4f4f5", stroke: "#a1a1aa" },
   ocupada: { fill: "#d1fae5", stroke: "#059669" },
   pidio_cuenta: { fill: "#fef3c7", stroke: "#d97706" },
@@ -29,9 +36,17 @@ export type TableExtra = {
   /** Spec 067: nombre del cliente sentado (`tableDisplayName`). Sólo se usa si
    *  el plano tiene `show_customer_name`. `undefined` = walk-in anónimo. */
   customerName?: string;
-  mozoInitial?: string;
-  /** HSL determinístico por user_id — pinta el badge con el color del mozo. */
+  /**
+   * Cómo se llama el mozo asignado, ya resuelto por `buildMozoShortNames`:
+   * «Juan», o «Juan B.» si hay dos Juanes en el equipo. Va escrito DEBAJO de
+   * la mesa — antes era un círculo con las iniciales adentro de la mesa, que
+   * no se entendía sin mirar la leyenda.
+   */
+  mozoLabel?: string;
+  /** Color determinístico por user_id — tiñe la mesa en modo pintura. */
   mozoColor?: string;
+  /** El mismo color, oscuro, para escribir el nombre del mozo. */
+  mozoInk?: string;
   /**
    * Demora de cocina (spec 30): la comanda más demorada de la mesa sobre su
    * tiempo esperado. `level 0`/undefined = sin punto. Lo calcula el parent con
@@ -92,7 +107,7 @@ export function FloorPlanViewer({
     // cualquier resolución de monitor sin números mágicos (antes: maxHeight 68vh
     // + aspect-ratio, que ignoraba la altura disponible y dejaba el plano chico
     // con márgenes en pantallas anchas).
-    <div className="flex h-full w-full items-center justify-center overflow-hidden bg-background">
+    <div className="bg-background flex h-full w-full items-center justify-center overflow-hidden">
       <svg
         viewBox={`0 0 ${plan.width} ${plan.height}`}
         preserveAspectRatio="xMidYMid meet"
@@ -113,7 +128,7 @@ export function FloorPlanViewer({
 
         {active.map((table) => (
           <ViewerTable
-          showCustomerName={plan.show_customer_name ?? false}
+            showCustomerName={plan.show_customer_name ?? false}
             key={table.id}
             table={table}
             extra={extras[table.id]}
@@ -171,7 +186,11 @@ function ViewerTable({
   const [showDelayTip, setShowDelayTip] = useState(false);
   const cx = table.width / 2;
   const cy = table.height / 2;
-  const transform = `translate(${table.x} ${table.y}) rotate(${table.rotation} ${cx} ${cy})`;
+  // El translate y el rotate van separados a propósito: el nombre del mozo
+  // cuelga del grupo trasladado pero NO del rotado, así una mesa girada no
+  // deja el nombre acostado de lado.
+  const place = `translate(${table.x} ${table.y})`;
+  const spin = `rotate(${table.rotation} ${cx} ${cy})`;
   const opStatus = table.operational_status ?? "libre";
 
   // En paint mode: ganan los colores del mozo asignado sobre el estado.
@@ -183,29 +202,40 @@ function ViewerTable({
       : "#f4f4f5"
     : statusColors.fill;
   const stroke = paintMode
-    ? extra?.mozoColor ?? "#a1a1aa"
+    ? (extra?.mozoColor ?? "#a1a1aa")
     : statusColors.stroke;
   const strokeWidth = paintMode ? 3 : 2.5;
 
   const labelSize = Math.min(table.width, table.height) * 0.22;
   const subSize = Math.max(9, labelSize * 0.62);
+  // El nombre del mozo se cuelga del tamaño del rótulo de la mesa: es dato
+  // secundario, así que va un escalón abajo del número —nunca más grande— pero
+  // con un piso, porque en las mesas chicas del plano real (45pt) el
+  // proporcional solo quedaba ilegible.
+  const mozoNameSize = Math.max(9, Math.min(labelSize * 0.75, 13));
 
   // Qué mostrar debajo del label
   const hasReservation = !!extra?.reservation;
   // Radio del badge de reserva, escalado para que se lea también en mesas chicas.
-  const reservationBadgeR = Math.max(6, Math.min(9, Math.min(table.width, table.height) * 0.11));
+  const reservationBadgeR = Math.max(
+    6,
+    Math.min(9, Math.min(table.width, table.height) * 0.11),
+  );
   const minutesOpen = extra?.minutesOpen;
 
   // Punto de demora de cocina (spec 30). En paint mode no va: el encargado
   // está distribuyendo mozos, no mirando demoras.
   const delay = paintMode ? undefined : extra?.delay;
-  const delayColor = delay && delay.level >= 1 ? DELAY_COLORS[delay.level] : null;
+  const delayColor =
+    delay && delay.level >= 1 ? DELAY_COLORS[delay.level] : null;
 
   // Geometría del tooltip de demora (se dibuja dentro del SVG al hover, a la
   // misma escala que el resto del plano). Sector + minutos reales de exceso.
   const tipFont = Math.max(11, subSize);
   const tipLine1 = delay?.station ?? "";
-  const tipLine2 = delay ? `+${Math.round(delay.excessMinutes)} min de demora` : "";
+  const tipLine2 = delay
+    ? `+${Math.round(delay.excessMinutes)} min de demora`
+    : "";
   const tipChars = Math.max(tipLine1.length, tipLine2.length);
   const tipPadX = tipFont * 0.7;
   const tipW = tipChars * tipFont * 0.56 + tipPadX * 2 + 6;
@@ -222,7 +252,10 @@ function ViewerTable({
   // cae al rótulo de siempre: la opción cambia qué se muestra, nunca deja una
   // mesa sin etiqueta. En paint mode manda el modo pintura.
   const nameLabel =
-    !paintMode && showCustomerName && opStatus !== "libre" && extra?.customerName
+    !paintMode &&
+    showCustomerName &&
+    opStatus !== "libre" &&
+    extra?.customerName
       ? fitNameToTable(extra.customerName, table.width / (labelSize * 0.58))
       : null;
 
@@ -238,7 +271,7 @@ function ViewerTable({
 
   return (
     <g
-      transform={transform}
+      transform={place}
       // El tap de una mesa no es un tap "al plano": si burbujeara, abrir una
       // mesa y cerrar el panel serían el mismo gesto.
       onClick={(e) => {
@@ -247,165 +280,192 @@ function ViewerTable({
       }}
       style={{ cursor: "pointer" }}
     >
-      {/* Mesa */}
-      {table.shape === "circle" ? (
-        <ellipse
-          cx={cx}
-          cy={cy}
-          rx={table.width / 2}
-          ry={table.height / 2}
-          fill={fill}
-          stroke={stroke}
-          strokeWidth={strokeWidth}
-          style={{ filter: "drop-shadow(0 2px 4px rgb(0 0 0 / 0.1))" }}
-        />
-      ) : (
-        <rect
-          x={0}
-          y={0}
-          width={table.width}
-          height={table.height}
-          rx={table.shape === "rect" ? 10 : 6}
-          fill={fill}
-          stroke={stroke}
-          strokeWidth={strokeWidth}
-          style={{ filter: "drop-shadow(0 2px 4px rgb(0 0 0 / 0.1))" }}
-        />
-      )}
+      <g transform={spin}>
+        {/* Mesa */}
+        {table.shape === "circle" ? (
+          <ellipse
+            cx={cx}
+            cy={cy}
+            rx={table.width / 2}
+            ry={table.height / 2}
+            fill={fill}
+            stroke={stroke}
+            strokeWidth={strokeWidth}
+            style={{ filter: "drop-shadow(0 2px 4px rgb(0 0 0 / 0.1))" }}
+          />
+        ) : (
+          <rect
+            x={0}
+            y={0}
+            width={table.width}
+            height={table.height}
+            rx={table.shape === "rect" ? 10 : 6}
+            fill={fill}
+            stroke={stroke}
+            strokeWidth={strokeWidth}
+            style={{ filter: "drop-shadow(0 2px 4px rgb(0 0 0 / 0.1))" }}
+          />
+        )}
 
-      {/* Label central */}
-      <text
-        x={cx}
-        y={subLine ? cy - 2 : cy + labelSize * 0.35}
-        textAnchor="middle"
-        fontSize={nameLabel ? labelSize * 0.86 : labelSize}
-        fontWeight="700"
-        fill="#18181b"
-        style={{ userSelect: "none", pointerEvents: "none", fontFamily: "inherit" }}
-      >
-        {nameLabel ?? table.label}
-      </text>
-
-      {/* Sub-línea: hora de reserva o tiempo abierta */}
-      {subLine && (
+        {/* Label central */}
         <text
           x={cx}
-          y={cy + subSize + 2}
+          y={subLine ? cy - 2 : cy + labelSize * 0.35}
           textAnchor="middle"
-          fontSize={subSize}
-          fontWeight="500"
-          fill="#52525b"
-          style={{ userSelect: "none", pointerEvents: "none", fontFamily: "inherit" }}
+          fontSize={nameLabel ? labelSize * 0.86 : labelSize}
+          fontWeight="700"
+          fill="#18181b"
+          style={{
+            userSelect: "none",
+            pointerEvents: "none",
+            fontFamily: "inherit",
+          }}
         >
-          {subLine}
+          {nameLabel ?? table.label}
         </text>
-      )}
 
-      {/* Badge reserva (esquina superior derecha). Antes sólo se dibujaba en
+        {/* Sub-línea: hora de reserva o tiempo abierta */}
+        {subLine && (
+          <text
+            x={cx}
+            y={cy + subSize + 2}
+            textAnchor="middle"
+            fontSize={subSize}
+            fontWeight="500"
+            fill="#52525b"
+            style={{
+              userSelect: "none",
+              pointerEvents: "none",
+              fontFamily: "inherit",
+            }}
+          >
+            {subLine}
+          </text>
+        )}
+
+        {/* Badge reserva (esquina superior derecha). Antes sólo se dibujaba en
           mesas grandes, así que en las chicas la reserva pasaba desapercibida:
           ahora va siempre, escalado al tamaño de la mesa. */}
-      {hasReservation && (
-        <>
-          <circle
-            cx={table.width - reservationBadgeR - 2}
-            cy={reservationBadgeR + 2}
-            r={reservationBadgeR}
-            fill="#6366f1"
-            stroke="white"
-            strokeWidth={1.5}
-          />
-          <text
-            x={table.width - reservationBadgeR - 2}
-            y={reservationBadgeR + 2 + reservationBadgeR * 0.5}
-            textAnchor="middle"
-            fontSize={reservationBadgeR * 1.1}
-            fontWeight="700"
-            fill="white"
-            style={{ userSelect: "none", pointerEvents: "none" }}
-          >
-            R
-          </text>
-        </>
-      )}
-
-      {/* Badge mozo asignado (esquina inferior derecha) — color del mozo */}
-      {extra?.mozoInitial && (
-        <>
-          <circle
-            cx={table.width - 11}
-            cy={table.height - 11}
-            r={11}
-            fill={extra.mozoColor ?? "#0f172a"}
-            stroke="white"
-            strokeWidth={1.5}
-          />
-          <text
-            x={table.width - 11}
-            y={table.height - 7.5}
-            textAnchor="middle"
-            fontSize="9.5"
-            fontWeight="700"
-            fill="white"
-            style={{ userSelect: "none", pointerEvents: "none" }}
-          >
-            {extra.mozoInitial}
-          </text>
-        </>
-      )}
-
-      {/* Punto de demora de cocina (esquina sup-izq) + tooltip al hover. El
-          color encodea cuánto se PASÓ del tiempo esperado; no toca el fill. */}
-      {delayColor && delay && (
-        <g>
-          <circle
-            cx={10}
-            cy={10}
-            r={7.5}
-            fill={delayColor}
-            stroke="white"
-            strokeWidth={1.5}
-            onMouseEnter={() => setShowDelayTip(true)}
-            onMouseLeave={() => setShowDelayTip(false)}
-            style={{ cursor: "pointer" }}
-          />
-          {showDelayTip && (
-            <g
-              transform={`translate(${tipX} ${tipY})`}
-              style={{ pointerEvents: "none" }}
+        {hasReservation && (
+          <>
+            <circle
+              cx={table.width - reservationBadgeR - 2}
+              cy={reservationBadgeR + 2}
+              r={reservationBadgeR}
+              fill="#6366f1"
+              stroke="white"
+              strokeWidth={1.5}
+            />
+            <text
+              x={table.width - reservationBadgeR - 2}
+              y={reservationBadgeR + 2 + reservationBadgeR * 0.5}
+              textAnchor="middle"
+              fontSize={reservationBadgeR * 1.1}
+              fontWeight="700"
+              fill="white"
+              style={{ userSelect: "none", pointerEvents: "none" }}
             >
-              <rect
-                x={0}
-                y={0}
-                width={tipW}
-                height={tipH}
-                rx={tipFont * 0.4}
-                fill="#18181b"
-                opacity={0.96}
-                style={{ filter: "drop-shadow(0 2px 6px rgb(0 0 0 / 0.35))" }}
-              />
-              <rect x={0} y={0} width={4} height={tipH} rx={2} fill={delayColor} />
-              <text
-                x={tipPadX}
-                y={tipFont * 1.25}
-                fontSize={tipFont}
-                fontWeight={700}
-                fill="#ffffff"
-                style={{ userSelect: "none", pointerEvents: "none", fontFamily: "inherit" }}
+              R
+            </text>
+          </>
+        )}
+
+        {/* Punto de demora de cocina (esquina sup-izq) + tooltip al hover. El
+          color encodea cuánto se PASÓ del tiempo esperado; no toca el fill. */}
+        {delayColor && delay && (
+          <g>
+            <circle
+              cx={10}
+              cy={10}
+              r={7.5}
+              fill={delayColor}
+              stroke="white"
+              strokeWidth={1.5}
+              onMouseEnter={() => setShowDelayTip(true)}
+              onMouseLeave={() => setShowDelayTip(false)}
+              style={{ cursor: "pointer" }}
+            />
+            {showDelayTip && (
+              <g
+                transform={`translate(${tipX} ${tipY})`}
+                style={{ pointerEvents: "none" }}
               >
-                {tipLine1}
-              </text>
-              <text
-                x={tipPadX}
-                y={tipFont * 2.25}
-                fontSize={tipFont * 0.85}
-                fill="#e4e4e7"
-                style={{ userSelect: "none", pointerEvents: "none", fontFamily: "inherit" }}
-              >
-                {tipLine2}
-              </text>
-            </g>
-          )}
-        </g>
+                <rect
+                  x={0}
+                  y={0}
+                  width={tipW}
+                  height={tipH}
+                  rx={tipFont * 0.4}
+                  fill="#18181b"
+                  opacity={0.96}
+                  style={{ filter: "drop-shadow(0 2px 6px rgb(0 0 0 / 0.35))" }}
+                />
+                <rect
+                  x={0}
+                  y={0}
+                  width={4}
+                  height={tipH}
+                  rx={2}
+                  fill={delayColor}
+                />
+                <text
+                  x={tipPadX}
+                  y={tipFont * 1.25}
+                  fontSize={tipFont}
+                  fontWeight={700}
+                  fill="#ffffff"
+                  style={{
+                    userSelect: "none",
+                    pointerEvents: "none",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  {tipLine1}
+                </text>
+                <text
+                  x={tipPadX}
+                  y={tipFont * 2.25}
+                  fontSize={tipFont * 0.85}
+                  fill="#e4e4e7"
+                  style={{
+                    userSelect: "none",
+                    pointerEvents: "none",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  {tipLine2}
+                </text>
+              </g>
+            )}
+          </g>
+        )}
+      </g>
+
+      {/* Nombre del mozo, DEBAJO de la mesa y derecho (fuera del grupo que
+          rota). Reemplaza al círculo con iniciales que vivía en la esquina:
+          en un plano lleno, "JB" no dice nada sin ir a buscar la leyenda, y
+          encima le comía la esquina a la mesa. El halo blanco es para que se
+          lea igual sobre la foto del salón. */}
+      {extra?.mozoLabel && (
+        <text
+          x={cx}
+          y={table.height + mozoNameSize * 0.85 + 3}
+          textAnchor="middle"
+          fontSize={mozoNameSize}
+          fontWeight="700"
+          fill={extra.mozoInk ?? "#3f3f46"}
+          stroke="#ffffff"
+          strokeWidth={mozoNameSize * 0.3}
+          strokeLinejoin="round"
+          style={{
+            paintOrder: "stroke",
+            userSelect: "none",
+            pointerEvents: "none",
+            fontFamily: "inherit",
+          }}
+        >
+          {extra.mozoLabel}
+        </text>
       )}
     </g>
   );

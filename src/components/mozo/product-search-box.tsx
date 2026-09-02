@@ -128,6 +128,10 @@ export function useProductSearch({
       e.preventDefault();
       onEnterResults();
     } else if (e.key === "Enter") {
+      // Ctrl/⌘+Enter no es del buscador: es «enviar la comanda». Sin este
+      // corte, el atajo agregaba el primer resultado de la búsqueda antes de
+      // enviar — te ibas a cocina con un producto que nadie pidió.
+      if (e.metaKey || e.ctrlKey) return;
       // Enter desde el buscador agrega el primero — el caso de siempre: tipeás
       // tres letras y el que buscabas ya está arriba. Para cualquier otro, ↓.
       const pick = results[0];

@@ -983,6 +983,45 @@ export function MozoPedirClient({
     });
   };
 
+  // ── Ctrl/⌘+Enter = enviar la comanda (spec 075, FR-016) ──
+  //
+  // Escucha en el DOCUMENTO, no en el div del panel. Un `onKeyDown` de React
+  // sólo se entera si el foco está adentro del árbol, y en el salón el foco se
+  // va del panel todo el tiempo: un click al plano, un click al aire, un tap
+  // en un botón que se desmonta. Ahí el atajo quedaba muerto sin ninguna
+  // señal. Ahora anda desde donde estés, que es lo que promete la ayuda de
+  // atajos.
+  //
+  // `sendRef` para no re-suscribir en cada tecla tipeada: `handleSend` se
+  // recrea en cada render y el listener tiene que ver siempre el carrito de
+  // ahora, no el del render en que se colgó.
+  const sendRef = useRef(handleSend);
+  useEffect(() => {
+    sendRef.current = handleSend;
+  });
+  // Con un modal propio abierto (alta de producto, menú del día, cancelar
+  // ítem) las teclas son suyas; y con un envío en vuelo, el atajo no puede
+  // hacer lo que el botón tiene prohibido.
+  const envioBloqueado =
+    pending || !!openProduct || !!openDailyMenu || !!cancelTarget;
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey)) return;
+      if (envioBloqueado) return;
+      // Un diálogo de AFUERA abierto encima (los atajos del salón, transferir
+      // mesa) se queda con la tecla: el panel sigue montado detrás.
+      const dialog = (e.target as HTMLElement | null)?.closest?.(
+        "[role='dialog']",
+      );
+      if (dialog && rootRef.current && !rootRef.current.contains(dialog))
+        return;
+      e.preventDefault();
+      sendRef.current();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [envioBloqueado]);
+
   const handleCancelConfirm = () => {
     if (!cancelTarget) return;
     const reason = cancelReason.trim();
@@ -1090,6 +1129,7 @@ export function MozoPedirClient({
 
   // Layout: pantalla completa (mozo) vs embebido en un panel (sidebar admin).
   // Embebido = columna flex con scroll interno y footer no-fixed.
+  const rootRef = useRef<HTMLDivElement>(null);
   const rootClass = embedded
     ? "relative flex h-full min-h-0 flex-col overflow-hidden bg-zinc-50"
     : `min-h-dvh bg-zinc-50 ${showTabNavInFooter ? "pb-48" : "pb-36"}`;
@@ -1261,24 +1301,7 @@ export function MozoPedirClient({
   // full-screen del mozo (abajo) conserva su flujo de 2 pasos intacto.
   if (embedded) {
     return (
-      <div
-        className={rootClass}
-        onKeyDown={(e) => {
-          // Enviar con Ctrl/Cmd+Enter desde cualquier parte del panel, salvo con
-          // un modal abierto. Pasa por el mismo handleSend (anti-doble-envío,
-          // specs 41/42). FR-016.
-          if (
-            (e.metaKey || e.ctrlKey) &&
-            e.key === "Enter" &&
-            !openProduct &&
-            !openDailyMenu &&
-            !cancelTarget
-          ) {
-            e.preventDefault();
-            handleSend();
-          }
-        }}
-      >
+      <div className={rootClass} ref={rootRef}>
         {/* Header compacto */}
         <header className="shrink-0 border-b border-zinc-200 bg-white px-3 py-2.5">
           <div className="flex items-center gap-2">
@@ -1473,7 +1496,7 @@ export function MozoPedirClient({
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
-    <div className={rootClass}>
+    <div className={rootClass} ref={rootRef}>
       {/* ─── Header sticky ─── */}
       <header className="sticky top-0 z-30 border-b border-zinc-200 bg-white/95 backdrop-blur-md">
         <div className="mx-auto flex max-w-md items-center gap-2 px-3 py-3">
