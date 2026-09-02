@@ -1,7 +1,12 @@
-import { readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+
+import {
+  DESCUENTO_MEDIO_PCT,
+  DIFERENCIA_CAJA_OK_CENTS,
+} from "@/lib/permissions/can";
 
 import {
   GRUPOS,
@@ -70,6 +75,44 @@ describe("contenido de la guía · estructura", () => {
   // «Lo importante» es lo único que se lee cuando se entra apurado. Un tema sin
   // claves deja esa caja vacía; con seis, deja de ser un destaque y pasa a ser
   // otro párrafo más.
+  // El día que el cliente devuelva la matriz con otros topes, se cambian en
+  // `can.ts` y la guía tiene que seguirlos sola. Este test es lo que evita que
+  // alguien vuelva a tipear "25%" a mano en un paso nuevo.
+  it("los topes salen de `can.ts`, no están tipeados en el texto", () => {
+    const todo = TEMAS.flatMap((t) => [
+      ...t.claves,
+      ...[...t.pasos, ...Object.values(t.pasosPorModo ?? {}).flat()].flatMap((p) => [
+        p.titulo,
+        p.texto,
+        p.aviso?.texto ?? "",
+      ]),
+    ]).join(" ");
+
+    // Los valores actuales SÍ tienen que aparecer — vienen de la constante.
+    expect(todo).toContain(`${DESCUENTO_MEDIO_PCT}%`);
+    expect(todo).toContain(
+      new Intl.NumberFormat("es-AR", {
+        style: "currency",
+        currency: "ARS",
+        maximumFractionDigits: 0,
+      }).format(DIFERENCIA_CAJA_OK_CENTS / 100),
+    );
+
+    // Y no pueden estar tipeados en el fuente. Se mira el ARCHIVO, no el valor
+    // resuelto: en runtime `${TOPE_DESCUENTO}` y "25%" son idénticos, y lo que
+    // se quiere prohibir es justamente la forma de escribirlo.
+    const fuente = readFileSync(
+      join(process.cwd(), "src", "lib", "ayuda", "contenido.ts"),
+      "utf8",
+    );
+    // Sólo el cuerpo de los temas: la cabecera y las constantes sí los nombran.
+    const cuerpo = fuente.slice(fuente.indexOf("export const TEMAS"));
+    expect(cuerpo, "hay un «25%» tipeado a mano: usá TOPE_DESCUENTO").not.toMatch(/\b25\s?%/);
+    expect(cuerpo, "hay un «$5.000» tipeado a mano: usá TOPE_DIFERENCIA_CAJA").not.toMatch(
+      /\$\s?5\.000/,
+    );
+  });
+
   it("cada tema tiene entre una y tres claves", () => {
     for (const tema of TEMAS) {
       expect(tema.claves.length, `${tema.slug}`).toBeGreaterThan(0);

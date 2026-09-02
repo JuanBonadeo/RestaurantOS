@@ -21,6 +21,10 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import {
+  DESCUENTO_MEDIO_PCT,
+  DIFERENCIA_CAJA_OK_CENTS,
+} from "@/lib/permissions/can";
 import type { ReservationMode } from "@/lib/reservations/types";
 
 // ============================================
@@ -50,6 +54,25 @@ import type { ReservationMode } from "@/lib/reservations/types";
  *  Dos tonos a propósito: con tres ya no se distinguen, y si todo es urgente
  *  nada lo es. */
 export type Aviso = { tono: "ojo" | "peligro"; texto: string };
+
+// ─── Los números que decide `can.ts` ────────────────────────────────────────
+//
+// Se IMPORTAN, no se tipean. Son los topes que el sistema aplica de verdad, y
+// el propio `can.ts` avisa que son defaults nuestros pendientes de que el
+// cliente los confirme (ver `wiki/negocio/cuestionario-topes-y-recargos.md`).
+// El día que vuelvan otros números, se cambian en `can.ts` y la guía queda
+// bien sola — que es exactamente lo que no pasaba cuando estaban escritos a
+// mano en siete lugares distintos.
+
+/** «$5.000» — lo máximo de diferencia de caja que el encargado cierra solo. */
+export const TOPE_DIFERENCIA_CAJA = new Intl.NumberFormat("es-AR", {
+  style: "currency",
+  currency: "ARS",
+  maximumFractionDigits: 0,
+}).format(DIFERENCIA_CAJA_OK_CENTS / 100);
+
+/** «25%» — lo máximo de descuento que el encargado aplica solo. */
+export const TOPE_DESCUENTO = `${DESCUENTO_MEDIO_PCT}%`;
 
 /**
  * Un círculo numerado sobre un punto de la captura. `x`/`y` son PORCENTAJES
@@ -219,7 +242,7 @@ export const TEMAS: Tema[] = [
     claves: [
       "Cerrar la caja principal libera todas las mesas y borra la distribución de mozos. No se puede evitar.",
       "Sin todas las rendiciones resueltas, la caja principal no cierra.",
-      "Podés cerrar con una diferencia de hasta $5.000. Más que eso lo cierra el dueño.",
+      `Podés cerrar con una diferencia de hasta ${TOPE_DIFERENCIA_CAJA}. Más que eso lo cierra el dueño.`,
     ],
     pasos: [
       {
@@ -276,7 +299,7 @@ export const TEMAS: Tema[] = [
         aviso: {
           tono: "peligro",
           texto:
-            'Arriba de $5.000 de diferencia el sistema te frena: "La diferencia excede tu autorización. Pedile al admin que cierre la caja.". No cambies el conteo para que entre — convertís un faltante explicable en uno escondido.',
+            `Arriba de ${TOPE_DIFERENCIA_CAJA} de diferencia el sistema te frena: "La diferencia excede tu autorización. Pedile al admin que cierre la caja.". No cambies el conteo para que entre — convertís un faltante explicable en uno escondido.`,
         },
       },
       {
@@ -352,7 +375,7 @@ export const TEMAS: Tema[] = [
     icono: Receipt,
     grupo: "operacion",
     claves: [
-      "Tu tope de descuento es 25%. Partirlo en dos cobros no lo saltea.",
+      `Tu tope de descuento es ${TOPE_DESCUENTO}. Partirlo en dos cobros no lo saltea.`,
       "Si «Cobrar» se queda pensando, NO lo toques de nuevo: refrescá y mirá cómo quedó.",
       "Mirá en qué caja va a quedar el cobro antes de confirmar. Es el error más fácil de evitar.",
     ],
@@ -387,7 +410,7 @@ export const TEMAS: Tema[] = [
       {
         titulo: "Propina y descuento",
         texto:
-          'La propina se elige por porcentaje o monto, y «Sin propina» es una opción válida. En el descuento el sistema te dice «Tu rol permite hasta 25%»; si te pasás se pone en rojo con «Excede tu autorización · pedile al dueño» y no te deja cobrar. El descuento siempre pide motivo, con «Cortesía de la casa» entre las opciones.',
+          `La propina se elige por porcentaje o monto, y «Sin propina» es una opción válida. En el descuento el sistema te dice «Tu rol permite hasta ${TOPE_DESCUENTO}»; si te pasás se pone en rojo con «Excede tu autorización · pedile al dueño» y no te deja cobrar. El descuento siempre pide motivo, con «Cortesía de la casa» entre las opciones.`,
       },
       {
         titulo: "Cobrar",
@@ -1043,7 +1066,7 @@ export const TEMAS: Tema[] = [
       {
         titulo: '"La diferencia excede tu autorización. Pedile al admin que cierre la caja."',
         texto:
-          "Contaste el cajón y falta o sobra más de $5.000. Es el techo de lo que podés cerrar solo. No cambies el número contado para que entre: llamá al dueño, que él sí puede cerrarla, y dejá escrito en las notas qué pasó.",
+          `Contaste el cajón y falta o sobra más de ${TOPE_DIFERENCIA_CAJA}. Es el techo de lo que podés cerrar solo. No cambies el número contado para que entre: llamá al dueño, que él sí puede cerrarla, y dejá escrito en las notas qué pasó.`,
         aviso: {
           tono: "peligro",
           texto: "Cambiar el conteo para esquivar este cartel convierte un faltante explicable en un faltante escondido.",
@@ -1086,7 +1109,7 @@ export const TEMAS: Tema[] = [
           "Estás sacando plata de la caja sin decir para qué. Escribí el motivo — «pago proveedor», «depósito banco» — con suficiente detalle como para entenderlo dentro de un mes.",
       },
       {
-        titulo: '"Tu rol permite hasta 25%" / "Excede tu autorización · pedile al dueño"',
+        titulo: `"Tu rol permite hasta ${TOPE_DESCUENTO}" / "Excede tu autorización · pedile al dueño"`,
         texto:
           "El descuento que pusiste se pasa de lo que podés autorizar. Bajalo hasta el tope o pedile al dueño que lo haga él. Partirlo en dos cobros no cuenta como solución.",
         verTambien: { tema: "cobrar", texto: "Descuentos, con el tope explicado" },
