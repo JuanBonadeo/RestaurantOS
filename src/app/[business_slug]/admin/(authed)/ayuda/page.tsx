@@ -8,6 +8,8 @@ import { getReservationSettings } from "@/lib/reservations/queries";
 import type { ReservationMode } from "@/lib/reservations/types";
 import { getBusiness } from "@/lib/tenant";
 
+import { Asistente } from "./asistente";
+
 import { H1, PAGINA, PROSA, SECUNDARIO, TEXTO } from "./estilos";
 
 // Índice de la guía del encargado — spec 134 (RestaurantOS-Brain#35).
@@ -41,8 +43,11 @@ export default async function AyudaIndice({
       <div className={PAGINA}>
         <h1 className={H1}>Ayuda</h1>
         <p className={`mt-3 ${SECUNDARIO} ${TEXTO}`}>
-          Cómo se usa el panel, explicado paso a paso. Elegí lo que necesitás hacer.
+          Cómo se usa el panel, explicado paso a paso. Preguntá lo que necesitás, o
+          elegí un tema.
         </p>
+
+        <Asistente slug={business_slug} />
 
         {/* Agrupado y no una tira de dieciséis tarjetas iguales: con esta
             cantidad, una lista plana obliga a leerlas todas para encontrar una.

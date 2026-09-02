@@ -78,6 +78,15 @@ export type Paso = {
   alt?: string;
   marcas?: Marca[];
   aviso?: Aviso;
+  /**
+   * Sólo se muestra si el negocio está en ese modo de reservas.
+   *
+   * Lo usan un par de entradas de `carteles`, que es un catálogo plano y por lo
+   * tanto no puede tener `pasosPorModo`: el cartel del cupo lleno existe en los
+   * dos modos pero dice cosas distintas, y a un local en `estricto` no le sirve
+   * leer que puede sobrevender — no puede.
+   */
+  soloModo?: ReservationMode;
 };
 
 /**
@@ -158,9 +167,11 @@ export type Tema = {
   pasosPorModo?: Record<ReservationMode, Paso[]>;
 };
 
-/** Los pasos que le tocan a este negocio. */
+/** Los pasos que le tocan a este negocio: la variante de su modo, y sin las
+ *  entradas sueltas marcadas para el otro. */
 export function pasosDe(tema: Tema, modo: ReservationMode): Paso[] {
-  return tema.pasosPorModo?.[modo] ?? tema.pasos;
+  const base = tema.pasosPorModo?.[modo] ?? tema.pasos;
+  return base.filter((paso) => !paso.soloModo || paso.soloModo === modo);
 }
 
 // ─── Los temas ──────────────────────────────────────────────────────────────
@@ -1063,12 +1074,14 @@ export const TEMAS: Tema[] = [
       },
       {
         titulo: '"Ese servicio ya está completo. Probá otro horario, otra fecha u otro salón."',
+        soloModo: "flexible",
         texto:
           "Es el cartel que ve el CLIENTE en la web cuando el servicio está lleno. A vos, desde el panel, el sistema te deja pasar igual avisándote que no quedan mesas.",
         verTambien: { tema: "reservas", texto: "El cupo, explicado" },
       },
       {
         titulo: '"No quedan mesas libres en ese servicio. Confirmá para reservar igual."',
+        soloModo: "flexible",
         texto:
           "Estás tomando una reserva sobre un servicio lleno. El sistema no te lo prohíbe: te pide que confirmes que sabés lo que hacés. Tomala sólo si tenés el lugar contado de verdad.",
       },
