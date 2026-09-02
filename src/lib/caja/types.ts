@@ -143,7 +143,14 @@ export type CajaLiveStats = {
    * cerraban justo en la pantalla donde se decide si falta plata.
    */
   desglose_esperado: {
+    /**
+     * Lo que quedó en el cajón del turno anterior **después** del retiro del
+     * cierre (spec 130): cuando se retiró todo —el caso normal— es $0 y el
+     * turno arranca limpio.
+     */
     apertura_cents: number;
+    /** Lo que se llevó el cierre anterior, ya descontado de `apertura_cents`. */
+    retiro_cierre_cents: number;
     efectivo_cents: number;
     ingresos_cents: number;
     sangrias_cents: number;

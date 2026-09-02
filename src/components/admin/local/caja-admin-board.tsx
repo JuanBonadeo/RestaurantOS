@@ -286,6 +286,12 @@ function CajaCard({
   // (issue #189).
   const cargandoStats = stats == null;
   const expected = stats?.expected_cash_cents ?? 0;
+  // Spec 130 · Lo que quedó del turno anterior **después** del retiro del
+  // cierre. Sale de los stats (ya neteado) y no de `ultimo_corte`: el monto
+  // contado en el corte es plata que ya se sacó del cajón, y anunciarla como
+  // saldo anterior —con la sangría que la vacía tres líneas más abajo— es
+  // narrar la misma plata dos veces. Con el retiro hecho, esto es $0.
+  const apertura = stats?.desglose_esperado.apertura_cents ?? 0;
   const ventas = stats?.total_ventas_cents ?? 0;
   const propinas = stats?.total_propinas_cents ?? 0;
   const cobros = stats?.cobros_count ?? 0;
@@ -383,10 +389,15 @@ function CajaCard({
             )}
           </p>
           <p className="mt-1 text-xs text-zinc-600">
-            {caja.ultimo_corte
-              ? `${formatCurrency(caja.ultimo_corte.closing_cash_cents)} del corte anterior`
-              : "$0 inicio"}{" "}
-            + movimientos del período
+            {/* Mientras los stats no llegaron no se sabe la apertura: un
+                «Arranca en $0» prematuro es la misma mentira que el «$0» de
+                arriba (issue #189), así que se reserva el alto y no se dice
+                nada. */}
+            {cargandoStats
+              ? "\u00A0"
+              : apertura !== 0
+                ? `${formatCurrency(apertura)} del corte anterior + movimientos del período`
+                : "Arranca en $0 + movimientos del período"}
           </p>
         </div>
         <div className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200/70">

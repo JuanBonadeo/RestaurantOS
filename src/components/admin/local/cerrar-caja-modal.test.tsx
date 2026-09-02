@@ -69,6 +69,7 @@ function data(over: Partial<CierreCajaData> = {}): CierreCajaData {
       periodo_desde: "2026-08-30T12:00:00Z",
       desglose_esperado: {
         apertura_cents: 0,
+        retiro_cierre_cents: 0,
         efectivo_cents: 312_400,
         ingresos_cents: 0,
         sangrias_cents: 0,
