@@ -124,7 +124,11 @@ export async function getTodaySummary(
     else finished.push(entry);
   }
 
+  // La `terminal` (spec 140) no ficha: es la PC compartida del salón, no una
+  // persona. Listarla en «sin fichar» sería pedirle asistencia a un mueble —
+  // los que fichan desde ella son los mozos, cada uno con su PIN.
   const absent = (allMembers ?? [])
+    .filter((m) => m.role !== "terminal")
     .filter((m) => !clockedUserIds.has(m.user_id))
     .map((m) => ({
       userId: m.user_id,

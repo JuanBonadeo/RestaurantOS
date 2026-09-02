@@ -626,6 +626,10 @@ export const TEAM = [
   { email: "diego@demo.test", name: "Diego Mozo", role: "mozo", pin: "3333" },
   { email: "ramon@demo.test", name: "Ramón Cocina", role: "personal", pin: "4444" },
   { email: "marta@demo.test", name: "Marta Limpieza", role: "personal", pin: "5555" },
+  // Spec 140 — el puesto compartido del salón. No es una persona: es la PC que
+  // usan todos los mozos cuando no tienen móvil. Sin PIN: no ficha (los que
+  // fichan desde ella son los mozos, cada uno con el suyo).
+  { email: "terminal@demo.test", name: "Terminal Salón", role: "terminal", pin: null },
 ] as const;
 
 export const TEAM_PASSWORD = "demo1234";

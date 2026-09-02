@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { elegirMozoAtribuido } from "./cobro-actions";
+import { elegirMozoAtribuido } from "./atribucion-mozo";
 
 /**
  * Spec 140 · D5 — de quién es la plata de una mesa.
