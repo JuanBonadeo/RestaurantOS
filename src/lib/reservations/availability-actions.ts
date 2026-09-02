@@ -20,6 +20,8 @@ type AvailableSlotDTO = {
   slot: string;
   starts_at: string;
   ends_at: string;
+  /** Spec 144 — mesas libres en ese slot, para pintar el plano del picker. */
+  free_table_ids: string[];
 };
 
 type SalonDTO = { id: string; name: string };
@@ -73,6 +75,7 @@ export async function fetchAvailability(
       slot: s.slot,
       starts_at: s.starts_at.toISOString(),
       ends_at: s.ends_at.toISOString(),
+      free_table_ids: s.freeTableIds,
     })),
   );
 }

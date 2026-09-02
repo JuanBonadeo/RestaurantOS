@@ -155,3 +155,21 @@ export function horaInicial(
   });
   return conReserva ?? horas[0];
 }
+
+/**
+ * El `viewBox` que encuadra un conjunto de mesas, con aire alrededor
+ * (spec 144). Lo comparten el plano del día y el picker del formulario de
+ * reserva: dos planos del mismo salón que encuadraran distinto se leerían como
+ * dos salones.
+ */
+export function encuadreDeMesas(
+  mesas: Pick<FloorTable, "x" | "y" | "width" | "height">[],
+  pad = 40,
+): string {
+  if (mesas.length === 0) return "0 0 100 100";
+  const minX = Math.min(...mesas.map((t) => t.x)) - pad;
+  const minY = Math.min(...mesas.map((t) => t.y)) - pad;
+  const maxX = Math.max(...mesas.map((t) => t.x + t.width)) + pad;
+  const maxY = Math.max(...mesas.map((t) => t.y + t.height)) + pad;
+  return `${minX} ${minY} ${maxX - minX} ${maxY - minY}`;
+}

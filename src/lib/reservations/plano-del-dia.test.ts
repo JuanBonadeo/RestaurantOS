@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  encuadreDeMesas,
   estadoDeMesasEn,
   horaInicial,
   horasDelDia,
@@ -203,5 +204,20 @@ describe("momentoDe", () => {
     expect(momentoDe(DATE, "20:00", TZ).toISOString()).toBe(
       "2026-09-05T23:00:00.000Z",
     );
+  });
+});
+
+describe("encuadreDeMesas (spec 144)", () => {
+  it("encuadra el rectángulo que ocupan las mesas, con aire", () => {
+    const mesas = [
+      { x: 100, y: 50, width: 60, height: 60 },
+      { x: 300, y: 200, width: 40, height: 40 },
+    ];
+    // minX 100-40=60, minY 50-40=10, maxX 340+40=380, maxY 240+40=280.
+    expect(encuadreDeMesas(mesas)).toBe("60 10 320 270");
+  });
+
+  it("sin mesas devuelve un encuadre neutro en vez de NaN", () => {
+    expect(encuadreDeMesas([])).toBe("0 0 100 100");
   });
 });

@@ -332,3 +332,62 @@ describe("computeAvailableSlots", () => {
     ]);
   });
 });
+
+/**
+ * Spec 144 — el picker de mesa del formulario de reserva pinta el plano con
+ * esto. Antes mostraba el `operational_status` (el estado del AHORA), que para
+ * una reserva de mañana no significa nada.
+ */
+describe("computeAvailableSlots · mesas libres por slot (spec 144)", () => {
+  const reservaEn = (tableId: string): Reservation => ({
+    id: `r-${tableId}`,
+    business_id: "b1",
+    table_id: tableId,
+    user_id: null,
+    customer_name: "X",
+    customer_phone: "0",
+    party_size: 2,
+    starts_at: "2026-04-21T15:00:00Z", // 12:00 ART
+    ends_at: "2026-04-21T16:30:00Z", // 13:30 ART
+    status: "confirmed",
+    notes: null,
+    source: "web",
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  });
+
+  it("cada slot dice qué mesas quedan libres en ÉL, no ahora", () => {
+    const slots = computeAvailableSlots({
+      date: "2026-04-21",
+      partySize: 2,
+      settings: { ...baseSettings, schedule: SCHEDULE_OPEN_TUE },
+      tables: [makeTable({ id: "t1", seats: 4 }), makeTable({ id: "t2", seats: 4 })],
+      reservations: [reservaEn("t1")],
+      timezone: TZ,
+      now: new Date("2026-04-21T03:00:00Z"),
+    });
+
+    const porSlot = Object.fromEntries(slots.map((s) => [s.slot, s.freeTableIds]));
+    // A las 12:00 t1 está tomada; a la noche vuelve a estar libre.
+    expect(porSlot["12:00"]).toEqual(["t2"]);
+    expect(porSlot["20:30"]).toEqual(["t1", "t2"]);
+  });
+
+  it("no lista las mesas donde no entra el grupo ni las deshabilitadas", () => {
+    const slots = computeAvailableSlots({
+      date: "2026-04-21",
+      partySize: 4,
+      settings: { ...baseSettings, schedule: SCHEDULE_OPEN_TUE },
+      tables: [
+        makeTable({ id: "chica", seats: 2 }),
+        makeTable({ id: "rota", seats: 8, status: "disabled" }),
+        makeTable({ id: "ok", seats: 6 }),
+      ],
+      reservations: [],
+      timezone: TZ,
+      now: new Date("2026-04-21T03:00:00Z"),
+    });
+
+    expect(slots.every((s) => s.freeTableIds.join() === "ok")).toBe(true);
+  });
+});

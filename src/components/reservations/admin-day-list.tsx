@@ -749,6 +749,10 @@ export function AdminDayList({
           slug={slug}
           tables={activeTables}
           floorPlanId={null}
+          // Spec 144 — la hoja no está parada en ningún salón: se elige adentro.
+          // Si la tab de Operación está filtrada por uno solo, ése viene puesto.
+          floorPlans={floorPlans}
+          defaultFloorPlanId={salonIds.length === 1 ? salonIds[0] : null}
           onClose={() => setShowNewReservation(false)}
           onChanged={onChanged ? () => onChanged(date) : undefined}
         />

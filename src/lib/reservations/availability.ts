@@ -17,6 +17,14 @@ export type AvailableSlot = {
   slot: string;
   starts_at: Date;
   ends_at: Date;
+  /**
+   * Spec 144 — mesas del pool que quedan libres **en este slot** (activas, con
+   * lugar para el grupo y sin conflicto contando el buffer). El picker del
+   * formulario de reserva pinta el plano con esto: antes miraba el
+   * `operational_status`, que es el estado del *ahora* y para una reserva de
+   * mañana no dice nada.
+   */
+  freeTableIds: string[];
 };
 
 export type ComputeSlotsParams = {
@@ -151,11 +159,11 @@ export function computeAvailableSlots(params: ComputeSlotsParams): AvailableSlot
     if (start < leadCutoff) continue;
     const end = new Date(start.getTime() + durationMs);
 
-    const hasFreeTable = eligibleTables.some(
-      (t) => !tableHasConflict(t.id, start, end, bufferMs, reservations),
-    );
-    if (hasFreeTable) {
-      out.push({ slot, starts_at: start, ends_at: end });
+    const freeTableIds = eligibleTables
+      .filter((t) => !tableHasConflict(t.id, start, end, bufferMs, reservations))
+      .map((t) => t.id);
+    if (freeTableIds.length > 0) {
+      out.push({ slot, starts_at: start, ends_at: end, freeTableIds });
     }
   }
 

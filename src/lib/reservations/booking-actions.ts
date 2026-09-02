@@ -338,6 +338,10 @@ export async function createReservationFromAdmin(
     customerPhone: parsed.data.customer_phone,
     notes: parsed.data.notes,
     forcedTableId: parsed.data.table_id ?? null,
+    // Spec 144 — el salón elegido en el formulario. Sin esto el pool de mesas
+    // caía al primer `floor_plan` del negocio: auto-asignaba siempre ahí y una
+    // mesa de otro salón se rechazaba con «La mesa seleccionada no existe».
+    floorPlanId: parsed.data.floor_plan_id ?? null,
   });
   if (result.ok) {
     revalidatePath(`/${parsed.data.business_slug}/admin/reservas`);

@@ -29,12 +29,19 @@ import {
 } from "@/lib/reservations/booking-actions";
 import { arrivalSlots } from "@/lib/reservations/flexible-availability";
 import { CustomerFields } from "@/components/shared/customer-fields";
+import { MesaPickerPlano } from "@/components/reservations/mesa-picker-plano";
 import { partySizeFromKey } from "@/lib/mozo/party-size-keys";
 import { useArrowFocus } from "@/lib/ui/use-arrow-focus";
 import { useRovingList } from "@/lib/ui/use-roving-list";
 import type { FloorTable, ReservationMode, ReservationService } from "@/lib/reservations/types";
 
-type Slot = { slot: string; starts_at: string; ends_at: string };
+type Slot = {
+  slot: string;
+  starts_at: string;
+  ends_at: string;
+  /** Spec 144 — mesas libres EN ese slot (modo estricto). */
+  free_table_ids?: string[];
+};
 type FreeTable = { id: string; label: string; seats: number };
 
 /**
@@ -78,6 +85,8 @@ export function ReservaForm({
   slug,
   tables,
   floorPlanId,
+  floorPlans = [],
+  defaultFloorPlanId = null,
   onDone,
   tablePicker,
   footerClassName,
@@ -85,7 +94,16 @@ export function ReservaForm({
 }: {
   slug: string;
   tables: FloorTable[];
+  /** Salón fijo: lo pasa el sidebar, que ya está parado en un plano. */
   floorPlanId: string | null;
+  /**
+   * Spec 144 — salones del negocio. Cuando vienen (la hoja de la tab de
+   * Reservas, que no está parada en ninguno), el salón se **elige acá**: sin él
+   * la reserva se guarda sin zona y el cupo del servicio no la cuenta.
+   */
+  floorPlans?: Array<{ id: string; name: string }>;
+  /** Salón preelegido (la tab de Operación filtrada por un solo salón). */
+  defaultFloorPlanId?: string | null;
   onDone: () => void;
   tablePicker?: TablePickerBridge;
   footerClassName?: string;
@@ -126,7 +144,41 @@ export function ReservaForm({
   } | null>(null);
   const [loadingFlex, setLoadingFlex] = useState(false);
 
-  // La mesa efectiva sale del plano cuando hay bridge; si no, del <select>.
+  // ── Salón (spec 144) ──────────────────────────────────────────────────────
+  //
+  // Reservable = tiene al menos una mesa activa que no sea de barra; es el
+  // mismo criterio que el motor (`getAllReservableTables` filtra `is_bar`), así
+  // que ningún salón que el server vaya a rechazar aparece en la lista.
+  const salones = useMemo(
+    () =>
+      floorPlans.filter((fp) =>
+        tables.some(
+          (t) => t.floor_plan_id === fp.id && t.status === "active" && !t.is_bar,
+        ),
+      ),
+    [floorPlans, tables],
+  );
+  const [salonId, setSalonId] = useState<string | null>(null);
+
+  // Con un solo salón no hay nada que preguntar (y la tab de Operación puede
+  // venir filtrada por uno: ése arranca elegido).
+  useEffect(() => {
+    if (salonId && salones.some((s) => s.id === salonId)) return;
+    if (salones.length === 1) {
+      setSalonId(salones[0].id);
+      return;
+    }
+    if (defaultFloorPlanId && salones.some((s) => s.id === defaultFloorPlanId)) {
+      setSalonId(defaultFloorPlanId);
+    }
+  }, [salones, salonId, defaultFloorPlanId]);
+
+  /** El salón con el que se consulta y se guarda: fijo (sidebar) o elegido. */
+  const zonaId = floorPlanId ?? salonId;
+  /** Hay que elegirlo antes de seguir. */
+  const faltaElegirSalon = !tablePicker && salones.length > 1 && !zonaId;
+
+  // La mesa efectiva sale del plano cuando hay bridge; si no, del picker.
   const effectiveTableId = tablePicker ? (tablePicker.pickedTableId ?? undefined) : tableId;
 
   useEffect(() => {
@@ -140,6 +192,20 @@ export function ReservaForm({
     });
   }, [slug]);
 
+  /**
+   * Spec 144 · D7 — un servicio configurado para una zona sólo se ofrece en esa
+   * zona (más los que no tienen zona). Si el salón elegido no tiene ninguno
+   * —el Bar de golf-jcr no tiene servicios cargados— se ofrecen todos igual:
+   * bloquear la reserva sería una regresión silenciosa.
+   */
+  const serviciosDelSalon = useMemo(() => {
+    if (!zonaId) return services;
+    const propios = services.filter(
+      (s) => s.floor_plan_id === zonaId || s.floor_plan_id == null,
+    );
+    return propios.length > 0 ? propios : services;
+  }, [services, zonaId]);
+
   // Servicios aplicables a la fecha elegida (día exacto o "todos los días").
   const serviceNames = useMemo(() => {
     const dow = new Date(
@@ -149,23 +215,25 @@ export function ReservaForm({
         Number(date.slice(8, 10)),
       ),
     ).getUTCDay();
-    const applicable = services.filter((s) => s.day_of_week == null || s.day_of_week === dow);
+    const applicable = serviciosDelSalon.filter(
+      (s) => s.day_of_week == null || s.day_of_week === dow,
+    );
     return Array.from(new Set(applicable.map((s) => s.name)));
-  }, [services, date]);
+  }, [serviciosDelSalon, date]);
 
   const selectedServiceRow = useMemo(() => {
     if (!service) return null;
     const dow = new Date(
       Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8, 10))),
     ).getUTCDay();
-    const matches = services.filter((s) => s.name === service);
+    const matches = serviciosDelSalon.filter((s) => s.name === service);
     return (
       matches.find((s) => s.day_of_week === dow) ??
       matches.find((s) => s.day_of_week == null) ??
       matches[0] ??
       null
     );
-  }, [services, service, date]);
+  }, [serviciosDelSalon, service, date]);
 
   const arrivalOptions = useMemo(
     () =>
@@ -192,25 +260,29 @@ export function ReservaForm({
     }
   }, [mode, serviceNames, service]);
 
-  // Estricto: slots por fecha + party.
+  // Estricto: slots por fecha + party (del salón elegido, spec 144).
   useEffect(() => {
     if (mode !== "estricto" || !date || partySize < 1) return;
-    setLoadingSlots(true);
     setSelectedSlot(null);
+    if (faltaElegirSalon) {
+      setSlots([]);
+      return;
+    }
+    setLoadingSlots(true);
     fetchAvailability({
       business_slug: slug,
       date,
       party_size: partySize,
-      ...(floorPlanId ? { floor_plan_id: floorPlanId } : {}),
+      ...(zonaId ? { floor_plan_id: zonaId } : {}),
     }).then((r) => {
       setLoadingSlots(false);
       setSlots(r.ok ? r.data : []);
     });
-  }, [mode, slug, date, partySize, floorPlanId]);
+  }, [mode, slug, date, partySize, zonaId, faltaElegirSalon]);
 
   // Flexible: mesas libres + cubiertos del servicio.
   useEffect(() => {
-    if (mode !== "flexible" || !service) {
+    if (mode !== "flexible" || !service || faltaElegirSalon) {
       setFlexTables([]);
       setFlexInfo(null);
       return;
@@ -222,7 +294,7 @@ export function ReservaForm({
       date,
       service,
       party_size: partySize,
-      ...(floorPlanId ? { floor_plan_id: floorPlanId } : {}),
+      ...(zonaId ? { floor_plan_id: zonaId } : {}),
     }).then((r) => {
       setLoadingFlex(false);
       if (r.ok) {
@@ -238,9 +310,9 @@ export function ReservaForm({
         setFlexInfo(null);
       }
     });
-    // `tablePicker` se omite a propósito: sólo decide si reseteamos el select.
+    // `tablePicker` se omite a propósito: sólo decide si reseteamos la mesa.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, slug, date, service, partySize, floorPlanId]);
+  }, [mode, slug, date, service, partySize, zonaId, faltaElegirSalon]);
 
   // Spec 077 — el servicio está lleno cuando se agotaron los cubiertos del cupo
   // o cuando no queda mesa libre que entre el party. Al cliente eso lo frena; a
@@ -256,11 +328,11 @@ export function ReservaForm({
   // Cambió el servicio/fecha/personas → la confirmación anterior ya no aplica.
   useEffect(() => {
     setOverbookOk(false);
-  }, [service, date, partySize, floorPlanId]);
+  }, [service, date, partySize, zonaId]);
 
   // El teléfono es opcional cuando la carga el encargado (el libro del club no
   // siempre lo tiene). El cliente web sí lo necesita — eso lo valida el server.
-  const baseValid = name.trim().length > 0 && !pending;
+  const baseValid = name.trim().length > 0 && !pending && !faltaElegirSalon;
   const canSubmit =
     mode === "flexible"
       ? baseValid &&
@@ -286,7 +358,7 @@ export function ReservaForm({
               ...(overbookOk ? { allow_overbook: true } : {}),
               ...(arrivalTime ? { arrival_time: arrivalTime } : {}),
               ...(effectiveTableId ? { table_id: effectiveTableId } : {}),
-              ...(floorPlanId ? { floor_plan_id: floorPlanId } : {}),
+              ...(zonaId ? { floor_plan_id: zonaId } : {}),
             })
           : await createReservationFromAdmin({
               business_slug: slug,
@@ -296,7 +368,7 @@ export function ReservaForm({
               customer_name: name.trim(),
               customer_phone: phone.trim(),
               notes: notes.trim() || undefined,
-              ...(floorPlanId ? { floor_plan_id: floorPlanId } : {}),
+              ...(zonaId ? { floor_plan_id: zonaId } : {}),
               ...(effectiveTableId ? { table_id: effectiveTableId } : {}),
             });
       if (!result.ok) {
@@ -325,6 +397,12 @@ export function ReservaForm({
   const formRef = useRef<HTMLFormElement>(null);
   const { handleKeyDown: handleFormArrows, move: moverEnForm } =
     useArrowFocus(formRef);
+
+  const salonesZona = useRovingList<HTMLButtonElement>({
+    length: salones.length,
+    onExitUp: () => moverEnForm(-1),
+    onExitDown: () => moverEnForm(1),
+  });
 
   const serviciosZona = useRovingList<HTMLButtonElement>({
     length: serviceNames.length,
@@ -385,12 +463,53 @@ export function ReservaForm({
     setPartySize(next);
   };
 
-  const freeTablesEstricto = tables.filter(
-    (t) => t.status === "active" && (t.operational_status ?? "libre") === "libre",
+  // ── La mesa, sobre el plano (spec 144) ───────────────────────────────────
+  //
+  // Mesas del salón elegido que el motor considera reservables: activas y sin
+  // barra (las de barra las rechaza el server). El picker las pinta todas y
+  // marca cuáles se pueden elegir.
+  const mesasDelSalon = useMemo(
+    () =>
+      zonaId
+        ? tables.filter(
+            (t) => t.floor_plan_id === zonaId && t.status === "active" && !t.is_bar,
+          )
+        : [],
+    [tables, zonaId],
   );
 
-  /** Selector de mesa: sobre el plano si hay bridge, si no un <select>. */
+  /** Las libres las dice el motor: el servicio en flexible, el slot en estricto. */
+  const mesasLibres = useMemo(() => {
+    if (mode === "flexible") return flexTables.map((t) => t.id);
+    const slotElegido = slots.find((s) => s.slot === selectedSlot);
+    return slotElegido?.free_table_ids ?? [];
+  }, [mode, flexTables, slots, selectedSlot]);
+
+  const avisoDelPlano = faltaElegirSalon
+    ? "Elegí un salón para ver las mesas."
+    : mode === "flexible"
+      ? !service
+        ? "Elegí un servicio primero."
+        : loadingFlex
+          ? "Buscando mesas libres…"
+          : null
+      : !selectedSlot
+        ? "Elegí un horario y te muestro qué mesas quedan libres."
+        : null;
+
+  // Una mesa que dejó de estar libre (cambió el horario, el servicio o la
+  // cantidad de personas) no puede quedar elegida a espaldas del encargado.
+  useEffect(() => {
+    if (tablePicker || !tableId) return;
+    if (!mesasLibres.includes(tableId)) setTableId(undefined);
+  }, [mesasLibres, tableId, tablePicker]);
+
+  const [planoAbierto, setPlanoAbierto] = useState(false);
+  const mesaElegida = tables.find((t) => t.id === tableId) ?? null;
+
+  /** Selector de mesa: el plano de la página si hay bridge, si no el de acá. */
   const tableField = tablePicker ? (
+
     <div>
       <label className={LABEL_CLS}>Mesa (opcional)</label>
       {tablePicker.pickedTableId ? (
@@ -433,40 +552,72 @@ export function ReservaForm({
         Sin mesa, se sienta al llegar.
       </p>
     </div>
-  ) : mode === "flexible" ? (
+  ) : (
+    // Spec 144 — el mismo chip índigo que el sidebar, pero el plano se despliega
+    // acá adentro: el formulario es una hoja modal, y en la tab de Operación no
+    // hay plano al lado en el que delegar.
     <div>
       <label className={LABEL_CLS}>Mesa (opcional)</label>
-      <select
-        value={tableId ?? ""}
-        onChange={(e) => setTableId(e.target.value || undefined)}
-        className={INPUT_CLS}
-        disabled={loadingFlex}
-      >
-        <option value="">Sin mesa (se sienta al llegar)</option>
-        {flexTables.map((t) => (
-          <option key={t.id} value={t.id}>
-            {t.label} ({t.seats} sillas)
-          </option>
-        ))}
-      </select>
+      {mesaElegida ? (
+        <div className="mt-1 flex items-center gap-2 rounded-xl bg-indigo-50 px-3 py-2.5 ring-1 ring-indigo-200 @lg:max-w-xs">
+          <MapPin className="h-4 w-4 shrink-0 text-indigo-600" />
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold text-indigo-900">
+            Mesa {mesaElegida.label}
+          </span>
+          <button
+            type="button"
+            onClick={() => setPlanoAbierto((v) => !v)}
+            className="shrink-0 rounded-lg px-2 py-1 text-xs font-bold text-indigo-700 transition hover:bg-indigo-100"
+          >
+            Cambiar
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setTableId(undefined);
+              setPlanoAbierto(false);
+            }}
+            aria-label="Quitar mesa"
+            className="shrink-0 rounded-lg p-1 text-indigo-500 transition hover:bg-indigo-100"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setPlanoAbierto((v) => !v)}
+          disabled={faltaElegirSalon}
+          className={`mt-1 flex h-12 w-full items-center justify-center gap-2 rounded-xl text-sm font-bold text-white transition active:scale-[0.98] disabled:opacity-40 @lg:max-w-xs ${
+            planoAbierto
+              ? "bg-indigo-700 ring-2 ring-indigo-300"
+              : "bg-indigo-600 hover:bg-indigo-700"
+          }`}
+        >
+          <MapPin className="h-4 w-4" />
+          {planoAbierto ? "Elegí una mesa del plano…" : "Elegir mesa en el plano"}
+        </button>
+      )}
+
+      {planoAbierto && (
+        <MesaPickerPlano
+          mesas={mesasDelSalon}
+          libres={mesasLibres}
+          partySize={partySize}
+          elegida={tableId ?? null}
+          onElegir={(id) => {
+            setTableId(id ?? undefined);
+            if (id) setPlanoAbierto(false);
+          }}
+          aviso={avisoDelPlano}
+        />
+      )}
+
+      <p className="mt-1 text-[11px] text-zinc-400">
+        Sin mesa, se sienta al llegar.
+      </p>
     </div>
-  ) : freeTablesEstricto.length > 0 ? (
-    <div>
-      <label className={LABEL_CLS}>Mesa (opcional)</label>
-      <select
-        value={tableId ?? ""}
-        onChange={(e) => setTableId(e.target.value || undefined)}
-        className={INPUT_CLS}
-      >
-        <option value="">Auto-asignar</option>
-        {freeTablesEstricto.map((t) => (
-          <option key={t.id} value={t.id}>
-            {t.label} ({t.seats} sillas)
-          </option>
-        ))}
-      </select>
-    </div>
-  ) : null;
+  );
 
   return (
     <form
@@ -540,6 +691,44 @@ export function ReservaForm({
             className={`${INPUT_CLS} @lg:max-w-xs`}
           />
         </div>
+
+        {/* Spec 144 — el salón manda: define qué mesas hay y, sobre todo, en qué
+            cupo entra la reserva. Con un solo salón no se dibuja. */}
+        {!tablePicker && salones.length > 1 && (
+          <div>
+            <label className={LABEL_CLS}>Salón *</label>
+            <div
+              onKeyDown={salonesZona.handleKeyDown}
+              className="mt-2 flex flex-wrap gap-1.5"
+            >
+              {salones.map((s, i) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => {
+                    setSalonId(s.id);
+                    setTableId(undefined);
+                    setPlanoAbierto(false);
+                  }}
+                  {...salonesZona.itemProps(i)}
+                  className={`rounded-xl px-3 py-2 text-sm font-semibold outline-none transition active:scale-95 focus-visible:ring-2 focus-visible:ring-blue-900/30 ${
+                    salonId === s.id
+                      ? "bg-blue-600 text-white shadow-sm"
+                      : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
+                  }`}
+                >
+                  {s.name}
+                </button>
+              ))}
+            </div>
+            {faltaElegirSalon && (
+              <p className="mt-1 text-[11px] text-zinc-400">
+                El salón define el cupo del servicio: sin él, la reserva no
+                cuenta en ninguno.
+              </p>
+            )}
+          </div>
+        )}
 
         {mode === null ? (
           <div className="flex items-center justify-center py-6 text-zinc-400">
@@ -655,7 +844,9 @@ export function ReservaForm({
                 </div>
               ) : slots.length === 0 ? (
                 <p className="mt-2 text-center text-sm text-zinc-400">
-                  Sin horarios disponibles para esta fecha.
+                  {faltaElegirSalon
+                    ? "Elegí un salón para ver los horarios."
+                    : "Sin horarios disponibles para esta fecha."}
                 </p>
               ) : (
                 <div
@@ -726,12 +917,17 @@ export function NewReservationModal({
   slug,
   tables,
   floorPlanId,
+  floorPlans = [],
+  defaultFloorPlanId = null,
   onClose,
   onChanged,
 }: {
   slug: string;
   tables: FloorTable[];
   floorPlanId: string | null;
+  /** Spec 144 — salones entre los que elegir (la hoja no está parada en uno). */
+  floorPlans?: Array<{ id: string; name: string }>;
+  defaultFloorPlanId?: string | null;
   onClose: () => void;
   /** Spec 103: re-sincroniza al que me renderiza (default: refresh de ruta). */
   onChanged?: () => void;
@@ -743,7 +939,8 @@ export function NewReservationModal({
         if (!o) onClose();
       }}
     >
-      <SheetContent side="bottom" className="max-h-[90vh] rounded-t-3xl sm:mx-auto sm:max-w-lg">
+      {/* Spec 144 — un poco más ancha que antes: adentro va el plano del salón. */}
+      <SheetContent side="bottom" className="max-h-[90vh] rounded-t-3xl sm:mx-auto sm:max-w-xl">
         <SheetHeader>
           <SheetTitle className="font-heading flex items-center gap-2 text-lg font-bold">
             <CalendarPlus className="h-5 w-5 text-blue-600" />
@@ -755,6 +952,8 @@ export function NewReservationModal({
           slug={slug}
           tables={tables}
           floorPlanId={floorPlanId}
+          floorPlans={floorPlans}
+          defaultFloorPlanId={defaultFloorPlanId}
           onDone={onClose}
           onChanged={onChanged}
           footerClassName="border-t border-zinc-200 p-4"

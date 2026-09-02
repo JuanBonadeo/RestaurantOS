@@ -7,6 +7,7 @@ import { Check, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { ElegirMesaBanner } from "@/components/reservations/elegir-mesa-banner";
+import { MesaFigura } from "@/components/reservations/mesa-figura";
 import {
   mesaSirveParaReserva,
   textoDeAsignacion,
@@ -18,6 +19,7 @@ import {
 } from "@/lib/reservations/booking-actions";
 import { OVERBOOK_HINT } from "@/lib/reservations/edit-window";
 import {
+  encuadreDeMesas,
   estadoDeMesasEn,
   horaInicial,
   momentoDe,
@@ -113,15 +115,7 @@ export function PlanoDelDia({
   );
 
   /** Encuadre: el rectángulo que ocupan las mesas, con aire alrededor. */
-  const viewBox = useMemo(() => {
-    if (mesasDelSalon.length === 0) return "0 0 100 100";
-    const pad = 40;
-    const minX = Math.min(...mesasDelSalon.map((t) => t.x)) - pad;
-    const minY = Math.min(...mesasDelSalon.map((t) => t.y)) - pad;
-    const maxX = Math.max(...mesasDelSalon.map((t) => t.x + t.width)) + pad;
-    const maxY = Math.max(...mesasDelSalon.map((t) => t.y + t.height)) + pad;
-    return `${minX} ${minY} ${maxX - minX} ${maxY - minY}`;
-  }, [mesasDelSalon]);
+  const viewBox = useMemo(() => encuadreDeMesas(mesasDelSalon), [mesasDelSalon]);
 
   const seleccionada = estado.find((m) => m.mesa.id === elegida) ?? null;
 
@@ -375,50 +369,22 @@ function MesaDibujada({
   onClick: () => void;
 }) {
   const { mesa, estado } = m;
-  const cx = mesa.x + mesa.width / 2;
-  const cy = mesa.y + mesa.height / 2;
-  const comun = cn(
-    RELLENO[estado],
-    estado === "pendiente" ? "[stroke-dasharray:5_3]" : "",
-    elegida ? "stroke-[3]" : "stroke-[1.5]",
-    apagada ? "opacity-30" : "",
-    "cursor-pointer transition",
-  );
 
   return (
-    <g
-      transform={`rotate(${mesa.rotation} ${cx} ${cy})`}
+    <MesaFigura
+      mesa={mesa}
       onClick={onClick}
       role="button"
       aria-label={`Mesa ${mesa.label}, ${estado}`}
-    >
-      {mesa.shape === "circle" ? (
-        <ellipse
-          cx={cx}
-          cy={cy}
-          rx={mesa.width / 2}
-          ry={mesa.height / 2}
-          className={comun}
-        />
-      ) : (
-        <rect
-          x={mesa.x}
-          y={mesa.y}
-          width={mesa.width}
-          height={mesa.height}
-          rx={mesa.shape === "square" ? 8 : 10}
-          className={comun}
-        />
+      className={cn(
+        RELLENO[estado],
+        estado === "pendiente" ? "[stroke-dasharray:5_3]" : "",
+        elegida ? "stroke-[3]" : "stroke-[1.5]",
+        apagada ? "opacity-30" : "",
+        "cursor-pointer transition",
       )}
-      <text
-        x={cx}
-        y={cy + 4}
-        textAnchor="middle"
-        className={cn("pointer-events-none text-[13px] font-semibold", TEXTO[estado])}
-      >
-        {mesa.label}
-      </text>
-    </g>
+      textClassName={TEXTO[estado]}
+    />
   );
 }
 
