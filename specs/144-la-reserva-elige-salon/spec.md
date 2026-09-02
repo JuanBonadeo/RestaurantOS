@@ -172,6 +172,7 @@ nada de esto).
 | 7 bis · ocupada | reabierto el formulario a las 21:00, la 115 pasó a «ocupada» y las otras 26 siguieron libres |
 | «no entran» | subiendo a 6 personas, 7 mesas del salón pasaron a «no entran», 1 ocupada, 19 libres |
 | 6 · cupo por salón (flexible) | con `demo` en flexible y un servicio por zona: Salón principal «0/60 cubiertos», Salón 2 «2/20» — el contador se recalcula al cambiar de salón |
+| auto-asignar | sin tocar el plano, la reserva del Salón 2 cayó en la **101** (de ese salón): antes el pool era siempre el primer `floor_plan` |
 | 5 · sin mesa, con salón | creada sin mesa en Salón 2: la fila quedó con `table_id NULL` y **`floor_plan_id` = Salón 2**, y el contador pasó de 2/20 a **4/20** (antes la reserva no sumaba en ningún cupo) |
 
 **Bug encontrado y arreglado de paso:** `createReservationFromAdmin` **no le
