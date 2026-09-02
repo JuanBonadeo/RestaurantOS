@@ -1,294 +1,274 @@
-# 140 · Los mozos en Operación, desde la compu del salón
+# 140 · La terminal del salón
 
 **Issue:** [#211](https://github.com/gachetponzellini/RestaurantOS-app/issues/211) ·
 **Milestone:** Post-demo · Growth & hardening ·
-**Estado:** **spec** — sin implementar.
+**Estado:** **spec v2** — sin implementar. La v1 resolvía esto reusando el rol
+`mozo`; se descartó, ver [D1](#d1--sí-va-un-rol-nuevo-terminal).
 
-**Input:** Juan, 2026-09-02: *"como en la etapa 1, los mozos no van a tener su
-propio movil, van a manejar todo de una computadora en comun distinta a la del
-encargado, habria que armar como un rol intermedio que pueda ver el panel como
-un encargado, pero que no tenga los mismos permisos"*. Y después: *"el fichaje
-que también lo puedan manejar, para ficharse desde esa compu"*.
+**Input:** Juan, 2026-09-02. Primero: *"como en la etapa 1, los mozos no van a
+tener su propio movil, van a manejar todo de una computadora en comun distinta a
+la del encargado, habria que armar como un rol intermedio que pueda ver el panel
+como un encargado, pero que no tenga los mismos permisos"*. Después: *"el fichaje
+que también lo puedan manejar, para ficharse desde esa compu"*, *"la cuenta de
+mozo compartido, deberia de poder manejar todas las mesas, es como un encargado
+pero que no tiene tantos privilegios"*, y por último *"es que capaz se usan las
+dos cosas al mismo tiempo, capaz hay que hacer un rol nuevo"*.
 
 **Depende de**: [`138`](../138-asignar-mesa-desde-el-plano/spec.md) (distribuir
-mozos desde el plano — es de donde sale la asignación mesa→mozo que acá pasa a
-ser la fuente de la atribución), [`139`](../139-el-cierre-en-papel/spec.md) (la
-rendición obligatoria, que depende de que la atribución sea correcta),
-[`07`](../../../../wiki/specs/07-caja-rendicion-mozos/spec.md) (la rendición y
-`caja_user_assignments`), [`14`](../../../../wiki/specs/14-multi-local-y-deploy-onsite/dashboard-y-permisos.md)
-(la matriz de secciones por rol, §B).
+mozos desde el plano), [`139`](../139-el-cierre-en-papel/spec.md) (rendición
+obligatoria), [`07`](../../../../wiki/specs/07-caja-rendicion-mozos/spec.md)
+(rendición y `caja_user_assignments`),
+[`14`](../../../../wiki/specs/14-multi-local-y-deploy-onsite/dashboard-y-permisos.md)
+(matriz de secciones por rol, §B).
 
 ---
 
 ## Por qué
 
-En golf-house la Etapa 1 arranca sin móviles para los mozos. Van a operar desde
-una computadora común del salón, distinta de la del encargado. Es el flujo que
-ya conocen de MaxiRest: el mozo toma el pedido en papel, camina hasta la
-terminal y lo carga.
+En golf-house la Etapa 1 arranca sin móviles para los mozos: van a operar desde
+una computadora común del salón, distinta de la del encargado. Es el flujo que ya
+conocen de MaxiRest — el mozo toma el pedido en papel, camina hasta la terminal y
+lo carga.
 
-Hoy no pueden. Hay dos gates encima:
-
-1. El layout de `admin/(authed)` redirige a `/mozo` a **todo** rol `mozo`, de
-   una, para todas las páginas del panel
-   ([`layout.tsx:31`](<../../src/app/[business_slug]/admin/(authed)/layout.tsx>)).
-2. `/operacion` repite el chequeo con un whitelist propio de admin/encargado
-   ([`operacion/page.tsx:39`](<../../src/app/[business_slug]/admin/(authed)/operacion/page.tsx>)).
-
-La superficie del mozo es `/mozo`, cuatro pantallas pensadas para un teléfono en
-la mano. En una PC de escritorio compartida por seis personas eso no es lo que
-hace falta: hace falta el plano del salón, que es donde se ve de quién es cada
-mesa.
+Hoy no pueden. El layout de `admin/(authed)` redirige a `/mozo` a todo rol `mozo`
+([`layout.tsx:31`](<../../src/app/[business_slug]/admin/(authed)/layout.tsx>)) y
+`/operacion` repite el chequeo con un whitelist propio
+([`operacion/page.tsx:39`](<../../src/app/[business_slug]/admin/(authed)/operacion/page.tsx>)).
+La superficie que tienen, `/mozo`, son cuatro pantallas pensadas para un teléfono
+en la mano. En una PC compartida por seis personas lo que hace falta es el plano
+del salón.
 
 ## Lo que ya está construido
 
-Esta spec es más chica de lo que parece, porque el trabajo pesado ya está hecho.
+**La matriz ya lo anticipaba.** `sections.ts` declara
+`operacion: { …, mozo: "limited", … }` ([`sections.ts:63`](../../src/lib/permissions/sections.ts)) —
+celda letra muerta, porque el layout redirige antes de que `canSee` se evalúe.
 
-**La matriz ya lo dice.** `sections.ts` declara desde hace rato:
-
-```ts
-operacion: { admin: "full", encargado: "full", mozo: "limited", personal: "none" }
-```
-
-([`sections.ts:63`](../../src/lib/permissions/sections.ts)). Alguien ya modeló
-"el mozo ve Operación, recortada". La celda es **letra muerta**: el layout
-redirige antes de que `canSee` llegue a evaluarse. `"limited"` no se lee nunca
-para esta sección.
-
-**El plano ya sabe qué es un mozo.** `salon-desktop.tsx` gatea por rol acción por
-acción, y contempla el caso explícitamente:
-
-| Control | Gate | Qué le pasa al mozo |
-|---|---|---|
-| Distribuir mozos | `canDistribuir={canAssignMozo(role)}` | se esconde |
-| Venta rápida | `canVentaRapida={canCargarPedido(role)}` | se esconde |
-| Transferir mesa | `role !== "mozo" \|\| pedirTable.mozo_id === currentUserId` | sólo su mesa |
-| Trasladar mesa | `canMoveTable(role)` | se esconde |
-| Anular mesa | `canTransitionMesa(role, "ocupada", "libre")` | se esconde |
+**El plano ya gatea por rol.** `salon-desktop.tsx` esconde «Distribuir mozos»
+(`canAssignMozo`), «Venta rápida» (`canCargarPedido`), trasladar (`canMoveTable`)
+y anular (`canTransitionMesa`) según quién mira.
 
 **El fichaje ya es la pantalla de fichar.** El tab Fichaje de Operación no es una
-vista de supervisión: es el numpad con PIN, el mismo mecanismo que `/fichar`
-(`Numpad`, `PinDisplay`, `clockPunch(slug, pin)` en
-[`fichaje-tab.tsx`](../../src/components/admin/local/fichaje-tab.tsx)). Y
-`business_users.pin` char(4), único por negocio, ya existe y ya se usa. O sea:
-lo que Juan pide —que se fichen desde esa compu— sale gratis con sólo dejar el
-tab visible.
-
-**Los 28 helpers de `can.ts` ya distinguen `mozo`** acción por acción: descuento
-≤10% contra ≤25%, no anula, no corrige cobros, no hace corte ni sangría, no
-confirma pedidos entrantes, no toca precios. La matriz de permisos que hacía
-falta está escrita desde el Bloque 1.
-
-Por eso **no se crea un cuarto rol** (D1). Lo único que falta es la puerta.
+vista de supervisión: es el numpad con PIN, la misma mecánica que `/fichar`
+([`fichaje-tab.tsx`](../../src/components/admin/local/fichaje-tab.tsx)). Y
+`business_users.pin` char(4) único por negocio ya existe y ya se usa. Lo que Juan
+pidió —que se fichen desde esa compu— sale con dejar el tab visible.
 
 ---
 
 ## Decisiones
 
-### D1 · Se reusa `mozo`, no se crea un rol nuevo
+### D1 · Sí va un rol nuevo: `terminal`
 
-El pedido original era "un rol intermedio". Pero el rol intermedio ya existe:
-es `mozo` con acceso de escritorio. Un cuarto rol arrastraría el CHECK de
-`business_users_role_check`, `is_business_staff()` en RLS, el tipo
-`BusinessRole`, las 18 filas de `sections.ts`, los 28 helpers de `can.ts` y los
-role-pickers de alta e invitación — todo para llegar a una columna que ya está
-llena.
+La v1 de esta spec proponía reusar `mozo` y no crear un rol. El argumento era que
+`can.ts` ya distingue al mozo acción por acción y `sections.ts` ya tenía la celda
+`limited`. Se cae por lo que planteó Juan: **las dos cosas pueden convivir en el
+mismo negocio al mismo tiempo** — mozos con teléfono y la terminal compartida.
 
-Un rol nuevo se justificaría sólo si esta persona necesitara algo que el mozo
-hoy **no** puede (confirmar pedidos entrantes, anular ítem post-envío, cargar
-delivery) sin darle caja ni rendición. No es el caso de Etapa 1.
+Con eso, cualquier solución basada en el rol `mozo` (o en un flag por negocio,
+que era la D6 de la v1) le aplica también a los mozos con móvil, que es justo lo
+que no se quiere.
 
-**Consecuencia:** cero migraciones. Esta spec no toca la base.
+Pero el argumento decisivo es otro, y es de datos. Toda la app lista "los mozos"
+así:
 
-### D2 · Qué significa `limited` en Operación
+```ts
+.from("business_users").select("user_id, full_name, role")
+  .in("role", ["admin", "encargado", "mozo"])     // getMozosByBusiness
+```
 
-| Tab | Mozo | Por qué |
+([`mozo/queries.ts:30`](../../src/lib/mozo/queries.ts)). Esa lista alimenta la
+paleta de «Distribuir mozos» del plano y el selector de mozo. Y
+`getRendicionesPendientesTodosLosMozos` hace lo mismo con
+`.in("role", ["mozo", "encargado"])`
+([`caja/queries.ts:543`](../../src/lib/caja/queries.ts)).
+
+Si la cuenta compartida tuviera rol `mozo`, **aparecería como una persona más**:
+en la paleta para asignarle mesas —y asignarle una mesa es mandarle la plata a su
+rendición (D5)— y en el panel de rendiciones pendientes del encargado. La
+terminal no es una persona: es un puesto. Un rol propio la deja afuera de esas
+listas **sin tocar una sola query**.
+
+**Nombre:** `terminal`. Choca de refilón con el "terminal de tarjeta" del
+glosario (que en el producto se dice *posnet*), así que se puede ajustar —
+`puesto`, `salon_compartido`. La spec usa `terminal`.
+
+**Costo real.** Más chico de lo que parece: de los 28 helpers de `can.ts`, 22 son
+`admin || encargado` y el rol nuevo cae en `false` por default, que es lo
+correcto. Sólo 6 lo mencionan o hay que abrirlos: `canApplyDiscount`,
+`canTransitionMesa`, `canTransferTable`, `canManageReservations`,
+`canCargarPedido` (D4) y `canAssignMozo` (D7).
+
+**Migración `0057`:** sumar `'terminal'` al CHECK de `business_users_role_check` y
+al `role in (…)` de `is_business_staff()`. No se toca `notification_preferences`
+ni `notifications` — la terminal no recibe notificaciones dirigidas: las lee el
+encargado.
+
+### D2 · Qué ve la terminal en Operación
+
+| Tab | `terminal` | Por qué |
 |---|:---:|---|
-| Salón (plano) | ✅ | Su pantalla de trabajo. Es lo que reemplaza "mis mesas" |
-| Comandas | ✅ | Ver qué salió de lo que mandó |
-| Reservas | ✅ | `canManageReservations` ya incluye al mozo (decisión 2026-06-15) |
-| Fichaje | ✅ | Fichar desde la terminal — pedido explícito |
-| Pedidos | ❌ | Delivery / mostrador: `canConfirmOrder` y `canCargarPedido` son del encargado |
-| Caja | ❌ | Cortes, sangrías, arqueo. `canHacerCorte` = encargado |
-| Rendición | ❌ | Es el acto de supervisión sobre el mozo, no del mozo. `canRendirMozo` = encargado |
+| Salón (plano) | ✅ | Su pantalla de trabajo |
+| Comandas | ✅ | Ver qué salió de lo que se mandó |
+| Reservas | ✅ | Es agenda de salón, la misma razón por la que el mozo la tiene |
+| Fichaje | ✅ | Que el personal fiche con su PIN desde esa compu |
+| Pedidos | ❌ | Delivery / mostrador: es del encargado |
+| Caja | ❌ | Cortes, sangrías, arqueo |
+| Rendición | ❌ | Es el acto de supervisión **sobre** el mozo, no del mozo |
 
-Rendición merece una nota: no se oculta sólo por permiso, sino porque en una
-terminal compartida **"lo mío" no existe**. La sesión es de la máquina, no de
-la persona. Un tab que dijera "tu rendición" mostraría la de todos juntos.
+En `sections.ts` la terminal queda `operacion: "limited"` y `none` en las otras 17
+secciones.
 
 ### D3 · El gate pasa de blacklist a `canSee`
 
 El layout hoy pregunta "¿sos mozo? afuera". Pasa a preguntar "¿podés ver esta
-sección?", que es lo que `sections.ts` ya sabe contestar. Con eso el mozo entra
-a Operación y sigue afuera de las otras 17 secciones sin escribir una condición
-nueva por página.
+sección?", que es lo que `sections.ts` ya sabe contestar. Los dos whitelists
+explícitos —`/operacion` y `admin/mesa/[id]/{pedir,cuenta,cobrar}`— se alinean al
+mismo criterio. Ojo con estos últimos: hoy rebotan al mozo a su versión móvil, lo
+que desde la terminal la sacaría del panel a mitad de la carga.
 
-Los dos whitelists explícitos que quedan —`/operacion` y las pantallas desktop
-de mesa (`admin/mesa/[id]/{pedir,cuenta,cobrar}`)— se alinean al mismo criterio.
-Ojo con estas últimas: hoy rebotan al mozo a `/mozo/mesa/[id]/pedir`, su versión
-móvil. Desde la terminal eso lo sacaría del panel a mitad de la carga.
+`ensureMozoAccess` suma `terminal` a su whitelist: la terminal no usa `/mozo`,
+pero comparte componentes que pasan por ahí.
 
 ### D4 · `canCargarPedido` se parte en dos
 
-Hoy es un solo helper para dos cosas distintas, y en el plano gobierna si tocar
-una mesa abre la carga directa
+Hoy es un solo helper para dos cosas distintas. Su docstring habla del pedido de
+mostrador *sin mesa* (spec 054), pero el plano lo usa para decidir si tocar una
+mesa abre la carga
 ([`salon-desktop.tsx:1237`](../../src/components/admin/local/salon-desktop.tsx)).
-Su docstring habla del pedido de mostrador *sin mesa* (spec 054), pero el plano
-lo usa para el pedido *de mesa*.
 
-Con el gate abierto y el helper cerrado, el mozo entra al plano y **sólo puede
-mirar** — el propio comentario del código lo dice: *"Sin permiso de carga
-tampoco: para ese rol el detalle es lo único que hay"*. Sería abrirle la puerta
-a una pantalla de sólo lectura.
-
-Se separan: cargar pedido **de mesa** (mozo sí) y cargar pedido **de mostrador /
-delivery sin mesa** (encargado, como está).
+Con el gate abierto y el helper cerrado, la terminal entra al plano y **sólo
+puede mirar** — el propio comentario lo dice: *"para ese rol el detalle es lo
+único que hay"*. Se separan: cargar pedido **de mesa** (terminal sí) y cargar
+pedido **de mostrador / delivery sin mesa** (encargado, como está).
 
 ### D5 · La mesa manda en la atribución
 
-Esta es la decisión que sostiene todo lo demás, y la que hoy **no** se cumple.
+La decisión que sostiene todo lo demás, y la que hoy **no** se cumple.
 
-La premisa de Etapa 1 es que la plata de cada mesa es del mozo asignado a esa
-mesa: se distribuye al iniciar el turno y se puede reasignar. Eso es lo que hace
-que la rendición siga teniendo sentido con una sola cuenta en la terminal.
+La premisa es que la plata de cada mesa es del mozo asignado a esa mesa: se
+distribuye al iniciar el turno y se puede reasignar. Eso es lo que hace que la
+rendición siga teniendo sentido con una sola cuenta operando.
 
-El código hoy no funciona así. `deriveAttributedMozo` busca **primero** el
-`loaded_by` del último ítem activo, y sólo cae al `mozo_id` de la mesa si no
-encuentra ninguno
-([`cobro-actions.ts:130`](../../src/lib/billing/cobro-actions.ts)). Y `loaded_by`
-se escribe siempre con `ctx.userId`, el que opera
+El código no funciona así. `deriveAttributedMozo` busca **primero** el
+`loaded_by` del último ítem activo y sólo cae al `mozo_id` de la mesa si no
+encuentra ninguno ([`cobro-actions.ts:130`](../../src/lib/billing/cobro-actions.ts)).
+Y `loaded_by` se escribe siempre con `ctx.userId`, el que opera
 ([`comandas/actions.ts:609`](../../src/lib/comandas/actions.ts)).
 
-Con la terminal compartida, `loaded_by` es **siempre** la cuenta de la PC. Como
-toda mesa cobrada tiene al menos un ítem cargado, el fallback a la mesa no se
-alcanza nunca. Y la rendición se arma filtrando exactamente por ese campo:
+Con la terminal, `loaded_by` es **siempre** la misma cuenta. Como toda mesa
+cobrada tiene al menos un ítem, el fallback a la mesa no se alcanza nunca. Y la
+rendición se arma filtrando exactamente por ese campo
+(`.eq("attributed_mozo_id", mozoId)`, [`caja/queries.ts:504`](../../src/lib/caja/queries.ts)):
+la rendición de cada mozo daría **$0** y la recaudación entera quedaría atribuida
+a la terminal.
 
-```
-.from("payments").select("method, amount_cents, tip_cents")
-  .eq("attributed_mozo_id", mozoId)
-```
+Se invierte: **si la mesa tiene `mozo_id`, gana la mesa**; `loaded_by` queda de
+fallback para lo que no tiene mesa. Es coherente con el modelo que ya existe —
+`orders.mozo_id` es el snapshot inmutable de quién abrió, `tables.mozo_id` el
+mutable que refleja transferencias.
 
-([`caja/queries.ts:504`](../../src/lib/caja/queries.ts), vía
-`getRendicionPendienteMozo`). El resultado sería que **la rendición de cada mozo
-da $0** y toda la recaudación del turno queda atribuida a un solo usuario
-fantasma: la terminal. Las propinas de `getTodayTips` van al mismo lugar.
+Efecto lateral bueno: arregla un caso que **ya muerde hoy**. Cada ítem que el
+encargado carga desde el panel le pasa a él la propina de esa mesa.
 
-Se invierte la prioridad: **si la mesa tiene `mozo_id`, gana la mesa**;
-`loaded_by` queda como fallback para lo que no tiene mesa (mostrador, delivery).
-Es coherente con el modelo que ya existe — `orders.mozo_id` es el snapshot
-inmutable de quién abrió, y `tables.mozo_id` es el mutable que refleja las
-transferencias (ver el comentario en
-[`comandas/actions.ts:465`](../../src/lib/comandas/actions.ts)).
+### D6 · La terminal opera todas las mesas
 
-Efecto lateral bueno: arregla un caso que **ya muerde hoy**, sin terminal
-compartida. Cada vez que el encargado carga un ítem desde el panel, la propina de
-esa mesa pasa a atribuirse al encargado.
-
-### D6 · La cuenta de la terminal opera **todas** las mesas
-
-Juan, 2026-09-02: *"la cuenta de mozo compartido, deberia de poder manejar todas
-las mesas, es como un encargado pero que no tiene tantos privilegios"*.
-
-El código hoy hace exactamente lo contrario, en dos capas:
+Juan: *"deberia de poder manejar todas las mesas"*. Hoy hay dos capas que dicen
+lo contrario, las dos atadas a `role === "mozo"`:
 
 - **UI** — `role !== "mozo" || table.mozo_id === currentUserId` esconde
   «Transferir» en toda mesa ajena
   ([`salon-desktop.tsx:1844` y `:2880`](../../src/components/admin/local/salon-desktop.tsx)).
-- **Server** — `isOrigen = fromMozoId === ctx.userId`,
-  `isSelfClaim = toMozoId === ctx.userId`, y `canTransferTable` le exige al mozo
-  uno de los dos ([`mozo/actions.ts:708`](../../src/lib/mozo/actions.ts)).
+- **Server** — `canTransferTable` le exige al mozo ser origen (`fromMozoId ===
+  ctx.userId`) o reclamarla para sí ([`mozo/actions.ts:708`](../../src/lib/mozo/actions.ts)).
 
-Con la cuenta compartida **ninguna de las dos se cumple jamás**: la terminal no
-es el `mozo_id` de ninguna mesa —están asignadas a personas reales— y nadie
-transfiere una mesa *hacia* la terminal. La protección "sólo tu mesa" deja de
-proteger y pasa a ser un bloqueo total.
+Con el rol nuevo esto se resuelve solo: las dos condiciones preguntan por `mozo`,
+y `terminal` no lo es. `canTransferTable` suma `terminal` al lado de
+admin/encargado, y los gates de UI pasan a preguntar por el rol que restringe, no
+por el que habilita.
 
-Lo que no se hace es borrarla del rol. En Etapa 2, con un teléfono por mozo,
-"mi mesa" vuelve a significar algo y esa restricción es justamente lo que se va
-a querer. No es una propiedad del **rol**, es una propiedad del **local**:
+Y el rol mozo queda intacto para Etapa 2, cuando cada uno tenga su teléfono y
+"mi mesa" vuelva a significar algo. Eso es precisamente lo que el flag por negocio
+de la v1 no podía dar.
 
-```
-businesses.mozos_comparten_terminal boolean not null default false   -- migración 0057
-```
+### D7 · La terminal asigna mozo a las mesas
 
-Prendido: el mozo opera cualquier mesa del salón. Apagado: se comporta como hoy,
-sin cambios para nadie. `canTransferTable` y los dos gates de UI pasan a recibir
-el flag. Es el mismo patrón que ya usan `afip_enabled`, `mp_accepts_payments` o
-el `mode` de reservas: el comportamiento lo elige el negocio, no el enum de rol.
+En la v1 esto quedaba abierto, porque con rol `mozo` significaba darle a una
+cuenta compartida el poder de mover plata entre personas. Con `terminal` la
+respuesta se aclara: **es el puesto de coordinación del salón**, y si no puede
+asignar, cada walk-in que se sienta necesita al encargado en la otra máquina para
+decir de quién es la mesa — fricción justo en hora pico.
 
-**Alternativa descartada:** abrirle la transferencia al rol `mozo` a secas. Una
-línea menos hoy, pero deja el modelo de Etapa 2 sin forma de volver.
+`canAssignMozo` suma `terminal`. El rol `mozo` sigue sin poder (se auto-asigna por
+walk-in, CU-09 R2).
 
-**Consecuencia sobre D1:** esta spec sí toca la base, con una columna booleana.
-Sigue sin tocar el enum de roles ni RLS.
-
-### D7 · Asignar mozo a una mesa — pendiente de Juan
-
-`canAssignMozo` es hoy admin/encargado, así que «Distribuir mozos» se le esconde
-al mozo (D2 lo daba por bueno). Con D6 hay que volver a mirarlo, porque es
-**la acción que decide de quién es la plata**: asignar la mesa 12 a Lucía manda
-toda esa cuenta a la rendición de Lucía (D5).
-
-A favor de abrirlo: si no, cada walk-in que se sienta necesita al encargado en la
-otra máquina para decir de quién es — fricción en hora pico, que es justo cuando
-pasa. En contra: le da a una cuenta compartida el poder de mover plata entre
-mozos, sin que quede registro de qué persona lo hizo.
-
-Recomendación: abrirlo bajo el mismo flag de D6. Queda a confirmar.
+Lo que se pierde: el audit log de la asignación va a decir siempre "terminal", no
+qué persona la hizo. Es el costo de la cuenta compartida y se acepta para Etapa 1;
+el camino para recuperarlo es el PIN por acción (No-objetivos).
 
 ---
 
 ## Alcance
 
-1. Layout `admin/(authed)`: blacklist → `canSee`.
-2. Page-gates de `/operacion` y de `admin/mesa/[id]/{pedir,cuenta,cobrar}`.
-3. `LocalShell`: filtrar `TABS` por rol según D2.
-4. `can.ts`: partir `canCargarPedido` (D4).
-5. `deriveAttributedMozo`: la mesa manda (D5).
-6. Migración `0057`: `businesses.mozos_comparten_terminal` (D6).
-7. `canTransferTable` + los dos gates de UI del plano pasan a recibir el flag (D6).
+1. Migración `0057`: `'terminal'` en `business_users_role_check` y en
+   `is_business_staff()`.
+2. `BusinessRole` + `sections.ts`: columna nueva según D2.
+3. Layout `admin/(authed)`: blacklist → `canSee`. Page-gates de `/operacion` y
+   `admin/mesa/[id]/{pedir,cuenta,cobrar}`. `ensureMozoAccess`.
+4. `LocalShell`: filtrar `TABS` por rol.
+5. `can.ts`: los 6 helpers de D1 — `canCargarPedido` (D4), `canTransferTable` y
+   los gates de UI del plano (D6), `canAssignMozo` (D7), y revisar
+   `canApplyDiscount`, `canTransitionMesa`, `canManageReservations`.
+6. `deriveAttributedMozo`: la mesa manda (D5).
+7. Role-pickers de alta e invitación: que se pueda crear la cuenta.
 
 ## No-objetivos
 
-- **Cuarto rol.** D1.
-- **RLS y el enum de roles.** No se tocan. La única migración es la columna
-  booleana de D6.
-- **Login por PIN en la terminal antes de cargar o cobrar.** El mecanismo existe
+- **RLS más allá de `is_business_staff()`.** Las policies existentes ya cubren al
+  rol nuevo por esa función.
+- **Login por PIN antes de cargar o cobrar.** El mecanismo existe
   (`business_users.pin`) y sería el equivalente exacto del código de MaxiRest,
-  pero con D5 la atribución ya queda resuelta por la asignación de mesa. Se
-  evalúa después, si el local pide identificar quién tipeó además de a quién se
-  le atribuye.
+  pero con D5 la atribución de la plata ya queda resuelta por la asignación de
+  mesa. Se evalúa después, si el local quiere además saber quién tipeó.
 - **La app `/mozo`.** Sigue igual, para cuando haya móviles.
+- **Que la terminal aparezca en listas de mozos.** Es lo que D1 evita a propósito:
+  no se le asignan mesas ni se le pide rendición.
 
 ## Riesgos
 
-- **La terminal es una sola identidad para seis personas.** Con D6, cualquiera
-  parado frente a esa PC opera cualquier mesa, y el audit log va a decir siempre
-  lo mismo: la cuenta de la terminal. Se pierde el «quién» de cada acción; queda
-  el «a quién se le atribuye», que es lo que importa para la plata (D5). Si el
-  local quiere recuperar el quién, el camino es el PIN por acción (ver
-  No-objetivos), que es exactamente lo que hace MaxiRest.
-- **D5 cambia comportamiento existente.** Toda mesa con `mozo_id` asignado pasa a
-  atribuir por mesa aunque otra persona haya cargado los ítems. Es el
-  comportamiento buscado, pero cambia números respecto de hoy: conviene mirar
-  qué mesas de `golf-jcr` tienen `mozo_id` nulo antes de aplicarlo.
+- **Una identidad para seis personas.** El audit log de todo lo que pase por esa
+  PC va a decir "terminal". Queda el «a quién se le atribuye» (D5), que es lo que
+  importa para la plata, pero se pierde el «quién lo hizo».
+- **D5 cambia comportamiento existente.** Toda mesa con `mozo_id` pasa a atribuir
+  por mesa aunque otra persona haya cargado los ítems. Es lo buscado, pero cambia
+  números respecto de hoy: conviene mirar cuántas mesas de `golf-jcr` tienen
+  `mozo_id` nulo antes de aplicarlo, porque para esas la atribución seguiría
+  cayendo en `loaded_by`.
+- **Coexistencia sin probar.** El escenario "mozos con móvil + terminal en el
+  mismo turno" es el que motiva el rol, pero no se va a poder probar de verdad
+  hasta que existan los móviles. Los tests tienen que cubrirlo aunque el local
+  todavía no lo use.
 
 ## Verificación
 
-Con el rol real, nunca service_role. Magic link:
+Con el rol real, nunca service_role. Hace falta crear una cuenta `terminal` en el
+negocio demo (no existe hoy).
 
 ```
-node scripts/magic-link.mjs pedro@demo.test "/demo/admin/operacion"
+node scripts/magic-link.mjs terminal@demo.test "/demo/admin/operacion"
 ```
 
-1. Pedro (mozo) entra a `/demo/admin/operacion` y ve el plano. No lo redirige.
+1. Entra a `/demo/admin/operacion` y ve el plano. No la redirige.
 2. Ve Salón, Comandas, Reservas, Fichaje. No ve Pedidos, Caja, Rendición.
-3. Escribiendo `?tab=caja` a mano tampoco entra.
-4. Sigue rebotado en `/demo/admin`, `/demo/admin/reportes` y el resto.
-5. Toca una mesa libre → abre la carga de pedido (D4).
-6. Con `mozos_comparten_terminal` prendido, opera cualquier mesa del salón:
-   transferir una mesa que no es suya funciona (D6). Con el flag apagado, sólo
-   la propia — el comportamiento de hoy no cambia.
-7. Ficha con su PIN desde el tab Fichaje.
-8. Carga y cobra una mesa asignada a Lucía; el cobro queda atribuido a **Lucía**,
-   y aparece en la rendición pendiente de Lucía, no en la de Pedro (D5).
+   Escribiendo `?tab=caja` a mano tampoco entra.
+3. Sigue rebotada en `/demo/admin`, `/demo/admin/reportes` y el resto.
+4. Toca una mesa libre → abre la carga de pedido (D4).
+5. Transfiere una mesa asignada a Lucía, sin ser origen (D6).
+6. Distribuye mesas desde el plano (D7).
+7. Ficha con el PIN de Pedro desde el tab Fichaje.
+8. Carga y cobra una mesa asignada a Lucía: el cobro queda atribuido a **Lucía**
+   y aparece en su rendición pendiente, no en la de la terminal (D5).
+9. **La terminal no aparece** en la paleta de «Distribuir mozos» ni en el panel de
+   rendiciones pendientes del encargado (D1).
+10. Pedro (rol `mozo`) sigue exactamente como hoy: entra a `/mozo`, ve sus mesas,
+    y `/demo/admin/operacion` lo sigue rebotando.
