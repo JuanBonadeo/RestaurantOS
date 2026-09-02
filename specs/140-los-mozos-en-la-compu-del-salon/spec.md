@@ -184,6 +184,58 @@ Efecto lateral bueno: arregla un caso que **ya muerde hoy**, sin terminal
 compartida. Cada vez que el encargado carga un ítem desde el panel, la propina de
 esa mesa pasa a atribuirse al encargado.
 
+### D6 · La cuenta de la terminal opera **todas** las mesas
+
+Juan, 2026-09-02: *"la cuenta de mozo compartido, deberia de poder manejar todas
+las mesas, es como un encargado pero que no tiene tantos privilegios"*.
+
+El código hoy hace exactamente lo contrario, en dos capas:
+
+- **UI** — `role !== "mozo" || table.mozo_id === currentUserId` esconde
+  «Transferir» en toda mesa ajena
+  ([`salon-desktop.tsx:1844` y `:2880`](../../src/components/admin/local/salon-desktop.tsx)).
+- **Server** — `isOrigen = fromMozoId === ctx.userId`,
+  `isSelfClaim = toMozoId === ctx.userId`, y `canTransferTable` le exige al mozo
+  uno de los dos ([`mozo/actions.ts:708`](../../src/lib/mozo/actions.ts)).
+
+Con la cuenta compartida **ninguna de las dos se cumple jamás**: la terminal no
+es el `mozo_id` de ninguna mesa —están asignadas a personas reales— y nadie
+transfiere una mesa *hacia* la terminal. La protección "sólo tu mesa" deja de
+proteger y pasa a ser un bloqueo total.
+
+Lo que no se hace es borrarla del rol. En Etapa 2, con un teléfono por mozo,
+"mi mesa" vuelve a significar algo y esa restricción es justamente lo que se va
+a querer. No es una propiedad del **rol**, es una propiedad del **local**:
+
+```
+businesses.mozos_comparten_terminal boolean not null default false   -- migración 0057
+```
+
+Prendido: el mozo opera cualquier mesa del salón. Apagado: se comporta como hoy,
+sin cambios para nadie. `canTransferTable` y los dos gates de UI pasan a recibir
+el flag. Es el mismo patrón que ya usan `afip_enabled`, `mp_accepts_payments` o
+el `mode` de reservas: el comportamiento lo elige el negocio, no el enum de rol.
+
+**Alternativa descartada:** abrirle la transferencia al rol `mozo` a secas. Una
+línea menos hoy, pero deja el modelo de Etapa 2 sin forma de volver.
+
+**Consecuencia sobre D1:** esta spec sí toca la base, con una columna booleana.
+Sigue sin tocar el enum de roles ni RLS.
+
+### D7 · Asignar mozo a una mesa — pendiente de Juan
+
+`canAssignMozo` es hoy admin/encargado, así que «Distribuir mozos» se le esconde
+al mozo (D2 lo daba por bueno). Con D6 hay que volver a mirarlo, porque es
+**la acción que decide de quién es la plata**: asignar la mesa 12 a Lucía manda
+toda esa cuenta a la rendición de Lucía (D5).
+
+A favor de abrirlo: si no, cada walk-in que se sienta necesita al encargado en la
+otra máquina para decir de quién es — fricción en hora pico, que es justo cuando
+pasa. En contra: le da a una cuenta compartida el poder de mover plata entre
+mozos, sin que quede registro de qué persona lo hizo.
+
+Recomendación: abrirlo bajo el mismo flag de D6. Queda a confirmar.
+
 ---
 
 ## Alcance
@@ -193,11 +245,14 @@ esa mesa pasa a atribuirse al encargado.
 3. `LocalShell`: filtrar `TABS` por rol según D2.
 4. `can.ts`: partir `canCargarPedido` (D4).
 5. `deriveAttributedMozo`: la mesa manda (D5).
+6. Migración `0057`: `businesses.mozos_comparten_terminal` (D6).
+7. `canTransferTable` + los dos gates de UI del plano pasan a recibir el flag (D6).
 
 ## No-objetivos
 
 - **Cuarto rol.** D1.
-- **Migraciones / RLS.** Nada de esto toca la base.
+- **RLS y el enum de roles.** No se tocan. La única migración es la columna
+  booleana de D6.
 - **Login por PIN en la terminal antes de cargar o cobrar.** El mecanismo existe
   (`business_users.pin`) y sería el equivalente exacto del código de MaxiRest,
   pero con D5 la atribución ya queda resuelta por la asignación de mesa. Se
@@ -207,11 +262,12 @@ esa mesa pasa a atribuirse al encargado.
 
 ## Riesgos
 
-- **El plano en una pantalla compartida no tiene "mis mesas".** El mozo ve todo
-  el salón, con las mesas de todos. Los gates por rol impiden que *opere* las
-  ajenas (transferir sólo la propia), pero no que las *vea*. Para Etapa 1 es
-  probablemente lo correcto —es la misma foto que tenían en MaxiRest— pero hay
-  que confirmarlo con el local antes de dar la spec por buena.
+- **La terminal es una sola identidad para seis personas.** Con D6, cualquiera
+  parado frente a esa PC opera cualquier mesa, y el audit log va a decir siempre
+  lo mismo: la cuenta de la terminal. Se pierde el «quién» de cada acción; queda
+  el «a quién se le atribuye», que es lo que importa para la plata (D5). Si el
+  local quiere recuperar el quién, el camino es el PIN por acción (ver
+  No-objetivos), que es exactamente lo que hace MaxiRest.
 - **D5 cambia comportamiento existente.** Toda mesa con `mozo_id` asignado pasa a
   atribuir por mesa aunque otra persona haya cargado los ítems. Es el
   comportamiento buscado, pero cambia números respecto de hoy: conviene mirar
@@ -230,7 +286,9 @@ node scripts/magic-link.mjs pedro@demo.test "/demo/admin/operacion"
 3. Escribiendo `?tab=caja` a mano tampoco entra.
 4. Sigue rebotado en `/demo/admin`, `/demo/admin/reportes` y el resto.
 5. Toca una mesa libre → abre la carga de pedido (D4).
-6. En una mesa ajena no ve Transferir; en la propia sí.
+6. Con `mozos_comparten_terminal` prendido, opera cualquier mesa del salón:
+   transferir una mesa que no es suya funciona (D6). Con el flag apagado, sólo
+   la propia — el comportamiento de hoy no cambia.
 7. Ficha con su PIN desde el tab Fichaje.
 8. Carga y cobra una mesa asignada a Lucía; el cobro queda atribuido a **Lucía**,
    y aparece en la rendición pendiente de Lucía, no en la de Pedro (D5).
