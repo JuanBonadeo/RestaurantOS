@@ -2,7 +2,9 @@
 
 **Issue:** [#213](https://github.com/gachetponzellini/RestaurantOS-app/issues/213) ·
 **Milestone:** Post-demo · Growth & hardening ·
-**Estado:** **propuesta** — approval gate: sin código hasta el OK de Juan.
+**Estado:** **propuesta** — approval gate: sin código hasta el OK de Juan. ·
+**Diseño:** [canvas de 4 artboards](https://claude.ai/code/artifact/8e0ff51e-3301-4bf9-b5fc-6f467528f6ea)
+(la tab con datos · vacía · fiar desde el cobro · cobrar el saldo).
 
 **Input:** Juan, 2026-09-02: *"vamos a tener que reemplazar la parte que habíamos
 hecho el plano de pedidos de mostrador, para hacer el sistema de cuentas
@@ -121,11 +123,32 @@ crea además un `caja_movimientos` de tipo `ingreso` (reason
 Si es transferencia o tarjeta, queda sólo en el libro del cliente: es
 exactamente el tratamiento que el sistema ya le da a esos métodos en el cajón.
 
-### D6 · El mozo no fía
+### D6 · Fían encargado, admin y **terminal**. El mozo no
 
-`cuenta_corriente` se ofrece a **encargado, admin y terminal**. El mozo cobra, no
-decide a quién se le fía. Se implementa con el `allowedMethods` que `CobroForm` ya
-tiene, más el gate en el server.
+Confirmado por Juan (2026-09-02): *"el rol terminal, sí tiene que poder fiar"*.
+Es coherente con la spec 140 — `terminal` es el puesto compartido del salón y es
+**el que está parado en el mostrador cuando el socio dice «ponelo en mi cuenta»**.
+El mozo cobra, no decide a quién se le fía.
+
+Se implementa con el `allowedMethods` que `CobroForm` ya tiene, más el gate en el
+server: gate nuevo `canFiar` en `permissions/can.ts` (admin · encargado ·
+terminal), porque `allowedMethods` es UX y esto es plata.
+
+### D7 · La tab la ven encargado y admin; `terminal` fía pero no cobra el saldo
+
+`terminal` **no ve la tab**. La spec 140 ya trazó esa línea: el puesto compartido
+*"no ve la plata de supervisión —caja, rendición—"*, y `TABS_POR_ROL.terminal` es
+hoy `["salon", "reservas", "comandas", "fichaje"]`. Cobrar un saldo registra un
+`ingreso` en una caja que `terminal` no puede ni mirar; dejarlo cobrar ahí sería
+plata entrando a un cajón ciego.
+
+Lo que `terminal` **sí** ve es lo único que necesita para fiar bien: **el saldo
+actual del cliente, en el buscador del cobro**, antes de confirmar. Un dato, no
+una pantalla de gestión.
+
+> Si Juan lo quiere al revés —que la terminal también cobre saldos— es una línea
+> en `TABS_POR_ROL` + el gate de `registrarCobranza`. Se deja anotado, no se
+> construye.
 
 ---
 
@@ -201,11 +224,39 @@ cierra, la mesa se libera y la factura se emite como siempre.
 falta. Fiar la mitad y cobrar la otra mitad en efectivo es dividir la cuenta,
 que ya existe.
 
-### US3 · Ver quién debe
+### US3 · Ver quién debe — **tab de Operación**
 
-Panel **«Cuentas corrientes»** en Operación —el que reemplaza al plano—: lista de
-clientes con saldo distinto de cero, ordenada por saldo, con el total fiado
-arriba y buscador. Un tap abre la ficha del cliente.
+Pedido de Juan: *"esta parte de las cuentas corrientes debería de ser una tab de
+operaciones"*. O sea: **la octava tab**, al lado de Caja, no una pantalla aparte
+en el panel. Es el reemplazo literal del plano — el mismo lugar donde el
+encargado lo buscaba.
+
+| | |
+|---|---|
+| Key | `cuentas` (octavo valor de `TABS` en [`local-shell.tsx:100`](../../src/components/admin/local/local-shell.tsx)) |
+| Label | **«Cuentas corrientes»** — *no* «Cuentas»: en la casa **«la cuenta» es la factura de la mesa** y confundirlas en la barra de operación sería caro. Si la barra queda apretada, «Ctas. corrientes» |
+| Posición | después de **Caja**, antes de Rendición — es la familia de la plata |
+| Pill | **cuántos clientes deben** (no el monto: el pill es un contador en las siete tabs y romper eso hace leer «8» como ocho pesos) |
+| Rol | `TABS_POR_ROL.terminal` **no** la incluye (D7) |
+| Guía | entrada nueva en `TEMA_POR_TAB` (spec 134 · D7) — la barra tiene un «?» por tab y `Record<Tab, string>` no deja saltearlo |
+| Salón | **no** entra en `SALON_FILTERABLE`: una deuda no es de un salón, y dejar el selector a la vista invitaría a leer un total recortado |
+
+**Contenido**, con el layout de dos columnas que ya usan Salón y Caja:
+
+- **Izquierda** — la lista de deudores: nombre, saldo, hace cuánto que no paga,
+  último consumo. Ordenada por saldo descendente, con buscador. Fila → ficha.
+- **Derecha** — el resumen: **total fiado**, cuántos clientes, y el corte por
+  antigüedad (al día / +30 / +60), que es la única lectura que dispara una
+  llamada.
+
+**Un hallazgo del diseño:** con `cuenta_corriente` la grilla de métodos del cobro pasa a
+**siete**, y en dos columnas (lo que hay hoy) se pasa del alto de pantalla — el picker de
+cliente queda abajo del fold, justo el dato que hay que mirar antes de fiar. En el canvas la
+grilla va a **tres columnas** y el panel a 566 px.
+
+El **estado vacío** importa más que de costumbre: golf-jcr arranca en cero y va a
+estar así un tiempo. Dice qué es la tab y cómo se habilita a un cliente, con el
+link a `/admin/clientes` — no un ícono gris.
 
 ### US4 · Cobrar el saldo
 
@@ -266,13 +317,13 @@ Cambio de **datos**, no de esquema: 1 delete de plano (cascade a las 60 mesas).
 | T001 | Migración `0059` (método, `credit_customer_id`, `credit_enabled`, tabla de cobranzas) + RLS + `db:types` |
 | T002 | `PaymentMethod` + los 5 `Record<>`, labels y orden — typecheck en verde |
 | T003 | `saldoDeCliente()` / `libroDeCliente()` puros + tests (el corazón de D4) |
-| T004 | `registrarPago` acepta `credit_customer_id`; gate de rol (D6) y validación de `credit_enabled` en el server |
+| T004 | `registrarPago` acepta `credit_customer_id`; gate `canFiar` (D6) y validación de `credit_enabled` en el server |
 | T005 | `registrar_pago_tx` pasa el nuevo campo |
-| T006 | `CobroForm`: método «Cuenta corriente» + buscador de cliente habilitado |
+| T006 | `CobroForm`: método «Cuenta corriente» + buscador de cliente habilitado **con su saldo a la vista** (D7) |
 | T007 | D3 — separar el fiado de «Cobrado» en `getCajaLiveStats` y en el panel del arqueo, con test |
 | T008 | Ficha del cliente: switch, saldo, libro |
 | T009 | `registrarCobranza` + `anularCobranza` (con el `ingreso` linkeado de D5) |
-| T010 | Panel «Cuentas corrientes» en Operación |
+| T010 | **Tab «Cuentas corrientes»** en Operación: `TABS`, `TABS_POR_ROL`, `TEMA_POR_TAB`, pill, loader y las dos columnas (US3) |
 | T011 | Borrar el plano «Pedidos de Mostrador» de golf-jcr |
 | T012 | Import desde el MaxiRest del Golf (**bloqueado**: falta el backup) |
 | T013 | Alta de `payment_method_configs` para golf-jcr + wiki (`features/cobros`, `features/caja`, `dominio/schema`) |
