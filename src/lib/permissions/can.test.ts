@@ -280,9 +280,15 @@ describe("permissions / rol terminal (spec 140)", () => {
     expect(canTransitionMesa("terminal", "ocupada", "libre")).toBe(false);
   });
 
-  it("no carga pedidos de mostrador ni confirma los que entran solos", () => {
-    // Lo de mesa sí (arriba); esto es la cola de delivery/take-away.
-    expect(canCargarPedido("terminal")).toBe(false);
+  it("sí carga la venta de mostrador: el de la barra no tiene mesa", () => {
+    // Decisión de Juan 2026-09-02 — en la 140 había quedado afuera. Es el mismo
+    // permiso que gobierna «Venta rápida» en el plano (kiosko/barra, sin mesa).
+    expect(canCargarPedido("terminal")).toBe(true);
+  });
+
+  it("pero no confirma los pedidos que entran solos ni factura por monto", () => {
+    // La cola de delivery/take-away del canal digital sigue siendo del
+    // encargado: decidir si un pedido online entra a cocina no es del salón.
     expect(canConfirmOrder("terminal")).toBe(false);
     expect(canCrearPedidoFlash("terminal")).toBe(false);
   });

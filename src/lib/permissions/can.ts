@@ -264,14 +264,21 @@ export function canCrearPedidoFlash(role: BusinessRole): boolean {
 /**
  * Cargar a mano un pedido para llevar / delivery SIN mesa desde operación
  * (spec 054) — el pedido de mostrador o telefónico, que hoy sólo entra
- * automático por la carta pública. Es operación de mostrador: encargado/admin.
- * El mozo y la terminal están en salón, operan mesas.
+ * automático por la carta pública. Y la «venta rápida» del plano, que es lo
+ * mismo: kiosko / barra, sin mesa.
+ *
+ * La `terminal` entra (decisión de Juan, 2026-09-02): es la compu del salón, y
+ * el que pide una gaseosa parado en la barra no tiene mesa donde cargársela.
+ * En la spec 140 había quedado afuera por prolijidad —«la terminal opera
+ * mesas»— pero en el mostrador de un local eso no se sostiene.
+ *
+ * El mozo sigue afuera: su superficie es el teléfono, en el salón.
  *
  * Ojo: esto NO es cargarle el pedido a una mesa. Para eso está
  * `canCargarPedidoMesa`, que es otra cosa y otro círculo de gente.
  */
 export function canCargarPedido(role: BusinessRole): boolean {
-  return role === "admin" || role === "encargado";
+  return role === "admin" || role === "encargado" || role === "terminal";
 }
 
 /**

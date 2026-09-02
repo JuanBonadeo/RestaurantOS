@@ -209,6 +209,30 @@ el camino para recuperarlo es el PIN por acción (No-objetivos).
 
 ---
 
+### D8 · La venta rápida también es suya (2026-09-02)
+
+Juan, mirando la pantalla: *"en la pantalla de terminal no está el btn de venta
+rápida, ponelo"*.
+
+En D2 había quedado afuera por prolijidad —«la terminal opera mesas, el mostrador
+es del encargado»—, pero en el mostrador de un local eso no se sostiene: el que pide
+una gaseosa parado en la barra no tiene mesa donde cargársela, y la terminal es
+justamente la compu que tiene enfrente.
+
+`canCargarPedido` suma `terminal`. Arrastra dos cosas más, las dos correctas: la
+venta de mostrador por server action (es la misma operación) y «Cargar cliente» en
+una mesa, que estaba gateado por el mismo helper.
+
+El mozo sigue afuera: su superficie es el teléfono, en el salón.
+
+**Efecto sobre la rendición, a mirar:** una venta rápida no tiene mesa, así que su
+plata se atribuye a `loaded_by` — la terminal (D5 lo dice explícitamente). Y la
+terminal no aparece en las rendiciones pendientes, porque esa query lista
+`role in ('mozo','encargado')`. Si la terminal cobra en efectivo una venta de barra,
+esa plata está en el cajón y nadie la rinde. Es el mismo caso que el operador de
+caja, que `deben-rendir` excluye a propósito («esa plata ya está adentro»), y por eso
+no se rompe nada — pero conviene confirmarlo con el local antes del go-live.
+
 ## Alcance
 
 1. Migración `0057`: `'terminal'` en `business_users_role_check` y en
