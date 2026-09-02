@@ -217,9 +217,9 @@ export const TEMAS: Tema[] = [
     icono: Wallet,
     grupo: "operacion",
     claves: [
+      "Cerrar la caja principal libera todas las mesas y borra la distribución de mozos. No se puede evitar.",
+      "Sin todas las rendiciones resueltas, la caja principal no cierra.",
       "Podés cerrar con una diferencia de hasta $5.000. Más que eso lo cierra el dueño.",
-      "Toda diferencia pide motivo escrito. No lo maquilles: es lo que después la explica.",
-      "Las propinas no están en «En la caja deberías tener». Son del mozo, no del local.",
     ],
     pasos: [
       {
@@ -243,10 +243,31 @@ export const TEMAS: Tema[] = [
         alt: "El formulario de sangría: monto, y motivo marcado como obligatorio con un asterisco rojo.",
       },
       {
-        titulo: "Antes de cerrar, que los mozos rindan",
+        titulo: "Primero las rendiciones: sin eso no cierra",
         texto:
-          'Un mozo que cobró en efectivo tiene esa plata encima hasta que la entrega. Si falta alguno, el cierre te frena con "Falta 1 rendición para poder cerrar.".',
+          "Un mozo que cobró tiene esa plata encima hasta que la entrega, y desde hace poco el cierre de la caja principal NO avanza hasta resolver a todos. Resolver son dos caminos: «Rindió», con el monto que te dio, o «No entregó», con motivo — que deja la deuda escrita y le avisa al dueño. El botón de cerrar queda apagado hasta que no quede ninguno.",
+        aviso: {
+          tono: "ojo",
+          texto:
+            "El bar es la excepción: una caja que no es la principal cierra sin pedir rendiciones, porque puede tener que cortar en plena cena.",
+        },
         verTambien: { tema: "rendicion", texto: "Cómo se toma una rendición" },
+      },
+      {
+        titulo: "Las mesas abiertas también frenan",
+        texto:
+          'No se puede cerrar la caja principal con consumo sin cobrar. Si queda alguna, el sistema te las nombra: "No podés cerrar: hay 2 mesas con la cuenta abierta — Mesa 14 ($18.500), Mesa 7 ($6.200).". Andá, cobralas o anulalas, y volvé.',
+        verTambien: { tema: "mesas", texto: "Cerrar o anular una mesa" },
+      },
+      {
+        titulo: "Los deliverys NO frenan el cierre",
+        texto:
+          'Un pedido de la web todavía abierto se te lista como aviso —"Quedan 3 pedidos de delivery / take away abiertos. No frenan el cierre: si se cobran después, entran en el período nuevo."— pero te deja cerrar igual. Es a propósito: el repartidor puede volver más tarde. Lo que tenés que saber es que esa plata va a caer en el turno siguiente, no en el que estás cerrando.',
+        aviso: {
+          tono: "ojo",
+          texto:
+            "Si querés que todo el día quede en un solo turno, resolvé los deliverys antes de cerrar. El sistema no te lo va a exigir.",
+        },
       },
       {
         titulo: "Contá, explicá la diferencia y decidí si retirás",
@@ -257,6 +278,17 @@ export const TEMAS: Tema[] = [
           texto:
             'Arriba de $5.000 de diferencia el sistema te frena: "La diferencia excede tu autorización. Pedile al admin que cierre la caja.". No cambies el conteo para que entre — convertís un faltante explicable en uno escondido.',
         },
+      },
+      {
+        titulo: "Qué pasa con el salón cuando confirmás",
+        texto:
+          "Cerrar la caja principal no cierra sólo la plata: además libera TODAS las mesas ocupadas del local y borra la asignación de mozos de todas ellas. El salón te queda limpio para el turno siguiente. Es automático y no hay casilla para evitarlo.",
+        aviso: {
+          tono: "peligro",
+          texto:
+            "Alcanza a todos los salones del negocio, no sólo al que te toca. Y borra la distribución de mozos entera: si mañana usás las mismas secciones, las vas a tener que repartir de nuevo.",
+        },
+        verTambien: { tema: "mesas", texto: "Repartir el salón entre los mozos" },
       },
     ],
   },
@@ -424,21 +456,32 @@ export const TEMAS: Tema[] = [
   {
     slug: "pedidos",
     titulo: "Los pedidos de la web",
-    resumen: "Delivery y take away: aceptarlos, corregirlos, cobrarlos y avisar para cuándo están.",
+    resumen: "Delivery y take away: qué clase de pedido es cada uno, cómo se aceptan y cómo se cobran.",
     icono: Truck,
     grupo: "operacion",
     claves: [
-      '«No marchó» en rojo = alguien espera comida que nunca se empezó. Es lo más urgente de la pantalla.',
+      "Acá viven SÓLO delivery y take away. Lo del salón no aparece: eso es Mesas.",
+      "«No marchó» en rojo = alguien espera comida que nunca se empezó. Es lo más urgente de la pantalla.",
       "El motivo de cancelación lo lee el cliente en el seguimiento de su pedido.",
-      "Un pedido ya pagado no se edita: se anula y se rehace.",
     ],
     pasos: [
       {
+        titulo: "Qué clase de pedidos hay",
+        texto:
+          "Para el sistema hay tres destinos: a domicilio, para retirar, y para consumir en el local. Los dos primeros son los que ves acá. El tercero —la mesa, la venta de mostrador— no entra a esta pantalla: se maneja en el salón, y por eso el contador de arriba nunca cuenta una mesa.",
+        verTambien: { tema: "mesas", texto: "Lo del salón se maneja acá" },
+      },
+      {
+        titulo: "De dónde salen",
+        texto:
+          "Un pedido llega por dos caminos: lo carga el cliente desde la carta web, o lo cargás vos con «Cargar pedido» cuando llaman por teléfono. Los dos entran al mismo circuito y se cobran igual. El que carga el staff nace anotado como efectivo, pero lo que vale es el método que registrás al cobrar.",
+      },
+      {
         titulo: "Las cinco columnas",
         texto:
-          "Un pedido recorre «Nuevos» → «Preparando» → «Listos» → «En camino» → «Entregados», y se mueve con el botón de su tarjeta. El número al lado de «Pedidos online» es cuántos hay sin atender: si tiene número, alguien está esperando.",
+          "Un pedido recorre «Pendientes» → «En cocina» → «Listos» → «En camino» → «Entregados», y se mueve con el botón de su tarjeta. Un pedido para retirar no pasa por «En camino»: salta de «Listos» a entregado cuando el cliente lo busca. El número al lado de «Pedidos online» es cuántos hay sin atender.",
         imagen: "/ayuda/op-pedidos.png",
-        alt: "Las cinco columnas de pedidos online: Nuevos, Preparando, Listos, En camino y Entregados.",
+        alt: "Las cinco columnas de pedidos online: Pendientes, En cocina, Listos, En camino y Entregados.",
         marcas: [
           { n: 1, x: 7, y: 47 },
           { n: 2, x: 43.5, y: 9 },
@@ -447,7 +490,7 @@ export const TEMAS: Tema[] = [
       {
         titulo: "Confirmar, y los que son para más tarde",
         texto:
-          "«Confirmar pedido» lo acepta y manda la comanda a cocina — confirmá cuando estés seguro de que se puede hacer. Los encargados para otro momento quedan en «Nuevos» con el chip «Programado» y no salen a cocina hasta que corresponde.",
+          "«Confirmar pedido» lo acepta y manda la comanda a cocina — confirmá cuando estés seguro de que se puede hacer. Los encargados para otro momento quedan en la primera columna con el chip «Programado» y no salen a cocina hasta que corresponde. Aceptar un programado lo avala sin marcharlo. Ojo: un pedido para comer en el local no se puede programar.",
       },
       {
         titulo: "El que tenía que salir y sigue ahí",
@@ -463,7 +506,7 @@ export const TEMAS: Tema[] = [
       {
         titulo: "Corregir, cobrar, cancelar",
         texto:
-          'Tocando la tarjeta se abre el detalle: ahí se saca lo que no hay, se cambian cantidades y se deja «Nota para cocina (sale en la comanda)». Los que pagan al recibir dicen «Efectivo · A cobrar» y se cobran desde ahí. Cancelar pide un motivo con ejemplos como «Sin stock, zona fuera de cobertura».',
+          'Tocando la tarjeta se abre el detalle: ahí se saca lo que no hay, se cambian cantidades y se deja «Nota para cocina (sale en la comanda)». Un pedido de la web nace impago; los que pagan al recibir dicen «Efectivo · A cobrar» y se cobran desde ahí. Cancelar pide un motivo con ejemplos como «Sin stock, zona fuera de cobertura».',
       },
     ],
   },
