@@ -16,7 +16,7 @@ import { getReservationSettings } from "@/lib/reservations/queries";
 import type { ReservationMode } from "@/lib/reservations/types";
 import { getBusiness } from "@/lib/tenant";
 
-import { ANCHO, H1, H2, PROSA, SECUNDARIO } from "../estilos";
+import { H1, H2, PAGINA, PROSA, SECUNDARIO, TEXTO } from "../estilos";
 
 // Un tema de la guía — spec 134 (RestaurantOS-Brain#35).
 //
@@ -41,7 +41,7 @@ function AvisoBox({ aviso }: { aviso: Aviso }) {
   const Icono = peligro ? TriangleAlert : CircleAlert;
   return (
     <div
-      className={`mt-4 flex items-start gap-3 rounded-xl p-4 ring-1 ${
+      className={`mt-5 flex max-w-[68ch] items-start gap-3 rounded-xl p-4 ring-1 ${
         peligro
           ? "bg-red-50 text-red-900 ring-red-200"
           : "bg-amber-50 text-amber-900 ring-amber-200"
@@ -64,7 +64,7 @@ function AvisoBox({ aviso }: { aviso: Aviso }) {
 function Claves({ claves }: { claves: string[] }) {
   return (
     <section
-      className="mt-6 rounded-2xl bg-white p-5 ring-1 ring-zinc-200/70"
+      className={`mt-8 rounded-2xl bg-white p-6 ring-1 ring-zinc-200/70 sm:p-7 ${TEXTO}`}
       aria-labelledby="lo-importante"
     >
       <h2
@@ -114,8 +114,8 @@ export default async function TemaPage({
   const catalogo = tema.tipo === "catalogo";
 
   return (
-    <PageShell width="narrow">
-      <div className={ANCHO}>
+    <PageShell width="wide" className="px-4 py-10 sm:px-8 lg:px-12 lg:py-14">
+      <div className={PAGINA}>
         <Link
           href={base}
           className="inline-flex min-h-12 items-center gap-2 text-[17px] font-medium text-zinc-600 transition hover:text-zinc-900"
@@ -123,13 +123,13 @@ export default async function TemaPage({
           <ArrowLeft className="size-5" strokeWidth={1.75} /> Volver a Ayuda
         </Link>
 
-        <h1 className={`mt-2 ${H1}`}>{tema.titulo}</h1>
-        <p className={`mt-2 ${SECUNDARIO}`}>{tema.resumen}</p>
+        <h1 className={`mt-2 ${H1} ${TEXTO}`}>{tema.titulo}</h1>
+        <p className={`mt-3 ${SECUNDARIO} ${TEXTO}`}>{tema.resumen}</p>
 
         {tema.claves.length > 0 && <Claves claves={tema.claves} />}
 
         {estaEscrito(tema, modo) ? (
-          <ol className={catalogo ? "mt-8 space-y-7" : "mt-8 space-y-8"}>
+          <ol className={catalogo ? "mt-10 space-y-8" : "mt-12 space-y-12 lg:space-y-16"}>
             {pasos.map((paso, i) => (
               <li
                 key={paso.titulo}
@@ -142,7 +142,7 @@ export default async function TemaPage({
               >
                 {!catalogo && (
                   <span
-                    className="grid size-10 shrink-0 place-items-center rounded-full text-[18px] font-semibold"
+                    className="grid size-11 shrink-0 place-items-center rounded-full text-[19px] font-semibold"
                     style={{
                       background: "var(--brand)",
                       color: "var(--brand-foreground)",
@@ -152,8 +152,11 @@ export default async function TemaPage({
                   </span>
                 )}
                 <div className="min-w-0 flex-1">
-                  <h2 className={H2}>{paso.titulo}</h2>
-                  <p className={`mt-2 ${PROSA}`}>{paso.texto}</p>
+                  {/* El ancho de lectura va en cada pieza de TEXTO, no en el
+                      contenedor: así la captura de abajo usa la página entera
+                      (D20). Ver el comentario de `estilos.ts`. */}
+                  <h2 className={`${H2} ${TEXTO}`}>{paso.titulo}</h2>
+                  <p className={`mt-2 ${PROSA} ${TEXTO}`}>{paso.texto}</p>
                   {paso.imagen && (
                     <Captura
                       src={paso.imagen}
@@ -177,7 +180,7 @@ export default async function TemaPage({
           </ol>
         ) : (
           // Se llega acá tipeando la URL: el índice no enlaza un tema vacío.
-          <div className="mt-8 rounded-2xl bg-zinc-50 p-6 ring-1 ring-zinc-200/70">
+          <div className={`mt-8 rounded-2xl bg-zinc-50 p-6 ring-1 ring-zinc-200/70 ${TEXTO}`}>
             <p className={PROSA}>
               Este tema todavía no está escrito. Mientras tanto preguntanos — y decinos
               qué necesitabas, así lo escribimos primero.
@@ -186,7 +189,7 @@ export default async function TemaPage({
         )}
 
         {siguiente && (
-          <div className="mt-12 border-t border-zinc-200 pt-6">
+          <div className="mt-16 border-t border-zinc-200 pt-8">
             <Link
               href={`${base}/${siguiente.slug}`}
               className="inline-flex min-h-12 items-center gap-2 rounded-xl px-5 text-[17px] font-medium"

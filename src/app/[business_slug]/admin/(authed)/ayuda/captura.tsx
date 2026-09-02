@@ -67,10 +67,16 @@ export function Captura({
 
   return (
     <>
-      {/* El breakout: `-mx-*` la saca de la columna de texto hacia los costados.
-          Los valores están acotados al espacio que sobra dentro de PageShell
-          (max-w-4xl con su padding), así que nunca genera scroll horizontal. */}
-      <figure className="mt-4 -mx-4 sm:-mx-10 lg:-mx-28">
+      {/* En desktop no hace falta ningún truco: la captura ya ocupa el ancho de
+          la página, porque el límite de 68 caracteres se le pone al texto y no
+          al contenedor (D20). Se topa en 1160 px, el ancho nativo con el que se
+          sacan — estirarla más sería agrandar píxeles.
+
+          En mobile sí: ahí el círculo del número se come 60 px de los 375, así
+          que la imagen se corre a la izquierda para arrancar en el borde del
+          texto de arriba. Se mantiene el padding derecho de la página, así que
+          no genera scroll horizontal. */}
+      <figure className="mt-6 -ml-[60px] max-w-[1160px] sm:ml-0">
         <button
           type="button"
           onClick={() => setAbierta(true)}

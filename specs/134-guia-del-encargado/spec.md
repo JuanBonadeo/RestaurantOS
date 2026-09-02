@@ -133,13 +133,18 @@ encontrar cómo se marca un producto agotado.
 numerados como dato. Un test exige que **todo tema de Operación y Catálogo tenga al menos
 una**: el pedido «bien visual» deja de depender de que alguien se acuerde.
 
-**D19 · La captura rompe la columna, y se abre a pantalla completa.** Una captura de
-1160 px metida en una columna de 68 caracteres se ve a menos de la mitad, y a ese tamaño
-no se lee un rótulo: la imagen estaba de adorno. Ahora el **texto** se queda en 68ch —eso
-es D6 y no se toca— pero la **imagen** se sale hacia los costados hasta donde da la
-página (~800 px en desktop, borde a borde en mobile), y tocándola se abre a resolución
-completa sobre un fondo oscuro, con Esc y clic afuera para cerrar. Los círculos son
-porcentajes, así que caen bien en los dos tamaños sin recalcular nada.
+**D20 · El ancho de lectura es del TEXTO, no del contenedor.** Durante tres versiones
+el `max-w-[68ch]` estaba puesto en el bloque que envuelve todo, así que también achicaba
+las capturas: una pantalla de 1160 px entraba en 490 y no se leía un rótulo. Ahora la
+**página** es ancha (1180 px) y el límite de 60-70 caracteres se le pone a cada párrafo y
+cada título. La captura llega hasta 1160 px —su ancho nativo, estirarla más sería
+agrandar píxeles— y el índice pasa a **dos columnas** desde `lg`: con diecinueve temas,
+una sola tira obliga a scrollear la guía entera para ver qué hay.
+
+**D19 · La captura se abre a pantalla completa.** Tocándola se abre a resolución completa
+sobre fondo oscuro, con Esc, la X o clic afuera para cerrar; tocar la propia imagen no
+cierra, para poder hacer zoom con los dedos. Los círculos son porcentajes, así que caen
+bien en todos los tamaños sin recalcular nada.
 
 | Grupo | Temas |
 |---|---|

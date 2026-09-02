@@ -8,7 +8,7 @@ import { getReservationSettings } from "@/lib/reservations/queries";
 import type { ReservationMode } from "@/lib/reservations/types";
 import { getBusiness } from "@/lib/tenant";
 
-import { ANCHO, H1, PROSA, SECUNDARIO } from "./estilos";
+import { H1, PAGINA, PROSA, SECUNDARIO, TEXTO } from "./estilos";
 
 // Índice de la guía del encargado — spec 134 (RestaurantOS-Brain#35).
 //
@@ -37,10 +37,10 @@ export default async function AyudaIndice({
   const modo: ReservationMode = settings.mode ?? "estricto";
 
   return (
-    <PageShell width="narrow">
-      <div className={ANCHO}>
+    <PageShell width="wide" className="px-4 py-10 sm:px-8 lg:px-12 lg:py-14">
+      <div className={PAGINA}>
         <h1 className={H1}>Ayuda</h1>
-        <p className={`mt-2 ${SECUNDARIO}`}>
+        <p className={`mt-3 ${SECUNDARIO} ${TEXTO}`}>
           Cómo se usa el panel, explicado paso a paso. Elegí lo que necesitás hacer.
         </p>
 
@@ -53,13 +53,16 @@ export default async function AyudaIndice({
           if (temas.length === 0) return null;
 
           return (
-            <section key={grupo.id} className="mt-10">
-              <h2 className="text-[22px] font-semibold leading-snug text-zinc-900">
+            <section key={grupo.id} className="mt-12 lg:mt-16">
+              <h2 className="text-[24px] font-semibold leading-snug text-zinc-900 sm:text-[26px]">
                 {grupo.titulo}
               </h2>
-              <p className={`mt-1 ${SECUNDARIO}`}>{grupo.bajada}</p>
+              <p className={`mt-1.5 ${SECUNDARIO} ${TEXTO}`}>{grupo.bajada}</p>
 
-              <div className="mt-4 space-y-3">
+              {/* Dos columnas desde `lg`: con diecinueve temas, una sola tira
+                  obliga a scrollear la guía entera para ver qué hay. En dos, el
+                  índice entra casi de una sola mirada. */}
+              <div className="mt-5 grid gap-4 lg:grid-cols-2">
                 {temas.map((tema) => {
                   const Icono = tema.icono;
                   const listo = estaEscrito(tema, modo);
@@ -101,14 +104,14 @@ export default async function AyudaIndice({
                     <Link
                       key={tema.slug}
                       href={`/${business_slug}/admin/ayuda/${tema.slug}`}
-                      className="flex items-start gap-4 rounded-2xl bg-white p-4 ring-1 ring-zinc-200/70 transition hover:ring-zinc-300 sm:p-5"
+                      className="flex items-start gap-4 rounded-2xl bg-white p-5 ring-1 ring-zinc-200/70 transition hover:ring-zinc-300 sm:p-6"
                     >
                       {cuerpo}
                     </Link>
                   ) : (
                     <div
                       key={tema.slug}
-                      className="flex items-start gap-4 rounded-2xl bg-white p-4 opacity-70 ring-1 ring-zinc-200/70 sm:p-5"
+                      className="flex items-start gap-4 rounded-2xl bg-white p-5 opacity-70 ring-1 ring-zinc-200/70 sm:p-6"
                     >
                       {cuerpo}
                     </div>
@@ -119,7 +122,7 @@ export default async function AyudaIndice({
           );
         })}
 
-        <p className={`mt-10 ${PROSA}`}>
+        <p className={`mt-14 ${PROSA} ${TEXTO}`}>
           ¿No encontrás lo que buscás? Preguntanos — y contanos qué te faltó, así lo
           agregamos acá.
         </p>
