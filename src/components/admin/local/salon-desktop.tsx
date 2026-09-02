@@ -113,6 +113,7 @@ import {
   canAssignMozo,
   canCancelItem,
   canCargarPedido,
+  canCargarPedidoMesa,
   canMoveTable,
   canTransitionMesa,
 } from "@/lib/permissions/can";
@@ -1232,9 +1233,14 @@ export function SalonDesktop({
    * walk-in y dejar la reserva colgada.
    *
    * Sin permiso de carga tampoco: para ese rol el detalle es lo único que hay.
+   *
+   * Spec 140 · D4 — el permiso es `canCargarPedidoMesa`, no `canCargarPedido`.
+   * El segundo es el pedido de mostrador *sin* mesa (la venta rápida de más
+   * abajo), y usarlo acá dejaba a la terminal —y a cualquier rol de salón—
+   * mirando el plano sin poder cargarle nada a una mesa.
    */
   const abreCargaDirecto = useCallback(
-    (t: FloorTable) => canCargarPedido(role) && !reservationByTable[t.id],
+    (t: FloorTable) => canCargarPedidoMesa(role) && !reservationByTable[t.id],
     [role, reservationByTable],
   );
 
@@ -1835,7 +1841,13 @@ export function SalonDesktop({
                 }}
                 mesaAcciones={{
                   onCobrar: () => openCuenta(pedirTable),
-                  onCargarCliente: () => setClienteTableId(pedirTable.id),
+                  // Buscar y asociar un cliente pasa por `canCargarPedido`
+                  // (`customers-actions`), que es admin/encargado. La terminal
+                  // no lo tiene, así que tampoco se le ofrece: un botón que el
+                  // server rechaza es peor que no tenerlo (spec 140).
+                  onCargarCliente: canCargarPedido(role)
+                    ? () => setClienteTableId(pedirTable.id)
+                    : undefined,
                   // Mismas reglas que tenía el detalle: transferir y trasladar
                   // sólo con la mesa abierta, anular sólo si el rol puede
                   // llevarla a `libre`.
@@ -1964,7 +1976,11 @@ export function SalonDesktop({
               }}
               onTransfer={() => setTransferTableId(selected.id)}
               onTrasladar={() => setTrasladarTableId(selected.id)}
-              onCargarCliente={() => setClienteTableId(selected.id)}
+              onCargarCliente={
+                canCargarPedido(role)
+                  ? () => setClienteTableId(selected.id)
+                  : undefined
+              }
               onAnular={() => pedirAnular(selected.id, selected.label)}
             />
           ) : (
@@ -2849,7 +2865,7 @@ function TableDetail({
   onTransfer: () => void;
   onTrasladar: () => void;
   /** Abre «Cargar cliente» (spec 111, FR-015). */
-  onCargarCliente: () => void;
+  onCargarCliente?: () => void;
   onAnular: () => void;
 }) {
   const status = (table.operational_status ?? "libre") as OperationalStatus;
@@ -3171,7 +3187,7 @@ function TableDetail({
           // Spec 111, FR-015: cargar el cliente dejó de ser un paso obligado
           // para sentar y pasó a ser esto — una opción, cuando hace falta.
           // Sólo con la mesa abierta: sin orden no hay dónde guardarlo.
-          if (status !== "libre" && canPedir)
+          if (status !== "libre" && canPedir && onCargarCliente)
             menuItems.push({
               key: "cliente",
               icon: UserPlus,

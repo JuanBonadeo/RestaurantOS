@@ -1,4 +1,10 @@
-export const BUSINESS_ROLES = ["admin", "encargado", "mozo", "personal"] as const;
+export const BUSINESS_ROLES = [
+  "admin",
+  "encargado",
+  "mozo",
+  "terminal",
+  "personal",
+] as const;
 export type BusinessRoleInput = (typeof BUSINESS_ROLES)[number];
 
 export const ROLE_META: Record<
@@ -18,6 +24,11 @@ export const ROLE_META: Record<
     label: "Mozo",
     description:
       "Plano de mesas, toma de pedido, cobros, descuentos hasta 10%.",
+  },
+  terminal: {
+    label: "Terminal del salón",
+    description:
+      "La compu compartida del salón: opera todas las mesas, carga pedidos y cobra. La plata se atribuye al mozo de cada mesa, no a esta cuenta.",
   },
   personal: {
     label: "Personal",

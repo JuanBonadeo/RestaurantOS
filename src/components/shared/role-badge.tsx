@@ -4,6 +4,7 @@ const ROLE_COLORS: Record<string, string> = {
   admin: "bg-violet-50 text-violet-700 ring-1 ring-violet-200",
   encargado: "bg-blue-50 text-blue-700 ring-1 ring-blue-200",
   mozo: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
+  terminal: "bg-teal-50 text-teal-700 ring-1 ring-teal-200",
   personal: "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
 };
 
@@ -11,6 +12,7 @@ const ROLE_LABELS: Record<string, string> = {
   admin: "Admin",
   encargado: "Encargado",
   mozo: "Mozo",
+  terminal: "Terminal",
   personal: "Personal",
 };
 
