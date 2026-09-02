@@ -27,6 +27,12 @@ const ROLES = [
     active: "bg-emerald-50 text-emerald-700 ring-emerald-200",
   },
   {
+    key: "terminal",
+    label: "Terminal",
+    dot: "bg-teal-500",
+    active: "bg-teal-50 text-teal-700 ring-teal-200",
+  },
+  {
     key: "personal",
     label: "Personal",
     dot: "bg-amber-500",
