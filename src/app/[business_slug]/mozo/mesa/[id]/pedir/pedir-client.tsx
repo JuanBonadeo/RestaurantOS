@@ -622,7 +622,7 @@ export function MozoPedirClient({
   // llevó el foco. Sin esta guarda, lo que se tipea en el modal termina en el
   // buscador de productos que está tapado.
   useEffect(() => {
-    if (embedded && !mozoPickerAbierto && !comensalesAbierto)
+    if (embedded && !mozoPickerAbierto && !comensalesTableId)
       searchRef.current?.focus();
     // `mozoPickerAbierto` a propósito fuera de las deps: esto es el foco de
     // **montaje**. Devolverlo cuando el modal se cierra es del efecto de abajo,
@@ -636,6 +636,12 @@ export function MozoPedirClient({
   const focusSearch = useCallback(() => {
     if (!embedded) return;
     setTimeout(() => {
+      // Va en el próximo tick, así que entre el pedido y la ejecución puede
+      // haberse abierto un diálogo —el selector de mozo de otra mesa, el de
+      // comensales, un producto—. El foco es suyo: robárselo deja al usuario
+      // tecleando en un buscador que está tapado. Pasó en vivo cerrando un
+      // modal con Esc y tocando otra mesa acto seguido.
+      if (document.querySelector("[role='dialog']")) return;
       const input = searchRef.current;
       if (!input) return;
       input.focus();
@@ -668,8 +674,27 @@ export function MozoPedirClient({
    * desmonta al saltar de mesa en mesa (keep-alive, specs 101/114), así que sin
    * este registro volver a una mesa ya contestada la volvería a preguntar.
    */
-  const [comensalesAbierto, setComensalesAbierto] = useState(false);
-  const comensalesPreguntados = useRef<Set<string>>(new Set());
+  /**
+   * El modal guarda **de qué mesa** es, no un `true`.
+   *
+   * Es lo que lo desmonta solo cuando el panel se re-apunta a otra: el plano
+   * queda vivo detrás a propósito, así que tocar otra mesa con el modal abierto
+   * es un gesto normal. Con un booleano, el modal sobrevivía al cambio —
+   * cambiaba el título pero se quedaba con el número de la mesa anterior, y
+   * confirmarlo se lo aplicaba a la nueva. Es el gemelo del efecto que cierra
+   * el selector de mozo cuando su mesa deja de ser la del panel.
+   */
+  const [comensalesTableId, setComensalesTableId] = useState<string | null>(
+    null,
+  );
+  /**
+   * Lo que ya se contestó, por mesa. Es un mapa y no un set porque también es
+   * **la respuesta**: sin orden todavía, el número vive sólo en el estado del
+   * panel, y ese estado se resetea al saltar de mesa. Sin guardarlo, contestar
+   * «6» en la mesa 12, irse a mirar la 3 y volver dejaba la 12 en 2 otra vez —
+   * y como ya estaba preguntada, nadie volvía a preguntar.
+   */
+  const comensalesPreguntados = useRef<Map<string, number | null>>(new Map());
   const abrirComensales = useCallback(() => {
     if (!aperturaDeMesa) return false;
     // Hasta que no vuelve el estado de la mesa no se pregunta: el `libre` del
@@ -678,23 +703,16 @@ export function MozoPedirClient({
     if (mesaCargando) return false;
     if (loPedido != null) return false;
     if (comensalesPreguntados.current.has(table.id)) return false;
-    comensalesPreguntados.current.add(table.id);
-    setComensalesAbierto(true);
+    // `null` = preguntada y todavía sin respuesta (se cerró con Esc, o está
+    // abierta). La respuesta la escribe el `onConfirmar` del modal.
+    comensalesPreguntados.current.set(table.id, null);
+    setComensalesTableId(table.id);
     return true;
   }, [aperturaDeMesa, mesaCargando, loPedido, table.id]);
 
-  const mesaDelModal = useRef(table.id);
   useEffect(() => {
     const seCerroElPicker = pickerAbiertoAntes.current && !mozoPickerAbierto;
     pickerAbiertoAntes.current = mozoPickerAbierto;
-    // Cambió la mesa con el modal abierto (se puede: el plano sigue vivo
-    // detrás). Lo que estaba preguntando ya no corre —era de la otra mesa— y
-    // dejarlo abierto le aplicaría ese número a ésta. Se cierra y, si la nueva
-    // también lo necesita, se abre de cero unas líneas más abajo.
-    if (mesaDelModal.current !== table.id) {
-      mesaDelModal.current = table.id;
-      setComensalesAbierto(false);
-    }
     // El mozo va primero: mientras se elige, acá no pasa nada.
     if (mozoPickerAbierto) return;
     const abrio = abrirComensales();
@@ -1125,7 +1143,7 @@ export function MozoPedirClient({
     !!openDailyMenu ||
     !!cancelTarget ||
     mozoPickerAbierto ||
-    comensalesAbierto;
+    comensalesTableId != null;
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey)) return;
@@ -1218,11 +1236,17 @@ export function MozoPedirClient({
   const seedeadaConOrden = useRef<string | null>(null);
   useEffect(() => {
     if (mesaDePersonas.current !== table.id) {
-      // Mesa nueva: parte de lo suyo, nunca de lo que quedó de la anterior.
+      // Mesa nueva: parte de lo suyo, nunca de lo que quedó de la anterior. Lo
+      // suyo es su orden si la tiene, lo que ya se contestó para esa mesa si
+      // se contestó, y recién ahí el default.
       mesaDePersonas.current = table.id;
       seedeadaConOrden.current =
         loPedido?.party_size != null ? table.id : null;
-      setPersonas(loPedido?.party_size ?? 2);
+      setPersonas(
+        loPedido?.party_size ??
+          comensalesPreguntados.current.get(table.id) ??
+          2,
+      );
       return;
     }
     // Misma mesa, y recién ahora llegó su orden: se toma el número real. Una
@@ -1632,15 +1656,12 @@ export function MozoPedirClient({
           </ColumnaLateral>
         </PanelDeCarga>
 
-        {comensalesAbierto && (
+        {comensalesTableId === table.id && (
           <ComensalesModal
-            // Por mesa: el número con el que abre es estado interno suyo, así
-            // que remontarlo es lo que garantiza que no muestre el de la
-            // anterior.
-            key={table.id}
             tableLabel={table.label}
             valorInicial={personas}
             onConfirmar={(n) => {
+              comensalesPreguntados.current.set(table.id, n);
               // Sólo estado: la mesa está libre —lo garantiza `aperturaDeMesa`—
               // así que todavía no hay orden que actualizar y el número viaja
               // con el primer envío, que es el que la crea (spec 111, FR-014).
@@ -1648,7 +1669,7 @@ export function MozoPedirClient({
               setPersonas(n);
             }}
             onCerrar={() => {
-              setComensalesAbierto(false);
+              setComensalesTableId(null);
               // Contestado o no, lo que sigue es cargar: el foco al buscador.
               focusSearch();
             }}

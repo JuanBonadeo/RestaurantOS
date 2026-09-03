@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { MozoPedirClient } from "./pedir-client";
@@ -146,5 +147,27 @@ describe("comensales · el modal es de una mesa (spec 146)", () => {
   it("la mesa ocupada no pregunta nada", () => {
     render(panel("t9", "9", orden(3), "ocupada", { aperturaDeMesa: false }));
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("lo contestado sobrevive a ir y volver: la respuesta no se evapora", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      panel("t1", "5", null, "libre", { aperturaDeMesa: true }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("dialog", { name: /Mesa 5/i })).toBeInTheDocument(),
+    );
+    await user.keyboard("6");
+    expect(elegido()).toBe("6");
+
+    // Se va a mirar otra mesa y vuelve, antes de enviar nada. El 6 no está en
+    // ninguna orden todavía: vive sólo en el panel, y el panel se re-apunta.
+    rerender(panel("t2", "6", null, "libre", { aperturaDeMesa: true }));
+    await waitFor(() => expect(elegido()).toBe("2"));
+
+    rerender(panel("t1", "5", null, "libre", { aperturaDeMesa: true }));
+    await waitFor(() => expect(elegido()).toBe("6"));
+    // Y no vuelve a preguntar lo que ya contestó.
+    expect(screen.queryByRole("dialog", { name: /Mesa 5/i })).toBeNull();
   });
 });

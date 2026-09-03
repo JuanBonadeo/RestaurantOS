@@ -459,6 +459,30 @@ siempre. Ahora cada mesa parte de lo suyo —su `party_size` si tiene orden, el
 default si no— y el modal se remonta por mesa, así que tocar otra mientras
 pregunta cierra la pregunta vieja en vez de contestar por la nueva.
 
+**D-A17 · El modal es de una mesa, y lo contestado no se evapora.** Dos cosas que
+salieron de una pasada adversarial de agentes sobre la cadena, y que el diseño
+ingenuo no tenía:
+
+- El modal guarda **de qué mesa** es (`comensalesTableId`), no un `true`. El
+  plano queda vivo detrás a propósito, así que tocar otra mesa con la pregunta
+  abierta es un gesto normal — y con un booleano el modal sobrevivía al cambio:
+  cambiaba el título y se quedaba con el número de la mesa anterior, que al
+  confirmar se le aplicaba a la nueva. Ahora se desmonta y se vuelve a montar
+  para la mesa nueva, con su número y su foco.
+- Lo contestado se recuerda por mesa. Sin orden todavía, el número vive sólo en
+  el estado del panel y ese estado se resetea al saltar de mesa: contestar «6»
+  en la 12, ir a mirar la 3 y volver dejaba la 12 en 2 otra vez — y como ya
+  estaba preguntada, nadie volvía a preguntar. El registro de «ya preguntadas»
+  pasó de un set a un mapa: es también la respuesta.
+
+Y el modal se defiende de las teclas que no son suyas: atrapa el `Tab` (si el
+foco se escapa, el `Esc` siguiente lo agarra el panel y cierra **la mesa
+entera**) e ignora las teclas con modificador (`Ctrl+−` es el zoom del
+navegador; `⌘Enter`, enviar la comanda). El foco diferido del buscador, que
+corre en el próximo tick, ahora se abstiene si mientras tanto se abrió un
+diálogo: cerrar con `Esc` y tocar otra mesa acto seguido dejaba tecleando en un
+buscador tapado.
+
 ### Lo que se decidió NO hacer
 
 - **Recordar las mesas descartadas.** Se evaluó no volver a preguntar en una
@@ -515,6 +539,18 @@ pregunta el mozo, o `openTable` deja de auto-asignar cuando el actor no es mozo?
 - La barra de `demo` **sí** pregunta: sus BAR1-3 no están marcadas `is_bar`. En
   `golf-jcr`, que sí las marca, no va a preguntar (dato verificado contra el
   cloud).
+
+### El costo aceptado: las mesas de 10 a 20
+
+Con el dígito confirmando en el acto, un `1` cierra en «1 persona» y el `0` que
+venía atrás cae en el buscador de productos. Para esas mesas el camino es
+`+`/`−` (y el Enter), que es lo que dice el pie del modal.
+
+Se evaluó la alternativa —que el `1` y el `2`, los únicos dígitos que pueden ser
+prefijo de un valor válido con techo 20, esperen ~500 ms un segundo dígito— y se
+descartó: le pondría esa demora justo a **«2 personas»**, que es la mesa más
+común del turno, para ganar en un caso raro. Si aparece seguido en el piloto, se
+da vuelta.
 
 ## Nota de proceso
 
