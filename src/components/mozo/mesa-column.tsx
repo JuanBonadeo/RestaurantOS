@@ -202,7 +202,7 @@ export function MesaColumn({
   return (
     <section
       aria-label={`Mesa ${tableLabel}`}
-      className={`flex min-h-0 flex-col border-zinc-200 @2xl:border-r ${className}`}
+      className={`flex min-h-0 flex-col border-zinc-200 @min-[600px]:border-r ${className}`}
     >
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
         {cargando && (
@@ -226,8 +226,8 @@ export function MesaColumn({
 
         {!cargando && tandas.length === 0 && !haySinEnviar && (
           <p className="px-1 py-8 text-center text-xs text-zinc-500">
-            La mesa todavía no tiene nada cargado. Buscá un producto a la
-            derecha y agregalo con Enter.
+            La mesa todavía no tiene nada cargado. Buscá un producto y
+            agregalo con Enter.
           </p>
         )}
 

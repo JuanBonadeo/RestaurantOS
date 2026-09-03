@@ -688,7 +688,7 @@ export function CargarPedidoSheet({
             {view === "datos" ? (
               <button
                 onClick={() => setView("carga")}
-                className="-ml-1 rounded-full p-2 text-zinc-700 active:bg-zinc-100 @2xl:hidden"
+                className="-ml-1 rounded-full p-2 text-zinc-700 active:bg-zinc-100 @min-[600px]:hidden"
                 aria-label="Volver a la carga"
               >
                 <ArrowLeft className="h-5 w-5" />
@@ -749,7 +749,7 @@ export function CargarPedidoSheet({
             otra superficie. El corte lo decide el ancho **de la hoja**. */}
         <PanelDeCarga>
           <ColumnaDeCarga
-            className="@2xl:order-2"
+            className="@min-[600px]:order-2"
             encabezado={
               <>
                 <ProductSearchInput api={searchApi} inputRef={searchRef} />
@@ -766,7 +766,7 @@ export function CargarPedidoSheet({
             // no hay a dónde «continuar» — igual que la carga del salón, que no
             // tiene pie. Angosto es el único lugar donde el carrito no se ve.
             pie={
-              <div className="shrink-0 border-t border-zinc-200 bg-white @2xl:hidden">
+              <div className="shrink-0 border-t border-zinc-200 bg-white @min-[600px]:hidden">
                 <div className="flex items-center gap-2 px-3 py-2.5">
                   <div className="min-w-0 flex-1">
                     <p className="text-[11px] text-zinc-500">
@@ -845,7 +845,7 @@ export function CargarPedidoSheet({
           {/* ─── Izquierda: cliente, entrega y el pedido en armado ─── */}
           <ColumnaLateral
             abierta={view === "datos"}
-            className="@2xl:order-1 @2xl:border-r @2xl:border-zinc-200"
+            className="@min-[600px]:order-1 @min-[600px]:border-r @min-[600px]:border-zinc-200"
           >
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3 py-3">
               {/* Modo agregar (spec 125): el cliente, la entrega y el «para

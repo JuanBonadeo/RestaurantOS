@@ -37,6 +37,7 @@ import {
   Star,
   Tag,
   Trash2,
+  UserRound,
   Users,
   UtensilsCrossed,
   Wine,
@@ -54,7 +55,7 @@ import {
   type EnviarComandaDailyMenuItem,
 } from "@/lib/comandas/actions";
 import type { ComandaConItems } from "@/lib/comandas/queries";
-import { contarItemsVivos, type LoPedido } from "@/lib/mozo/lo-pedido";
+import { type LoPedido } from "@/lib/mozo/lo-pedido";
 import { ObservacionDeLaTanda } from "@/components/mozo/observacion-de-la-tanda";
 import {
   MesaColumn,
@@ -71,6 +72,7 @@ import { useCartZone } from "@/lib/mozo/use-cart-zone";
 import { isPrintableKey } from "@/lib/ui/roving";
 import { useRovingList } from "@/lib/ui/use-roving-list";
 import { formatCurrency } from "@/lib/currency";
+import { mozoPalette } from "@/lib/mozo/colors";
 import type {
   CatalogCategory,
   CatalogForMozo,
@@ -78,6 +80,7 @@ import type {
   CatalogSuperCategory,
 } from "@/lib/mozo/catalog-query";
 import type { DailyMenuForMozo } from "@/lib/mozo/daily-menus-query";
+import { filterDailyMenus } from "@/lib/mozo/daily-menu-search";
 import type { DailyMenuSelection } from "@/lib/mozo/daily-menu-steps";
 import { DailyMenuWizard } from "@/components/mozo/daily-menu-wizard";
 import {
@@ -178,6 +181,15 @@ type Props = {
   topProductIds: string[];
   dailyMenus: DailyMenuForMozo[];
   role: BusinessRole;
+  /**
+   * El mozo de la mesa, para la pastilla del header (spec 146 · D-A3). Sólo
+   * llegan en el sidebar del salón: en la pantalla del mozo la mesa es suya.
+   * `onElegirMozo` viene sólo si el rol puede asignar (`canAssignMozo`); sin
+   * él la pastilla es un rótulo, no un botón.
+   */
+  mozoId?: string | null;
+  mozoName?: string | null;
+  onElegirMozo?: () => void;
   /** Destino del botón "volver" y del post-envío. Default: la vista del mozo.
    *  El admin/encargado lo setea a `/{slug}/admin/operacion` para cargar el
    *  pedido sin salir del panel (misma idea que el cobro admin). */
@@ -316,6 +328,9 @@ export function MozoPedirClient({
   topProductIds,
   dailyMenus,
   role,
+  mozoId = null,
+  mozoName = null,
+  onElegirMozo,
   homeHref,
   embedded = false,
   onClose,
@@ -574,6 +589,7 @@ export function MozoPedirClient({
       catalogoIndex.size > 0 ? catalogo.focusFirst() : carrito.focusFirst(),
   });
   const {
+    search,
     setSearch,
     isSearching,
     results: searchResults,
@@ -625,17 +641,25 @@ export function MozoPedirClient({
     [tabSections, visibleIds],
   );
 
-  // Los menús del día encabezan el catálogo del tab «Más pedidos», así que son
-  // el primer tramo de la zona.
-  const menusVisibles = useMemo(
-    () =>
-      !isSearching &&
-      (embedded || activeTab === TOP_TAB_ID) &&
-      dailyMenus.length > 0
-        ? dailyMenus
-        : [],
-    [isSearching, embedded, activeTab, dailyMenus],
-  );
+  /**
+   * Los menús del día que se ven, y son el primer tramo de la zona de teclado.
+   *
+   * En el **panel del salón** (spec 146 · B) ya no encabezan el catálogo con
+   * una tarjeta: en reposo van compactos —una fila cada uno— y con el buscador
+   * escrito aparecen los que matchean. Esto último es la mitad que faltaba: el
+   * buscador mira productos, y un menú del día no es un producto, así que sin
+   * `filterDailyMenus` sacar las tarjetas lo dejaba sin ninguna puerta.
+   *
+   * En la pantalla del mozo no cambia nada: la tarjeta grande en «Más
+   * pedidos», que es donde sirve para mostrarle el plato al cliente.
+   */
+  const menusVisibles = useMemo(() => {
+    if (dailyMenus.length === 0) return [];
+    if (embedded) {
+      return isSearching ? filterDailyMenus(dailyMenus, search) : dailyMenus;
+    }
+    return !isSearching && activeTab === TOP_TAB_ID ? dailyMenus : [];
+  }, [isSearching, search, embedded, activeTab, dailyMenus]);
   const catalogoIndex = useMemo(() => {
     const index = new Map<string, number>();
     for (const m of menusVisibles) index.set(`menu:${m.id}`, index.size);
@@ -1076,11 +1100,6 @@ export function MozoPedirClient({
   const userCanCancel = canCancelItem(role);
   const tableMinutes = minutesSince(table.opened_at);
 
-  // «Lo pedido» (spec 111): cuántos ítems vivos tiene la mesa y —sólo cuando el
-  // panel es angosto— si la hoja está abierta sobre el catálogo.
-  const itemsPedidos = contarItemsVivos(loPedido?.items ?? []);
-  const [verLoPedido, setVerLoPedido] = useState(false);
-
   // Personas (FR-013/014) y cliente (FR-015). Con la mesa ya abierta el chip
   // persiste solo; sin orden todavía, viaja con el primer envío —que es el que
   // la crea— así que vive acá hasta entonces.
@@ -1347,26 +1366,13 @@ export function MozoPedirClient({
                     {loPedido.party_size === 1 ? "persona" : "personas"}
                   </span>
                 )}
+                <MozoDeLaMesa
+                  mozoId={mozoId}
+                  mozoName={mozoName}
+                  onElegir={onElegirMozo}
+                />
               </div>
             </div>
-            {/* Abajo de @2xl (672px **de panel**) la mesa no entra al lado de
-                la carga: se abre como hoja encima. Arriba está siempre a la
-                vista y el botón sobra. */}
-            <button
-              type="button"
-              onClick={() => setVerLoPedido((v) => !v)}
-              aria-expanded={verLoPedido}
-              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1.5 text-[11px] font-semibold ring-1 transition @2xl:hidden ${
-                verLoPedido
-                  ? "bg-zinc-900 text-white ring-zinc-900"
-                  : "bg-white text-zinc-600 ring-zinc-200"
-              }`}
-            >
-              <ClipboardList className="h-3.5 w-3.5" />
-              La mesa
-              {itemsPedidos + cart.length > 0 &&
-                ` · ${itemsPedidos + cart.length}`}
-            </button>
             {/* El filtro de la carta online: a la derecha de la fila del
                 negocio, alineado con el selector de salones de la barra de
                 arriba (spec 111, fase 5). Es contexto de la PC —se elige una
@@ -1378,45 +1384,16 @@ export function MozoPedirClient({
         {/* Cuerpo en dos columnas (spec 111; shell compartido con los pedidos
             online desde la 115): lo ya pedido a la izquierda, la carga a la
             derecha. El corte es por ancho **del panel** (container query), no
-            del viewport: el panel es el 44% de la pantalla. */}
+            del viewport: el panel es la mitad de la pantalla. */}
         <PanelDeCarga>
-          {/* Izquierda: lo que la mesa ya tiene cargado. Ancha de verdad —el
-              detalle por ítem (modificadores, nota, sector, estado) no entra
-              en una columna angosta— pero nunca más que la de carga. */}
-          <ColumnaLateral abierta={verLoPedido}>
-            <MesaColumn
-              tableLabel={table.label}
-              loPedido={loPedido ?? null}
-              cargando={mesaCargando}
-              comandas={comandas}
-              stationNameById={stationNameById}
-              cart={cartParaColumna}
-              cartTotalCents={cartTotal}
-              userCanCancel={userCanCancel}
-              userCanEditPrice={userCanEditPrice}
-              enviando={pending}
-              onCancelItem={(id, name) =>
-                setCancelTarget({ orderItemId: id, productName: name })
-              }
-              onAdvance={handleAdvance}
-              onChangeQty={changeQuantity}
-              onRemoveCartItem={removeFromCart}
-              onEditPrice={setPriceTargetKey}
-              onEnviar={handleSend}
-              cartZone={carrito}
-              observacion={observacion}
-              onObservacionChange={cambiarObservacion}
-              acciones={{
-                ...mesaAcciones,
-                onCargarCliente: () => setClienteOpen(true),
-              }}
-              className="min-h-0 flex-1"
-            />
-          </ColumnaLateral>
-
-          {/* Derecha: la carga. Es la columna del camino feliz —buscador,
-              catálogo, enviar— y se queda con el resto del ancho. */}
+          {/* La carga primero **en el DOM** y segunda en pantalla
+              (`order-2`): en esta pantalla se entra a tipear, así que con el
+              panel angosto el buscador tiene que quedar arriba y la mesa
+              debajo. De paso el orden de tabulación coincide con la cadena de
+              teclado —buscador → catálogo → carrito—, que hasta acá iban al
+              revés. */}
           <ColumnaDeCarga
+            className="@min-[600px]:order-2"
             encabezado={
               <>
                 {/* Personas primero (spec 111, FR-013): es el dato de la mesa y
@@ -1452,13 +1429,31 @@ export function MozoPedirClient({
             // Elegir modificadores tapa la carga, no la mesa.
             pie={modalsCargaEl}
           >
+            {/* El menú del día va **afuera** del if: en el panel también aparece
+                buscando (spec 146 · D-B2), y los resultados de productos son
+                otra lista. Arriba porque encabeza la zona de teclado
+                (`catalogoIndex`), buscando o no. */}
+            {menusVisibles.length > 0 && (
+              <div className="mb-3">
+                <MenusDelDia
+                  menus={menusVisibles}
+                  compacto
+                  onPick={setOpenDailyMenu}
+                  itemProps={catalogoProps}
+                />
+              </div>
+            )}
             {isSearching ? (
-              <SearchResults
-                results={searchResults}
-                onPick={setOpenProduct}
-                enterTargetId={enterTargetId}
-                itemProps={catalogoProps}
-              />
+              // «Sin resultados» con un menú del día matcheado arriba sería
+              // mentira: el cartel sale sólo si no quedó nada de nada.
+              searchResults.length > 0 || menusVisibles.length === 0 ? (
+                <SearchResults
+                  results={searchResults}
+                  onPick={setOpenProduct}
+                  enterTargetId={enterTargetId}
+                  itemProps={catalogoProps}
+                />
+              ) : null
             ) : tabs.length === 0 ? (
               <EmptyCatalog />
             ) : (
@@ -1466,7 +1461,9 @@ export function MozoPedirClient({
                 tabSections={visibleSections}
                 activeTabLabel="el catálogo"
                 isTopTab={topProducts.length > 0}
-                dailyMenus={menusVisibles}
+                // Ya se renderizaron arriba: acá sólo quedan los productos.
+                dailyMenus={[]}
+                compacto
                 onPick={setOpenProduct}
                 onPickDailyMenu={setOpenDailyMenu}
                 enterTargetId={enterTargetId}
@@ -1474,6 +1471,47 @@ export function MozoPedirClient({
               />
             )}
           </ColumnaDeCarga>
+
+          {/* La mesa: lo que ya tiene cargado. Al lado de la carga cuando el
+              panel llega a 600 (ancha de verdad: el detalle por ítem no entra
+              en una columna angosta, pero nunca más que la de carga), y
+              **apilada abajo** cuando no llega (spec 146 · D-C2). Lo que no
+              hace nunca más es esconderse detrás de una pastilla: acá viven lo
+              enviado, lo que falta mandar, el total y «Cobrar». */}
+          <ColumnaLateral
+            abierta
+            modoAngosto="apilada"
+            className="max-h-[45%] border-t border-zinc-200 @min-[600px]:order-1 @min-[600px]:max-h-none @min-[600px]:border-t-0"
+          >
+            <MesaColumn
+              tableLabel={table.label}
+              loPedido={loPedido ?? null}
+              cargando={mesaCargando}
+              comandas={comandas}
+              stationNameById={stationNameById}
+              cart={cartParaColumna}
+              cartTotalCents={cartTotal}
+              userCanCancel={userCanCancel}
+              userCanEditPrice={userCanEditPrice}
+              enviando={pending}
+              onCancelItem={(id, name) =>
+                setCancelTarget({ orderItemId: id, productName: name })
+              }
+              onAdvance={handleAdvance}
+              onChangeQty={changeQuantity}
+              onRemoveCartItem={removeFromCart}
+              onEditPrice={setPriceTargetKey}
+              onEnviar={handleSend}
+              cartZone={carrito}
+              observacion={observacion}
+              onObservacionChange={cambiarObservacion}
+              acciones={{
+                ...mesaAcciones,
+                onCargarCliente: () => setClienteOpen(true),
+              }}
+              className="min-h-0 flex-1"
+            />
+          </ColumnaLateral>
         </PanelDeCarga>
 
         {clienteOpen && (
@@ -1834,11 +1872,69 @@ function SearchResults({
   );
 }
 
+/**
+ * El mozo de la mesa, en el header del panel — spec 146 · D-A3.
+ *
+ * Es la puerta que faltaba. Había dos: «Distribuir mozos», que es para repartir
+ * el salón entero, y «Transferir mozo» en el ⋯, que es sacarle la mesa a
+ * alguien. Con **un solo mozo** en el salón —el caso de la encargada de Golf—
+ * ninguna de las dos es lo que uno quiere hacer: quiere asignar, la primera
+ * vez, sin salir de la mesa que ya tiene abierta.
+ *
+ * Sin `onElegir` (rol que no puede asignar) es un rótulo: mostrar un botón que
+ * el server va a rechazar es peor que no tenerlo (spec 140).
+ */
+function MozoDeLaMesa({
+  mozoId,
+  mozoName,
+  onElegir,
+}: {
+  mozoId: string | null;
+  mozoName: string | null;
+  onElegir?: () => void;
+}) {
+  const p = mozoId ? mozoPalette(mozoId) : null;
+  const texto = mozoName ?? (mozoId ? "Mozo" : "Sin mozo");
+
+  if (!onElegir) {
+    // Sin mozo y sin permiso no hay nada que decir: la fila no gasta lugar en
+    // un hueco.
+    if (!mozoId) return null;
+    return (
+      <span
+        className={`inline-flex max-w-[10rem] items-center gap-1 truncate rounded-full px-2 py-0.5 ring-1 ${
+          p ? `${p.bg} ${p.text} ${p.ring}` : ""
+        }`}
+      >
+        <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${p?.dot ?? ""}`} />
+        <span className="truncate">{texto}</span>
+      </span>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onElegir}
+      aria-label={mozoId ? `Mozo: ${texto}` : "Sin mozo asignado"}
+      className={`inline-flex max-w-[10rem] items-center gap-1 truncate rounded-full px-2 py-0.5 ring-1 transition active:scale-95 ${
+        p
+          ? `${p.bg} ${p.text} ${p.ring} hover:brightness-95`
+          : "bg-white text-zinc-500 ring-dashed ring-zinc-300 hover:bg-zinc-50"
+      }`}
+    >
+      <UserRound className="h-3 w-3 shrink-0" />
+      <span className="truncate">{texto}</span>
+    </button>
+  );
+}
+
 function TabView({
   tabSections,
   activeTabLabel,
   isTopTab,
   dailyMenus,
+  compacto = false,
   onPick,
   onPickDailyMenu,
   enterTargetId,
@@ -1851,6 +1947,9 @@ function TabView({
   activeTabLabel: string;
   isTopTab: boolean;
   dailyMenus: DailyMenuForMozo[];
+  /** Panel del salón: el menú del día va en fila y el cartel de los más
+   *  pedidos es un rótulo (spec 146 · B). */
+  compacto?: boolean;
   onPick: (p: CatalogProduct) => void;
   onPickDailyMenu: (m: DailyMenuForMozo) => void;
   /** El que abre Enter desde el buscador (spec 073/075): el primero de lo que
@@ -1880,38 +1979,39 @@ function TabView({
   return (
     <div className="space-y-5">
       {showDailyMenus && (
-        <section className="space-y-2">
-          <h3 className="px-1 text-xs font-bold tracking-wide text-emerald-700 uppercase">
-            Hoy en el menú del día
-          </h3>
-          <div className="space-y-2">
-            {dailyMenus.map((m) => (
-              <DailyMenuCard
-                key={m.id}
-                menu={m}
-                onClick={() => onPickDailyMenu(m)}
-                itemProps={itemProps?.(`menu:${m.id}`)}
-              />
-            ))}
-          </div>
-        </section>
+        <MenusDelDia
+          menus={dailyMenus}
+          compacto={compacto}
+          onPick={onPickDailyMenu}
+          itemProps={itemProps}
+        />
       )}
 
-      {isTopTab && tabSections.length > 0 && (
-        <div className="flex items-center gap-2 rounded-2xl bg-amber-50 p-3 ring-1 ring-amber-100">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100">
-            <Star className="h-4 w-4 text-amber-600" />
-          </span>
-          <div className="min-w-0">
-            <p className="text-sm font-bold text-amber-900">
-              Principales más pedidos
-            </p>
-            <p className="text-xs text-amber-800/80">
-              Lo que más sale en los últimos 30 días.
-            </p>
+      {isTopTab &&
+        tabSections.length > 0 &&
+        (compacto ? (
+          /* En el panel del salón el cartel es un rótulo (spec 146 · D-B3): en
+             la pantalla donde se carga a las apuradas, tres líneas que explican
+             de dónde sale la lista se leen una vez en la vida y ocupan lugar
+             todos los días. */
+          <h3 className="px-1 text-xs font-bold tracking-wide text-amber-700 uppercase">
+            Más pedidos
+          </h3>
+        ) : (
+          <div className="flex items-center gap-2 rounded-2xl bg-amber-50 p-3 ring-1 ring-amber-100">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100">
+              <Star className="h-4 w-4 text-amber-600" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-amber-900">
+                Principales más pedidos
+              </p>
+              <p className="text-xs text-amber-800/80">
+                Lo que más sale en los últimos 30 días.
+              </p>
+            </div>
           </div>
-        </div>
-      )}
+        ))}
 
       {tabSections.map((section, idx) => (
         <div key={section.category?.id ?? `top-${idx}`} className="space-y-2">
@@ -1985,6 +2085,89 @@ function TabNav({
         </button>
       )}
     </div>
+  );
+}
+
+/**
+ * Los menús del día del catálogo — spec 146 · B.
+ *
+ * Dos caras de lo mismo:
+ *
+ * - **Tarjeta** (pantalla del mozo): la de siempre, con foto, descripción y
+ *   pasos. Ahí sirve para mostrarle el plato al cliente.
+ * - **Fila** (`compacto`, panel del salón): nombre y precio, la misma altura
+ *   que un producto. La encargada de Golf pidió sacarlas —*"prefiero tener
+ *   solamente el buscador"*— y con dos menús las tarjetas eran ~270px antes
+ *   del primer producto. Sacarlas del todo no: es por donde se carga el menú
+ *   ejecutivo todos los mediodías.
+ */
+function MenusDelDia({
+  menus,
+  compacto,
+  onPick,
+  itemProps,
+}: {
+  menus: DailyMenuForMozo[];
+  compacto: boolean;
+  onPick: (m: DailyMenuForMozo) => void;
+  itemProps?: CatalogoItemProps;
+}) {
+  return (
+    <section className={compacto ? "space-y-1.5" : "space-y-2"}>
+      <h3 className="px-1 text-xs font-bold tracking-wide text-emerald-700 uppercase">
+        {compacto ? "Menú del día" : "Hoy en el menú del día"}
+      </h3>
+      <div className={compacto ? "space-y-1.5" : "space-y-2"}>
+        {menus.map((m) =>
+          compacto ? (
+            <DailyMenuRow
+              key={m.id}
+              menu={m}
+              onClick={() => onPick(m)}
+              itemProps={itemProps?.(`menu:${m.id}`)}
+            />
+          ) : (
+            <DailyMenuCard
+              key={m.id}
+              menu={m}
+              onClick={() => onPick(m)}
+              itemProps={itemProps?.(`menu:${m.id}`)}
+            />
+          ),
+        )}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * El menú del día como una fila más de la lista (spec 146 · D-B1). Misma altura
+ * y misma forma que un producto —el teclado no distingue— con el verde y el
+ * cubierto como única señal de que abre un asistente y no agrega directo.
+ */
+function DailyMenuRow({
+  menu,
+  onClick,
+  itemProps,
+}: {
+  menu: DailyMenuForMozo;
+  onClick: () => void;
+  itemProps?: Partial<React.ComponentProps<"button">>;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      {...itemProps}
+      className="flex w-full items-center gap-2.5 rounded-xl bg-emerald-50/70 px-3 py-2.5 text-left ring-1 ring-emerald-200 outline-none transition active:scale-[0.99] focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
+    >
+      <UtensilsCrossed className="h-4 w-4 shrink-0 text-emerald-600" />
+      <span className="min-w-0 flex-1 truncate text-sm font-semibold text-zinc-900">
+        {menu.name}
+      </span>
+      <span className="shrink-0 text-sm font-bold text-emerald-700 tabular-nums">
+        {formatCurrency(menu.price_cents)}
+      </span>
+    </button>
   );
 }
 

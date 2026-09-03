@@ -21,14 +21,28 @@ import { cn } from "@/lib/utils";
  * agregar— que se queda con el ancho que sobra.
  */
 
-/** El ancho de panel a partir del cual entran las dos columnas: `@2xl` de Tailwind. */
-export const ANCHO_DOS_COLUMNAS = 672;
+/**
+ * El ancho de panel a partir del cual entran las dos columnas.
+ *
+ * Era 672 (`@2xl` de Tailwind) y **no se cumplía nunca** en las pantallas
+ * reales: con el panel expandido (spec 122) mide 480 de 1024 a 1279, y ~628 a
+ * ~668 de 1280 a 1400. O sea que en la notebook del salón la columna de la
+ * mesa quedaba escondida siempre, y lo que se había escrito como «modo
+ * angosto» terminó siendo el modo normal. Con 600, un viewport de 1280 ya
+ * muestra las dos partes: la mesa se lleva 46% (≈285px) y la carga el resto
+ * (spec 146 · D-C1).
+ *
+ * El número vive acá y en las clases `@min-[600px]:` de abajo — Tailwind no
+ * puede leer una variante armada en tiempo de ejecución, así que la variante va
+ * escrita entera. Si cambia, cambia en los dos lados.
+ */
+export const ANCHO_DOS_COLUMNAS = 600;
 
 /**
  * ¿El panel es lo bastante ancho para las dos columnas?
  *
  * Mide el **contenedor**, no la ventana, contra el mismo umbral que usa la CSS
- * (`@2xl`). Antes la hoja duplicaba el breakpoint en JS con un `matchMedia` de
+ * (`@min-[600px]`). Antes la hoja duplicaba el breakpoint en JS con un `matchMedia` de
  * viewport (`useSheetAncho`), que es otra medida: una hoja de 448 px dentro de
  * una pantalla de 1400 px daba «ancho» en JS y una sola columna en pantalla, y
  * ⌘Enter confirmaba un pedido con la mitad del formulario fuera de la vista.
@@ -72,7 +86,7 @@ export function PanelDeCarga({
   return (
     <div
       className={cn(
-        "relative flex min-h-0 flex-1 flex-col @2xl:flex-row",
+        "relative flex min-h-0 flex-1 flex-col @min-[600px]:flex-row",
         className,
       )}
     >
@@ -86,9 +100,10 @@ export function PanelDeCarga({
  *
  * Ancha: al lado de la carga, con ancho propio —el detalle por ítem no entra en
  * una columna angosta— pero nunca más que la de carga.
- * Angosta: no hay lugar para las dos, así que se abre **encima** de la carga
- * (tapándola a propósito) o no se ve. Quién la abre es el padre: en el salón la
- * pastilla «La mesa», en la hoja el paso «datos».
+ * Angosta: depende del `modoAngosto`. `"encima"` se abre tapando la carga y la
+ * abre el padre (en la hoja online, el paso «datos»); `"apilada"` se queda
+ * debajo, siempre a la vista — es lo que usa la mesa desde la spec 146, porque
+ * lo que hay en esa columna no puede depender de que te acuerdes de abrirla.
  */
 export function ColumnaLateral({
   abierta,
@@ -104,19 +119,30 @@ export function ColumnaLateral({
    *   Es lo que quieren la mesa y la hoja online: son dos vistas de lo mismo y
    *   se alterna entre ellas.
    * - `"apilada"` — se queda en el flujo, debajo de la carga, como una franja.
-   *   Es lo que quiere la venta rápida: el total y el botón de cobrar no pueden
-   *   depender de que te acuerdes de abrir otra vista.
+   *   Es lo que quieren la venta rápida y —desde la spec 146— la mesa: el total
+   *   y el botón de cobrar no pueden depender de que te acuerdes de abrir otra
+   *   vista. Quien la usa le pone el techo (`max-h-*`) por `className`: el alto
+   *   de la franja depende de qué lleva adentro.
    */
   modoAngosto?: "encima" | "apilada";
   children: ReactNode;
   className?: string;
 }) {
-  const anchoDeColumna = "@2xl:w-[46%] @2xl:max-w-[520px] @2xl:shrink-0";
+  const anchoDeColumna =
+    "@min-[600px]:w-[46%] @min-[600px]:max-w-[520px] @min-[600px]:shrink-0";
   if (modoAngosto === "apilada") {
     return (
       <div
         className={cn(
-          "flex min-h-0 shrink-0 flex-col @2xl:min-h-0 @2xl:flex-1",
+          // Apilada es lo que hace **abajo** del umbral; arriba es una columna
+          // más. El `flex-1` le gana al 46% de `anchoDeColumna` (en un flex row
+          // el `flex-basis: 0` pisa al ancho) y eso es a propósito: el reparto
+          // sale del contenido. La columna de carga tiene piso —la fila de
+          // «Personas» no baja de ~390px— así que a 620 de panel un 46% duro
+          // para la lateral la desbordaba. Con `flex-1` cada una arranca en lo
+          // que necesita y el sobrante se reparte parejo; el techo de 520 sigue
+          // valiendo en pantallas grandes.
+          "flex min-h-0 shrink-0 flex-col @min-[600px]:min-h-0 @min-[600px]:flex-1",
           anchoDeColumna,
           className,
         )}
@@ -130,8 +156,8 @@ export function ColumnaLateral({
       className={cn(
         "flex min-h-0 flex-col",
         abierta
-          ? `absolute inset-0 z-10 bg-zinc-50 @2xl:static @2xl:z-auto ${anchoDeColumna}`
-          : `hidden @2xl:flex ${anchoDeColumna}`,
+          ? `absolute inset-0 z-10 bg-zinc-50 @min-[600px]:static @min-[600px]:z-auto ${anchoDeColumna}`
+          : `hidden @min-[600px]:flex ${anchoDeColumna}`,
         className,
       )}
     >

@@ -44,20 +44,22 @@ function MesaHeaderSkeleton({ variant }: { variant: MesaRouteVariant }) {
  * que el catálogo está cacheado, el panel monta con la columna de carga ya
  * pintada y esta pantalla no aparece más.
  *
- * Calca el panel de dos columnas de la spec 111 —la mesa a la izquierda (46 %),
- * la carga a la derecha— y no una lista suelta: si el esqueleto no tiene la
- * forma de lo que viene, no sirve de nada. El corte es por ancho **del panel**
- * (container query), igual que el real.
+ * Calca el panel de dos columnas de la spec 111 —la mesa a un lado, la carga
+ * al otro— y no una lista suelta: si el esqueleto no tiene la forma de lo que
+ * viene, no sirve de nada. El corte es por ancho **del panel** (container
+ * query), igual que el real, y abajo del corte la mesa se apila en vez de
+ * esconderse (spec 146 · C).
  */
 export function PedirPanelSkeleton() {
   return (
     <div
       role="status"
       aria-label="Cargando la mesa"
-      className="flex min-h-0 flex-1 flex-col @2xl:flex-row"
+      className="flex min-h-0 flex-1 flex-col @min-[600px]:flex-row"
     >
-      {/* Izquierda: lo que la mesa ya tiene cargado. */}
-      <div className="hidden space-y-3 border-zinc-200 px-3 py-3 @2xl:flex @2xl:w-[46%] @2xl:max-w-[520px] @2xl:shrink-0 @2xl:flex-col @2xl:border-r">
+      {/* La mesa: al lado de la carga con el panel ancho, apilada abajo con el
+          panel angosto — nunca escondida. */}
+      <div className="order-2 max-h-[45%] shrink-0 space-y-3 overflow-hidden border-t border-zinc-200 px-3 py-3 @min-[600px]:order-1 @min-[600px]:flex @min-[600px]:max-h-none @min-[600px]:w-[46%] @min-[600px]:max-w-[520px] @min-[600px]:flex-col @min-[600px]:border-t-0 @min-[600px]:border-r">
         {Array.from({ length: 2 }).map((_, i) => (
           <div
             key={i}
@@ -74,8 +76,8 @@ export function PedirPanelSkeleton() {
         ))}
       </div>
 
-      {/* Derecha: el buscador fijo y la lista de productos. */}
-      <div className="flex min-h-0 flex-1 flex-col">
+      {/* La carga: el buscador fijo y la lista de productos. */}
+      <div className="order-1 flex min-h-0 flex-1 flex-col @min-[600px]:order-2">
         <div className="shrink-0 space-y-2 border-b border-zinc-200 bg-white px-3 py-2.5">
           <Skeleton className="h-11 w-full rounded-2xl" />
           <div className="flex gap-2 overflow-hidden">

@@ -22,6 +22,7 @@ import {
   Store,
   UserCheck,
   UserPlus,
+  UserRound,
   Users,
   X,
 } from "lucide-react";
@@ -49,7 +50,7 @@ import {
 } from "@/components/mozo/floor-plan-viewer";
 import { OrderSummaryCard } from "@/components/mozo/order-summary-card";
 import type { ItemEditable } from "@/components/shared/editar-items-modal";
-import { TransferTableModal } from "@/components/mozo/transfer-table-modal";
+import { ElegirMozoModal } from "@/components/mozo/elegir-mozo-modal";
 import { TrasladarMesaModal } from "@/components/mozo/trasladar-mesa-modal";
 import { WalkInPanel } from "@/components/mozo/walk-in-modal";
 import { Button } from "@/components/ui/button";
@@ -434,7 +435,7 @@ export function SalonDesktop({
     /** "seat" = elegir la mesa Y sentar en un solo gesto (reserva genérica). */
     intent: "assign" | "seat";
   } | null>(null);
-  const [transferTableId, setTransferTableId] = useState<string | null>(null);
+  const [mozoTableId, setMozoTableId] = useState<string | null>(null);
   const [trasladarTableId, setTrasladarTableId] = useState<string | null>(null);
   // «Cargar cliente» (spec 111, FR-015): el bloque de nombre y teléfono que
   // antes había que pasar para sentar a alguien, ahora detrás del ⋯.
@@ -1350,6 +1351,12 @@ export function SalonDesktop({
         "libre") as string)
     : "libre";
 
+  /** Mozo **vivo** de esa misma mesa: sale de `tables`, que ya tiene aplicado
+   *  el overlay optimista, así que asignar desde el panel se ve al instante. */
+  const pedirMozoId = pedirTable
+    ? (tables.find((t) => t.id === pedirTable.id)?.mozo_id ?? null)
+    : null;
+
   const mesaEnModo =
     cobroTable?.id ??
     cuentaTable?.id ??
@@ -1870,7 +1877,7 @@ export function SalonDesktop({
                   onTransferir:
                     pedirEstado !== "libre" &&
                     (role !== "mozo" || pedirTable.mozo_id === currentUserId)
-                      ? () => setTransferTableId(pedirTable.id)
+                      ? () => setMozoTableId(pedirTable.id)
                       : undefined,
                   onTrasladar:
                     pedirEstado !== "libre" && canMoveTable(role)
@@ -1885,6 +1892,20 @@ export function SalonDesktop({
                 topProductIds={catalogBundle.topProductIds}
                 dailyMenus={catalogBundle.dailyMenus}
                 role={role}
+                // El mozo de la mesa, en el header del panel (spec 146 · D-A3):
+                // la puerta que faltaba para el salón de un solo mozo. No mira
+                // el estado de la mesa —mientras se carga el primer pedido
+                // sigue `libre` (spec 111, FR-011), que es justo cuando hace
+                // falta—: mira el permiso.
+                mozoId={pedirMozoId}
+                mozoName={
+                  pedirMozoId ? (mozoNameById.get(pedirMozoId) ?? null) : null
+                }
+                onElegirMozo={
+                  canAssignMozo(role)
+                    ? () => setMozoTableId(pedirTable.id)
+                    : undefined
+                }
                 embedded
                 onClose={closePedir}
                 onSent={() => {
@@ -1990,7 +2011,12 @@ export function SalonDesktop({
                 const res = reservationByTable[selected.id];
                 if (res) handleSentarReserva(res.id, selected.id);
               }}
-              onTransfer={() => setTransferTableId(selected.id)}
+              onTransfer={() => setMozoTableId(selected.id)}
+              onElegirMozo={
+                canAssignMozo(role)
+                  ? () => setMozoTableId(selected.id)
+                  : undefined
+              }
               onTrasladar={() => setTrasladarTableId(selected.id)}
               onCargarCliente={
                 canCargarPedido(role)
@@ -2063,27 +2089,35 @@ export function SalonDesktop({
       </div>
 
       {/* ── Modales ── */}
-      {transferTableId && (
-        <TransferTableModal
-          tableId={transferTableId}
-          tableLabel={
-            tables.find((t) => t.id === transferTableId)?.label ?? "?"
+      {mozoTableId && (
+        /* Un solo modal para las dos cosas (spec 146 · D-A1): la mesa sin mozo
+           se **asigna** (sin motivo ni notificación) y la que ya tiene dueño se
+           **transfiere**, que es lo que hacía la 079. El modo sale de la mesa,
+           así que la misma puerta sirve para las dos. */
+        <ElegirMozoModal
+          modo={
+            tables.find((t) => t.id === mozoTableId)?.mozo_id
+              ? "transferir"
+              : "asignar"
           }
+          tableId={mozoTableId}
+          tableLabel={tables.find((t) => t.id === mozoTableId)?.label ?? "?"}
           currentMozoId={
-            tables.find((t) => t.id === transferTableId)?.mozo_id ?? null
+            tables.find((t) => t.id === mozoTableId)?.mozo_id ?? null
           }
           mozos={mozos}
           businessSlug={slug}
-          onClose={() => setTransferTableId(null)}
+          conTeclado
+          onClose={() => setMozoTableId(null)}
           onSuccess={(toMozoId) => {
             // Optimista: la mesa cambia de mozo al instante.
-            if (transferTableId) {
+            if (mozoTableId) {
               setOptimisticStatus((prev) => ({
                 ...prev,
-                [transferTableId]: { mozo_id: toMozoId },
+                [mozoTableId]: { mozo_id: toMozoId },
               }));
             }
-            setTransferTableId(null);
+            setMozoTableId(null);
             void refetchSalon();
           }}
         />
@@ -2861,6 +2895,7 @@ function TableDetail({
   onWalkIn,
   onSentarReserva,
   onTransfer,
+  onElegirMozo,
   onTrasladar,
   onCargarCliente,
   onAnular,
@@ -2885,6 +2920,9 @@ function TableDetail({
   onWalkIn: () => void;
   onSentarReserva: () => void;
   onTransfer: () => void;
+  /** Abre el modal de elegir mozo (spec 146 · D-A3). Sólo si el rol puede
+   *  asignar: sin esto la pastilla es un rótulo. */
+  onElegirMozo?: () => void;
   onTrasladar: () => void;
   /** Abre «Cargar cliente» (spec 111, FR-015). */
   onCargarCliente?: () => void;
@@ -2975,27 +3013,47 @@ function TableDetail({
                 {tiempoLabel}
               </span>
             )}
-            {mozoName &&
-              table.mozo_id &&
-              (() => {
-                const p = mozoPalette(table.mozo_id);
+            {/* El mozo de la mesa (spec 146 · D-A3). Antes se veía sólo cuando
+                **había** mozo — justo al revés de cuando hace falta: la mesa sin
+                asignar era la que no decía nada y la que mandaba al encargado a
+                «Distribuir mozos» para poner uno solo. */}
+            {(() => {
+              const p = table.mozo_id ? mozoPalette(table.mozo_id) : null;
+              const base =
+                "inline-flex max-w-[180px] items-center gap-1 truncate rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 @lg:max-w-[300px]";
+              const texto = mozoName ?? (table.mozo_id ? "Mozo" : "Sin mozo");
+              if (!onElegirMozo) {
+                if (!table.mozo_id || !mozoName) return null;
                 return (
-                  <span
-                    className={cn(
-                      "inline-flex max-w-[180px] items-center gap-1 truncate rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 @lg:max-w-[300px]",
-                      p.bg,
-                      p.text,
-                      p.ring,
-                    )}
-                  >
+                  <span className={cn(base, p?.bg, p?.text, p?.ring)}>
                     <span
                       aria-hidden
-                      className={cn("h-1.5 w-1.5 shrink-0 rounded-full", p.dot)}
+                      className={cn("h-1.5 w-1.5 shrink-0 rounded-full", p?.dot)}
                     />
-                    <span className="truncate">{mozoName}</span>
+                    <span className="truncate">{texto}</span>
                   </span>
                 );
-              })()}
+              }
+              return (
+                <button
+                  type="button"
+                  onClick={onElegirMozo}
+                  aria-label={
+                    table.mozo_id ? `Mozo: ${texto}` : "Sin mozo asignado"
+                  }
+                  className={cn(
+                    base,
+                    "transition active:scale-95",
+                    p
+                      ? cn(p.bg, p.text, p.ring, "hover:brightness-95")
+                      : "bg-card text-muted-foreground ring-border ring-dashed hover:bg-muted/60",
+                  )}
+                >
+                  <UserRound className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{texto}</span>
+                </button>
+              );
+            })()}
           </div>
         </div>
         <button

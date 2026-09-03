@@ -33,7 +33,7 @@ import { MobileTabBar, type MozoTab } from "@/components/mozo/mobile-tab-bar";
 import { OrderSummaryCard } from "@/components/mozo/order-summary-card";
 import { TableDrawer } from "@/components/mozo/table-drawer";
 import { MesaActionRow, MesaActionTile } from "@/components/mozo/mesa-actions";
-import { TransferTableModal } from "@/components/mozo/transfer-table-modal";
+import { ElegirMozoModal } from "@/components/mozo/elegir-mozo-modal";
 import { TrasladarMesaModal } from "@/components/mozo/trasladar-mesa-modal";
 import { WalkInModal } from "@/components/mozo/walk-in-modal";
 import { signOut } from "@/lib/auth/sign-out";
@@ -929,7 +929,12 @@ export function MozoClient({
 
       {/* Transfer modal */}
       {transferTableId && (
-        <TransferTableModal
+        /* Siempre `transferir` (spec 146 · D-A1): el mozo no puede asignar
+           mesas (`canAssignMozo`), pero sí **tomar** una libre —el self-claim de
+           la 079, que vive en `transferTable`—. `conTeclado` va apagado: es un
+           teléfono, y el autofoco abriría el teclado virtual encima de la lista. */
+        <ElegirMozoModal
+          modo="transferir"
           tableId={transferTableId}
           tableLabel={
             localTables.find((t) => t.id === transferTableId)?.label ?? ""
