@@ -1,4 +1,4 @@
-# 150 · Factura A a un cliente guardado
+# 150 · Factura A a una entidad fiscal guardada
 
 **Issue:** [#226](https://github.com/gachetponzellini/RestaurantOS-app/issues/226) ·
 **Milestone:** Post-demo · Growth & hardening ·
@@ -56,11 +56,25 @@ facturación mensual a los médicos— son los dos a CUIT.
 
 ## Las decisiones
 
-**D1 · Los datos fiscales viven en el cliente.** `customers` suma `cuit`,
-`razon_social` y `condicion_iva`, los tres **nullable**: el 97 % de los clientes
-son consumidores finales que nunca van a tener CUIT, y obligarlos rompería el
-alta desde la carta, el chatbot y el walk-in. Un cliente con CUIT es un cliente
-normal que además se puede facturar.
+**D1 · Los datos fiscales viven en su propia tabla, no colgados de `customers`.**
+La primera versión de esta spec los agregaba como columnas del cliente. Los datos
+reales del backup dicen que no:
+
+- **Son poblaciones casi disjuntas.** De los 410 clientes con CUIT de Golf, sólo
+  **7** coinciden con los 298 `customers` ya importados. El 98 % de quienes reciben
+  factura no comen en el salón.
+- **`customers.phone` es la identidad de esa tabla, y ellos no la tienen.** Es NOT
+  NULL + UNIQUE, y `upsertCustomerByPhone` lo dice con todas las letras: *«sin
+  teléfono no hay cliente: el nombre solo no identifica a nadie»*. De los 410 con
+  CUIT, **20 tienen teléfono**. Meterlos ahí obligaba a inventarle un placeholder a
+  390 filas — romper a mano la invariante que el código defiende a propósito.
+- **Ensuciaba cuatro pantallas.** El buscador de clientes se usa al abrir mesa, en
+  el walk-in, al cargar un pedido y al reservar: sumarle 410 razones sociales
+  empeora los cuatro flujos para servir a uno.
+
+Un comensal y un receptor de factura son cosas distintas, y la clave natural lo
+confirma: **al comensal lo identifica el teléfono, al receptor el CUIT.** Cuando
+son la misma persona —los 7 casos— se enlazan con `fiscal_entities.customer_id`.
 
 **D2 · El buscador aparece sólo cuando el tipo es A.** En B no hay a quién
 buscar: el receptor es consumidor final y el campo sería ruido en el camino más
@@ -80,10 +94,10 @@ un error de tipeo del apuro que un dato nuevo, y pisarlo en silencio arrastra el
 error a todas las facturas siguientes. Corregir un dato fiscal ya cargado se hace
 en la ficha del cliente, con la pantalla quieta.
 
-**D5 · La factura queda vinculada: `invoices.customer_id`.** Sin eso no se puede
+**D5 · La factura queda vinculada: `invoices.fiscal_entity_id`.** Sin eso no se puede
 responder «qué le facturamos a este cliente», que es justo lo que la encargada
 necesita para la liquidación mensual del sanatorio. Es nullable: las facturas B a
-consumidor final no tienen cliente, y las 14 que ya existen tampoco.
+consumidor final no tienen receptor identificado, y las 14 que ya existen tampoco.
 
 **D6 · La A sigue siendo explícita.** La spec 147 automatizó la B; la A no se
 automatiza y la razón no cambia: el sistema no puede adivinar **a quién** se le
@@ -97,12 +111,10 @@ backup de Golf (23/12/2025) hay **2.786 clientes, 410 con CUIT** (378 distintos:
 hay 30 duplicados a resolver), y el `tipo_iva` mapea la condición casi perfecto —
 399 son tipo `2` y 396 de esos tienen CUIT. En KCC son 782 y 62.
 
-**Y hay una trampa esperándolo:** `customers` tiene `UNIQUE (business_id, phone)`,
-pero de los 410 clientes con CUIT de Golf **sólo 20 tienen teléfono**. Un import
-que use el teléfono como clave choca contra ese unique apenas encuentre el segundo
-cliente sin número. La clave de deduplicación del import tiene que ser el **CUIT**,
-no el teléfono — y hay que decidir qué `phone` se les pone a los 390 que no lo
-tienen, porque la columna es `NOT NULL`.
+El import deduplica por **`(business_id, cuit)`**, que es el unique de la tabla
+nueva — y hace falta, porque el backup trae **30 CUIT repetidos** en esas 410 filas.
+Esto es justamente lo que el modelo de la 0061 no podía hacer: ahí la clave hubiera
+sido el teléfono, que 390 de los 410 no tienen.
 
 Cargar 410 clientes fiscales a mano no es una opción, así que el importador deja
 de ser opcional. **Sigue sin entrar en esta spec** —el modelo y el flujo tienen
@@ -112,16 +124,18 @@ falta». Detalle del relevamiento en
 
 ## Alcance
 
-- ~~**Migración**~~ ✅ **hecha** — `0061_datos_fiscales_del_cliente.sql`, aplicada
-  al cloud el 2026-09-03. `customers` suma `cuit text` (con CHECK de **11 dígitos
-  normalizados**, sin guiones: MaxiRest los trae como `30-50023730-5`),
-  `razon_social text` y `condicion_iva smallint` (CHECK `in (1,4,5,6)`, los códigos
-  ARCA RG 5616 que ya usa `invoices.condicion_iva_receptor` — **no** los internos de
-  MaxiRest). `invoices` suma `customer_id uuid references customers(id) **on delete
-  set null**`: depurar la lista de clientes no puede borrar un comprobante fiscal.
-  Índices parciales en `(business_id, cuit)` y en `customer_id`. Sin cambios de RLS:
-  la policy de `customers` ya es `is_business_member() OR is_platform_admin() OR
-  user_id = auth.uid()`, sólo `authenticated`, así que el CUIT no queda expuesto.
+- ~~**Migración**~~ ✅ **hecha** — `0062_entidades_fiscales.sql`, aplicada al cloud
+  el 2026-09-03 y verificada. Crea **`fiscal_entities`** (ver D1) con
+  `unique (business_id, cuit)` como clave natural, CHECK de CUIT normalizado a 11
+  dígitos y de `condicion_iva in (1,4,5,6)`, domicilio y contacto opcionales,
+  `customer_id` nullable para enlazar al comensal cuando son la misma persona, y
+  `external_ref` para que un re-import sepa qué ya trajo. `invoices` suma
+  `fiscal_entity_id` **on delete set null**. RLS propia, calcada de `customers`
+  menos el `user_id = auth.uid()`: sólo `authenticated` y miembros del negocio.
+  La `0061`, que colgaba los campos de `customers`, **se revierte entera** en la
+  misma migración (se aplicó el mismo día, con 0 filas escritas y sin código que
+  la leyera).
+
 - **`src/lib/admin/customers-actions.ts`** — `ClienteMatch` suma los datos
   fiscales; `buscarClientes` gana un modo que prioriza/filtra los que tienen
   CUIT, para que en el flujo de facturación no haya que scrollear entre 298

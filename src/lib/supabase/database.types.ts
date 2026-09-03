@@ -1590,6 +1590,75 @@ export type Database = {
           },
         ];
       };
+      fiscal_entities: {
+        Row: {
+          business_id: string;
+          cod_postal: string | null;
+          condicion_iva: number;
+          created_at: string;
+          cuit: string;
+          customer_id: string | null;
+          domicilio: string | null;
+          email: string | null;
+          external_ref: string | null;
+          id: string;
+          localidad: string | null;
+          phone: string | null;
+          provincia: string | null;
+          razon_social: string;
+          updated_at: string;
+        };
+        Insert: {
+          business_id: string;
+          cod_postal?: string | null;
+          condicion_iva: number;
+          created_at?: string;
+          cuit: string;
+          customer_id?: string | null;
+          domicilio?: string | null;
+          email?: string | null;
+          external_ref?: string | null;
+          id?: string;
+          localidad?: string | null;
+          phone?: string | null;
+          provincia?: string | null;
+          razon_social: string;
+          updated_at?: string;
+        };
+        Update: {
+          business_id?: string;
+          cod_postal?: string | null;
+          condicion_iva?: number;
+          created_at?: string;
+          cuit?: string;
+          customer_id?: string | null;
+          domicilio?: string | null;
+          email?: string | null;
+          external_ref?: string | null;
+          id?: string;
+          localidad?: string | null;
+          phone?: string | null;
+          provincia?: string | null;
+          razon_social?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "fiscal_entities_business_id_fkey";
+            columns: ["business_id"];
+            isOneToOne: false;
+            referencedRelation: "businesses";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "fiscal_entities_customer_id_fkey";
+            columns: ["customer_id"];
+            isOneToOne: false;
+            referencedRelation: "customers";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       floor_plans: {
         Row: {
           background_image_url: string | null;
