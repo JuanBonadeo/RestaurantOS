@@ -179,6 +179,8 @@ export function CargarPedidoSheet({
   const [clienteDirecciones, setClienteDirecciones] = useState<
     ClienteDireccion[]
   >([]);
+  /** Cambiar de cliente rápido: sólo manda el último pick, no el que llega. */
+  const pickSeqRef = useRef(0);
 
   const [pending, startTransition] = useTransition();
   const searchRef = useRef<HTMLInputElement>(null);
@@ -364,6 +366,7 @@ export function CargarPedidoSheet({
     setDeliveryNotes("");
     setKitchenNotes("");
     setClienteDirecciones([]);
+    pickSeqRef.current += 1;
   }
 
   if (!open || !portalHost) return null;
@@ -422,21 +425,39 @@ export function CargarPedidoSheet({
   }
 
   /**
+   * La dirección prellenada era del cliente que se está soltando: no es de
+   * este pedido, es de esa persona. Se borra **sólo si sigue siendo una de sus
+   * guardadas**; la que el encargado tipeó a mano es del pedido y se queda.
+   */
+  function soltarDireccionDelCliente() {
+    const guardadas = new Set(clienteDirecciones.map(formatDireccion));
+    setClienteDirecciones([]);
+    setDeliveryAddress((dir) => (guardadas.has(dir) ? "" : dir));
+  }
+
+  /**
    * Soltar el cliente del CRM (spec 067): se limpia el teléfono —su identidad—
    * y las direcciones guardadas, que ya no le corresponden a nadie. El nombre
    * queda como texto libre.
    */
   function quitarCliente() {
+    pickSeqRef.current += 1; // el fetch en vuelo, si hay, ya no manda
     setCustomerPhone("");
-    setClienteDirecciones([]);
+    soltarDireccionDelCliente();
   }
 
   function pickCliente(c: ClienteMatch) {
     setCustomerName(c.name ?? "");
     setCustomerPhone(c.phone);
-    setClienteDirecciones([]);
+    // Lo del cliente anterior se va ANTES de traer lo del nuevo: si este no
+    // tiene direcciones guardadas —o el fetch falla— la de la persona anterior
+    // se quedaba pegada y el delivery salía a la casa equivocada.
+    soltarDireccionDelCliente();
     // Traemos las direcciones guardadas para prellenar la de delivery (editable).
+    const seq = (pickSeqRef.current += 1);
     getClienteDirecciones(slug, c.id).then((r) => {
+      // Cambió de cliente mientras viajaba: esta respuesta ya no es de nadie.
+      if (seq !== pickSeqRef.current) return;
       if (!r.ok) return;
       setClienteDirecciones(r.data);
       if (deliveryType === "delivery" && r.data.length > 0) {
