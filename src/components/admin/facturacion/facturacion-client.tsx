@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
+  Building2,
   ChevronLeft,
   ChevronRight,
   FileText,
@@ -127,7 +128,16 @@ export function FacturacionClient({
 
   return (
     <div className="grid gap-6">
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {/* spec 150 — a quién se le factura. Vive en Facturación y no en la
+            ficha del cliente: el receptor de una factura y el comensal son
+            cosas distintas (7 de 410 coinciden). */}
+        <Link href={`/${slug}/admin/facturacion/entidades`}>
+          <Button variant="outline" size="sm">
+            <Building2 className="size-3.5" />
+            Entidades fiscales
+          </Button>
+        </Link>
         <PedidoFlashDialog slug={slug} />
       </div>
 

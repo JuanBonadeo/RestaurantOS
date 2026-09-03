@@ -179,6 +179,7 @@ export function CobrarPedidoSheet({
 
               <div className="border-border/60 border-t pt-4">
                 <ComprobanteFields
+                  slug={slug}
                   value={comprobante}
                   onChange={setComprobante}
                 />

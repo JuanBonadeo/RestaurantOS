@@ -252,6 +252,24 @@ export function canAnularFactura(role: BusinessRole): boolean {
 }
 
 /**
+ * Gestionar las **entidades fiscales** — a quién se le emite un comprobante
+ * (spec 150): darlas de alta desde el cobro, buscarlas y corregirlas en su
+ * pantalla de Facturación.
+ *
+ * Encargado/admin, el mismo círculo que ya factura y anula. El mozo cobra pero
+ * no toca el padrón de receptores: un CUIT o una razón social mal cargados no
+ * se corrigen con un undo, salen impresos en el próximo comprobante de ese
+ * cliente y se arrastran a todos los siguientes.
+ *
+ * Crear y editar comparten techo: la corrección es la que repara el error de
+ * tipeo del apuro, y dejarla más arriba que el alta obligaría al encargado a
+ * buscar un admin para arreglar una letra de lo que él mismo cargó.
+ */
+export function canGestionarEntidadesFiscales(role: BusinessRole): boolean {
+  return role === "admin" || role === "encargado";
+}
+
+/**
  * Crear un "pedido flash" — orden de un único renglón por monto y concepto
  * libre, para facturar un evento sin desglose (ej: "Lunch torneo Banco Macro").
  * Operación de mostrador: encargado/admin. El mozo no genera facturación por

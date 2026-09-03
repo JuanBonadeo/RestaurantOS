@@ -1954,7 +1954,7 @@ export type Database = {
           condicion_iva_receptor: number | null;
           created_at: string;
           cuit_receptor: string | null;
-          customer_id: string | null;
+          fiscal_entity_id: string | null;
           error_message: string | null;
           id: string;
           idempotency_key: string | null;
@@ -1986,7 +1986,7 @@ export type Database = {
           condicion_iva_receptor?: number | null;
           created_at?: string;
           cuit_receptor?: string | null;
-          customer_id?: string | null;
+          fiscal_entity_id?: string | null;
           error_message?: string | null;
           id?: string;
           idempotency_key?: string | null;
@@ -2018,7 +2018,7 @@ export type Database = {
           condicion_iva_receptor?: number | null;
           created_at?: string;
           cuit_receptor?: string | null;
-          customer_id?: string | null;
+          fiscal_entity_id?: string | null;
           error_message?: string | null;
           id?: string;
           idempotency_key?: string | null;
@@ -2069,10 +2069,10 @@ export type Database = {
             referencedColumns: ["id"];
           },
           {
-            foreignKeyName: "invoices_customer_id_fkey";
-            columns: ["customer_id"];
+            foreignKeyName: "invoices_fiscal_entity_id_fkey";
+            columns: ["fiscal_entity_id"];
             isOneToOne: false;
-            referencedRelation: "customers";
+            referencedRelation: "fiscal_entities";
             referencedColumns: ["id"];
           },
         ];

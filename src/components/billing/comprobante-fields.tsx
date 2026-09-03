@@ -5,7 +5,10 @@ import {
   condicionesValidasPara,
   condicionIvaDefault,
 } from "@/lib/afip/condicion-iva";
+import { formatCuit } from "@/lib/afip/cuit";
 import type { CondicionIvaReceptor, TipoComprobante } from "@/lib/afip/types";
+
+import { FiscalEntitySearchField } from "./fiscal-entity-search-field";
 
 // ============================================================================
 // Datos del comprobante (spec 053), compartidos.
@@ -24,6 +27,12 @@ export type ComprobanteState = {
   cuit: string;
   razonSocial: string;
   condicionIva: CondicionIvaReceptor;
+  /**
+   * Entidad fiscal elegida en el buscador (spec 150). Viaja a `emitInvoice`
+   * para vincular la factura con su receptor, y el servidor la acepta sólo si
+   * es del negocio y su CUIT es el que se emite: es una pista, no la verdad.
+   */
+  fiscalEntityId: string | null;
 };
 
 export function comprobanteInicial(): ComprobanteState {
@@ -32,6 +41,7 @@ export function comprobanteInicial(): ComprobanteState {
     cuit: "",
     razonSocial: "",
     condicionIva: condicionIvaDefault("factura_a"),
+    fiscalEntityId: null,
   };
 }
 
@@ -49,13 +59,16 @@ export function comprobanteToInvoiceInput(state: ComprobanteState) {
     cuitReceptor: state.cuit.replace(/\D/g, ""),
     razonSocialReceptor: state.razonSocial.trim() || undefined,
     condicionIvaReceptor: state.condicionIva,
+    fiscalEntityId: state.fiscalEntityId ?? undefined,
   };
 }
 
 export function ComprobanteFields({
+  slug,
   value,
   onChange,
 }: {
+  slug: string;
   value: ComprobanteState;
   onChange: (next: ComprobanteState) => void;
 }) {
@@ -84,6 +97,23 @@ export function ComprobanteFields({
 
       {esA && (
         <div className="mt-3 space-y-2.5">
+          <FiscalEntitySearchField
+            slug={slug}
+            cuit={value.cuit}
+            razonSocial={value.razonSocial}
+            condicionIva={value.condicionIva}
+            entidadId={value.fiscalEntityId}
+            onSelect={(entidad) =>
+              onChange({
+                ...value,
+                cuit: formatCuit(entidad.cuit),
+                razonSocial: entidad.razon_social,
+                condicionIva: entidad.condicion_iva,
+                fiscalEntityId: entidad.id,
+              })
+            }
+          />
+
           <div className="grid gap-1.5">
             <label
               htmlFor="comprobante-cuit"
@@ -96,7 +126,16 @@ export function ComprobanteFields({
               type="text"
               inputMode="numeric"
               value={value.cuit}
-              onChange={(e) => onChange({ ...value, cuit: e.target.value })}
+              onChange={(e) =>
+                onChange({
+                  ...value,
+                  cuit: e.target.value,
+                  // Cambiar el CUIT es cambiar de receptor: el vínculo con la
+                  // entidad elegida deja de valer (la razón social, no — ésa
+                  // se corrige sobre la misma entidad, D3).
+                  fiscalEntityId: null,
+                })
+              }
               placeholder="11 dígitos"
               className="block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
             />

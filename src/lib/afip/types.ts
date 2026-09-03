@@ -117,6 +117,12 @@ export type Invoice = {
   razon_social_receptor: string | null;
   /** Condición IVA del receptor declarada (RG 5616); NULL = default por tipo. Spec 053. */
   condicion_iva_receptor: CondicionIvaReceptor | null;
+  /**
+   * A quién se le facturó (spec 150 · D5). NULL en las B a consumidor final sin
+   * identificar — y en las 14 que ya existían. `on delete set null`: depurar la
+   * lista de receptores no borra un comprobante emitido.
+   */
+  fiscal_entity_id: string | null;
   total_cents: number;
   neto_cents: number;
   iva_cents: number;

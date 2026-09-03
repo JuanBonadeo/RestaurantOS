@@ -12,6 +12,8 @@ const PAGE_SIZE = 20;
 
 type InvoiceFilters = {
   businessId: string;
+  /** Comprobantes emitidos a un receptor guardado (spec 150 · D5). */
+  fiscalEntityId?: string;
   status?: InvoiceStatus;
   tipo?: TipoComprobante;
   from?: string;
@@ -36,6 +38,9 @@ export async function listInvoices(
     .eq("business_id", filters.businessId)
     .order("created_at", { ascending: false });
 
+  if (filters.fiscalEntityId) {
+    query = query.eq("fiscal_entity_id", filters.fiscalEntityId);
+  }
   if (filters.status) query = query.eq("status", filters.status);
   if (filters.tipo) query = query.eq("tipo_comprobante", filters.tipo);
   if (filters.from) query = query.gte("created_at", filters.from);

@@ -25,6 +25,22 @@ vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn(), message: vi.fn() },
 }));
 
+// spec 150 — el buscador de entidades fiscales que la sección monta en A.
+const buscarEntidadesFiscales = vi.fn();
+const crearEntidadFiscal = vi.fn();
+vi.mock("@/lib/afip/fiscal-entities-actions", () => ({
+  buscarEntidadesFiscales: (...args: unknown[]) =>
+    buscarEntidadesFiscales(...args),
+  crearEntidadFiscal: (...args: unknown[]) => crearEntidadFiscal(...args),
+}));
+
+const SANATORIO = {
+  id: "fe-1",
+  cuit: "30500237305",
+  razon_social: "SANATORIO PARQUE SA",
+  condicion_iva: 1 as const,
+};
+
 function invoice(over: Partial<Invoice> = {}): Invoice {
   return {
     id: "inv-1",
@@ -70,6 +86,7 @@ function setup(existingInvoice: Invoice | null = null) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  buscarEntidadesFiscales.mockResolvedValue({ ok: true, data: [] });
 });
 
 describe("FacturacionSection", () => {
@@ -115,6 +132,57 @@ describe("FacturacionSection", () => {
     expect(screen.getByText(/CAE: 75123456789012/)).toBeInTheDocument();
     expect(screen.getByText("Emitida")).toBeInTheDocument();
     expect(screen.queryByText("Emitir comprobante")).not.toBeInTheDocument();
+  });
+
+  // ── Entidades fiscales (spec 150) ─────────────────────────────
+
+  it("el buscador de receptores aparece sólo con Factura A (D2)", async () => {
+    setup();
+    // En B el receptor es consumidor final: no hay a quién buscar, y el campo
+    // sería ruido en el camino más transitado.
+    expect(screen.queryByLabelText(/Buscar receptor guardado/)).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: /Factura A/ }));
+    expect(
+      screen.getByLabelText(/Buscar receptor guardado/),
+    ).toBeInTheDocument();
+  });
+
+  it("elegir una entidad completa los campos y la factura viaja vinculada", async () => {
+    buscarEntidadesFiscales.mockResolvedValue({ ok: true, data: [SANATORIO] });
+    emitInvoice.mockResolvedValue({
+      ok: true,
+      data: { invoice: invoice({ status: "authorized" }) },
+    });
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: /Factura A/ }));
+    await userEvent.type(
+      screen.getByLabelText(/Buscar receptor guardado/),
+      "sanatorio",
+    );
+
+    const opcion = await screen.findByRole("button", {
+      name: /SANATORIO PARQUE SA/,
+    });
+    await userEvent.click(opcion);
+
+    // Escenario 2: los tres campos quedan completos sin tipear nada. El CUIT se
+    // muestra formateado y viaja normalizado (lo verifica el payload de abajo).
+    expect(screen.getByDisplayValue("30-50023730-5")).toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /Emitir Factura A/ }),
+    );
+    await waitFor(() => expect(emitInvoice).toHaveBeenCalledTimes(1));
+    expect(emitInvoice).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tipoComprobante: "factura_a",
+        cuitReceptor: "30500237305",
+        razonSocialReceptor: "SANATORIO PARQUE SA",
+        condicionIvaReceptor: 1,
+        fiscalEntityId: "fe-1",
+      }),
+    );
   });
 
   it("una factura fallida ofrece reintentar", async () => {

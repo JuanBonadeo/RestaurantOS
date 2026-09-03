@@ -2,8 +2,8 @@
 
 **Issue:** [#226](https://github.com/gachetponzellini/RestaurantOS-app/issues/226) ·
 **Milestone:** Post-demo · Growth & hardening ·
-**Estado:** 🟡 parcial (2026-09-03) — **el modelo está aplicado** (migración `0061`,
-al cloud, verificada); el flujo de UI sigue pendiente
+**Estado:** ✅ implementado (2026-09-03) — modelo (`0062`) + dominio + buscador en
+los puntos de cobro + alta desde el cobro + ABM en Facturación
 
 **Input:** Juan, 2026-09-03: *"lo de la factura B automática ya lo hicimos, ahora
 faltaría lo de dejarle hacer una factura A a un cliente"*.
@@ -200,25 +200,83 @@ falta». Detalle del relevamiento en
    `customer_id`, **entonces** la entidad sigue funcionando igual y borrar el
    cliente **no** la borra (`on delete set null`).
 
+## Qué se construyó
+
+| Archivo | Qué hace |
+|---|---|
+| `src/lib/afip/cuit.ts` | `normalizarCuit` / `esCuitValido` / `formatCuit`. Puro y sin `server-only` a propósito: la misma normalización corre en el buscador y antes de cada query. |
+| `src/lib/afip/fiscal-entities.ts` | Dominio `server-only`: `buscarEntidadPorCuit`, `buscarEntidades`, `resolverEntidadParaFactura` (D4), `listFiscalEntities`, `getFiscalEntity`. |
+| `src/lib/afip/fiscal-entities-actions.ts` | La puerta autenticada: `buscarEntidadesFiscales`, `crearEntidadFiscal`, `actualizarEntidadFiscal`. Zod + `canGestionarEntidadesFiscales`. |
+| `src/components/billing/fiscal-entity-search-field.tsx` | El buscador + el alta desde el cobro. |
+| `src/components/billing/comprobante-fields.tsx` | `fiscalEntityId` en `ComprobanteState`; el buscador condicional (D2). |
+| `src/components/billing/facturacion-section.tsx` | Lo mismo en el cobro de mesa (mozo y encargado). |
+| `src/lib/afip/emit-core.ts` | Persiste `fiscal_entity_id` (D5) y dispara el alta diferida (D4). |
+| `facturacion/entidades/` + `entidades/[id]/` | El ABM: lista, búsqueda, editar, y las facturas de cada entidad. |
+
+**Dos decisiones tomadas al implementar:**
+
+- **El dominio va en dos archivos, no en uno.** La spec pedía un solo
+  `fiscal-entities.ts` con firmas por `slug`, pero `emitInvoiceCore` lo importa y
+  ese archivo es `server-only`: si el dominio fuera `"use server"`, cada export
+  sería un endpoint público que crea entidades fiscales. Mismo razonamiento que la
+  spec 147 · D2. El dominio se importa; los actions se exponen.
+- **El `fiscalEntityId` del cliente es una pista, no la verdad.** Llega del
+  navegador, así que el servidor lo acepta sólo si la entidad es del negocio **y**
+  su CUIT es el que se emite; si no cierra, manda la clave natural
+  `(business_id, cuit)`. Sin eso se podía colgar una factura a la entidad ajena
+  que se quisiera.
+- **Sin razón social no se crea la entidad.** El CHECK de la tabla la rebotaría
+  igual (`length(trim(razon_social)) > 0`), y una fila sin nombre no se puede
+  reconocer en la lista. La emisión no se bloquea: el CUIT y la razón social
+  viajan en la propia factura, que es el dato fiscal que vale.
+
 ## Verificación
 
-Pendiente — el modelo está, el flujo no.
+**Tests** — `pnpm typecheck` limpio y **2153 tests en verde** (205 archivos). Los
+`*.integration.test.ts` quedan fuera: sin stack local fallan con `fetch failed`,
+ruido conocido.
 
-Al implementar: tests del `resolverEntidadParaFactura` (CUIT nuevo → crea; CUIT
-existente con datos distintos → **no pisa**; CUIT con guiones → matchea), de que el
-buscador no aparece en B, y de que `fiscal_entity_id` viaja a la factura. La
-migración ya está verificada contra el cloud (rechaza guiones, rechaza CUIT
-duplicado por negocio, vive sin teléfono ni customer, y borrar la entidad deja la
-factura viva).
+- `fiscal-entities.test.ts` (11): D4 —CUIT existente con datos distintos **no se
+  pisa**—, CUIT nuevo → crea, CUIT con guiones → matchea, CUIT incompleto y sin
+  razón social → no crea nada, y la carrera contra el unique.
+- `comprobante-fields.test.tsx` (5) y `facturacion-section.test.tsx`: el buscador
+  no aparece en B y sí en A, elegir completa los tres campos, `fiscalEntityId`
+  viaja a `emitInvoice`, y corregir el CUIT a mano suelta el vínculo.
+- `can.test.ts`: encargado y admin sí, mozo/terminal/personal no.
 
-El verify en vivo va en `demo` con el gateway en **sandbox**, que es donde el CAE
-vuelve y se puede ver una A completa de punta a punta:
+**En vivo** — `demo`, gateway en sandbox, con **Sofía (encargada)** por magic
+link. No le faltó permiso en ninguna pantalla nueva.
 
-    node scripts/magic-link.mjs sofia@demo.test "/demo/admin/operacion"
+| # | Escenario | |
+|---|---|---|
+| 1 | El buscador aparece sólo con Factura A | ✅ |
+| 2 | Elegir la entidad completa CUIT + razón social + condición | ✅ |
+| 5 | CUIT tipeado `30-50023730` matchea la guardada como `30500237305` | ✅ |
+| 8 | Receptor **sin teléfono ni cliente**: se crea, se busca y se factura | ✅ |
+| 7 | Factura B: todo igual que hoy, `fiscal_entity_id` NULL | ✅ |
+| — | D4 en vivo: mismo CUIT + razón social distinta → avisa y **no pisa** (`updated_at` intacto) | ✅ |
+| — | ABM: lista, búsqueda, editar (razón social + domicilio), facturas de la entidad | ✅ |
+| 4 / 6 | `fiscal_entity_id` en una A emitida y esa factura en la lista de la entidad | ⚠️ ver abajo |
 
-Sofía, encargada: es quien cobra y factura las mesas. Si le falta permiso en la
-pantalla de entidades fiscales, es un hallazgo de esta spec y no un supuesto —
-`sections.ts` ya le da `full` en Facturación.
+### Hallazgo: la auto-emisión de la 147 tapa la Factura A explícita
+
+Con `afip_auto_emit = true`, **la Factura A elegida en el cobro nunca se emite**.
+El orden es `registrarPago` → (dentro) `autoEmitInvoiceForOrder` emite la B → y
+recién después el sheet llama a `facturar()`, que choca con el guard de la spec
+100 («esta orden ya tiene la Factura B … autorizada»). Lo mismo en el cobro de
+mesa: `FacturacionSection` sólo se monta con la orden cerrada, que es justo
+cuando la B automática ya salió.
+
+No es de esta spec —cambiar *cuándo* dispara la auto-emisión es territorio de la
+147, y «emitir A automáticamente» está explícitamente fuera de alcance— y **no
+afecta a golf-house**: `golf-jcr` tiene el flag en `false`. Es `demo` el que lo
+tiene prendido. Merece spec propia: hoy, en un negocio con auto-emisión, pedir
+una A obliga a anular la B con su nota de crédito.
+
+Por eso los escenarios 4 y 6 quedaron sin verificar de punta a punta en el
+navegador: hacerlo pedía apagar `afip_auto_emit` en `demo`, y el cambio de config
+quedó bloqueado. El vínculo en sí está cubierto por los tests del dominio y por
+el escenario 7 (la B automática guardó `fiscal_entity_id` NULL, como debe).
 
 ---
 

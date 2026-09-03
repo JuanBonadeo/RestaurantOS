@@ -8,6 +8,7 @@ import {
   CONDICION_IVA_LABEL,
   condicionesValidasPara,
 } from "@/lib/afip/condicion-iva";
+import { formatCuit } from "@/lib/afip/cuit";
 import { emitInvoice, retryInvoice } from "@/lib/afip/emit-invoice";
 import { waitForInvoiceTerminal } from "@/lib/afip/poll";
 import type {
@@ -19,6 +20,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatCurrency } from "@/lib/currency";
 import { cn } from "@/lib/utils";
+
+import { FiscalEntitySearchField } from "./fiscal-entity-search-field";
 
 // ============================================================================
 // Facturación AFIP post-cobro (spec 06 · 053), compartida.
@@ -62,6 +65,8 @@ export function FacturacionSection({
   const [razonSocial, setRazonSocial] = useState("");
   // Condición de IVA del receptor (spec 053). Solo se envía cuando hay CUIT.
   const [condicionIva, setCondicionIva] = useState<CondicionIvaReceptor>(6);
+  // Receptor guardado elegido en el buscador (spec 150). Sólo se ofrece en A.
+  const [fiscalEntityId, setFiscalEntityId] = useState<string | null>(null);
   const [emitting, setEmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -91,6 +96,7 @@ export function FacturacionSection({
         cuitReceptor: hasCuit ? cuitDigits : undefined,
         razonSocialReceptor: showReceptor && razonSocial ? razonSocial : undefined,
         condicionIvaReceptor: hasCuit ? condicionIva : undefined,
+        fiscalEntityId: fiscalEntityId ?? undefined,
         slug,
       });
       if (!r.ok) {
@@ -269,6 +275,7 @@ export function FacturacionSection({
           onClick={() => {
             setTipoA(false);
             setCondicionIva(6); // B con CUIT: Monotributo por defecto
+            setFiscalEntityId(null);
           }}
           className={cn(
             "flex-1 rounded-xl px-3 py-2.5 text-center text-xs font-semibold transition ring-1",
@@ -306,6 +313,22 @@ export function FacturacionSection({
           condición de IVA (spec 053). El CUIT en B habilita facturar B a un
           identificado (Monotributo/Exento) declarando su condición real. */}
       <div className="space-y-2.5">
+        {tipoA && (
+          <FiscalEntitySearchField
+            slug={slug}
+            cuit={cuit}
+            razonSocial={razonSocial}
+            condicionIva={condicionIva}
+            entidadId={fiscalEntityId}
+            onSelect={(entidad) => {
+              setCuit(formatCuit(entidad.cuit));
+              setRazonSocial(entidad.razon_social);
+              setCondicionIva(entidad.condicion_iva);
+              setFiscalEntityId(entidad.id);
+            }}
+          />
+        )}
+
         <div className="grid gap-1">
           <Label className="text-xs text-zinc-600">
             CUIT del cliente{" "}
@@ -317,7 +340,13 @@ export function FacturacionSection({
           </Label>
           <Input
             value={cuit}
-            onChange={(e) => setCuit(e.target.value.replace(/[^\d\-]/g, ""))}
+            onChange={(e) => {
+              setCuit(e.target.value.replace(/[^\d\-]/g, ""));
+              // Otro CUIT es otro receptor: el vínculo con la entidad elegida
+              // deja de valer. La razón social sí se corrige sobre la misma
+              // entidad (D3) y no la desvincula.
+              setFiscalEntityId(null);
+            }}
             placeholder="20-12345678-9"
             maxLength={13}
             inputMode="numeric"

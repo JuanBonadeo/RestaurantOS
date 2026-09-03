@@ -6,6 +6,7 @@ import {
   DIFERENCIA_CAJA_OK_CENTS,
   canAcceptCajaDifference,
   canAnularFactura,
+  canGestionarEntidadesFiscales,
   canApplyDiscount,
   canCancelItem,
   canAssignMozo,
@@ -190,6 +191,16 @@ describe("permissions / canAnularFactura", () => {
     expect(canAnularFactura("encargado")).toBe(true);
     expect(canAnularFactura("mozo")).toBe(false);
     expect(canAnularFactura("personal")).toBe(false);
+  });
+});
+
+describe("permissions / canGestionarEntidadesFiscales", () => {
+  it("el encargado factura, así que gestiona receptores; el mozo no", () => {
+    expect(canGestionarEntidadesFiscales("admin")).toBe(true);
+    expect(canGestionarEntidadesFiscales("encargado")).toBe(true);
+    expect(canGestionarEntidadesFiscales("mozo")).toBe(false);
+    expect(canGestionarEntidadesFiscales("terminal")).toBe(false);
+    expect(canGestionarEntidadesFiscales("personal")).toBe(false);
   });
 });
 

@@ -10,6 +10,12 @@ import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 import { calculateAmounts } from "./calculate-amounts";
 import { esCondicionValidaPara } from "./condicion-iva";
+import { normalizarCuit } from "./cuit";
+import {
+  buscarEntidadPorCuit,
+  getFiscalEntity,
+  resolverEntidadParaFactura,
+} from "./fiscal-entities";
 import { formatInvoiceNumber, tipoLabel } from "./format";
 import { buildProvider, loadAFIPConfig, terminalPatch } from "./reconcile";
 import { selectProvider } from "./provider-config";
@@ -43,6 +49,13 @@ export type EmitInput = {
    * default histórico por tipo.
    */
   condicionIvaReceptor?: CondicionIvaReceptor;
+  /**
+   * Entidad fiscal elegida en el buscador del cobro (spec 150). Es una PISTA
+   * del cliente, no la verdad: se acepta sólo si la entidad es de este negocio
+   * y su CUIT coincide con el que se está emitiendo. Si no, se resuelve por la
+   * clave natural `(business_id, cuit)`, que es la que manda.
+   */
+  fiscalEntityId?: string;
   slug: string;
   /** Clave de idempotencia explícita (opcional); por defecto `${orderId}:${tipo}`. */
   idempotencyKey?: string;
@@ -228,6 +241,16 @@ export async function emitInvoiceCore(
   const amounts = calculateAmounts(facturableCents);
   const idempotencyKey = input.idempotencyKey ?? `${input.orderId}:${tipo}`;
 
+  // spec 150 · D5 — a quién se le factura, para poder responder después «qué le
+  // facturamos a este cliente» (la liquidación mensual del sanatorio).
+  //
+  // Acá sólo se BUSCA la entidad que ya existe; la que no está se crea recién
+  // cuando el comprobante no fue rechazado (más abajo). Un CUIT que ARCA rebota
+  // no debería dejar una entidad basura en la lista para siempre.
+  const entidadExistente = input.cuitReceptor
+    ? await resolverEntidadElegida(service, businessId, input)
+    : null;
+
   // ── RESERVA ──────────────────────────────────────────────────────
   // Insertamos un comprobante `pending` ANTES de llamar al provider. El índice
   // único parcial (business, order, tipo) where status in (pending, authorized)
@@ -245,6 +268,7 @@ export async function emitInvoiceCore(
       cuit_receptor: input.cuitReceptor ?? null,
       razon_social_receptor: input.razonSocialReceptor ?? null,
       condicion_iva_receptor: input.condicionIvaReceptor ?? null,
+      fiscal_entity_id: entidadExistente?.id ?? null,
       total_cents: amounts.totalCents,
       neto_cents: amounts.netoCents,
       iva_cents: amounts.ivaCents,
@@ -356,10 +380,63 @@ export async function emitInvoiceCore(
     );
   }
 
+  // spec 150 · D4 — el CUIT que no estaba cargado queda cargado, y la próxima
+  // factura a ese receptor ya lo encuentra en el buscador. Se hace acá y no en
+  // la reserva porque hasta este punto el gateway podía rechazar el
+  // comprobante: recién ahora sabemos que el CUIT sirve para algo.
+  //
+  // Best-effort: la entidad es un índice para buscar, no el comprobante. El
+  // CUIT y la razón social ya están guardados en la propia factura, que es el
+  // dato fiscal que vale — si esto falla, no se toca lo que ARCA autorizó.
+  if (!entidadExistente && input.cuitReceptor) {
+    const creada = await resolverEntidadParaFactura({
+      service,
+      businessId,
+      cuit: input.cuitReceptor,
+      razonSocial: input.razonSocialReceptor,
+      condicionIva: input.condicionIvaReceptor,
+    }).catch((err) => {
+      console.error("emitInvoiceCore: alta de entidad fiscal", err);
+      return null;
+    });
+    if (creada) {
+      const { error: linkErr } = await service
+        .from("invoices")
+        .update({ fiscal_entity_id: creada.id })
+        .eq("id", invoice.id);
+      if (linkErr) console.error("emitInvoiceCore: vínculo con la entidad", linkErr);
+      else invoice.fiscal_entity_id = creada.id;
+    }
+  }
+
   // spec 45 — comprobante al cliente por email (best-effort, idempotente).
   if (invoice.status === "authorized") {
     await notifyInvoiceIssued({ invoiceId: invoice.id });
   }
 
   return actionOk({ invoice });
+}
+
+/**
+ * La entidad fiscal que ya está cargada para este comprobante.
+ *
+ * El `fiscalEntityId` que manda el buscador del cobro es una pista, no la
+ * verdad: llega del cliente, así que sólo se acepta si la entidad es de este
+ * negocio **y** su CUIT es el que se está emitiendo. Sin esas dos condiciones,
+ * cualquiera podría colgarle una factura a la entidad que quisiera. Si la pista
+ * no cierra, manda la clave natural `(business_id, cuit)`.
+ */
+async function resolverEntidadElegida(
+  service: GenericClient,
+  businessId: string,
+  input: EmitInput,
+): Promise<{ id: string } | null> {
+  const cuit = normalizarCuit(input.cuitReceptor ?? "");
+  if (cuit.length !== 11) return null;
+
+  if (input.fiscalEntityId) {
+    const elegida = await getFiscalEntity(service, businessId, input.fiscalEntityId);
+    if (elegida && elegida.cuit === cuit) return elegida;
+  }
+  return buscarEntidadPorCuit(service, businessId, cuit);
 }
