@@ -8,6 +8,7 @@ import {
   VentasPorOrigen,
 } from "@/components/admin/local/caja-metricas";
 import { Diferencia } from "@/components/admin/local/cierres-client";
+import { ReimprimirCierreBoton } from "@/components/admin/local/reimprimir-cierre-boton";
 import { MovimientoRow } from "@/components/admin/local/movimiento-row";
 import { duracionDelTurno } from "@/lib/caja/formato-cierre";
 import type { ResumenDeCorte } from "@/lib/caja/types";
@@ -68,6 +69,14 @@ export function ResumenDeCierre({
           <div className="min-w-0">
             <p className="text-[0.65rem] font-semibold uppercase tracking-[0.18em] text-zinc-500">
               Cierre de caja · {resumen.caja_name}
+              {corte.numero != null && (
+                <>
+                  {" · "}
+                  {/* El número es cómo el local nombra este papel por teléfono
+                      (spec 139 · D14), así que va donde se lee primero. */}
+                  <span className="tabular-nums">Nº {corte.numero}</span>
+                </>
+              )}
             </p>
             <h1 className="mt-1 text-2xl font-semibold capitalize tracking-tight text-zinc-900 tabular-nums sm:text-3xl">
               {cerradoEl}
@@ -99,13 +108,20 @@ export function ResumenDeCierre({
               </span>
             </p>
           </div>
-          <Link
-            href={`/${slug}/admin/operacion/movimientos?desde=${formatInTimeZone(new Date(resumen.periodo_desde), timezone, "yyyy-MM-dd")}&hasta=${formatInTimeZone(new Date(corte.created_at), timezone, "yyyy-MM-dd")}`}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-white px-4 py-2 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200/70 transition hover:bg-zinc-50"
-          >
-            <ScrollText className="size-3.5" />
-            Ver en el libro
-          </Link>
+          <div className="flex shrink-0 items-center gap-2">
+            <ReimprimirCierreBoton
+              slug={slug}
+              corteId={corte.id}
+              disponible={corte.resumen != null}
+            />
+            <Link
+              href={`/${slug}/admin/operacion/movimientos?desde=${formatInTimeZone(new Date(resumen.periodo_desde), timezone, "yyyy-MM-dd")}&hasta=${formatInTimeZone(new Date(corte.created_at), timezone, "yyyy-MM-dd")}`}
+              className="inline-flex items-center gap-1.5 rounded-full bg-white px-4 py-2 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200/70 transition hover:bg-zinc-50"
+            >
+              <ScrollText className="size-3.5" />
+              Ver en el libro
+            </Link>
+          </div>
         </div>
       </header>
 

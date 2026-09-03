@@ -24,15 +24,18 @@ import { mozosQueDebenRendir } from "./deben-rendir";
 import {
   getCajaLiveStats,
   getCuentasAbiertas,
+  getMovimientosPeriodoActual,
   getOperadoresDeCaja,
   getRendicionesPendientesTodosLosMozos,
   getRendicionPendienteMozo,
 } from "./queries";
 import type {
   CajaCorte,
+  CierreResumenSnapshot,
   MozoRendicion,
   PaymentMethod,
   RendicionEstado,
+  VentaOrigen,
 } from "./types";
 
 type GenericClient = SupabaseClient;
@@ -367,19 +370,55 @@ export async function cerrarCaja(input: {
   // `stats` ya se computó arriba para validar la diferencia. Se congela acá
   // porque después de cerrar el período vivo pasa a ser el siguiente, y una
   // corrección posterior (spec 070) movería un papel que alguien ya firmó.
-  const resumen = {
-    version: 1 as const,
+  const [movimientos, encargado] = await Promise.all([
+    getMovimientosPeriodoActual(input.cajaId, business.id),
+    service
+      .from("business_users")
+      .select("full_name")
+      .eq("business_id", business.id)
+      .eq("user_id", ctx.userId)
+      .maybeSingle(),
+  ]);
+
+  const vivos = movimientos.filter((m) => !m.cancelled_at);
+  const linea = (m: (typeof vivos)[number], fallback: string) => ({
+    detalle: m.reason?.trim() || fallback,
+    total_cents: m.amount_cents,
+  });
+
+  const resumen: CierreResumenSnapshot = {
+    version: 1,
     caja_name: caja.name,
+    encargado_name:
+      (encargado.data as { full_name: string | null } | null)?.full_name ?? null,
     periodo_desde: stats.periodo_desde,
     total_ventas_cents: stats.total_ventas_cents,
     total_propinas_cents: stats.total_propinas_cents,
     cobros_count: stats.cobros_count,
-    ventas_por_metodo: stats.ventas_por_metodo,
-    ventas_por_origen: stats.ventas_por_origen,
-    desglose_esperado: stats.desglose_esperado,
     expected_cash_cents,
     closing_cash_cents: input.closing_cash_cents,
     difference_cents,
+    desglose_esperado: stats.desglose_esperado,
+    // Los anulados no van al papel: no movieron la caja (spec 070) y en un
+    // documento que se firma sumarían confusión, no información.
+    movimientos: {
+      ingresos: vivos.filter((m) => m.kind === "ingreso").map((m) => linea(m, "Ingreso")),
+      egresos: vivos.filter((m) => m.kind === "sangria").map((m) => linea(m, "Sangria")),
+    },
+    ventas_por_origen_lineas: ORIGEN_PAPEL.filter(
+      (o) => (stats.ventas_por_origen[o.key] ?? 0) > 0,
+    ).map((o) => ({
+      detalle: o.label,
+      total_cents: stats.ventas_por_origen[o.key] ?? 0,
+      cant: stats.cobros_por_origen[o.key] ?? 0,
+    })),
+    ventas_por_metodo_lineas: METODO_PAPEL.filter(
+      (m) => (stats.ventas_por_metodo[m.key] ?? 0) > 0,
+    ).map((m) => ({
+      detalle: m.label,
+      total_cents: stats.ventas_por_metodo[m.key] ?? 0,
+      cant: stats.cobros_por_metodo[m.key] ?? 0,
+    })),
   };
 
   const { data: rpcData, error } = await service.rpc("cerrar_caja_tx", {
@@ -437,6 +476,31 @@ export async function cerrarCaja(input: {
     mozosLimpiados: Number(row.mozos_limpiados ?? 0),
   });
 }
+
+/**
+ * Rótulos del papel del cierre. Van en ASCII y sin acentos a propósito: la
+ * térmica no recibe codepage, así que todo lo que pase de 0x7e sale como el
+ * símbolo que tenga cargado en su tabla. `sanitizeTicketText` lo cubriría igual,
+ * pero acá el nombre es corto y conviene que se lea igual en pantalla y papel.
+ *
+ * Las filas en $0 no se imprimen (se filtran arriba): el papel de MaxiRest sólo
+ * lista lo que tuvo movimiento.
+ */
+const METODO_PAPEL: { key: PaymentMethod; label: string }[] = [
+  { key: "cash", label: "Efectivo" },
+  { key: "mp_qr", label: "MercadoPago QR" },
+  { key: "mp_link", label: "MercadoPago link" },
+  { key: "card_manual", label: "Tarjeta" },
+  { key: "transfer", label: "Transferencia" },
+  { key: "other", label: "Otro" },
+];
+
+const ORIGEN_PAPEL: { key: VentaOrigen; label: string }[] = [
+  { key: "salon", label: "Salon" },
+  { key: "delivery", label: "Delivery" },
+  { key: "takeaway", label: "Take away" },
+  { key: "otro", label: "Otro" },
+];
 
 // ── Movimientos manuales ───────────────────────────────────────
 

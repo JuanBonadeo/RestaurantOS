@@ -29,6 +29,7 @@ import type {
   RendicionDelCorte,
   RendicionMozoPendiente,
   ResumenDeCorte,
+  VentaOrigen,
 } from "./types";
 
 // Post-migration types not yet regenerated; cast to bypass strict table checks.
@@ -429,9 +430,19 @@ async function getCajaStatsEnVentana(
   } = separarRetiroDelCierre(arrastreBrutoCents, movimientosDelPeriodo);
 
   const ventas_por_metodo: Record<PaymentMethod, number> = { ...EMPTY_BY_METHOD };
+  const cobros_por_metodo: Record<PaymentMethod, number> = { ...EMPTY_BY_METHOD };
+  const cobros_por_origen: Record<VentaOrigen, number> = {
+    salon: 0,
+    delivery: 0,
+    takeaway: 0,
+    otro: 0,
+  };
   let total_ventas_cents = 0;
   let total_propinas_cents = 0;
   for (const p of payments) {
+    cobros_por_metodo[p.method] = (cobros_por_metodo[p.method] ?? 0) + 1;
+    const origen = origenDeDeliveryType(p.delivery_type);
+    cobros_por_origen[origen] = (cobros_por_origen[origen] ?? 0) + 1;
     // spec 098 — la venta es lo que le queda al negocio: `amount − tip`. La
     // propina viaja dentro de `amount_cents` (es la plata que efectivamente
     // entró) pero **no es venta**, y sumarla acá la contaba dos veces: una en
@@ -473,6 +484,8 @@ async function getCajaStatsEnVentana(
     ventas_por_metodo,
     ventas_por_origen: agruparVentasPorOrigen(payments),
     cobros_count: payments.length,
+    cobros_por_metodo,
+    cobros_por_origen,
     expected_cash_cents,
     periodo_desde: desde,
     desglose_esperado,
@@ -646,6 +659,8 @@ export async function getResumenDeCorte(
     closing_notes: row.closing_notes,
     denomination_count: row.denomination_count,
     created_at: row.created_at,
+    numero: row.numero ?? null,
+    resumen: row.resumen ?? null,
   };
 
   const anterior = await getCorteAnterior(corte.caja_id, corte.created_at);

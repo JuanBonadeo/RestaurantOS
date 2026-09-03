@@ -5,7 +5,15 @@ import {
   buildControlTicketContent,
   type ControlTicketData,
 } from "@/lib/print/control-ticket";
-import { resolveCuentaPrinter } from "@/lib/print/cuenta-printer";
+import {
+  resolveCierrePrinter,
+  resolveCuentaPrinter,
+} from "@/lib/print/cuenta-printer";
+import {
+  buildCierreContent,
+  type CierreTicketData,
+} from "@/lib/print/cierre-ticket";
+import type { CierreResumenSnapshot } from "@/lib/caja/types";
 import {
   buildCuentaTicketContent,
   type CuentaTicketData,
@@ -75,10 +83,7 @@ export async function GET(req: Request) {
   const agente = await autenticarAgente(req, businessId);
   if (!agente) return unauthorized();
   if (!businessId) {
-    return NextResponse.json(
-      { error: "missing business_id" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "missing business_id" }, { status: 400 });
   }
 
   const service = createSupabaseServiceClient();
@@ -150,16 +155,11 @@ export async function GET(req: Request) {
   // todos los items ANTES de crear cualquier comanda: cuando una comanda existe,
   // los items de los otros sectores ya están, aunque su comanda todavía no.
   // Leerlo de las comandas dejaría al primer ticket del envío sin la mitad.
-  const otrosPorPedido = await loadItemsPorPedido(
-    service,
-    [
-      ...new Set(
-        (comandas ?? []).map(
-          (c) => (c.orders as unknown as { id: string }).id,
-        ),
-      ),
-    ],
-  );
+  const otrosPorPedido = await loadItemsPorPedido(service, [
+    ...new Set(
+      (comandas ?? []).map((c) => (c.orders as unknown as { id: string }).id),
+    ),
+  ]);
 
   // Una comanda a medio crear NO se le entrega al agente. `enviarComanda` crea
   // la fila de `comandas` y sus `comanda_items` en dos viajes separados a
@@ -171,114 +171,119 @@ export async function GET(req: Request) {
   // Sin items no hay nada que imprimir. Se saltea y sale completa en el próximo
   // poll, un segundo después. También cubre el caso de una comanda cuyos
   // `order_items` ya no existen (el `!inner` del select los descarta).
-  const printable = (comandas ?? []).filter(
-    (c) => ((c.comanda_items ?? []) as unknown[]).length > 0,
-  ).map((c) => {
-    const order = c.orders as unknown as {
-      id: string;
-      business_id: string;
-      daily_number: number | null;
-      table_id: string | null;
-      delivery_type: string | null;
-      kitchen_notes: string | null;
-      kitchen_at: string | null;
-      tables: { label: string } | null;
-    };
-    const station = c.stations as unknown as {
-      name: string;
-      printer_ip: string | null;
-      printer_port: number;
-      printer_enabled: boolean;
-    };
+  const printable = (comandas ?? [])
+    .filter((c) => ((c.comanda_items ?? []) as unknown[]).length > 0)
+    .map((c) => {
+      const order = c.orders as unknown as {
+        id: string;
+        business_id: string;
+        daily_number: number | null;
+        table_id: string | null;
+        delivery_type: string | null;
+        kitchen_notes: string | null;
+        kitchen_at: string | null;
+        tables: { label: string } | null;
+      };
+      const station = c.stations as unknown as {
+        name: string;
+        printer_ip: string | null;
+        printer_port: number;
+        printer_enabled: boolean;
+      };
 
-    const comanda = {
-      comanda_id: c.id,
-      station_id: c.station_id,
-      station_name: sanitizeTicketText(station?.name) ?? "—",
-      // Destino de impresión del sector (spec 28). El agente imprime en esta IP
-      // sin mapeo local; si es null, saltea la comanda y la deja `pendiente`.
-      printer_ip: station?.printer_ip ?? null,
-      printer_port: station?.printer_port ?? 9100,
-      printer_enabled: station?.printer_enabled ?? true,
-      batch: c.batch,
-      emitted_at: c.emitted_at,
-      // Spec 049: comanda anulada → el agente imprime un ticket «ANULADA».
-      // Campos aditivos: un agente viejo los ignora y reimprime el ticket normal.
-      cancelled: Boolean(c.cancelled_at),
-      cancelled_reason: sanitizeTicketText(c.cancelled_reason as string | null),
-      // Reimpresión pedida (spec 35): editar/reimprimir vuelve a mandar la
-      // comanda. El agente imprime un ticket «REIMPRESIÓN» para que cocina sepa
-      // que reemplaza a uno anterior. Campo aditivo (un agente viejo lo ignora).
-      reprint: Boolean(c.reprint_requested_at),
-      // El número del pedido del día: lo que cocina usa para juntar los
-      // tickets del mismo pedido que salieron por sectores distintos.
-      daily_number: order?.daily_number ?? null,
-      table_label: sanitizeTicketText(order?.tables?.label) ?? "—",
-      // Destino del pedido: delivery / retiro no tienen mesa (salía «MESA —»).
-      delivery_type: (order?.delivery_type ?? null) as
-        | "dine_in"
-        | "delivery"
-        | "pickup"
-        | null,
-      // Indicación del encargado para cocina («junto con la mesa 5»). NO es
-      // `delivery_notes` —la nota del cliente sobre la entrega—, que va al
-      // ticket de control y no le sirve a la parrilla.
-      kitchen_notes: sanitizeTicketText(order?.kitchen_notes),
-      // Para cuándo el plato tiene que estar LISTO (spec 127). Va formateada
-      // como `HH:MM` del local: el armador del ticket es puro y no resuelve TZ.
-      // Es la que encabeza la comanda; la nota de arriba pasó a ser el renglón
-      // de abajo. Campo aditivo — un agente viejo lo ignora.
-      kitchen_time: horaDeCocina(order?.kitchen_at ?? null),
-      // La observación de la tanda (spec 128): lo que el mozo escribió para
-      // este envío, igual en las comandas de todos sus sectores. Campo
-      // aditivo — un agente viejo lo ignora e imprime el ticket de siempre.
-      comanda_notes: sanitizeTicketText(c.notes as string | null),
-      // Con qué combina: lo del MISMO envío que sale de los otros sectores.
-      otros_sectores: agruparOtrosSectores(
-        otrosPorPedido.get(order?.id) ?? [],
-        c.station_id as string | null,
-        c.emitted_at as string | null,
-      ),
-      items: ((c.comanda_items ?? []) as unknown[]).map((ci) => {
-        const item = ci as {
-          order_item_id: string;
-          order_items: {
-            id: string;
-            quantity: number;
-            notes: string | null;
-            unit_price_cents: number;
-            parent_order_item_id: string | null;
-            parent: { product_name: string } | null;
-            products: { name: string } | null;
-            order_item_modifiers: { modifiers: { name: string } | null }[];
+      const comanda = {
+        comanda_id: c.id,
+        station_id: c.station_id,
+        station_name: sanitizeTicketText(station?.name) ?? "—",
+        // Destino de impresión del sector (spec 28). El agente imprime en esta IP
+        // sin mapeo local; si es null, saltea la comanda y la deja `pendiente`.
+        printer_ip: station?.printer_ip ?? null,
+        printer_port: station?.printer_port ?? 9100,
+        printer_enabled: station?.printer_enabled ?? true,
+        batch: c.batch,
+        emitted_at: c.emitted_at,
+        // Spec 049: comanda anulada → el agente imprime un ticket «ANULADA».
+        // Campos aditivos: un agente viejo los ignora y reimprime el ticket normal.
+        cancelled: Boolean(c.cancelled_at),
+        cancelled_reason: sanitizeTicketText(
+          c.cancelled_reason as string | null,
+        ),
+        // Reimpresión pedida (spec 35): editar/reimprimir vuelve a mandar la
+        // comanda. El agente imprime un ticket «REIMPRESIÓN» para que cocina sepa
+        // que reemplaza a uno anterior. Campo aditivo (un agente viejo lo ignora).
+        reprint: Boolean(c.reprint_requested_at),
+        // El número del pedido del día: lo que cocina usa para juntar los
+        // tickets del mismo pedido que salieron por sectores distintos.
+        daily_number: order?.daily_number ?? null,
+        table_label: sanitizeTicketText(order?.tables?.label) ?? "—",
+        // Destino del pedido: delivery / retiro no tienen mesa (salía «MESA —»).
+        delivery_type: (order?.delivery_type ?? null) as
+          | "dine_in"
+          | "delivery"
+          | "pickup"
+          | null,
+        // Indicación del encargado para cocina («junto con la mesa 5»). NO es
+        // `delivery_notes` —la nota del cliente sobre la entrega—, que va al
+        // ticket de control y no le sirve a la parrilla.
+        kitchen_notes: sanitizeTicketText(order?.kitchen_notes),
+        // Para cuándo el plato tiene que estar LISTO (spec 127). Va formateada
+        // como `HH:MM` del local: el armador del ticket es puro y no resuelve TZ.
+        // Es la que encabeza la comanda; la nota de arriba pasó a ser el renglón
+        // de abajo. Campo aditivo — un agente viejo lo ignora.
+        kitchen_time: horaDeCocina(order?.kitchen_at ?? null),
+        // La observación de la tanda (spec 128): lo que el mozo escribió para
+        // este envío, igual en las comandas de todos sus sectores. Campo
+        // aditivo — un agente viejo lo ignora e imprime el ticket de siempre.
+        comanda_notes: sanitizeTicketText(c.notes as string | null),
+        // Con qué combina: lo del MISMO envío que sale de los otros sectores.
+        otros_sectores: agruparOtrosSectores(
+          otrosPorPedido.get(order?.id) ?? [],
+          c.station_id as string | null,
+          c.emitted_at as string | null,
+        ),
+        items: ((c.comanda_items ?? []) as unknown[]).map((ci) => {
+          const item = ci as {
+            order_item_id: string;
+            order_items: {
+              id: string;
+              quantity: number;
+              notes: string | null;
+              unit_price_cents: number;
+              parent_order_item_id: string | null;
+              parent: { product_name: string } | null;
+              products: { name: string } | null;
+              order_item_modifiers: { modifiers: { name: string } | null }[];
+            };
           };
-        };
-        return {
-          product_name: sanitizeTicketText(item.order_items?.products?.name) ?? "—",
-          quantity: item.order_items?.quantity ?? 1,
-          notes: sanitizeTicketText(item.order_items?.notes),
-          modifiers: (item.order_items?.order_item_modifiers ?? [])
-            .map((m) => sanitizeTicketText(m.modifiers?.name))
-            .filter(Boolean),
-          // De qué menú del día viene el plato (spec 145). El combo se guarda
-          // partido: el nombre del menú vive en el PADRE, que no tiene sector y
-          // por eso nunca llegó a una comandera. Se sube acá para que el hijo
-          // —que sí va a cocina— lo lleve impreso. Es el `product_name` del
-          // padre y no `daily_menus.name`: snapshot, como `modifier_name`.
-          combo_name: sanitizeTicketText(item.order_items?.parent?.product_name),
-        };
-      }),
-    };
-    // Spec 051: el server pre-renderiza el ticket (ESC/POS en base64 + texto
-    // plano). El agente relay lo imprime tal cual; un agente viejo ignora estos
-    // campos y renderiza con su lógica local (aditivo → retrocompat).
-    const content = buildComandaContent(comanda);
-    return {
-      ...comanda,
-      content_escpos_b64: content.escpos_b64,
-      content_plain: content.plain,
-    };
-  });
+          return {
+            product_name:
+              sanitizeTicketText(item.order_items?.products?.name) ?? "—",
+            quantity: item.order_items?.quantity ?? 1,
+            notes: sanitizeTicketText(item.order_items?.notes),
+            modifiers: (item.order_items?.order_item_modifiers ?? [])
+              .map((m) => sanitizeTicketText(m.modifiers?.name))
+              .filter(Boolean),
+            // De qué menú del día viene el plato (spec 145). El combo se guarda
+            // partido: el nombre del menú vive en el PADRE, que no tiene sector y
+            // por eso nunca llegó a una comandera. Se sube acá para que el hijo
+            // —que sí va a cocina— lo lleve impreso. Es el `product_name` del
+            // padre y no `daily_menus.name`: snapshot, como `modifier_name`.
+            combo_name: sanitizeTicketText(
+              item.order_items?.parent?.product_name,
+            ),
+          };
+        }),
+      };
+      // Spec 051: el server pre-renderiza el ticket (ESC/POS en base64 + texto
+      // plano). El agente relay lo imprime tal cual; un agente viejo ignora estos
+      // campos y renderiza con su lógica local (aditivo → retrocompat).
+      const content = buildComandaContent(comanda);
+      return {
+        ...comanda,
+        content_escpos_b64: content.escpos_b64,
+        content_plain: content.plain,
+      };
+    });
 
   // ── Controles de pedido (spec 063) ────────────────────────────────────────
   // Viajan en el MISMO array que las comandas, con su propio UUID, su IP y su
@@ -287,7 +292,7 @@ export async function GET(req: Request) {
   // Cada familia de papel va aislada: un bug armando el control, la cuenta o la
   // factura NO puede dejar a cocina sin comandas. Es la parte crítica de este
   // endpoint y la única que, si falla, para el local.
-  const [controls, cuentas, facturas] = await Promise.all([
+  const [controls, cuentas, facturas, cierres] = await Promise.all([
     safePrintables("control", () =>
       buildPrintableControlTickets(service, businessId),
     ),
@@ -296,6 +301,9 @@ export async function GET(req: Request) {
     ),
     safePrintables("factura", () =>
       buildPrintableFacturaTickets(service, businessId),
+    ),
+    safePrintables("cierre", () =>
+      buildPrintableCierreTickets(service, businessId),
     ),
   ]);
 
@@ -310,7 +318,13 @@ export async function GET(req: Request) {
   // pisando comandas que el otro ya imprimió bien.
   //
   // Un negocio de un solo agente tiene `printerScope` null y no filtra nada.
-  const trabajos = [...printable, ...controls, ...cuentas, ...facturas].filter(
+  const trabajos = [
+    ...printable,
+    ...controls,
+    ...cuentas,
+    ...facturas,
+    ...cierres,
+  ].filter(
     (t) => alcanzaLaImpresora(agente.printerScope, t.printer_ip),
   );
 
@@ -494,7 +508,11 @@ async function buildPrintableControlTickets(
     control_printer_enabled: boolean | null;
   } | null;
 
-  if (!biz || !biz.control_printer_ip?.trim() || biz.control_printer_enabled === false) {
+  if (
+    !biz ||
+    !biz.control_printer_ip?.trim() ||
+    biz.control_printer_enabled === false
+  ) {
     return [];
   }
 
@@ -594,7 +612,8 @@ async function buildPrintableControlTickets(
           product_name: sanitizeTicketText(it.products?.name) ?? "—",
           quantity: it.quantity,
           line_total_cents: it.unit_price_cents * it.quantity,
-          notes: sanitizeTicketText(it.notes),
+          // `notes` NO viaja: es la aclaración del mozo para la cocina y este
+          // papel lo ve el cliente. Va en la comanda, no acá.
           modifiers: (it.order_item_modifiers ?? [])
             .map((m) => sanitizeTicketText(m.modifiers?.name))
             .filter(Boolean),
@@ -657,18 +676,12 @@ export async function POST(req: Request) {
   // era opcional y el check se salteaba al omitirlo, dejando transicionar
   // comandas de cualquier negocio con la key global (security review #4).
   if (!body.business_id) {
-    return NextResponse.json(
-      { error: "missing business_id" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "missing business_id" }, { status: 400 });
   }
 
   const comandaId = body.comanda_id;
   if (!comandaId) {
-    return NextResponse.json(
-      { error: "missing comanda_id" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "missing comanda_id" }, { status: 400 });
   }
   const result = body.result ?? "ok";
 
@@ -686,12 +699,7 @@ export async function POST(req: Request) {
     // Specs 063 + 080: puede ser un control de pedido o una cuenta. El agente
     // reporta cualquier impresión con el campo `comanda_id`, así que el id se
     // resuelve contra `print_jobs` antes de dar por perdido el reporte.
-    return handlePrintJobReport(
-      service,
-      comandaId,
-      body.business_id,
-      result,
-    );
+    return handlePrintJobReport(service, comandaId, body.business_id, result);
   }
 
   // Ownership por tenant (spec 36): la key del agente es global, así que
@@ -764,10 +772,7 @@ export async function POST(req: Request) {
 
   if (error) {
     console.error("print-agent confirm", error);
-    return NextResponse.json(
-      { error: "update failed" },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: "update failed" }, { status: 500 });
   }
 
   return NextResponse.json({ status: "en_preparacion", changed: true });
@@ -981,7 +986,7 @@ async function buildPrintableCuentaTickets(
           product_name: sanitizeTicketText(it.products?.name) ?? "—",
           quantity: it.quantity,
           line_total_cents: it.unit_price_cents * it.quantity,
-          notes: sanitizeTicketText(it.notes),
+          // `notes` NO viaja: ver el comentario del control de pedido.
         })),
     };
 
@@ -1000,6 +1005,152 @@ async function buildPrintableCuentaTickets(
       reprint: Boolean(j.reprint_requested_at),
       table_label: data.table_label,
       items: data.items ?? [],
+      content_escpos_b64: content.escpos_b64,
+      content_plain: content.plain,
+    });
+  }
+  return out;
+}
+
+/**
+ * Los cierres de caja pendientes de imprimir (spec 139 · Parte B).
+ *
+ * Sale por la **misma comandera que la cuenta de las mesas** — decisión de Juan
+ * (2026-09-03). En golf y kcc esa térmica y la de control son la misma máquina,
+ * así que esto precisa la D12 en vez de contradecirla; el fallback está en
+ * `resolveCierrePrinter` y ahí se explica por qué hace falta.
+ *
+ * El contenido se arma **del snapshot congelado** (`caja_cortes.resumen`), no de
+ * la base viva: el papel dice lo que el encargado vio al cerrar, y una
+ * corrección posterior (spec 070) no lo puede mover. Un corte anterior a la
+ * spec no tiene snapshot y **se saltea** — mejor no imprimir que imprimir una
+ * reconstrucción que nadie firmó.
+ */
+async function buildPrintableCierreTickets(
+  service: ReturnType<typeof createSupabaseServiceClient>,
+  businessId: string,
+) {
+  const { data: bizRow } = await service
+    .from("businesses")
+    .select(
+      "name, address, afip_cuit, cuenta_printer_ip, cuenta_printer_port, cuenta_printer_enabled, control_printer_ip, control_printer_port, control_printer_enabled",
+    )
+    .eq("id", businessId)
+    .maybeSingle();
+  const biz = bizRow as {
+    name: string;
+    address: string | null;
+    afip_cuit: string | null;
+    cuenta_printer_ip: string | null;
+    cuenta_printer_port: number | null;
+    cuenta_printer_enabled: boolean | null;
+    control_printer_ip: string | null;
+    control_printer_port: number | null;
+    control_printer_enabled: boolean | null;
+  } | null;
+  if (!biz) return [];
+
+  const printer = resolveCierrePrinter(biz);
+  // Sin destino no se entrega: queda pendiente para cuando lo configuren.
+  if (!printer) return [];
+
+  const { data: jobs, error } = await service
+    .from("print_jobs")
+    .select(
+      `
+      id,
+      emitted_at,
+      reprint_requested_at,
+      caja_cortes!inner(
+        numero,
+        resumen,
+        created_at,
+        closing_notes,
+        cajas(name)
+      )
+    `,
+    )
+    .eq("business_id", businessId)
+    .eq("kind", "cierre")
+    .eq("status", "pendiente")
+    .order("emitted_at", { ascending: true });
+
+  if (error) {
+    // No tumba el GET: las comandas de cocina se devuelven igual.
+    console.error("print-agent GET · print_jobs cierre", error);
+    return [];
+  }
+
+  const out = [];
+  for (const j of jobs ?? []) {
+    const corte = j.caja_cortes as unknown as {
+      numero: number | null;
+      resumen: CierreResumenSnapshot | null;
+      created_at: string;
+      closing_notes: string | null;
+      cajas: { name: string } | { name: string }[] | null;
+    };
+    if (!corte?.resumen) continue;
+    const r = corte.resumen;
+    const caja = Array.isArray(corte.cajas) ? corte.cajas[0] : corte.cajas;
+
+    const data: CierreTicketData = {
+      negocio: {
+        name: sanitizeTicketText(biz.name) ?? "—",
+        address: sanitizeTicketText(biz.address),
+        cuit: sanitizeTicketText(biz.afip_cuit),
+        // Razón social, sucursal y condición de IVA todavía no viven en
+        // `businesses` (issue #134): se omiten en vez de inventarse.
+        razon_social: null,
+        sucursal: null,
+        condicion_iva: null,
+      },
+      caja_name: sanitizeTicketText(r.caja_name ?? caja?.name) ?? "—",
+      numero: corte.numero,
+      apertura: r.periodo_desde,
+      cierre: corte.created_at,
+      encargado_name: sanitizeTicketText(r.encargado_name ?? null),
+      movimientos: {
+        ingresos: (r.movimientos?.ingresos ?? []).map((m) => ({
+          detalle: sanitizeTicketText(m.detalle) ?? "Ingreso",
+          total_cents: m.total_cents,
+        })),
+        egresos: (r.movimientos?.egresos ?? []).map((m) => ({
+          detalle: sanitizeTicketText(m.detalle) ?? "Sangría",
+          total_cents: m.total_cents,
+        })),
+      },
+      ventas_por_origen: r.ventas_por_origen_lineas ?? [],
+      ventas_por_metodo: r.ventas_por_metodo_lineas ?? [],
+      resumen: {
+        apertura_cents: r.desglose_esperado.apertura_cents,
+        efectivo_cents: r.desglose_esperado.efectivo_cents,
+        ingresos_cents: r.desglose_esperado.ingresos_cents,
+        sangrias_cents: r.desglose_esperado.sangrias_cents,
+        esperado_cents: r.expected_cash_cents,
+        contado_cents: r.closing_cash_cents,
+        diferencia_cents: r.difference_cents,
+        propinas_cents: r.total_propinas_cents,
+      },
+      notas: sanitizeTicketText(corte.closing_notes),
+      reimpresion: Boolean(j.reprint_requested_at),
+    };
+
+    const content = buildCierreContent(data);
+    out.push({
+      comanda_id: j.id,
+      station_id: null,
+      station_name: "CIERRE",
+      printer_ip: printer.ip,
+      printer_port: printer.port,
+      printer_enabled: true,
+      batch: 1,
+      emitted_at: j.emitted_at,
+      cancelled: false,
+      cancelled_reason: null,
+      reprint: Boolean(j.reprint_requested_at),
+      table_label: data.caja_name,
+      items: [],
       content_escpos_b64: content.escpos_b64,
       content_plain: content.plain,
     });

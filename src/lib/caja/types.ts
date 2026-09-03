@@ -19,6 +19,10 @@ export type CajaCorte = {
   closing_notes: string | null;
   denomination_count: Record<string, number> | null;
   created_at: string;
+  /** Correlativo por negocio (spec 139 · D14). NULL en cortes anteriores. */
+  numero?: number | null;
+  /** Snapshot congelado del papel (spec 139 · D9). NULL en cortes anteriores. */
+  resumen?: CierreResumenSnapshot | null;
 };
 
 export type CajaMovimientoKind = "sangria" | "ingreso";
@@ -134,6 +138,10 @@ export type CajaLiveStats = {
   ventas_por_metodo: Record<PaymentMethod, number>;
   ventas_por_origen: Record<VentaOrigen, number>;
   cobros_count: number;
+  /** Cuántos cobros por método — el papel del cierre lleva columna «Cant». */
+  cobros_por_metodo: Record<PaymentMethod, number>;
+  /** Idem por origen. */
+  cobros_por_origen: Record<VentaOrigen, number>;
   expected_cash_cents: number;
   periodo_desde: string;
   /**
@@ -160,6 +168,35 @@ export type CajaLiveStats = {
 export type CajaConEstado = Caja & {
   ultimo_corte: CajaCorte | null;
   periodo_desde: string;
+};
+
+/**
+ * Lo que se congela en `caja_cortes.resumen` al cerrar (spec 139 · D9).
+ *
+ * Es el contrato del **papel**: el ticket se arma de acá y no de la base viva,
+ * así que una corrección posterior (spec 070) no puede mover un cierre que
+ * alguien ya firmó. `version` existe para poder cambiar la forma sin romper los
+ * cierres viejos que ya están impresos y archivados.
+ */
+export type CierreResumenSnapshot = {
+  version: 1;
+  caja_name: string;
+  encargado_name: string | null;
+  periodo_desde: string;
+  total_ventas_cents: number;
+  total_propinas_cents: number;
+  cobros_count: number;
+  expected_cash_cents: number;
+  closing_cash_cents: number;
+  difference_cents: number;
+  desglose_esperado: CajaLiveStats["desglose_esperado"];
+  /** Línea por línea, con su motivo — así lo imprime MaxiRest. */
+  movimientos: {
+    ingresos: { detalle: string; total_cents: number }[];
+    egresos: { detalle: string; total_cents: number }[];
+  };
+  ventas_por_origen_lineas: { detalle: string; total_cents: number; cant: number }[];
+  ventas_por_metodo_lineas: { detalle: string; total_cents: number; cant: number }[];
 };
 
 // ── El cierre archivado (spec 149) ──────────────────────────────

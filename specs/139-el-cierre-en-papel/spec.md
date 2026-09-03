@@ -2,9 +2,10 @@
 
 **Issue:** [#210](https://github.com/gachetponzellini/RestaurantOS-app/issues/210) ·
 **Milestone:** Post-demo · Growth & hardening ·
-**Estado:** **parte A implementada y verificada en vivo** (2026-09-01, migración
-`0056` aplicada al cloud). La parte B —el papel— espera la foto del ticket que
-el local usa hoy.
+**Estado:** **parte A implementada y verificada en vivo** (2026-09-01, `0056`).
+**Parte B implementada** (2026-09-03, `0063` + `0064` aplicadas al cloud) —
+**sin verificar en vivo por pedido explícito de Juan**: *"no lo pruebes, que no
+salga ninguna impresión"*. Typecheck y tests en verde; ni un job encolado.
 
 **Input:** Juan, 2026-09-01: *"hay que hacer la spec para la impresión del ticket
 al cierre del turno, y la rendición debería de ser obligatoria y manual. Primero
@@ -197,8 +198,20 @@ agente imprime lo que le llega, el POST confirma por `comanda_id` y
 recompilado en el local** — que con las PCs de golf, por TeamViewer, no es un
 detalle menor.
 
-**D12 · El papel sale por la comandera de control.** Decisión de Juan
-(2026-09-01): *"el papel debería de imprimirse en la comandera de control"*.
+**D12 (corregida el 2026-09-03) · El papel sale por la comandera de la cuenta,
+con la de control como fallback.** Juan: *"debería de salir por la misma
+comandera que por la que salen los tickets para las mesas"*.
+
+No contradice lo que había: en los **dos locales reales esa térmica y la de
+control son la misma máquina** (golf `192.168.100.210`, kcc `192.168.10.210`).
+Lo que cambia es cómo se resuelve, y el detalle importa: la cuenta se configura
+**por salón** y un cierre es de una **caja**, no de un salón. En golf la IP está
+cargada por salón en la cuenta y por negocio en control, así que resolver sólo
+por la cuenta daría `null` y **el papel no saldría nunca, en silencio**. Por eso
+`resolveCierrePrinter` cae a la de control. Un `enabled: false` en la de la
+cuenta apaga las dos: si no, apagarla no serviría de nada.
+
+Lo que decía antes:
 `businesses.control_printer_ip` — la del mostrador, la misma que escupe el
 control que se lleva el repartidor. **Sin columnas nuevas y sin cadena de
 fallbacks**: es la única térmica que los dos locales reales tienen configurada

@@ -49,3 +49,46 @@ export function resolveCuentaPrinter(
 
   return null;
 }
+
+/**
+ * Comandera donde sale el papel del cierre de caja (spec 139 · Parte B).
+ *
+ * Juan (2026-09-03): *"debería de salir por la misma comandera que por la que
+ * salen los tickets para las mesas"*. En los dos locales reales **esa comandera
+ * y la de control son la misma máquina** — golf `192.168.100.210`, kcc
+ * `192.168.10.210` — así que esto no contradice la D12 original, la precisa.
+ *
+ * Por qué hay fallback y no basta con la de la cuenta: la cuenta se configura
+ * **por salón** (un local con terraza le pone una a cada uno) y un cierre es de
+ * una **caja**, no de un salón. En golf la IP está cargada por salón en la
+ * cuenta y por negocio en control: sin el fallback, `resolveCuentaPrinter(null,
+ * biz)` da `null` y el papel del cierre **no saldría nunca**, en silencio.
+ *
+ * El orden expresa la intención igual: primero la de la cuenta si el negocio la
+ * tiene a nivel local, y si no la de control, que es la misma térmica del
+ * mostrador. Un `enabled: false` explícito en la de la cuenta apaga las dos:
+ * apagarla y que igual saliera por la otra sería no poder apagarla.
+ */
+export function resolveCierrePrinter(
+  business: {
+    cuenta_printer_ip?: string | null;
+    cuenta_printer_port?: number | null;
+    cuenta_printer_enabled?: boolean | null;
+    control_printer_ip?: string | null;
+    control_printer_port?: number | null;
+    control_printer_enabled?: boolean | null;
+  } | null,
+): PrinterTarget | null {
+  if (business?.cuenta_printer_enabled === false) return null;
+
+  const cuenta = resolveCuentaPrinter(null, business);
+  if (cuenta) return cuenta;
+
+  if (business?.control_printer_enabled === false) return null;
+  const controlIp = business?.control_printer_ip?.trim();
+  if (controlIp) {
+    return { ip: controlIp, port: business?.control_printer_port ?? 9100 };
+  }
+
+  return null;
+}

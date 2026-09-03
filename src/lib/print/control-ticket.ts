@@ -190,6 +190,8 @@ export function buildControlTicketLines(c: ControlTicketData): Line[] {
         push(l, { size: "sm" });
     // La nota del ítem NO va, por lo mismo que en la cuenta: es la aclaración
     // del mozo para la cocina, y este papel lo ve el cliente que retira.
+    if (it.notes)
+      for (const l of wrap(`obs: ${it.notes}`, COLS.sm)) push(l, { size: "sm" });
     push(row("", money(it.line_total_cents)), { size: "sm" });
   }
   if (items.length === 0) push("(sin items)");

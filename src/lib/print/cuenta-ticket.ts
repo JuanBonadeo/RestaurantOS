@@ -131,6 +131,7 @@ export function buildCuentaTicketLines(c: CuentaTicketData): Line[] {
     // Este papel se lo lleva el cliente, y ahí esas aclaraciones son ruido en
     // el mejor caso y una nota sobre él mismo en el peor. Va en la comanda,
     // que es para quien cocina. Pedido de la encargada de golf (2026-09-03).
+    if (it.notes) for (const l of wrap(`obs: ${it.notes}`, COLS.sm)) push(l);
     push(row("", money(it.line_total_cents)));
   }
   if (items.length === 0) push("(sin consumo)");
