@@ -47,7 +47,9 @@ export type SectionAccess = "full" | "limited" | "none";
 // acciones que el encargado SÍ hace viven en OTRAS superficies que ya ve, no en
 // estas secciones de administración:
 //   - cortes/sangría → se hacen en Operación (`operacion?tab=caja`), no en la
-//     sección Cajas (que es config de caja, admin). Por eso `cajas` = none p/ encargado.
+//     sección Caja. Eso sigue siendo cierto, pero ya NO implica que el
+//     encargado no vea la sección: desde la spec 153 ahí vive también su
+//     historial de cierres y el libro. Ver la nota sobre `cajas` más abajo.
 //   - emitir factura → también en el flujo de cobro (mozo/encargado). Pero eso
 //     NO alcanzaba: la sección Facturación es el único lugar donde se ve el
 //     comprobante después (reintentar una fallida, anular con nota de crédito,
@@ -88,9 +90,21 @@ const MATRIX: Record<AdminSection, Record<BusinessRole, SectionAccess>> = {
     terminal: "none",
     personal: "none",
   },
+  // Spec 153 · D6 — el encargado entró acá el 2026-09-03, y esto REVIERTE la
+  // razón anotada arriba. Era buena mientras la sección fuera sólo config: las
+  // acciones del encargado (cortes, sangrías) viven en Operación, así que no
+  // necesitaba la sección.
+  //
+  // Dejó de serlo cuando la sección pasó a ser **todo lo de la plata** — las
+  // cajas, el historial de cierres (spec 149) y el libro (spec 070) bajo un
+  // mismo techo. Negarle al encargado su propio historial porque comparte ruta
+  // con el botón de crear caja es negarle su trabajo.
+  //
+  // Lo que gana de verdad y no es de sólo mirar: **pausar una caja**, y una
+  // caja pausada no aparece para cobrar. Conversado con Juan y aceptado.
   cajas: {
     admin: "full",
-    encargado: "none",
+    encargado: "full",
     mozo: "none",
     terminal: "none",
     personal: "none",

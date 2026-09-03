@@ -11,6 +11,7 @@ import { Diferencia } from "@/components/admin/local/cierres-client";
 import { ReimprimirCierreBoton } from "@/components/admin/local/reimprimir-cierre-boton";
 import { MovimientoRow } from "@/components/admin/local/movimiento-row";
 import { duracionDelTurno } from "@/lib/caja/formato-cierre";
+import { diaOperativoDe } from "@/lib/caja/rango-fechas";
 import type { ResumenDeCorte } from "@/lib/caja/types";
 import { formatCurrency } from "@/lib/currency";
 import { cn } from "@/lib/utils";
@@ -59,7 +60,7 @@ export function ResumenDeCierre({
     <div className="space-y-7">
       <header className="space-y-3">
         <Link
-          href={`/${slug}/admin/operacion/cierres`}
+          href={`/${slug}/admin/caja/cierres`}
           className="inline-flex items-center gap-1 text-xs font-medium text-zinc-500 transition hover:text-zinc-900"
         >
           <ChevronLeft className="size-3.5" strokeWidth={2} />
@@ -115,7 +116,9 @@ export function ResumenDeCierre({
               disponible={corte.resumen != null}
             />
             <Link
-              href={`/${slug}/admin/operacion/movimientos?desde=${formatInTimeZone(new Date(resumen.periodo_desde), timezone, "yyyy-MM-dd")}&hasta=${formatInTimeZone(new Date(corte.created_at), timezone, "yyyy-MM-dd")}`}
+              // El libro se abre en el día operativo del cierre (spec 153): es
+              // el mismo turno, no la fecha de calendario del corte.
+              href={`/${slug}/admin/caja/movimientos?gran=dia&fecha=${diaOperativoDe(new Date(resumen.periodo_desde), timezone)}`}
               className="inline-flex items-center gap-1.5 rounded-full bg-white px-4 py-2 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200/70 transition hover:bg-zinc-50"
             >
               <ScrollText className="size-3.5" />

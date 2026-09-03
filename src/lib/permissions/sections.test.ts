@@ -51,8 +51,11 @@ describe("sectionAccess / canSee", () => {
       expect(canSee("reservas", "encargado")).toBe(true);
     });
 
-    it("NO ve la sección admin de Cajas (sus cortes viven en Operación)", () => {
-      expect(canSee("cajas", "encargado")).toBe(false);
+    // Spec 153 · D6 — antes era `none`, y con razón: la sección era sólo
+    // config de caja. Dejó de serlo cuando pasó a ser todo lo de la plata —
+    // ahí viven su historial de cierres (spec 149) y el libro (spec 070).
+    it("ve la sección Caja: ahí está su historial, no sólo la config", () => {
+      expect(canSee("cajas", "encargado")).toBe(true);
     });
 
     // #139 — antes era `none` porque se asumía que el encargado emitía "en el

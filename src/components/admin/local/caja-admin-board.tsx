@@ -188,7 +188,7 @@ export function CajaAdminBoard({
               </p>
             </div>
             <Link
-              href={`/${slug}/admin/cajas`}
+              href={`/${slug}/admin/caja`}
               className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition hover:brightness-95"
               style={{
                 background: "var(--brand, #18181B)",
@@ -247,7 +247,7 @@ export function CajaAdminBoard({
 
       <div className="pt-1 text-center">
         <Link
-          href={`/${slug}/admin/cajas`}
+          href={`/${slug}/admin/caja`}
           className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-500 transition hover:text-zinc-900"
         >
           <Settings className="size-3" />
@@ -349,7 +349,7 @@ function CajaCard({
               <>
                 <span className="mx-1 text-zinc-300">·</span>
                 <Link
-                  href={`/${slug}/admin/operacion/cierres?caja=${caja.id}`}
+                  href={`/${slug}/admin/caja/cierres?caja=${caja.id}`}
                   className="font-medium underline underline-offset-2 transition hover:text-zinc-900"
                 >
                   ver cierres anteriores
@@ -463,7 +463,7 @@ function CajaCard({
               {/* El período es el hot path del turno; el libro (spec 070) es el
                   histórico con filtros, los anulados y la corrección. */}
               <Link
-                href={`/${slug}/admin/operacion/movimientos?caja=${caja.id}`}
+                href={`/${slug}/admin/caja/movimientos?caja=${caja.id}`}
                 className="text-xs font-semibold text-zinc-500 underline-offset-2 hover:text-zinc-800 hover:underline"
               >
                 Ver todos
@@ -481,7 +481,7 @@ function CajaCard({
             <ul className="mt-3 max-h-[28rem] divide-y divide-zinc-100 overflow-y-auto rounded-lg ring-1 ring-zinc-200/70">
               {entries.map((e) => {
                 const dia = e.createdAt.slice(0, 10);
-                const href = `/${slug}/admin/operacion/movimientos?caja=${caja.id}&desde=${dia}`;
+                const href = `/${slug}/admin/caja/movimientos?caja=${caja.id}&gran=dia&fecha=${dia}`;
                 return e.kind === "cobro" ? (
                   <CobroRow key={`p-${e.data.id}`} payment={e.data} href={href} />
                 ) : (

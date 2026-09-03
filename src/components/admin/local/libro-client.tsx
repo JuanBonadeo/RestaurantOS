@@ -142,8 +142,9 @@ function valorLegible(
 }
 
 type FiltrosUI = {
-  desde: string;
-  hasta: string;
+  /** El período lo maneja `FiltroFechas` (spec 153); acá sólo viaja para conservarlo. */
+  gran: string;
+  fecha: string;
   caja: string;
   tipo: string;
   metodo: string;
@@ -181,15 +182,15 @@ export function LibroClient({
   function aplicar(patch: Partial<FiltrosUI>) {
     const next = { ...filtros, ...patch };
     const params = new URLSearchParams();
-    if (next.desde) params.set("desde", next.desde);
-    if (next.hasta && next.hasta !== next.desde) params.set("hasta", next.hasta);
+    params.set("gran", next.gran);
+    params.set("fecha", next.fecha);
     if (next.caja) params.set("caja", next.caja);
     if (next.tipo) params.set("tipo", next.tipo);
     if (next.metodo) params.set("metodo", next.metodo);
     if (next.mozo) params.set("mozo", next.mozo);
     if (next.q) params.set("q", next.q);
     startTransition(() => {
-      router.push(`/${slug}/admin/operacion/movimientos?${params.toString()}`);
+      router.push(`/${slug}/admin/caja/movimientos?${params.toString()}`);
     });
   }
 
@@ -200,24 +201,6 @@ export function LibroClient({
     <div className="space-y-4">
       {/* Filtros */}
       <div className="flex flex-wrap items-end gap-3 rounded-2xl bg-white p-4 ring-1 ring-zinc-200/70">
-        <div className="grid gap-1">
-          <Label className="text-xs text-zinc-500">Desde</Label>
-          <Input
-            type="date"
-            value={filtros.desde}
-            className="h-10 w-[10.5rem] text-base"
-            onChange={(e) => aplicar({ desde: e.target.value })}
-          />
-        </div>
-        <div className="grid gap-1">
-          <Label className="text-xs text-zinc-500">Hasta</Label>
-          <Input
-            type="date"
-            value={filtros.hasta}
-            className="h-10 w-[10.5rem] text-base"
-            onChange={(e) => aplicar({ hasta: e.target.value })}
-          />
-        </div>
         <div className="grid gap-1">
           <Label className="text-xs text-zinc-500">Caja</Label>
           <select

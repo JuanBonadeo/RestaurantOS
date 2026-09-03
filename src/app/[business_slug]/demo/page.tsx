@@ -201,7 +201,7 @@ export default async function DemoHubPage({
           icon: Map,
         },
         {
-          href: `/${business_slug}/admin/cajas`,
+          href: `/${business_slug}/admin/caja`,
           title: "Cajas",
           description: "Controlá las cajas, arqueos y movimientos de efectivo.",
           icon: CreditCard,

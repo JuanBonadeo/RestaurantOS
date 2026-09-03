@@ -91,6 +91,6 @@ export async function reimprimirCierre(
     return actionError("No pudimos mandar el cierre a la impresora.");
   }
 
-  revalidatePath(`/${businessSlug}/admin/operacion/cierres/${corteId}`);
+  revalidatePath(`/${businessSlug}/admin/caja/cierres/${corteId}`);
   return actionOk({ print_job_id: job.id });
 }

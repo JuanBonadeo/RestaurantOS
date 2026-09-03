@@ -4,7 +4,7 @@ import { ResumenDeCierre } from "@/components/admin/local/resumen-de-cierre";
 import { PageShell } from "@/components/admin/shell/page-shell";
 import { ensureAdminAccess } from "@/lib/admin/context";
 import { getResumenDeCorte } from "@/lib/caja/queries";
-import { canHacerCorte } from "@/lib/permissions/can";
+import { canSee } from "@/lib/permissions/sections";
 import { getBusiness } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
@@ -21,7 +21,7 @@ export default async function ResumenDeCierrePage({
   if (!business) notFound();
 
   const ctx = await ensureAdminAccess(business.id, business_slug);
-  if (!ctx.isPlatformAdmin && (ctx.role === null || !canHacerCorte(ctx.role))) {
+  if (!canSee("cajas", ctx.role, { isPlatformAdmin: ctx.isPlatformAdmin })) {
     redirect(`/${business_slug}/admin/operacion`);
   }
 

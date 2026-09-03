@@ -2,7 +2,7 @@
 
 **Issue:** [#229](https://github.com/gachetponzellini/RestaurantOS-app/issues/229) ·
 **Milestone:** Post-demo · Growth & hardening ·
-**Estado:** 📋 propuesta (2026-09-03)
+**Estado:** ✅ implementada (2026-09-03)
 
 **Input:** Juan, 2026-09-03: *"habría que unificar las vistas de cajas y cierres
 de caja, siendo todo algo más un todo, también si podés la vista que se abre
@@ -184,18 +184,37 @@ paso, pero el arreglo es de esa issue, no de ésta.
 
 ## Verificación
 
-`pnpm typecheck` + `pnpm test` en verde.
+`pnpm typecheck` en 0 errores y **2223 tests unitarios en verde** (los 21
+`*.integration.test.ts` fallan por falta del stack local, sin aserciones rotas).
+`rango-fechas.test.ts` aporta 26: los bordes del día operativo (05:59 y 06:01
+caen en días distintos), las etiquetas en las tres granularidades, el cruce de
+fin de mes y de año, y que la basura en la URL caiga en el período corriente.
 
-Tests unitarios de `rango-fechas.ts`: los bordes del día operativo (un cierre a
-las 05:59 y otro a las 06:01 caen en días distintos), la etiqueta en las tres
-granularidades, y que el stepper no pase del presente.
+**Verificado en vivo en `demo`, con los dos roles.**
 
-Verify en vivo con **los dos roles**, que es lo que esta spec cambia:
+Como **Sofía (encargada)** en `/demo/admin/caja` — que hasta hoy no podía abrir:
 
-    node scripts/magic-link.mjs sofia@demo.test "/demo/admin/caja"
-    node scripts/magic-link.mjs terminal@demo.test "/demo/admin/caja"
+| | Caja Principal | Caja Bar |
+|---|---|---|
+| Adentro ahora | $ 280.500 | $ 0 |
+| Último cierre | jue 13/8 · 16:09 | lun 31/8 · 11:00 |
+| Cerró con | −$ 3.800 · «Faltó plata» | $ 0 · «Cerró justo» |
+| La operan | Pedro Mozo | **«Nadie asignado»** |
 
-Sofía tiene que entrar; `terminal` tiene que rebotar.
+La Caja Bar salió avisando *«El que cobre acá va a tener que rendirse a sí
+mismo»* — el caso de D3, con datos reales y sin que nadie lo buscara.
+
+El filtro: `?gran=mes&fecha=2026-08` etiqueta **«Agosto»** y trae los dos cortes
+de agosto. El redirect de `/admin/operacion/cierres?caja=abc` llega a
+`/admin/caja/cierres?caja=abc` **con el filtro puesto**.
+
+Como **`terminal`**: navegar a `/demo/admin/caja` rebota a `/admin/operacion`, y
+«Caja» no aparece en su menú (D7).
+
+### Nota sobre los cortes de `demo`
+
+Los dos son anteriores a la spec 139, así que no tienen `numero` y la columna
+«Último cierre» muestra «—». Es correcto: no se retro-numeran.
 
 ## Riesgo
 

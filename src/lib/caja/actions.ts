@@ -112,7 +112,7 @@ export async function crearCaja(
     return actionError(`No se pudo crear la caja: ${error.message}`);
   }
 
-  revalidatePath(`/${businessSlug}/admin/cajas`);
+  revalidatePath(`/${businessSlug}/admin/caja`);
   revalidatePath(`/${businessSlug}/admin/operacion`);
   return actionOk({
     id: (data as { id: string }).id,
@@ -158,7 +158,7 @@ export async function renombrarCaja(
     return actionError(`No se pudo renombrar la caja: ${error.message}`);
   }
 
-  revalidatePath(`/${businessSlug}/admin/cajas`);
+  revalidatePath(`/${businessSlug}/admin/caja`);
   revalidatePath(`/${businessSlug}/admin/operacion`);
   return actionOk({
     id: (data as { id: string }).id,
@@ -193,7 +193,7 @@ export async function setCajaActive(
     .eq("id", cajaId);
   if (error) return actionError(`No se pudo actualizar la caja: ${error.message}`);
 
-  revalidatePath(`/${businessSlug}/admin/cajas`);
+  revalidatePath(`/${businessSlug}/admin/caja`);
   revalidatePath(`/${businessSlug}/admin/operacion`);
   return actionOk(undefined);
 }
@@ -247,7 +247,7 @@ export async function setCajaDefault(
     .eq("id", cajaId);
   if (error) return actionError(`No se pudo actualizar la caja: ${error.message}`);
 
-  revalidatePath(`/${businessSlug}/admin/cajas`);
+  revalidatePath(`/${businessSlug}/admin/caja`);
   revalidatePath(`/${businessSlug}/admin/operacion`);
   return actionOk(undefined);
 }
@@ -785,7 +785,7 @@ export async function asignarCajaUsuario(
   if (error) return actionError(`No se pudo asignar la caja: ${error.message}`);
 
   revalidatePath(`/${businessSlug}/admin/operacion`);
-  revalidatePath(`/${businessSlug}/admin/cajas`);
+  revalidatePath(`/${businessSlug}/admin/caja`);
   return actionOk(undefined);
 }
 
@@ -817,7 +817,7 @@ export async function desasignarCajaUsuario(
   if (error) return actionError(`No se pudo desasignar: ${error.message}`);
 
   revalidatePath(`/${businessSlug}/admin/operacion`);
-  revalidatePath(`/${businessSlug}/admin/cajas`);
+  revalidatePath(`/${businessSlug}/admin/caja`);
   return actionOk(undefined);
 }
 

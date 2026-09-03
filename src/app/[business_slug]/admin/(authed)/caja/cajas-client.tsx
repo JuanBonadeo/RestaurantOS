@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Eye, EyeOff, Pencil, Plus, ScrollText, Wallet } from "lucide-react";
+import { Eye, Pencil, Plus, ScrollText, Wallet } from "lucide-react";
 import { toast } from "sonner";
 
 import { Surface } from "@/components/admin/shell/page-shell";
@@ -23,37 +23,61 @@ import {
   setCajaActive,
   setCajaDefault,
 } from "@/lib/caja/actions";
-import type { Caja } from "@/lib/caja/types";
+import { formatInTimeZone } from "date-fns-tz";
+import { es } from "date-fns/locale";
+
+import { Diferencia } from "@/components/admin/local/cierres-client";
+import type {
+  Caja,
+  CajaConEstado,
+  CajaLiveStats,
+  CorteDelHistorial,
+} from "@/lib/caja/types";
+import { formatCurrency } from "@/lib/currency";
+import { duracionDelTurno } from "@/lib/caja/formato-cierre";
 import { cn } from "@/lib/utils";
+
+/** Una caja con lo que está haciendo (spec 153 · D3). */
+export type CajaConVida = {
+  caja: CajaConEstado;
+  stats: CajaLiveStats | null;
+  ultimoCorte: CorteDelHistorial | null;
+  operadores: string[];
+};
 
 type Props = {
   slug: string;
-  cajas: Caja[];
+  timezone: string;
+  cajas: CajaConVida[];
+  /** El encargado entró acá en la spec 153; el permiso de tocar es aparte. */
+  puedeConfigurar: boolean;
 };
 
 /**
- * Pantalla de configuración de cajas físicas. Solo admin.
+ * Las cajas del local (spec 153 · D3).
  *
- * Acciones disponibles:
- *  - Crear nueva caja (botón "+ Nueva caja" en el header).
- *  - Renombrar (icono lápiz).
- *  - Deshabilitar (icono ojo tachado) — soft delete.
- *  - Re-habilitar una pausada (botón "Habilitar").
+ * **Dejó de ser una lista de config.** Antes mostraba nombre, renombrar y
+ * pausar: de una caja llamada «Caja Principal» no se aprendía nada. Ahora cada
+ * una dice qué está haciendo — cuánto hay adentro, cómo cerró la última vez y
+ * quién la opera — que es dato que ya se calculaba y no estaba junto en ningún
+ * lado.
  *
- * El día a día (sangrías, cortes, etc.) vive en
- * `/admin/operacion?tab=caja`. Acá solo se administra el catálogo — con la
- * salida al libro de movimientos (spec 070), que es adonde se va a mirar y
- * corregir lo que pasó por cada caja.
+ * El caso que esto resuelve solo: una caja **sin operadores asignados** no
+ * avisaba nada, y el que cobrara ahí terminaba rindiéndose a sí mismo
+ * (spec 139 · D3). Ahora se ve de un vistazo.
+ *
+ * El día a día (sangrías, cortes) sigue en `/admin/operacion?tab=caja`: acá se
+ * mira y se configura, no se opera.
  */
-export function CajasClient({ slug, cajas }: Props) {
+export function CajasClient({ slug, timezone, cajas, puedeConfigurar }: Props) {
   const router = useRouter();
   const [, startTransition] = useTransition();
 
   const [crearOpen, setCrearOpen] = useState(false);
   const [editing, setEditing] = useState<Caja | null>(null);
 
-  const activas = cajas.filter((c) => c.is_active);
-  const inactivas = cajas.filter((c) => !c.is_active);
+  const activas = cajas.filter((c) => c.caja.is_active);
+  const inactivas = cajas.filter((c) => !c.caja.is_active).map((c) => c.caja);
 
   const handleToggleActive = (caja: Caja, next: boolean) => {
     startTransition(async () => {
@@ -84,7 +108,7 @@ export function CajasClient({ slug, cajas }: Props) {
       {/* Acciones arriba a la derecha: el libro (lectura) y crear caja. */}
       <div className="flex items-center justify-end gap-2">
         <Link
-          href={`/${slug}/admin/operacion/movimientos`}
+          href={`/${slug}/admin/caja/movimientos`}
           className="inline-flex items-center gap-2 rounded-full bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-200"
         >
           <ScrollText className="size-4" />
@@ -142,26 +166,21 @@ export function CajasClient({ slug, cajas }: Props) {
         </Surface>
       )}
 
-      {/* Activas */}
       {activas.length > 0 && (
-        <Surface padding="default" className="space-y-3">
-          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
-            Activas · {activas.length}
-          </p>
-          <ul className="divide-y divide-zinc-100 rounded-xl ring-1 ring-zinc-200/70">
-            {activas.map((c, idx) => (
-              <CajaRow
-                key={c.id}
-                caja={c}
-                slug={slug}
-                stripe={idx % 2 === 1}
-                onRenombrar={() => setEditing(c)}
-                onDeshabilitar={() => handleToggleActive(c, false)}
-                onHacerDefault={() => handleSetDefault(c)}
-              />
-            ))}
-          </ul>
-        </Surface>
+        <div className="space-y-4">
+          {activas.map((v) => (
+            <CajaCard
+              key={v.caja.id}
+              vida={v}
+              slug={slug}
+              timezone={timezone}
+              puedeConfigurar={puedeConfigurar}
+              onRenombrar={() => setEditing(v.caja)}
+              onDeshabilitar={() => handleToggleActive(v.caja, false)}
+              onHacerDefault={() => handleSetDefault(v.caja)}
+            />
+          ))}
+        </div>
       )}
 
       {/* Inactivas */}
@@ -238,94 +257,207 @@ export function CajasClient({ slug, cajas }: Props) {
 
 // ── Fila de caja activa ─────────────────────────────────────────
 
-function CajaRow({
-  caja,
+/**
+ * Una caja con lo que está haciendo. El header lleva la identidad y las
+ * acciones; abajo, la franja de cuatro datos que antes no estaban en ningún
+ * lado juntos.
+ */
+function CajaCard({
+  vida,
   slug,
-  stripe,
+  timezone,
+  puedeConfigurar,
   onRenombrar,
   onDeshabilitar,
   onHacerDefault,
 }: {
-  caja: Caja;
+  vida: CajaConVida;
   slug: string;
-  stripe: boolean;
+  timezone: string;
+  puedeConfigurar: boolean;
   onRenombrar: () => void;
   onDeshabilitar: () => void;
   onHacerDefault: () => void;
 }) {
+  const { caja, stats, ultimoCorte, operadores } = vida;
+  // Los stats se piden en el server, pero una caja recién creada o una consulta
+  // que falló vuelven `null`: entonces no se sabe, que no es lo mismo que $0.
+  const seSabeCuantoHay = stats != null;
+
   return (
-    <li
-      className={cn(
-        "flex items-center justify-between gap-3 px-4 py-3",
-        stripe ? "bg-zinc-50/50" : "bg-white",
-      )}
-    >
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-700">
-          <Wallet className="size-4" />
-        </div>
-        <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-zinc-900">
-            {caja.name}
-          </p>
-          <p className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-emerald-700">
-            <span className="inline-flex items-center gap-1.5">
-              <span className="inline-block size-1.5 rounded-full bg-emerald-500" />
-              Activa
-            </span>
-            {caja.is_default && (
-              <span className="inline-flex items-center rounded-full bg-zinc-900 px-2 py-0.5 text-[0.65rem] font-semibold text-white">
-                Por defecto
-              </span>
+    <section className="overflow-hidden rounded-2xl bg-white ring-1 ring-zinc-200/70">
+      <header className="flex flex-wrap items-center justify-between gap-4 border-b border-zinc-100 p-5">
+        <div className="flex min-w-0 items-center gap-3.5">
+          <span
+            className={cn(
+              "inline-flex size-11 shrink-0 items-center justify-center rounded-full",
+              caja.is_default ? "text-white" : "bg-zinc-100 text-zinc-600",
             )}
-          </p>
-        </div>
-      </div>
-      <div className="flex items-center gap-1">
-        {/* Desde la config de esta caja al libro de ESTA caja: es la pregunta
-            que sigue («¿qué pasó por la barra?»), ya filtrada. */}
-        <Link
-          href={`/${slug}/admin/operacion/movimientos?caja=${caja.id}`}
-          className="inline-flex size-8 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
-          aria-label={`Ver movimientos de ${caja.name}`}
-          title="Ver movimientos de esta caja"
-        >
-          <ScrollText className="size-3.5" />
-        </Link>
-        <button
-          type="button"
-          onClick={onRenombrar}
-          className="inline-flex size-8 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
-          aria-label="Renombrar"
-          title="Renombrar"
-        >
-          <Pencil className="size-3.5" />
-        </button>
-        {!caja.is_default && (
-          <button
-            type="button"
-            onClick={onHacerDefault}
-            className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900"
-            title="Los cobros sin cajero (pago online) se asientan acá"
+            style={caja.is_default ? { background: "var(--brand, #18181B)" } : undefined}
           >
-            Hacer por defecto
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={onDeshabilitar}
-          className="inline-flex size-8 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
-          aria-label="Deshabilitar"
-          title="Deshabilitar"
-        >
-          <EyeOff className="size-3.5" />
-        </button>
+            <Wallet className="size-5" />
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-lg font-semibold tracking-tight text-zinc-900">
+                {caja.name}
+              </h2>
+              {caja.is_default && (
+                <span className="inline-flex items-center rounded-full bg-zinc-900 px-2.5 py-0.5 text-[0.65rem] font-semibold text-white">
+                  Principal
+                </span>
+              )}
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[0.65rem] font-semibold text-emerald-800">
+                <span className="size-1.5 rounded-full bg-emerald-500" />
+                Cobrando
+              </span>
+            </div>
+            <p className="mt-1 text-[0.8125rem] text-zinc-600">
+              {caja.is_default
+                ? "Barre el salón al cerrar · acá caen los cobros online"
+                : "Cierra sola, sin tocar el salón ni las rendiciones"}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <Link
+            href={`/${slug}/admin/operacion?tab=caja`}
+            className="inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-4 py-2 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-200"
+          >
+            Ver ahora
+          </Link>
+          <Link
+            href={`/${slug}/admin/caja/cierres?caja=${caja.id}`}
+            className="inline-flex items-center gap-1.5 rounded-full bg-white px-4 py-2 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200/70 transition hover:bg-zinc-50"
+          >
+            Cierres
+          </Link>
+          {puedeConfigurar && (
+            <>
+              <button
+                type="button"
+                onClick={onRenombrar}
+                className="grid size-8 place-items-center rounded-full text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-900"
+                aria-label={`Renombrar ${caja.name}`}
+                title="Renombrar"
+              >
+                <Pencil className="size-3.5" />
+              </button>
+              {!caja.is_default && (
+                <button
+                  type="button"
+                  onClick={onHacerDefault}
+                  className="rounded-full px-3 py-1.5 text-xs font-semibold text-zinc-600 transition hover:bg-zinc-100"
+                  title="Los cobros online van a caer acá"
+                >
+                  Hacer principal
+                </button>
+              )}
+              {/* La principal no se pausa: los cobros online se quedarían sin
+                  dónde caer (`payments.caja_id` es NOT NULL). */}
+              {!caja.is_default && (
+                <button
+                  type="button"
+                  onClick={onDeshabilitar}
+                  className="rounded-full px-3 py-1.5 text-xs font-semibold text-zinc-600 transition hover:bg-zinc-100"
+                >
+                  Pausar
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      </header>
+
+      <div className="grid grid-cols-2 gap-px bg-zinc-100 lg:grid-cols-4">
+        <Dato label="Adentro ahora">
+          <p className="mt-1.5 text-2xl font-bold tracking-tight text-zinc-900 tabular-nums">
+            {seSabeCuantoHay ? formatCurrency(stats.expected_cash_cents) : "—"}
+          </p>
+          <p className="mt-0.5 text-xs text-zinc-400">
+            {seSabeCuantoHay
+              ? `Desde hace ${duracionDelTurno(stats.periodo_desde, new Date().toISOString())}`
+              : "No se pudo calcular"}
+          </p>
+        </Dato>
+
+        <Dato label="Último cierre">
+          {ultimoCorte ? (
+            <>
+              <p className="mt-1.5 text-2xl font-bold tracking-tight text-zinc-900 tabular-nums">
+                {ultimoCorte.numero != null ? `Nº ${ultimoCorte.numero}` : "—"}
+              </p>
+              <p className="mt-0.5 text-xs tabular-nums text-zinc-400">
+                {formatInTimeZone(
+                  new Date(ultimoCorte.created_at),
+                  timezone,
+                  "EEE d/M · HH:mm",
+                  { locale: es },
+                )}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="mt-1.5 text-2xl font-bold tracking-tight text-zinc-400">—</p>
+              <p className="mt-0.5 text-xs text-zinc-400">Nunca se cortó</p>
+            </>
+          )}
+        </Dato>
+
+        <Dato label="Cerró con">
+          {ultimoCorte ? (
+            <>
+              <div className="mt-1.5">
+                <Diferencia cents={ultimoCorte.difference_cents} />
+              </div>
+              <p className="mt-1 text-xs text-zinc-400">
+                {ultimoCorte.difference_cents === 0
+                  ? "Cerró justo"
+                  : ultimoCorte.difference_cents < 0
+                    ? "Faltó plata"
+                    : "Sobró plata"}
+              </p>
+            </>
+          ) : (
+            <p className="mt-1.5 text-sm text-zinc-400">Sin cierres todavía</p>
+          )}
+        </Dato>
+
+        <Dato label="La operan">
+          {operadores.length > 0 ? (
+            <>
+              <p className="mt-1.5 truncate text-sm text-zinc-700">
+                {operadores.join(", ")}
+              </p>
+              <p className="mt-1 text-xs text-zinc-400">No rinden: cobran acá</p>
+            </>
+          ) : (
+            <>
+              <p className="mt-1.5 text-sm text-zinc-400">Nadie asignado</p>
+              {/* Spec 139 · D3 — sin operadores, el que cobre acá entra a la
+                  lista de rendición y termina rindiéndose a sí mismo. */}
+              <p className="mt-1 text-xs text-amber-700">
+                El que cobre acá va a tener que rendirse a sí mismo
+              </p>
+            </>
+          )}
+        </Dato>
       </div>
-    </li>
+    </section>
   );
 }
 
-// ── Modales ─────────────────────────────────────────────────────
+function Dato({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="bg-white p-5">
+      <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+        {label}
+      </p>
+      {children}
+    </div>
+  );
+}
 
 function CrearCajaModal({
   open,

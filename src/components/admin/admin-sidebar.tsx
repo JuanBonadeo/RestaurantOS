@@ -110,10 +110,12 @@ function buildNav(
         },
         {
           section: "cajas",
-          href: `${adminBase}/cajas`,
-          label: "Cajas",
+          href: `${adminBase}/caja`,
+          // Spec 153 · dejó de ser el catálogo de cajas y pasó a ser todo lo de
+          // la plata: las cajas, los cierres y el libro. Por eso el singular.
+          label: "Caja",
           icon: icon(Wallet),
-          match: (p) => p.startsWith(`${adminBase}/cajas`),
+          match: (p) => p.startsWith(`${adminBase}/caja`),
         },
       ],
     },

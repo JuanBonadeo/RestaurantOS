@@ -271,7 +271,7 @@ export async function corregirCobro(
   }
 
   revalidatePath(`/${input.slug}/admin/operacion`);
-  revalidatePath(`/${input.slug}/admin/operacion/movimientos`);
+  revalidatePath(`/${input.slug}/admin/caja/movimientos`);
   return actionOk({ changedFields: row.changed_fields ?? [] });
 }
 
@@ -364,7 +364,7 @@ export async function anularLineaDeCobro(input: {
   if (!row) return actionError("No se pudo anular el cobro.");
 
   revalidatePath(`/${input.slug}/admin/operacion`);
-  revalidatePath(`/${input.slug}/admin/operacion/movimientos`);
+  revalidatePath(`/${input.slug}/admin/caja/movimientos`);
   return actionOk({ ordenSaldada: row.fully_paid });
 }
 
@@ -451,6 +451,6 @@ export async function corregirMovimiento(
   if (!row) return actionError("No se pudo corregir el movimiento.");
 
   revalidatePath(`/${input.slug}/admin/operacion`);
-  revalidatePath(`/${input.slug}/admin/operacion/movimientos`);
+  revalidatePath(`/${input.slug}/admin/caja/movimientos`);
   return actionOk({ changedFields: row.changed_fields ?? [] });
 }

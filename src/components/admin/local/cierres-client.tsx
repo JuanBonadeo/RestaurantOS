@@ -7,35 +7,39 @@ import { ChevronRight, Lock } from "lucide-react";
 import { formatInTimeZone } from "date-fns-tz";
 import { es } from "date-fns/locale";
 
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import type { CorteDelHistorial } from "@/lib/caja/types";
 import { formatCurrency } from "@/lib/currency";
 import { duracionDelTurno } from "@/lib/caja/formato-cierre";
 import { cn } from "@/lib/utils";
-
-type FiltrosUI = { desde: string; hasta: string; caja: string };
 
 type Props = {
   slug: string;
   timezone: string;
   cajas: { id: string; name: string }[];
   cortes: CorteDelHistorial[];
-  filtros: FiltrosUI;
+  /** `""` = todas. */
+  cajaId: string;
+  /** El período elegido, para conservarlo al cambiar de caja (spec 153). */
+  filtroUrl: { gran: string; fecha: string };
 };
 
-export function CierresClient({ slug, timezone, cajas, cortes, filtros }: Props) {
+export function CierresClient({
+  slug,
+  timezone,
+  cajas,
+  cortes,
+  cajaId,
+  filtroUrl,
+}: Props) {
   const router = useRouter();
   const [, startTransition] = useTransition();
 
-  function aplicar(patch: Partial<FiltrosUI>) {
-    const next = { ...filtros, ...patch };
-    const params = new URLSearchParams();
-    if (next.desde) params.set("desde", next.desde);
-    if (next.hasta) params.set("hasta", next.hasta);
-    if (next.caja) params.set("caja", next.caja);
+  /** El período lo maneja `FiltroFechas`; acá sólo cambia la caja. */
+  function elegirCaja(id: string) {
+    const params = new URLSearchParams(filtroUrl);
+    if (id) params.set("caja", id);
     startTransition(() => {
-      router.push(`/${slug}/admin/operacion/cierres?${params.toString()}`);
+      router.push(`/${slug}/admin/caja/cierres?${params.toString()}`);
     });
   }
 
@@ -48,41 +52,26 @@ export function CierresClient({ slug, timezone, cajas, cortes, filtros }: Props)
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end gap-3 rounded-2xl bg-white p-4 ring-1 ring-zinc-200/70">
-        <div className="grid gap-1">
-          <Label className="text-xs text-zinc-500">Desde</Label>
-          <Input
-            type="date"
-            value={filtros.desde}
-            onChange={(e) => aplicar({ desde: e.target.value })}
-            className="h-10 w-[10.5rem] text-base"
-          />
+      {cajas.length > 1 && (
+        <div className="flex gap-1 self-start overflow-x-auto rounded-2xl bg-white p-1.5 ring-1 ring-zinc-200/70">
+          {[{ id: "", name: "Todas" }, ...cajas].map((c) => (
+            <button
+              key={c.id || "todas"}
+              type="button"
+              onClick={() => elegirCaja(c.id)}
+              aria-pressed={c.id === cajaId}
+              className={cn(
+                "shrink-0 rounded-xl px-4 py-1.5 text-sm font-semibold transition active:scale-[0.97]",
+                c.id === cajaId
+                  ? "bg-zinc-900 text-white shadow-sm"
+                  : "text-zinc-700 hover:bg-zinc-100",
+              )}
+            >
+              {c.name}
+            </button>
+          ))}
         </div>
-        <div className="grid gap-1">
-          <Label className="text-xs text-zinc-500">Hasta</Label>
-          <Input
-            type="date"
-            value={filtros.hasta}
-            onChange={(e) => aplicar({ hasta: e.target.value })}
-            className="h-10 w-[10.5rem] text-base"
-          />
-        </div>
-        <div className="grid gap-1">
-          <Label className="text-xs text-zinc-500">Caja</Label>
-          <select
-            value={filtros.caja}
-            onChange={(e) => aplicar({ caja: e.target.value })}
-            className="h-10 rounded-lg border border-zinc-200 bg-white px-2.5 text-base text-zinc-800"
-          >
-            <option value="">Todas</option>
-            {cajas.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
+      )}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Tile
@@ -116,7 +105,7 @@ export function CierresClient({ slug, timezone, cajas, cortes, filtros }: Props)
             {cortes.map((corte) => (
               <li key={corte.id}>
                 <Link
-                  href={`/${slug}/admin/operacion/cierres/${corte.id}`}
+                  href={`/${slug}/admin/caja/cierres/${corte.id}`}
                   className="grid grid-cols-[1fr_auto] items-center gap-3 px-4 py-3.5 transition hover:bg-zinc-50 sm:grid-cols-[minmax(0,18rem)_repeat(3,minmax(0,1fr))_minmax(0,10rem)_auto]"
                 >
                   <div className="flex min-w-0 items-center gap-3">
@@ -125,6 +114,11 @@ export function CierresClient({ slug, timezone, cajas, cortes, filtros }: Props)
                     </span>
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold text-zinc-900">
+                        {corte.numero != null && (
+                          <span className="tabular-nums text-zinc-400">
+                            Nº {corte.numero}{" · "}
+                          </span>
+                        )}
                         {corte.caja_name}
                       </p>
                       <p className="mt-0.5 truncate text-xs tabular-nums text-zinc-500">
