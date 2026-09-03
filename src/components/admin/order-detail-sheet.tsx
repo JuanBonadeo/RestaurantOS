@@ -293,7 +293,8 @@ export function OrderDetailSheet({
       product_name: i.product_name,
       quantity: i.quantity,
       notes: i.notes,
-      is_combo: false,
+      // El filtro de arriba ya sacó los combos y sus componentes.
+      combo_name: null,
       station_id: i.station_id,
       unit_price_cents: i.unit_price_cents,
       price_original_cents: i.price_original_cents,

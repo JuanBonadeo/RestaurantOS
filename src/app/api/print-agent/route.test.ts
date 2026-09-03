@@ -140,6 +140,7 @@ function itemDePedido(
   stationName: string,
   comandaEmittedAt?: string,
   cancelledAt: string | null = null,
+  comboName: string | null = null,
 ): Row {
   return {
     order_id: "o1",
@@ -147,6 +148,8 @@ function itemDePedido(
     product_name,
     station_id,
     stations: { name: stationName },
+    // El ítem padre del menú del día, o null si es un producto suelto (spec 145).
+    parent: comboName ? { product_name: comboName } : null,
     comanda_items: comandaEmittedAt
       ? [{ comandas: { emitted_at: comandaEmittedAt, cancelled_at: cancelledAt } }]
       : [],
@@ -649,5 +652,114 @@ describe("POST /api/print-agent — confirmación y reporte de fallo (spec 33)",
     const res = await POST(req);
     expect(res.status).toBe(401);
     expect(captured.updates).toHaveLength(0);
+  });
+});
+
+// ── Spec 145 · de qué menú viene el plato ───────────────────────────────────
+
+describe("GET /api/print-agent — de qué menú viene el plato (spec 145)", () => {
+  /** Un hijo de combo: producto propio, sector propio, y el padre con el menú. */
+  const hijoDeCombo = (
+    id: string,
+    productName: string,
+    comboName: string | null,
+  ) => ({
+    order_item_id: id,
+    order_items: {
+      id,
+      quantity: 1,
+      notes: null,
+      unit_price_cents: 0,
+      parent_order_item_id: comboName ? "padre-1" : null,
+      parent: comboName ? { product_name: comboName } : null,
+      products: { name: productName },
+      order_item_modifiers: [],
+    },
+  });
+
+  beforeEach(() => {
+    // La Fritera manda la milanesa del ejecutivo; el puré sale de Cocina.
+    rows = [
+      makeRow("Fritera", "192.168.10.50", {
+        station_id: "st-fritera",
+        comanda_items: [hijoDeCombo("oi-mila", "Milanesa", "Menu Ejecutivo")],
+      }),
+    ];
+    itemRows = [
+      itemDePedido("Puré", "st-cocina", "Cocina", MISMO_ENVIO, null, "Menu Ejecutivo"),
+    ];
+  });
+
+  it("el ítem viaja con el nombre del menú del padre", async () => {
+    const res = await GET(getReq());
+    const body = (await res.json()) as {
+      comandas: { items: { product_name: string; combo_name: string | null }[] }[];
+    };
+    expect(body.comandas[0]?.items[0]).toMatchObject({
+      product_name: "Milanesa",
+      combo_name: "Menu Ejecutivo",
+    });
+  });
+
+  it("el ticket impreso lo dice: la Fritera deja de mandar la de la carta", async () => {
+    const res = await GET(getReq());
+    const body = (await res.json()) as { comandas: { content_plain: string }[] };
+    const plain = body.comandas[0]?.content_plain ?? "";
+    expect(plain).toContain("MENU EJECUTIVO");
+    // Arriba del plato, que es lo que cambia cómo se lee el nombre.
+    expect(plain.indexOf("MENU EJECUTIVO")).toBeLessThan(plain.indexOf("Milanesa"));
+  });
+
+  it("el «COMBINA CON» identifica la guarnición del mismo menú", async () => {
+    const res = await GET(getReq());
+    const body = (await res.json()) as {
+      comandas: {
+        content_plain: string;
+        otros_sectores: {
+          station_name: string;
+          items: { product_name: string; combo_name: string | null }[];
+        }[];
+      }[];
+    };
+    expect(body.comandas[0]?.otros_sectores[0]?.items[0]).toMatchObject({
+      product_name: "Pure",
+      combo_name: "Menu Ejecutivo",
+    });
+    // En el papel: «- 1x Pure (Menu Ejecutivo)», cortado a 24 col por palabra.
+    const bloque = (body.comandas[0]?.content_plain ?? "").split("COMBINA CON")[1] ?? "";
+    expect(bloque.replace(/\r\n/g, " ")).toContain("- 1x Pure (Menu Ejecutivo)");
+  });
+
+  it("un producto suelto no lleva marca: el ticket sale como siempre", async () => {
+    rows = [
+      makeRow("Fritera", "192.168.10.50", {
+        station_id: "st-fritera",
+        comanda_items: [hijoDeCombo("oi-papas", "Papas fritas", null)],
+      }),
+    ];
+    itemRows = [];
+    const res = await GET(getReq());
+    const body = (await res.json()) as {
+      comandas: {
+        content_plain: string;
+        items: { combo_name: string | null }[];
+      }[];
+    };
+    expect(body.comandas[0]?.items[0]?.combo_name).toBeNull();
+    expect(body.comandas[0]?.content_plain).toContain("1x Papas");
+  });
+
+  it("saca los acentos del nombre del menú, como todo lo que va al papel", async () => {
+    rows = [
+      makeRow("Fritera", "192.168.10.50", {
+        station_id: "st-fritera",
+        comanda_items: [hijoDeCombo("oi-mila", "Milanesa", "Menú Niños")],
+      }),
+    ];
+    const res = await GET(getReq());
+    const body = (await res.json()) as {
+      comandas: { items: { combo_name: string | null }[] }[];
+    };
+    expect(body.comandas[0]?.items[0]?.combo_name).toBe("Menu Ninos");
   });
 });

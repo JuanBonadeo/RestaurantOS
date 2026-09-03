@@ -258,6 +258,11 @@ function ticketLines(c) {
   items.forEach((it, i) => {
     if (i > 0) push(""); // padding entre ítems
     const prefix = c.cancelled ? "ANULADO " : "";
+    // De qué menú viene el plato (spec 145): arriba del nombre, porque cambia
+    // cómo se lee lo que sigue. En `tall`, para no competir con el plato.
+    if (it.combo_name)
+      for (const l of wrap(it.combo_name.toUpperCase(), COLS.tall))
+        push(l, { size: "tall", bold: true });
     for (const l of wrap(`${prefix}${it.quantity}x ${it.product_name}`, COLS.xl))
       push(l, { size: "xl", bold: true });
     if (it.modifiers && it.modifiers.length)
@@ -278,7 +283,12 @@ function ticketLines(c) {
       for (const l of wrap(String(sector.station_name).toUpperCase(), COLS.tall))
         push(l, { size: "tall", bold: true });
       for (const it of sector.items)
-        for (const l of wrap(`- ${it.quantity}x ${it.product_name}`, COLS.tall))
+        // También acá (spec 145, D5): si no, la guarnición del menú aparece
+        // como un plato suelto de otra mesa.
+        for (const l of wrap(
+          `- ${it.quantity}x ${it.product_name}${it.combo_name ? ` (${it.combo_name})` : ""}`,
+          COLS.tall,
+        ))
           push(l, { size: "tall" });
     }
   }

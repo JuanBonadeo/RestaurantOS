@@ -512,3 +512,148 @@ describe("buildTicketLines · la hora de cocina (spec 127)", () => {
     expect(lines.find((l) => l.text.startsWith("ENTREGAR"))).toBeUndefined();
   });
 });
+
+// ── Spec 145 · de qué menú viene el plato ───────────────────────────────────
+
+describe("buildTicketLines · la marca del menú (spec 145)", () => {
+  const conMenu: TicketComanda = {
+    ...base,
+    items: [
+      {
+        quantity: 1,
+        product_name: "Milanesa",
+        modifiers: ["Puré"],
+        notes: null,
+        combo_name: "Menu Ejecutivo",
+      },
+      { quantity: 1, product_name: "Flan", modifiers: [], notes: null },
+    ],
+  };
+
+  it("dice de qué menú viene el plato, en mayúsculas", () => {
+    expect(buildTicketLines(conMenu).map((l) => l.text)).toContain(
+      "MENU EJECUTIVO",
+    );
+  });
+
+  it("va ARRIBA del plato: cambia cómo se lee el nombre que sigue", () => {
+    const texts = buildTicketLines(conMenu).map((l) => l.text);
+    const marca = texts.indexOf("MENU EJECUTIVO");
+    const plato = texts.indexOf("1x Milanesa");
+    expect(marca).toBeGreaterThan(0);
+    expect(plato).toBe(marca + 1);
+  });
+
+  it("en tall y negrita: no le compite al nombre del plato", () => {
+    const lines = buildTicketLines(conMenu);
+    const marca = lines.find((l) => l.text === "MENU EJECUTIVO");
+    expect(marca).toMatchObject({ size: "tall", bold: true });
+    // El plato sigue siendo lo más grande del renglón.
+    expect(lines.find((l) => l.text === "1x Milanesa")?.size).toBe("xl");
+  });
+
+  it("sólo el plato del menú la lleva: el suelto sale como siempre", () => {
+    const lines = buildTicketLines(conMenu);
+    const flan = lines.findIndex((l) => l.text === "1x Flan");
+    // El renglón de arriba del flan es el padding entre ítems, no una marca.
+    expect(lines[flan - 1]?.text).toBe("");
+  });
+
+  it("un nombre de menú largo se corta por palabra, no lo parte la impresora", () => {
+    const texts = buildTicketLines({
+      ...base,
+      items: [
+        {
+          quantity: 1,
+          product_name: "Milanesa",
+          combo_name: "Menu Ejecutivo del Mediodia con Postre",
+        },
+      ],
+    }).map((l) => l.text);
+    const marca = texts.filter((t) => t.startsWith("MENU EJECUTIVO"));
+    expect(marca.length).toBeGreaterThan(0);
+    for (const l of texts.slice(texts.indexOf(marca[0]), texts.indexOf("1x Milanesa")))
+      expect(l.length).toBeLessThanOrEqual(COLS.tall);
+  });
+
+  it("saca las tildes como todo el resto del ticket", () => {
+    expect(
+      buildTicketLines({
+        ...base,
+        items: [{ quantity: 1, product_name: "Milanesa", combo_name: "Menú Niños" }],
+      }).map((l) => l.text),
+    ).toContain("MENU NINOS");
+  });
+
+  it("un hijo anulado sigue diciendo ANULADO, con la marca arriba", () => {
+    const texts = buildTicketLines({ ...conMenu, cancelled: true }).map((l) => l.text);
+    const marca = texts.indexOf("MENU EJECUTIVO");
+    expect(marca).toBeGreaterThan(0);
+    expect(texts[marca + 1]).toBe("ANULADO 1x");
+    expect(texts[marca + 2]).toBe("Milanesa");
+  });
+
+  it("sin el campo, el ticket sale igual que siempre (aditivo)", () => {
+    const conCampo = buildTicketLines({
+      ...base,
+      items: (base.items ?? []).map((it) => ({ ...it, combo_name: null })),
+    });
+    expect(conCampo).toEqual(buildTicketLines(base));
+  });
+
+  it("un payload viejo no imprime un renglón vacío en su lugar", () => {
+    // `combo_name: ""` (o ausente) es «no viene de ningún menú», no una marca
+    // en blanco que empuje el plato un renglón para abajo.
+    const lines = buildTicketLines({
+      ...base,
+      items: [{ quantity: 1, product_name: "Milanesa", combo_name: "" }],
+    });
+    const plato = lines.findIndex((l) => l.text === "1x Milanesa");
+    expect(lines[plato - 1]?.text).toBe("");
+    expect(lines[plato - 2]?.text).toBe("");
+  });
+});
+
+describe("buildTicketLines · el «COMBINA CON» también lo lleva (spec 145, D5)", () => {
+  const conOtroDelMenu: TicketComanda = {
+    ...base,
+    items: [
+      {
+        quantity: 1,
+        product_name: "Milanesa",
+        combo_name: "Menu Ejecutivo",
+      },
+    ],
+    otros_sectores: [
+      {
+        station_name: "Cocina",
+        items: [
+          { quantity: 1, product_name: "Puré", combo_name: "Menu Ejecutivo" },
+          { quantity: 1, product_name: "Papas fritas" },
+        ],
+      },
+    ],
+  };
+
+  it("la guarnición del menú no aparece como un plato suelto de otra mesa", () => {
+    const lines = buildTicketLines(conOtroDelMenu);
+    const vaCon = lines.findIndex((l) => l.text === "COMBINA CON");
+    const bloque = lines.slice(vaCon).map((l) => l.text);
+    // «- 1x Pure (Menu Ejecutivo)» son 26 col y el bloque va a 24: se corta por
+    // palabra, como cualquier renglón del ticket. Lo que importa es que el
+    // renglón del puré diga de dónde viene.
+    expect(bloque.join(" ")).toContain("- 1x Pure (Menu Ejecutivo)");
+    for (const t of bloque) expect(t.length).toBeLessThanOrEqual(COLS.tall);
+  });
+
+  it("lo que no viene de un menú sigue saliendo pelado", () => {
+    const texts = buildTicketLines(conOtroDelMenu).map((l) => l.text);
+    expect(texts).toContain("- 1x Papas fritas");
+  });
+
+  it("sigue siendo referencia: todo el bloque va en tall", () => {
+    const lines = buildTicketLines(conOtroDelMenu);
+    const vaCon = lines.findIndex((l) => l.text === "COMBINA CON");
+    for (const l of lines.slice(vaCon)) if (l.text) expect(l.size).toBe("tall");
+  });
+});

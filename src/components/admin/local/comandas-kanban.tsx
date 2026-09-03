@@ -663,7 +663,7 @@ export function ComandasKanban({
               product_name: it.product_name,
               quantity: it.quantity,
               notes: it.notes,
-              is_combo: it.is_combo,
+              combo_name: it.combo_name,
               // Los ítems de una comanda son todos del sector de la comanda.
               station_id: editarTarget.station_id,
               unit_price_cents: it.unit_price_cents,
@@ -897,6 +897,15 @@ function ComandaCard({
               {it.quantity}×
             </span>
             <div className="min-w-0 flex-1">
+              {/* De qué menú viene el plato (spec 145). Arriba del nombre y no
+                  abajo: cambia CÓMO se lee lo que sigue —la milanesa del
+                  ejecutivo no es la de la carta— igual que en el papel. Chico y
+                  en mayúsculas para que no le compita al plato. */}
+              {it.combo_name && (
+                <p className="truncate text-[10px] font-bold tracking-wide text-amber-700 uppercase">
+                  {it.combo_name}
+                </p>
+              )}
               <p className="text-foreground truncate font-medium">
                 {it.product_name}
               </p>
@@ -922,6 +931,11 @@ function ComandaCard({
               {it.quantity}×
             </span>
             <div className="min-w-0 flex-1">
+              {it.combo_name && (
+                <p className="truncate text-[10px] font-bold tracking-wide uppercase line-through">
+                  {it.combo_name}
+                </p>
+              )}
               <p className="truncate font-medium line-through">
                 {it.product_name}
               </p>

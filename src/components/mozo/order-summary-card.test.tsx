@@ -145,7 +145,7 @@ describe("OrderSummaryCard · editar ítems", () => {
     product_name: "Bife de chorizo",
     quantity: 2,
     notes: null,
-    is_combo: false,
+    combo_name: null,
     station_id: "s1",
     unit_price_cents: 60_000,
     price_original_cents: null,

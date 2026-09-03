@@ -43,8 +43,13 @@ export type ItemEditable = {
   product_name: string;
   quantity: number;
   notes: string | null;
-  /** Combo, componente de combo o menú del día: el server no los deja editar. */
-  is_combo: boolean;
+  /**
+   * De qué menú del día viene la línea, o `null` si es un producto suelto
+   * (spec 145). Con nombre = combo / componente de combo: el server no lo deja
+   * editar. Antes era un booleano; el nombre sirve para lo mismo y además se
+   * puede mostrar.
+   */
+  combo_name: string | null;
   /**
    * Sector de la línea. `null` (una bebida, un producto de stock) esconde el
    * «cambiar producto»: es la decisión D3 de la spec 125 — cambiarle el
@@ -113,7 +118,7 @@ export function EditarItemsModal({
         quantity: it.quantity,
         notes: it.notes ?? "",
         removed: false,
-        isCombo: it.is_combo,
+        isCombo: it.combo_name != null,
         origProductId: it.product_id,
         origQuantity: it.quantity,
         origNotes: it.notes ?? "",

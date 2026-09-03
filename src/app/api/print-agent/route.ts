@@ -83,6 +83,11 @@ export async function GET(req: Request) {
 
   const service = createSupabaseServiceClient();
 
+  // `parent:parent_order_item_id(product_name)` — de qué menú viene el plato
+  // (spec 145). El embed self-referencial se resuelve por COLUMNA y no por el
+  // nombre del constraint: con el hint `order_items_parent_order_item_id_fkey`
+  // PostgREST contesta PGRST200, y con `order_items!parent_order_item_id`
+  // resuelve la dirección INVERSA (los hijos) y devuelve un array.
   let query = service
     .from("comandas")
     .select(
@@ -114,6 +119,8 @@ export async function GET(req: Request) {
           quantity,
           notes,
           unit_price_cents,
+          parent_order_item_id,
+          parent:parent_order_item_id(product_name),
           products(name),
           order_item_modifiers(modifiers(name))
         )
@@ -240,6 +247,8 @@ export async function GET(req: Request) {
             quantity: number;
             notes: string | null;
             unit_price_cents: number;
+            parent_order_item_id: string | null;
+            parent: { product_name: string } | null;
             products: { name: string } | null;
             order_item_modifiers: { modifiers: { name: string } | null }[];
           };
@@ -251,6 +260,12 @@ export async function GET(req: Request) {
           modifiers: (item.order_items?.order_item_modifiers ?? [])
             .map((m) => sanitizeTicketText(m.modifiers?.name))
             .filter(Boolean),
+          // De qué menú del día viene el plato (spec 145). El combo se guarda
+          // partido: el nombre del menú vive en el PADRE, que no tiene sector y
+          // por eso nunca llegó a una comandera. Se sube acá para que el hijo
+          // —que sí va a cocina— lo lleve impreso. Es el `product_name` del
+          // padre y no `daily_menus.name`: snapshot, como `modifier_name`.
+          combo_name: sanitizeTicketText(item.order_items?.parent?.product_name),
         };
       }),
     };
@@ -309,6 +324,8 @@ type ItemDePedido = {
   product_name: string;
   station_id: string | null;
   stations: { name: string } | null;
+  /** El ítem padre si esto es el componente de un menú del día (spec 145). */
+  parent: { product_name: string } | null;
   comanda_items:
     | { comandas: { emitted_at: string; cancelled_at: string | null } | null }[]
     | null;
@@ -341,7 +358,7 @@ async function loadItemsPorPedido(
   const { data, error } = await service
     .from("order_items")
     .select(
-      "order_id, quantity, product_name, station_id, stations(name), comanda_items(comandas(emitted_at, cancelled_at))",
+      "order_id, quantity, product_name, station_id, stations(name), parent:parent_order_item_id(product_name), comanda_items(comandas(emitted_at, cancelled_at))",
     )
     .in("order_id", orderIds)
     .is("cancelled_at", null)
@@ -388,7 +405,14 @@ function agruparOtrosSectores(
   const ref = emittedAt ? new Date(emittedAt).getTime() : NaN;
   const porSector = new Map<
     string,
-    { station_name: string; items: { product_name: string; quantity: number }[] }
+    {
+      station_name: string;
+      items: {
+        product_name: string;
+        quantity: number;
+        combo_name: string | null;
+      }[];
+    }
   >();
   for (const it of items) {
     if (!it.station_id || it.station_id === stationId) continue;
@@ -418,6 +442,9 @@ function agruparOtrosSectores(
     sector.items.push({
       product_name: sanitizeTicketText(it.product_name) ?? "—",
       quantity: it.quantity ?? 1,
+      // El mismo agujero que arriba (spec 145, D5): sin esto la guarnición del
+      // menú sale acá como si fuera un plato suelto de otra mesa.
+      combo_name: sanitizeTicketText(it.parent?.product_name),
     });
     porSector.set(it.station_id, sector);
   }

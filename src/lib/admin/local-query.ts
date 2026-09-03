@@ -19,8 +19,16 @@ export type LocalComandaItem = {
   cancelled_reason: string | null;
   modifiers: string[];
   kitchen_status: KitchenItemStatus;
-  /** Ítem de combo / menú del día: no editable en fase 1 (spec 049). */
-  is_combo: boolean;
+  /**
+   * De qué menú del día viene el plato (spec 145), o `null` si es un producto
+   * suelto. Es el `product_name` del ítem PADRE, congelado al enviar: el combo
+   * se guarda partido y el hijo —el que va a cocina— no sabe de dónde viene.
+   *
+   * Doble uso: la cocina lo lee en la tarjeta del KDS, y el modal de edición lo
+   * usa para saber que la línea es de un combo y no se edita (spec 049). Antes
+   * era un `is_combo` booleano que nadie pintaba.
+   */
+  combo_name: string | null;
   /**
    * Precio EFECTIVAMENTE cobrado por unidad (spec 069). El ticket de cocina no
    * lleva precios; esto es para el modal de edición del encargado.
@@ -118,6 +126,7 @@ export async function getActiveComandas(
         id, product_id, product_name, quantity, notes, cancelled_at, cancelled_reason,
         kitchen_status, is_combo_component, parent_order_item_id, daily_menu_id,
         unit_price_cents, price_original_cents, price_override_reason,
+        parent:parent_order_item_id ( product_name ),
         order_item_modifiers ( modifier_name )
       )
     )
@@ -193,6 +202,7 @@ export async function getActiveComandas(
         kitchen_status: KitchenItemStatus;
         is_combo_component: boolean | null;
         parent_order_item_id: string | null;
+        parent: { product_name: string } | null;
         daily_menu_id: string | null;
         unit_price_cents: number;
         price_original_cents: number | null;
@@ -236,10 +246,12 @@ export async function getActiveComandas(
         cancelled_reason: it.cancelled_reason,
         modifiers: (it.order_item_modifiers ?? []).map((m) => m.modifier_name),
         kitchen_status: it.kitchen_status,
-        is_combo:
-          Boolean(it.is_combo_component) ||
-          Boolean(it.parent_order_item_id) ||
-          Boolean(it.daily_menu_id),
+        // El nombre del menú sale del padre; el `daily_menu_id` propio marca al
+        // PADRE de un combo, que no tiene sector y por lo tanto nunca entra en
+        // una comanda — pero si algún día entrara, es su propio nombre.
+        combo_name:
+          it.parent?.product_name ??
+          (it.daily_menu_id ? it.product_name : null),
         unit_price_cents: Number(it.unit_price_cents),
         price_original_cents:
           it.price_original_cents == null ? null : Number(it.price_original_cents),

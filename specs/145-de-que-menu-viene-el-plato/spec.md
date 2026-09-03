@@ -2,7 +2,7 @@
 
 **Issue:** [#221](https://github.com/gachetponzellini/RestaurantOS-app/issues/221) ·
 **Milestone:** Post-demo · Growth & hardening ·
-**Estado:** 📋 propuesta (2026-09-03) — sin implementar
+**Estado:** ✅ implementada (2026-09-03)
 
 **Input:** la encargada de golf-jcr, 2026-09-03, mandando audios mientras usaba
 el sistema en pleno almuerzo:
@@ -198,23 +198,75 @@ del fallback casi nunca corra.
 
 ## Verificación
 
-Pendiente — la spec no está implementada.
+✅ **Implementada y verificada el 2026-09-03.**
 
-Al implementar, el piso es: los 5 casos de paridad de
-`ticket.test.ts` **sin regenerar fixtures** (si hay que regenerarlos, el campo
-dejó de ser aditivo y la decisión D1 se rompió en algún lado), tests nuevos del
-renderer (marca presente / ausente / en el «COMBINA CON» / con nombre largo que
-tiene que cortar por palabra a `COLS.tall`), y `pnpm typecheck` + `pnpm test` en
-verde.
+### Automática
 
-El verify en vivo tiene una particularidad que conviene resolver antes de
-empezar: **el ticket sale por una impresora física del local**. En `demo` se
-puede validar el payload y el `content_plain` que devuelve el `GET
-/api/print-agent` sin imprimir nada, y el KDS sí se ve completo desde la sesión
-de Sofía (encargada):
+- **Los 5 casos de paridad de `ticket.test.ts` pasan sin regenerar fixtures.**
+  `__fixtures__/tickets.json` quedó intacto: D1 se sostiene, el campo es aditivo
+  de verdad.
+- **`ticket.test.ts`** — 12 tests nuevos: la marca presente / arriba del plato /
+  en `tall` y no en `xl` / ausente en el ítem suelto / nombre largo cortado por
+  palabra a `COLS.tall` / tildes sacadas (`Menú Niños` → `MENU NINOS`) / hijo
+  anulado con `ANULADO` y la marca arriba / `combo_name: null` produce líneas
+  **idénticas** a no traer el campo / `""` no imprime un renglón vacío. Más 3 del
+  bloque «COMBINA CON» (D5).
+- **`route.test.ts`** — 5 tests nuevos: el ítem viaja con el nombre del padre, el
+  `content_plain` lo imprime arriba del plato, el «COMBINA CON» identifica la
+  guarnición del mismo menú, el producto suelto sale sin marca, y el nombre pasa
+  por `toAscii`.
+- **`comandas-kanban.combo.test.tsx`** (nuevo) — el escenario 5: la tarjeta pinta
+  la marca arriba del nombre, el suelto no la lleva, y el hijo anulado también la
+  lleva.
+- `pnpm typecheck` en verde y los 2042 tests unitarios en verde. Los 21
+  `*.integration.test.ts` fallan con `fetch failed` — es el stack local apagado,
+  ruido conocido y ajeno a este cambio.
 
-    node scripts/magic-link.mjs sofia@demo.test "/demo/admin/operacion?tab=comandas"
+### En vivo (demo, 2026-09-03)
 
-Para el papel de verdad hace falta golf-jcr y una comandera — coordinarlo con
-Juan, o darlo por verificado contra `content_plain`, que es literalmente lo que
-el agente imprime.
+El demo **no tenía ningún menú del día con productos** (los cuatro componentes
+del «Menú Ejecutivo» eran de tipo texto), así que era imposible generar un hijo
+de combo ahí. Se le pusieron dos productos de **sectores distintos** —Lomito
+Simple (Parrilla) y Papas Fritas (Fritera)—, que es exactamente la forma del
+pedido 8 de golf-jcr. Queda como fixture del demo.
+
+Cargado como **Sofía (encargada)** en la Mesa BAR1 → «Enviado · 2 comandas».
+
+- **KDS** (`/demo/admin/operacion?tab=comandas`): las dos tarjetas muestran
+  `MENÚ EJECUTIVO` arriba de `Lomito Simple` y de `Papas Fritas`.
+- **Papel**: `GET /api/print-agent` con una credencial temporal (creada y
+  **borrada** después), leyendo el `content_plain` — que es literalmente lo que
+  el agente escribe al socket:
+
+      PARRILLA                          FRITERA
+      MESA BAR1                         MESA BAR1
+      PEDIDO 1                          PEDIDO 1
+      ...                               ...
+      MENU EJECUTIVO                    MENU EJECUTIVO
+      1x Lomito                         1x Papas
+      Simple                            Fritas
+      ------------------------          ------------------------
+      COMBINA CON                       COMBINA CON
+      FRITERA                           PARRILLA
+      - 1x Papas Fritas (Menu           - 1x Lomito Simple (Menu
+      Ejecutivo)                        Ejecutivo)
+
+  Escenarios 1 y 2, los dos. Falta sólo el papel físico en golf con una
+  comandera real — coordinarlo con Juan.
+
+### Desviación de la spec: la sintaxis del embed
+
+La spec proponía `parent:order_items!order_items_parent_order_item_id_fkey(product_name)`.
+**No funciona.** Verificado contra el cloud: PostgREST resuelve las relaciones
+self-referenciales **por columna**, no por nombre de constraint.
+
+| forma | resultado |
+|---|---|
+| `order_items!order_items_parent_order_item_id_fkey(...)` | `PGRST200` — «no matches were found» |
+| `order_items!parent_order_item_id(...)` | 200, pero devuelve la dirección **inversa**: un array de los HIJOS |
+| **`parent:parent_order_item_id(product_name)`** | ✅ el padre, como objeto |
+
+Es la que quedó, con el porqué anotado arriba del `select` en
+[`route.ts`](../../src/app/api/print-agent/route.ts). El embed anidado dentro de
+`comanda_items` funciona bien, así que no hizo falta la segunda query que la
+spec dejaba como salida.

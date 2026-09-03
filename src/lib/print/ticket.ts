@@ -53,6 +53,21 @@ export type TicketItem = {
   notes?: string | null;
   // Post-`.filter(Boolean)` el caller puede tipar esto laxo; en runtime son strings.
   modifiers?: ReadonlyArray<string | null | undefined> | null;
+  /**
+   * De qué menú del día / combo viene este plato (spec 145): el
+   * `product_name` del ítem PADRE, congelado al enviar la comanda.
+   *
+   * Un combo se guarda partido: el padre tiene el nombre del menú y el precio
+   * pero NO tiene sector, así que no va a ninguna comandera; los hijos tienen
+   * su sector pero no saben de dónde vienen. Sin esto la Fritera lee
+   * «Milanesa» y manda la de la carta, que no es la porción del ejecutivo.
+   *
+   * Es snapshot y no el `daily_menus.name` de hoy: si el admin renombra el
+   * menú a mitad de servicio, la reimpresión saca el ticket que salió.
+   *
+   * Campo aditivo: los fixtures congelados no lo traen.
+   */
+  combo_name?: string | null;
 };
 
 /** Lo que el MISMO pedido lleva en otro sector. */
@@ -357,6 +372,16 @@ export function buildTicketLines(c: TicketComanda): Line[] {
   items.forEach((it, i) => {
     if (i > 0) push(""); // padding entre ítems
     const prefix = c.cancelled ? "ANULADO " : "";
+    // De qué menú viene el plato (spec 145). Va ARRIBA del nombre porque
+    // cambia CÓMO se lee lo que sigue —«Milanesa» del ejecutivo no es la
+    // milanesa de la carta—, igual que la observación de la tanda se puso
+    // antes de los ítems. Abajo, pegado a los modificadores, se leería como un
+    // ingrediente más. En `tall` y no en `xl`: el cuerpo grande está reservado
+    // para lo que cambia el momento de salida (ENTREGAR, ANULADA, REIMPRESION)
+    // y dos renglones en doble ancho seguidos compiten entre sí.
+    if (it.combo_name)
+      for (const l of wrap(it.combo_name.toUpperCase(), COLS.tall))
+        push(l, { size: "tall", bold: true });
     for (const l of wrap(`${prefix}${it.quantity}x ${it.product_name}`, COLS.xl))
       push(l, { size: "xl", bold: true });
     if (it.modifiers && it.modifiers.length)
@@ -380,7 +405,14 @@ export function buildTicketLines(c: TicketComanda): Line[] {
       for (const l of wrap(String(sector.station_name).toUpperCase(), COLS.tall))
         push(l, { size: "tall", bold: true });
       for (const it of sector.items)
-        for (const l of wrap(`- ${it.quantity}x ${it.product_name}`, COLS.tall))
+        // La marca del menú también acá (spec 145, D5): sin esto la guarnición
+        // del ejecutivo aparece tres renglones más abajo como si fuera un plato
+        // suelto de otra mesa. Entre paréntesis y no arriba: es una lista de
+        // referencia, y el renglón ya viene sangrado con `-`.
+        for (const l of wrap(
+          `- ${it.quantity}x ${it.product_name}${it.combo_name ? ` (${it.combo_name})` : ""}`,
+          COLS.tall,
+        ))
           push(l, { size: "tall" });
     }
   }
