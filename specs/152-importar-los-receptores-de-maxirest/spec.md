@@ -2,7 +2,7 @@
 
 **Issue:** [#228](https://github.com/gachetponzellini/RestaurantOS-app/issues/228) ·
 **Milestone:** Post-demo · Growth & hardening ·
-**Estado:** 📋 propuesto (2026-09-03)
+**Estado:** ✅ aplicado (2026-09-03) — **378 receptores en `golf-jcr`, 56 en `kcc`**
 
 **Input:** Juan, 2026-09-03, al ver que `fiscal_entities` estaba vacía: *"ya
 importaste los datos del maxirest?????"*.
@@ -64,6 +64,16 @@ Las otras **139 no se pueden insertar** — `razon_social` es NOT NULL con
 social a partir del CUIT ("CUIT 30-...-5") sería peor que no traer la fila: queda
 en la lista sin que nadie pueda reconocerla.
 
+> **Al implementar:** el fallback rescata **138 de las 139** — queda una sola
+> fila sin nombre (código 1178), y su CUIT entra igual porque está repetido en
+> otra que sí lo tiene. **Ningún CUIT de Golf se pierde.**
+>
+> Y los datos pidieron una regla más: en **24 de esas 138**, `nombre` y
+> `apellido` son **el mismo texto** (el usuario de MaxiRest escribió la empresa
+> en los dos campos), y en otras 3 uno contiene al otro. Sin tratarlo, entraban
+> como `"TANONI HNOS SA, TANONI HNOS SA"`. Cuando son iguales se usa uno solo;
+> cuando uno contiene al otro, el más largo.
+
 **D4 · Deduplica por `(business_id, cuit)`, que es el unique.** El backup trae
 **30 CUIT repetidos** en esas 410 filas (378 distintos). Gana **la primera fila
 con razón social**; si ninguna la tiene, la de `codigo` más bajo. Las descartadas
@@ -82,19 +92,27 @@ es justamente **el que no tiene CUIT**. Copiar el número sin mapear declararía
 Responsable Inscripto a un consumidor final, en la tabla desde la que se emite un
 comprobante fiscal.
 
-Lo que dicen los datos de Golf, cruzando `tipo_iva` contra tener CUIT:
+**Resuelto con los datos, no con una suposición.** La primera versión de esta
+spec asumía `6 → Monotributo` porque comparte dígito con el código de ARCA. Es
+falso. El cruce contra los **189.380 comprobantes de `mxfac`** —que guarda
+`cod_cpb` (la letra) junto al `tipo_iva`— lo cierra:
 
-| `tipo_iva` | Clientes | Con CUIT | Lectura | → `condicion_iva` |
+| `tipo_iva` | Clientes | Con CUIT | Comprobantes que recibió | → `condicion_iva` |
 |---|---|---|---|---|
-| `1` | 2.376 | 3 | consumidor final | — (no entran por D2; los 3 con CUIT se reportan) |
-| `2` | 399 | 396 | responsable inscripto | **1** |
-| `6` | 11 | 11 | otra condición | **6** (Monotributo) — *a confirmar* |
+| `1` | 2.376 | 3 | 22.905 B, 10.764 H — **ninguna A** | **5** Consumidor Final |
+| `2` | 399 | 396 | **2.782 Facturas A** | **1** Resp. Inscripto |
+| `6` | 11 | 11 | 537 G, 144 B, 61 H — **ninguna A** | **4** Exento |
 
-El mapeo de `2 → 1` es sólido: 396 de 399 tienen CUIT. El de `6` es una lectura
-de 11 filas y **hay que confirmarlo con el local antes de correr el import**; si
-no llega respuesta, esas 11 entran igual con Monotributo y quedan listadas en el
-reporte para revisar en la pantalla. Once filas revisables a mano no justifican
-frenar las otras 396.
+Los del `6` **no recibieron una sola Factura A en 189.380 comprobantes**, y un
+monotributista sí puede recibirla. Mirando quiénes son, cierra: los 11 son el
+Jockey Club de Rosario, la Federación de Golf del Sur del Litoral, la Federación
+Santafesina de Tenis, dos asociaciones mutuales, una asociación civil, una
+fundación, una caja de previsión social y un sanatorio — **CUIT 30 y 33, ni una
+persona física**. Es el perfil de un exento, no de un monotributista.
+
+Importarlos como Monotributo habría sido peor que un dato feo: la pantalla de
+cobro le habría ofrecido **Factura A** a nueve entidades exentas
+(`condicionesValidasPara("factura_a")` = RI o Monotributo).
 
 **D7 · No se toca `customers`.** Los 7 casos en que un receptor además es comensal
 se pueden enlazar después con `fiscal_entities.customer_id`; el import no lo hace.
@@ -168,26 +186,66 @@ nada: es exactamente para lo que es nullable.
 
 ## Verificación
 
-Pendiente — spec propuesta, sin código.
+**Tests** — 26 en `maxirest-import.test.ts`, escritos antes del script: el
+fallback de la razón social y sus tres casos raros, el mapeo del `tipo_iva`, la
+deduplicación (incluido que **no dependa del orden de las filas**), el CUIT
+normalizado, el contacto opcional como `null`, y que un `tipo_iva` desconocido se
+descarte en vez de adivinarse.
 
-Al implementar: los tests puros del mapeo y la deduplicación primero; después el
-dry-run contra el backup real, comparando los totales del reporte con el
-relevamiento (**410 con CUIT en Golf, 378 distintos, 271 con razón social**;
-**62 en KCC**). Si los números no dan, es el parser, no los datos.
+**Los números cierran contra el relevamiento**, que es la prueba de que el parser
+lee bien el dump:
 
-El verify en vivo es el escenario 10, en `golf-jcr`, con el rol real de la
-encargada — buscar por razón social en el cobro y que aparezca. **No hace falta
-emitir**: golf-jcr todavía no puede (su punto de venta no está dado de alta en
-ARCA y sus 14 invoices están en `failed`), y el escenario es el buscador, no el
-CAE.
+| | Golf | KCC |
+|---|---|---|
+| Filas en `mxcli` | 2.786 ✓ | 782 ✓ |
+| Sin CUIT (comensales) | 2.376 | 717 |
+| Con CUIT | 410 ✓ | 62 ✓ |
+| **Entidades importadas** | **378** ✓ | **56** |
+| Duplicadas por CUIT | 31 | 6 |
+| Descartadas | 1 | 3 (CUIT `"- -"`) |
+
+378 + 31 + 1 = 410 y 56 + 6 = 62: no se perdió ni se inventó una fila.
+
+**Condición de IVA importada** — Golf: 368 RI, **9 Exento**, 1 Consumidor Final.
+Los 9 exentos son los 11 del `tipo_iva = 6` menos dos duplicados (el Jockey Club
+y el Sanatorio Neuropático estaban dos veces).
+
+**En vivo**, con `sheila.tonso@golf-jcr.internal` (**encargada**, el rol real que
+factura): la lista muestra los 378, y buscar «jockey» devuelve
+**JOCKEY CLUB DE ROSARIO · 30-50023730-5 · Exento** (escenario 10). La búsqueda
+por CUIT con guiones se verificó contra los datos importados.
+
+> El escenario 10 se verificó en la pantalla de **Entidades fiscales**, no
+> abriendo una mesa: exige el mismo `buscarEntidades` y no escribe nada en el
+> negocio del cliente. El buscador del cobro ya quedó verificado en `demo` con la
+> spec 150.
+
+**Escenarios 8 y 9 (el re-import)** — correr el import de nuevo sobre Golf
+escribió **0 filas** y reportó las 378 como ya existentes. Y contra una entidad
+**editada a mano** (la de `demo`, que se había corregido a «SANATORIO PARQUE
+S.A.» con su domicilio), el import con el dato original **no la pisó**: quedó
+como la dejó la persona.
+
+**Calidad de lo importado** — verificado en la base: `TANONI HNOS SA` (no
+`"TANONI HNOS SA, TANONI HNOS SA"`), la ñ de `GRUPO OROÑO` intacta (el dump es
+latin1), `DE CAPUA, CESAR ARIEL` completo, y los 378 con `external_ref` cargado
+para que el próximo import sepa qué trajo.
 
 ## Preguntas abiertas
 
-1. **¿Qué es el `tipo_iva = 6` en MaxiRest?** (D6) — 11 clientes de Golf, todos
-   con CUIT. Si es Exento en vez de Monotributo, el mapeo va a `4`. Se puede
-   correr el import sin la respuesta; se revisa después en la pantalla.
-2. **¿Corremos el import ahora o en el cutover?** El backup de Golf es del
-   **23/12/2025** y el local siguió cargando clientes en MaxiRest desde entonces.
-   Correrlo ahora sirve para probar y para que la encargada lo vea funcionando;
-   igual habrá que re-correrlo con un backup fresco al migrar. El D5 hace que
-   re-correrlo sea seguro, así que la respuesta probablemente sea «las dos».
+1. ~~**¿Qué es el `tipo_iva = 6`?**~~ ✅ **Resuelto con los datos: es Exento**
+   (ver D6). No recibieron ni una Factura A en 189.380 comprobantes, y los 11 son
+   clubes, federaciones, mutuales y fundaciones. Se importaron como `4`.
+2. **¿Hay que re-correrlo en el cutover?** Sí. El backup de Golf es del
+   **23/12/2025** y el local siguió cargando clientes en MaxiRest desde entonces;
+   el de KCC es del **20/07/2026**. El D5 hace que re-correrlo sea seguro —está
+   verificado— así que al migrar se corre de nuevo con un backup fresco y entran
+   sólo los nuevos.
+3. **Las 24 razones sociales con conflicto** (Golf) y 4 (KCC) quedaron con la que
+   eligió el D4 y están listadas en el reporte del script. Casi todas son la
+   misma empresa escrita de dos formas (`"VALOR AGREGADO S.R.L."` vs `"SRL"`),
+   pero un par son typos que conviene corregir en la pantalla:
+   `"WHELL S.A."` (por WHEEL), `"WEID INGENIERIA S.R.L."` (por WELD) y
+   `"NEGOCIO DE GRANOS SRL"` (la otra fila decía `"NEGOCIOS DE GRANOS S.A."`).
+4. **El código 2029 de Golf** entró como `"XXX, XXX"` (CUIT 30-64087256-6): es
+   basura de carga en el origen. Está en el reporte «a revisar».
