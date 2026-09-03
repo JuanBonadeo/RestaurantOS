@@ -165,6 +165,9 @@ falta». Detalle del relevamiento en
 - **Importador desde MaxiRest** (D7). Queda afuera de esta spec porque necesita
   el modelo de datos primero, pero es el fast-follow inmediato: son 410 clientes
   con CUIT en Golf y 62 en KCC, y salen de `mxcli`, no de un Excel a mano.
+  → escrito como [spec 152](../152-importar-los-receptores-de-maxirest/spec.md)
+  ([#228](https://github.com/gachetponzellini/RestaurantOS-app/issues/228)),
+  2026-09-03.
 - **Emitir A automáticamente** (D6).
 - **Pisar datos fiscales ya cargados desde el cobro** (D4).
 - **Validar el CUIT contra el padrón de ARCA.** El gateway ya rechaza un CUIT
