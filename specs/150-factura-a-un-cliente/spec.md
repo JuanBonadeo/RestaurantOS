@@ -82,17 +82,18 @@ transitado. `ComprobanteFields` ya conoce el tipo elegido, así que el buscador 
 condicional dentro del componente que los cuatro flujos comparten — una sola
 implementación, cuatro pantallas.
 
-**D3 · Elegir el cliente completa los campos, pero no los congela.** Los tres
+**D3 · Elegir la entidad completa los campos, pero no los congela.** Los tres
 inputs siguen editables después de elegir: puede haber que corregir una razón
 social sobre la marcha, y bloquearlos obligaría a salir del cobro para arreglar
 una letra. Lo que se emite es lo que está en el formulario.
 
-**D4 · Se guarda en el cliente sólo lo que estaba vacío.** Si el cliente elegido
-no tenía CUIT y se tipea uno, queda guardado y la próxima factura ya lo trae. Si
-**tenía** uno distinto, **no se pisa**: un CUIT que cambia es más probable que sea
-un error de tipeo del apuro que un dato nuevo, y pisarlo en silencio arrastra el
-error a todas las facturas siguientes. Corregir un dato fiscal ya cargado se hace
-en la ficha del cliente, con la pantalla quieta.
+**D4 · Un CUIT nuevo crea la entidad; uno que ya existe no se pisa.** Si se tipea
+un CUIT que no está, al emitir se crea la `fiscal_entity` con lo que se cargó y la
+próxima factura ya la encuentra. Si el CUIT **ya existe** y lo tipeado difiere, la
+factura sale con lo tipeado pero **la entidad queda como estaba**: un dato fiscal
+que cambia es más probable que sea un error de tipeo del apuro que un dato nuevo, y
+pisarlo en silencio arrastra el error a todas las facturas siguientes. Corregir una
+entidad ya cargada se hace en su pantalla, con la cabeza fría.
 
 **D5 · La factura queda vinculada: `invoices.fiscal_entity_id`.** Sin eso no se puede
 responder «qué le facturamos a este cliente», que es justo lo que la encargada
@@ -101,7 +102,7 @@ consumidor final no tienen receptor identificado, y las 14 que ya existen tampoc
 
 **D6 · La A sigue siendo explícita.** La spec 147 automatizó la B; la A no se
 automatiza y la razón no cambia: el sistema no puede adivinar **a quién** se le
-factura. Elegir el cliente es la decisión, y la toma una persona.
+factura. Elegir a quién se le emite es la decisión, y la toma una persona.
 
 **D7 · El import desde MaxiRest entra, y es fast-follow inmediato.** Esta
 decisión decía lo contrario —«son un puñado de clientes, que los cargue a mano»—
@@ -136,21 +137,28 @@ falta». Detalle del relevamiento en
   misma migración (se aplicó el mismo día, con 0 filas escritas y sin código que
   la leyera).
 
-- **`src/lib/admin/customers-actions.ts`** — `ClienteMatch` suma los datos
-  fiscales; `buscarClientes` gana un modo que prioriza/filtra los que tienen
-  CUIT, para que en el flujo de facturación no haya que scrollear entre 298
-  contactos de delivery. La escritura del D4 va en su propia action, con su gate.
+- **`src/lib/afip/fiscal-entities.ts` (nuevo)** — el módulo de dominio:
+  `buscarEntidadesFiscales(slug, query)` (por razón social y por CUIT, tolerando
+  que se tipee con guiones), `crearEntidadFiscal`, `actualizarEntidadFiscal` y el
+  `resolverEntidadParaFactura` del D4 (busca por `(business_id, cuit)`, crea si no
+  está, devuelve la existente si está). Validación Zod y gate de permisos en el
+  borde, como todo el resto.
 - **`src/components/billing/comprobante-fields.tsx`** — el buscador condicional
-  (D2) y el `customerId` elegido dentro de `ComprobanteState`, para que
-  `comprobanteToInvoiceInput` lo pase.
-- **`src/lib/afip/emit-invoice.ts`** — persiste `customer_id` en la factura (D5) y
-  dispara el guardado del D4.
-- **Ficha del cliente** (`customer-detail.tsx`) — los datos fiscales se ven y se
-  editan ahí, que es el único lugar donde se corrigen (D4), más la lista de sus
-  comprobantes, que el `customer_id` recién ahora hace posible.
-- **Alta de cliente desde el cobro** — si el que va a pagar con CUIT no está
-  cargado, tiene que poder crearse sin abandonar el cobro. Sin esto, la primera
-  factura a un cliente nuevo sigue siendo la de hoy.
+  (D2) y el `fiscalEntityId` elegido dentro de `ComprobanteState`, para que
+  `comprobanteToInvoiceInput` lo pase. Es el componente que comparten los cuatro
+  puntos de cobro: una implementación, cuatro pantallas.
+- **`src/lib/afip/emit-invoice.ts`** — persiste `fiscal_entity_id` en la factura
+  (D5) y dispara el `resolverEntidadParaFactura` del D4.
+- **Alta desde el cobro** — si el CUIT no está cargado, la entidad se crea sin
+  abandonar la pantalla. Sin esto, la primera factura a un receptor nuevo sigue
+  siendo la de hoy.
+- **Pantalla de entidades fiscales** — el ABM vive en la sección **Facturación**,
+  que es donde se factura y a la que el encargado ya entra con `full` (#139); no en
+  la ficha del cliente, que es otra cosa. Lista + búsqueda + editar, y las facturas
+  de cada entidad (que el `fiscal_entity_id` recién ahora hace posible).
+- **Permisos** — `canGestionarEntidadesFiscales` en `can.ts`. El encargado factura,
+  así que entra; el mozo no. Se decide al implementar si editar una entidad ya
+  cargada pide un techo más alto que crearla.
 
 ## Qué NO entra
 
@@ -168,36 +176,52 @@ falta». Detalle del relevamiento en
 
 ## Escenarios de aceptación
 
-1. **Dado** el cobro con Factura A elegida, **entonces** aparece un buscador de
-   clientes; en Factura B **no** aparece.
-2. **Dado** un cliente con CUIT guardado, **cuando** se lo elige, **entonces**
-   CUIT, razón social y condición de IVA quedan completos y la factura se emite
-   sin tipear nada.
-3. **Dado** ese cliente elegido, **cuando** se corrige la razón social a mano,
-   **entonces** la factura sale con lo corregido (D3) y **el cliente no cambia**
+1. **Dado** el cobro con Factura A elegida, **entonces** aparece el buscador de
+   entidades fiscales; con Factura B **no** aparece.
+2. **Dado** una entidad guardada, **cuando** se la elige, **entonces** CUIT, razón
+   social y condición de IVA quedan completos y la factura se emite sin tipear
+   nada.
+3. **Dado** esa entidad elegida, **cuando** se corrige la razón social a mano,
+   **entonces** la factura sale con lo corregido (D3) y **la entidad no cambia**
    (D4).
-4. **Dado** un cliente sin datos fiscales, **cuando** se tipea el CUIT y se
-   emite, **entonces** queda guardado en el cliente y la próxima factura lo trae.
-5. **Dado** que el cliente no existe, **cuando** se lo crea desde el cobro,
-   **entonces** la factura sale a su nombre sin salir de la pantalla.
-6. **Dado** un comprobante emitido a un cliente, **cuando** se abre su ficha,
-   **entonces** aparece en su lista de facturas.
+4. **Dado** un CUIT que no está cargado, **cuando** se emite, **entonces** la
+   entidad se crea y la próxima factura a ese CUIT ya la encuentra.
+5. **Dado** un CUIT tipeado **con guiones**, **entonces** matchea contra la
+   entidad guardada igual — el CHECK de la tabla exige 11 dígitos, así que la
+   normalización tiene que pasar antes de la query, no después.
+6. **Dado** un comprobante emitido, **cuando** se abre la entidad en Facturación,
+   **entonces** la factura aparece en su lista.
 7. **Dado** un cobro con Factura B, **entonces** todo funciona exactamente como
    hoy — incluida la emisión automática de la spec 147.
-8. **Dado** un cliente sin CUIT, **cuando** se lo busca desde el flujo de
-   facturación, **entonces** no compite con los que sí lo tienen (D2 · alcance).
+8. **Dado** un receptor **sin teléfono ni cliente asociado** (el caso normal: 390
+   de los 410 de Golf), **entonces** se crea, se busca y se factura igual. Ésta es
+   la que el modelo viejo no podía cumplir.
+9. **Dado** un comensal que además factura (los 7 casos), **cuando** se enlaza su
+   `customer_id`, **entonces** la entidad sigue funcionando igual y borrar el
+   cliente **no** la borra (`on delete set null`).
 
 ## Verificación
 
-Pendiente — sin implementar.
+Pendiente — el modelo está, el flujo no.
 
-Al implementar: tests del guardado condicional del D4 (vacío → guarda; distinto →
-no pisa), de que el buscador no aparece en B, y de que `customer_id` viaja a la
-factura. El verify en vivo va en `demo` con el gateway en sandbox, donde el CAE
-vuelve y se puede ver la A completa:
+Al implementar: tests del `resolverEntidadParaFactura` (CUIT nuevo → crea; CUIT
+existente con datos distintos → **no pisa**; CUIT con guiones → matchea), de que el
+buscador no aparece en B, y de que `fiscal_entity_id` viaja a la factura. La
+migración ya está verificada contra el cloud (rechaza guiones, rechaza CUIT
+duplicado por negocio, vive sin teléfono ni customer, y borrar la entidad deja la
+factura viva).
+
+El verify en vivo va en `demo` con el gateway en **sandbox**, que es donde el CAE
+vuelve y se puede ver una A completa de punta a punta:
 
     node scripts/magic-link.mjs sofia@demo.test "/demo/admin/operacion"
 
-Sofía, encargada: es quien cobra y factura las mesas. La edición de datos
-fiscales en la ficha del cliente se verifica también con ella — si le falta
-permiso ahí, es un hallazgo de esta spec, no un supuesto.
+Sofía, encargada: es quien cobra y factura las mesas. Si le falta permiso en la
+pantalla de entidades fiscales, es un hallazgo de esta spec y no un supuesto —
+`sections.ts` ya le da `full` en Facturación.
+
+---
+
+**Nota de nomenclatura:** el directorio se llama `150-factura-a-un-cliente` porque
+nació con el modelo viejo (los campos colgados de `customers`). Se conserva para no
+romper los links del issue y de los commits; el modelo real es `fiscal_entities`.
