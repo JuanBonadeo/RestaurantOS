@@ -43,21 +43,32 @@ async function loadCajaForBusiness(
   service: GenericClient,
   cajaId: string,
   businessId: string,
-): Promise<{ id: string; is_active: boolean; is_default: boolean } | null> {
+): Promise<{
+  id: string;
+  name: string;
+  is_active: boolean;
+  is_default: boolean;
+} | null> {
   const { data } = await service
     .from("cajas")
-    .select("id, business_id, is_active, is_default")
+    .select("id, business_id, name, is_active, is_default")
     .eq("id", cajaId)
     .maybeSingle();
   if (!data) return null;
   const row = data as {
     id: string;
     business_id: string;
+    name: string;
     is_active: boolean;
     is_default: boolean;
   };
   if (row.business_id !== businessId) return null;
-  return { id: row.id, is_active: row.is_active, is_default: row.is_default };
+  return {
+    id: row.id,
+    name: row.name,
+    is_active: row.is_active,
+    is_default: row.is_default,
+  };
 }
 
 // ── CRUD de cajas físicas ──────────────────────────────────────
@@ -352,6 +363,25 @@ export async function cerrarCaja(input: {
     }
   }
 
+  // D9 · El snapshot de lo que el encargado está viendo. No hay cálculo nuevo:
+  // `stats` ya se computó arriba para validar la diferencia. Se congela acá
+  // porque después de cerrar el período vivo pasa a ser el siguiente, y una
+  // corrección posterior (spec 070) movería un papel que alguien ya firmó.
+  const resumen = {
+    version: 1 as const,
+    caja_name: caja.name,
+    periodo_desde: stats.periodo_desde,
+    total_ventas_cents: stats.total_ventas_cents,
+    total_propinas_cents: stats.total_propinas_cents,
+    cobros_count: stats.cobros_count,
+    ventas_por_metodo: stats.ventas_por_metodo,
+    ventas_por_origen: stats.ventas_por_origen,
+    desglose_esperado: stats.desglose_esperado,
+    expected_cash_cents,
+    closing_cash_cents: input.closing_cash_cents,
+    difference_cents,
+  };
+
   const { data: rpcData, error } = await service.rpc("cerrar_caja_tx", {
     p_caja_id: input.cajaId,
     p_business_id: business.id,
@@ -364,6 +394,7 @@ export async function cerrarCaja(input: {
     // D9 · Sólo la principal barre el salón: el cierre del bar puede pasar en
     // plena cena y no tiene por qué liberar mesas.
     p_barrer_salon: caja.is_default,
+    p_resumen: resumen,
   });
 
   if (error) {
@@ -388,30 +419,11 @@ export async function cerrarCaja(input: {
   } | null;
   if (!row) return actionError("No se pudo cerrar la caja.");
 
-  // Spec 130 · El retiro es la última línea del corte, no el primer movimiento
-  // del turno que arranca: `corte_id` es lo que se lo dice a la app (0059), que
-  // lo netea contra la apertura para que el turno nuevo empiece en $0 en vez de
-  // anunciar «$262.000 del corte anterior» con la sangría que lo vacía tres
-  // líneas más abajo.
-  //
-  // Va acá y no adentro de `cerrar_caja_tx` a propósito: esa función es corte +
-  // retiro + salón + rendiciones en una sola transacción, y reescribirla por
-  // una etiqueta es riesgo que no paga. Si este update falla, el cierre ya está
-  // hecho y la plata bien contada — se pierde el rótulo, nada más — así que se
-  // loguea y no se le arruina el cierre al encargado.
-  if (row.retiro_id) {
-    const { error: rotuloError } = await service
-      .from("caja_movimientos")
-      .update({ corte_id: row.corte.id })
-      .eq("id", row.retiro_id);
-    if (rotuloError) {
-      console.error(
-        "[cerrarCaja] el retiro quedó sin atar a su corte",
-        { retiro_id: row.retiro_id, corte_id: row.corte.id },
-        rotuloError,
-      );
-    }
-  }
+  // Issue #218 · el estampado del `corte_id` del retiro vivía acá, como un
+  // UPDATE best-effort **después** de la transacción: un cierre cuyo update
+  // fallaba quedaba con la plata retirada y el movimiento sin atar, y el
+  // resumen (spec 149) no podía decir cuánto se había sacado. Desde la 0063 lo
+  // hace `cerrar_caja_tx` adentro de la misma transacción.
 
   if (caja.is_default) {
     revalidatePath(`/${input.businessSlug}/mozo`);

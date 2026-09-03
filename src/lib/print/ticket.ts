@@ -33,6 +33,19 @@ const CHAR_SIZE: Record<Size, string> = { sm: "\x00", tall: "\x01", xl: "\x11" }
 // el nombre del producto a la mitad.
 export const COLS: Record<Size, number> = { sm: 24, tall: 24, xl: 11 };
 
+/**
+ * Ancho de la **Font B** (condensada), en la misma comandera de 58 mm.
+ *
+ * Celda Font B = 9 pt ⇒ 384 / 9 = 42 col, y sin `ESC SP` extra. Es el ancho al
+ * que MaxiRest imprime el cierre en golf: la línea más larga de su ticket
+ * (`IVA: Resp. Inscripto   CUIT: 30-71323440-7`) mide exactamente 42, y 42 no
+ * entran en Font A en este cabezal (techo 32). Mismo papel, otra tipografía.
+ *
+ * No se usa para comandas: la cocina lee de lejos y por eso va Font A con
+ * espaciado. El cierre se lee en la mano.
+ */
+export const COLS_COND = 42;
+
 // Espaciado lateral por carácter (ESC SP n) ≈ +33% de ancho sin duplicarlo.
 const CHAR_RIGHT_SPACING = 4;
 
@@ -40,6 +53,8 @@ const CHAR_RIGHT_SPACING = 4;
 const LINE_SPACING = 64;
 
 export const RULE = "------------------------"; // 24 col (≈ ancho útil 58mm con el espaciado)
+/** Separador a lo ancho de la condensada (42 col), para el papel del cierre. */
+export const RULE_COND = "-".repeat(COLS_COND);
 
 // Renglones en blanco arriba y abajo del bloque de ítems (entre ítem e ítem va
 // uno solo). Despega la lista de la línea separadora y del corte del papel.
@@ -461,10 +476,25 @@ function escPosQr(data: string, moduleSize = 6): string {
 }
 
 /** Renderiza las líneas como ESC/POS para térmica de red (producción). */
-export function renderEscPos(lines: Line[]): string {
+/**
+ * Perfil tipográfico del documento. `comanda` es el de siempre —Font A con
+ * espaciado lateral, para leer de lejos—; `cierre` es Font B sin espaciado, que
+ * es como imprime el papel del cierre (42 col).
+ */
+export type Perfil = "comanda" | "cierre";
+
+export function renderEscPos(lines: Line[], perfil: Perfil = "comanda"): string {
+  const condensada = perfil === "cierre";
   let out = ESC + "@"; // init (resetea tamaño, énfasis, interlineado y espaciado)
   out += ESC + "3" + String.fromCharCode(LINE_SPACING); // interlineado espaciado
-  out += ESC + " " + String.fromCharCode(CHAR_RIGHT_SPACING); // ancho extra (ESC SP)
+  // ESC M 1 — Font B. Sólo se emite en condensada **a propósito**: el `ESC @`
+  // de arriba ya deja la impresora en Font A, así que mandarlo también para la
+  // comanda serían dos bytes que no cambian nada — y los fixtures de paridad
+  // byte-a-byte con el agente están congelados justamente para cazar eso.
+  if (condensada) out += ESC + "M" + "\x01";
+  // En condensada el espaciado extra se va a cero: con 4 pt más por carácter
+  // las 42 columnas no entran.
+  out += ESC + " " + String.fromCharCode(condensada ? 0 : CHAR_RIGHT_SPACING);
   let align: Align | null = null;
   let size: Size | null = null;
   let bold: boolean | null = null;
