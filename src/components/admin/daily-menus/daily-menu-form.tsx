@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm, useFormContext } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,11 @@ import {
   createDailyMenu,
   updateDailyMenu,
 } from "@/lib/daily-menus/daily-menu-actions";
+import {
+  avisosDeModificadores,
+  grupoQueDuplica,
+  type ProductModifierGroup,
+} from "@/lib/daily-menus/daily-menu-modifiers";
 import {
   addOption,
   moveCard,
@@ -70,6 +75,20 @@ export function DailyMenuForm({
         if (c.product_id && c.product_name) {
           map.set(c.product_id, c.product_name);
         }
+      }
+    }
+    return map;
+  });
+
+  // Lo que cada producto pregunta por su cuenta (spec 148). Arranca con lo que
+  // trajo la query —si no, un menú ya guardado no mostraría nada hasta
+  // re-elegir cada producto— y crece cuando el picker elige uno nuevo, igual
+  // que `productNames`.
+  const [productModifiers] = useState(() => {
+    const map = new Map<string, ProductModifierGroup[]>();
+    if (menu) {
+      for (const c of menu.components) {
+        if (c.product_id) map.set(c.product_id, c.product_modifier_groups);
       }
     }
     return map;
@@ -379,7 +398,11 @@ export function DailyMenuForm({
           )}
         />
 
-        <ComponentsEditor businessId={businessId} productNames={productNames} />
+        <ComponentsEditor
+          businessId={businessId}
+          productNames={productNames}
+          productModifiers={productModifiers}
+        />
 
         <div className="flex gap-2">
           <Button type="submit" disabled={submitting}>
@@ -411,9 +434,11 @@ const KIND_OPTIONS = [
 function ComponentsEditor({
   businessId,
   productNames,
+  productModifiers,
 }: {
   businessId: string;
   productNames: Map<string, string>;
+  productModifiers: Map<string, ProductModifierGroup[]>;
 }) {
   const { control, watch, setValue, getValues, reset } =
     useFormContext<DailyMenuInput>();
@@ -446,6 +471,14 @@ function ComponentsEditor({
           },
         ]
       : [],
+  );
+
+  // Los nombres de los grupos del combo: contra ellos se compara lo que trae
+  // cada producto para detectar la doble pregunta (spec 148, D2). Se incluye el
+  // grupo propio de la opción: si «Guarnición» ofrece un Puré que a su vez
+  // pregunta «Guarnición», también se pregunta dos veces.
+  const nombresDeGruposDelCombo = cards.flatMap((card) =>
+    card.kind === "group" ? [card.label] : [],
   );
 
   const choiceGroups = watch("choice_groups") ?? [];
@@ -670,6 +703,8 @@ function ComponentsEditor({
                 onConditionChange={(next) => setGroup(card.groupId, next)}
                 control={control}
                 productNames={productNames}
+                productModifiers={productModifiers}
+                comboGroupNames={nombresDeGruposDelCombo}
                 onLabelChange={(label) => {
                   setGroup(card.groupId, { name: label });
                   // Se sigue escribiendo en las opciones mientras la columna
@@ -707,6 +742,7 @@ function ComponentsEditor({
               businessId={businessId}
               control={control}
               productNames={productNames}
+              productModifiers={productModifiers}
               moveButtons={move}
               onKindChange={(newKind) => {
                 setValue(`components.${start}.kind`, newKind);
@@ -722,6 +758,75 @@ function ComponentsEditor({
         })}
       </div>
     </section>
+  );
+}
+
+/**
+ * Lo que el producto elegido va a preguntar por su cuenta dentro del combo
+ * (spec 148).
+ *
+ * El dato siempre estuvo en la base: la spec 083 hace que el asistente
+ * pregunte los `modifier_groups` del producto sin que el menú declare nada, y
+ * esta pantalla no lo mostraba en ninguna parte. Se muestra **siempre**, no
+ * sólo cuando hay conflicto (D1): la mayoría de los casos son legítimos —el
+ * Puré trae «Variante», las pastas «Salsa para pasta»— y el problema de fondo
+ * no era la colisión sino que el editor escondía media conducta del menú.
+ *
+ * Cuando el nombre coincide con el de un grupo del combo, el aviso sube de
+ * tono, pero **no bloquea el guardado** (D2): puede haber un caso donde
+ * preguntar dos cosas parecidas tenga sentido, y el que arma el menú sabe más
+ * que la validación.
+ */
+function ModificadoresDelProducto({
+  groups,
+  comboGroupNames,
+  /** Un componente fijo (`kind='product'`) NO abre pasos: la spec 083 los dejó
+   *  explícitamente fuera. Se listan igual —el que arma el menú necesita saber
+   *  que la Milanesa fija no va a preguntar el punto de cocción—, pero el
+   *  texto dice lo contrario y no hay conflicto posible. */
+  fijo = false,
+}: {
+  groups: ProductModifierGroup[];
+  comboGroupNames: string[];
+  fijo?: boolean;
+}) {
+  // Sin modificadores no se dibuja nada: no se agrega ruido donde no hay nada
+  // que avisar.
+  const avisos = avisosDeModificadores(groups, fijo ? [] : comboGroupNames);
+  if (avisos.length === 0) return null;
+
+  const duplicados = avisos.filter((a) => a.duplicaA);
+
+  return (
+    <div className="text-muted-foreground bg-muted/50 space-y-1 rounded-lg px-3 py-2 text-xs">
+      <p>
+        {fijo
+          ? "Este producto tiene modificadores propios, pero al ser un componente fijo el asistente no los pregunta:"
+          : "Al elegir esta opción, el asistente va a preguntar además:"}
+      </p>
+      <ul className="space-y-0.5">
+        {avisos.map((a) => (
+          <li key={a.id} className="flex flex-wrap items-center gap-1.5">
+            <span className="text-foreground font-medium">
+              {a.name.trim() || "(sin nombre)"}
+            </span>
+            <span>{a.is_required ? "(obligatoria)" : "(opcional)"}</span>
+            {a.duplicaA && (
+              <span className="flex items-center gap-1 font-medium text-amber-700">
+                <AlertTriangle className="size-3" aria-hidden />
+                se pregunta dos veces
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+      {duplicados.map((a) => (
+        <p key={`dup-${a.id}`} className="font-medium text-amber-700">
+          El combo ya pregunta «{a.duplicaA}»; este producto la va a preguntar
+          de nuevo. Se puede guardar igual: revisá si es lo que querés.
+        </p>
+      ))}
+    </div>
   );
 }
 
@@ -784,6 +889,7 @@ function SingleComponentCard({
   businessId,
   control,
   productNames,
+  productModifiers,
   moveButtons,
   onKindChange,
   onRemove,
@@ -793,6 +899,7 @@ function SingleComponentCard({
   businessId: string;
   control: ReturnType<typeof useFormContext<DailyMenuInput>>["control"];
   productNames: Map<string, string>;
+  productModifiers: Map<string, ProductModifierGroup[]>;
   moveButtons: React.ReactNode;
   onKindChange: (kind: "text" | "product") => void;
   onRemove: () => void;
@@ -843,22 +950,35 @@ function SingleComponentCard({
       </div>
 
       {kind === "product" && (
-        <ProductPicker
-          businessId={businessId}
-          value={
-            productId
-              ? {
-                  id: productId,
-                  name: productNames.get(productId) ?? productId,
-                  image_url: null,
-                }
-              : null
-          }
-          onChange={(p) => {
-            setValue(`components.${idx}.product_id`, p?.id ?? null);
-            if (p) productNames.set(p.id, p.name);
-          }}
-        />
+        <>
+          <ProductPicker
+            businessId={businessId}
+            value={
+              productId
+                ? {
+                    id: productId,
+                    name: productNames.get(productId) ?? productId,
+                    image_url: null,
+                    modifier_groups: productModifiers.get(productId) ?? [],
+                  }
+                : null
+            }
+            onChange={(p) => {
+              setValue(`components.${idx}.product_id`, p?.id ?? null);
+              if (p) {
+                productNames.set(p.id, p.name);
+                productModifiers.set(p.id, p.modifier_groups);
+              }
+            }}
+          />
+          {productId && (
+            <ModificadoresDelProducto
+              groups={productModifiers.get(productId) ?? []}
+              comboGroupNames={[]}
+              fijo
+            />
+          )}
+        </>
       )}
 
       {kind === "text" && (
@@ -895,6 +1015,8 @@ function ChoiceGroupCard({
   onConditionChange,
   control,
   productNames,
+  productModifiers,
+  comboGroupNames,
   moveButtons,
   onLabelChange,
   onAddOption,
@@ -922,6 +1044,10 @@ function ChoiceGroupCard({
   }) => void;
   control: ReturnType<typeof useFormContext<DailyMenuInput>>["control"];
   productNames: Map<string, string>;
+  /** Lo que cada producto pregunta por su cuenta (spec 148). */
+  productModifiers: Map<string, ProductModifierGroup[]>;
+  /** Los nombres de los grupos del combo, para detectar la doble pregunta. */
+  comboGroupNames: string[];
   moveButtons: React.ReactNode;
   onLabelChange: (label: string) => void;
   onAddOption: () => void;
@@ -980,6 +1106,8 @@ function ChoiceGroupCard({
                           name:
                             productNames.get(productId) ?? productId,
                           image_url: null,
+                          modifier_groups:
+                            productModifiers.get(productId) ?? [],
                         }
                       : null
                   }
@@ -991,6 +1119,7 @@ function ChoiceGroupCard({
                     if (p) {
                       setValue(`components.${idx}.label`, p.name);
                       productNames.set(p.id, p.name);
+                      productModifiers.set(p.id, p.modifier_groups);
                     }
                   }}
                 />
@@ -1029,6 +1158,14 @@ function ChoiceGroupCard({
               )}
             </div>
 
+            {productId && (
+              <div className="pl-8">
+                <ModificadoresDelProducto
+                  groups={productModifiers.get(productId) ?? []}
+                  comboGroupNames={comboGroupNames}
+                />
+              </div>
+            )}
             </div>
           );
         })}
@@ -1058,6 +1195,7 @@ function ChoiceGroupCard({
         earlierGroups={earlierGroups}
         condition={condition}
         onChange={onConditionChange}
+        productModifiers={productModifiers}
       />
     </div>
   );
@@ -1081,6 +1219,7 @@ function GroupCondition({
   earlierGroups,
   condition,
   onChange,
+  productModifiers,
 }: {
   groupId: string;
   groupLabel: string;
@@ -1090,6 +1229,8 @@ function GroupCondition({
     applies_when_group_id: string | null;
     applies_when_product_ids: string[];
   }) => void;
+  /** Lo que cada producto pregunta por su cuenta (spec 148). */
+  productModifiers: Map<string, ProductModifierGroup[]>;
 }) {
   if (earlierGroups.length === 0) return null;
 
@@ -1161,7 +1302,16 @@ function GroupCondition({
 
       {condicionado && fuente && (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pl-6">
-          {fuente.options.map((o) => (
+          {fuente.options.map((o) => {
+            // Acá nace el caso real de golf-jcr: se marca «Guarnición» como
+            // condicional y se le eligen 12 disparadores, tres de los cuales
+            // ya traen su propia guarnición. El error se comete en esta lista,
+            // así que la marca va acá (spec 148, D3).
+            const duplica = grupoQueDuplica(
+              productModifiers.get(o.product_id),
+              groupLabel,
+            );
+            return (
             <label key={o.product_id} className="flex items-center gap-1.5 text-xs">
               <input
                 type="checkbox"
@@ -1179,8 +1329,18 @@ function GroupCondition({
                 }
               />
               <span>{o.label || "(sin producto)"}</span>
+              {duplica && (
+                <span
+                  className="flex items-center gap-1 font-medium text-amber-700"
+                  title={`«${o.label}» ya pregunta «${duplica}» por su cuenta: se preguntaría dos veces.`}
+                >
+                  <AlertTriangle className="size-3" aria-hidden />
+                  ya pregunta «{duplica}»
+                </span>
+              )}
             </label>
-          ))}
+            );
+          })}
           {fuente.options.length === 0 && (
             <span className="text-muted-foreground">
               Ese grupo todavía no tiene opciones con producto.

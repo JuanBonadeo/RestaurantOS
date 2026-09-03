@@ -4,12 +4,20 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
+import type { ProductModifierGroup } from "@/lib/daily-menus/daily-menu-modifiers";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
-type PickedProduct = {
+export type PickedProduct = {
   id: string;
   name: string;
   image_url: string | null;
+  /**
+   * Lo que el producto pregunta por su cuenta dentro del combo (spec 083). Se
+   * trae en el mismo viaje —una columna más en el select que ya existía— para
+   * que el editor pueda mostrarlo al elegirlo (spec 148, D4). El editor de
+   * menús no es una pantalla de hora pico: el costo es un join.
+   */
+  modifier_groups: ProductModifierGroup[];
 };
 
 export function ProductPicker({
@@ -37,13 +45,22 @@ export function ProductPicker({
       const supabase = createSupabaseBrowserClient();
       const { data } = await supabase
         .from("products")
-        .select("id, name, image_url")
+        .select(
+          "id, name, image_url, modifier_groups(id, name, is_required, sort_order)",
+        )
         .eq("business_id", businessId)
         .eq("is_active", true)
         .ilike("name", `%${q}%`)
         .order("name")
         .limit(10);
-      setResults((data ?? []) as PickedProduct[]);
+      setResults(
+        (data ?? []).map((p) => ({
+          id: p.id,
+          name: p.name,
+          image_url: p.image_url,
+          modifier_groups: (p.modifier_groups ?? []) as ProductModifierGroup[],
+        })),
+      );
       setLoading(false);
     },
     [businessId],

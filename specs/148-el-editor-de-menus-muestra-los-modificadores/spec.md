@@ -2,7 +2,7 @@
 
 **Issue:** [#224](https://github.com/gachetponzellini/RestaurantOS-app/issues/224) ·
 **Milestone:** Post-demo · Growth & hardening ·
-**Estado:** 📋 propuesta (2026-09-03) — sin implementar
+**Estado:** ✅ implementado (2026-09-03)
 
 **Input:** Juan, 2026-09-03, después de diagnosticar la guarnición doble:
 *"ahora habría que hacer algo para corregir que el primer problema no pase de
@@ -145,16 +145,49 @@ que se cobra: sale por el otro camino y con la encargada al tanto.
 
 ## Verificación
 
-Pendiente — sin implementar.
+**Tests** — 13 en el helper puro
+([`daily-menu-modifiers.test.ts`](../../src/lib/daily-menus/daily-menu-modifiers.test.ts)):
+normalización con tildes/mayúsculas/espacios, producto sin modificadores,
+producto con varios, marcado de sólo el que se pisa, grupo sin nombre que no
+matchea con otro sin nombre, y el caso legítimo del escenario 6 (que **no** da
+conflicto). Más 6 en el editor
+([`daily-menu-form.test.tsx`](../../src/components/admin/daily-menus/daily-menu-form.test.tsx)),
+incluida la de D2: con la colisión a la vista, el menú **se guarda igual**.
+`pnpm typecheck` en verde; 624 unitarios pasan (los `*.integration.test.ts`
+fallan con `fetch failed` porque piden el stack local, ruido conocido).
 
-Al implementar, el grueso va en los tests del helper puro: coincidencia con
-tildes y mayúsculas mezcladas, producto sin modificadores, producto con varios,
-grupo condicional con disparadores mixtos, y el caso legítimo del escenario 6
-(que **no** tiene que dar conflicto). El verify en vivo se hace en `demo` sobre
-un menú armado a propósito con la colisión — como admin, que es quien edita el
-catálogo:
+**En vivo** — `demo`, como admin, en `/demo/admin/menu-del-dia/nuevo`, armando a
+propósito la colisión (no se guardó nada):
 
-    node scripts/magic-link.mjs admin@demo.test "/demo/admin/catalogo"
+    node scripts/magic-link.mjs admin@demo.test "/demo/admin/menu-del-dia/nuevo"
+
+1. Grupo «Principal» con Milanesa → *«Al elegir esta opción, el asistente va a
+   preguntar además: Guarnición (opcional)»* (escenario 1).
+2. Segundo grupo llamado «Guarnicion», **sin tilde** → el bloque de la Milanesa
+   pasa a *«se pregunta dos veces»* + *«El combo ya pregunta «Guarnicion»; este
+   producto la va a preguntar de nuevo. Se puede guardar igual…»* (escenarios 3
+   y 4).
+3. Puré en ese mismo grupo → *«Variante (opcional)»* como información, **sin**
+   conflicto (escenario 6).
+4. «Sólo si en Principal eligieron:» → la Milanesa queda marcada con *«ya
+   pregunta «Guarnición»»* (escenario 5).
 
 Es el único caso de esta tanda donde el rol correcto **no** es Sofía: la
 encargada no edita menús.
+
+## Lo que se decidió al implementar
+
+**El componente fijo dice lo contrario.** La spec pedía el bloque también
+debajo del componente fijo (`kind='product'`), pero la spec 083 dejó los fijos
+explícitamente fuera de alcance: sus hijos los arma el server desde
+`components` y el cliente no manda modificadores
+([`comandas/actions.ts`](../../src/lib/comandas/actions.ts),
+[`persist-order.ts`](../../src/lib/orders/persist-order.ts)). Escribir ahí «el
+asistente va a preguntar además» sería mentir. Se muestra igual —el que arma el
+menú necesita saber que la Milanesa fija **no** va a preguntar el punto de
+cocción— con el texto invertido y sin detección de conflicto.
+
+**La query del admin también trae los modificadores.** D4 sólo nombraba el
+picker, pero un menú ya guardado no mostraría nada hasta re-elegir cada
+producto — y los dos menús de golf-jcr con la colisión son menús existentes.
+`daily-menu-query.ts` suma la misma columna al select que ya tenía.

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // El picker de productos y el uploader pegan al server; acá sólo importa el
@@ -13,9 +13,15 @@ vi.mock("@/components/admin/daily-menus/product-picker", () => ({
 vi.mock("@/components/admin/catalog/image-uploader", () => ({
   ImageUploader: () => <div data-testid="image-uploader" />,
 }));
+const { updateDailyMenuMock } = vi.hoisted(() => ({
+  updateDailyMenuMock: vi.fn(async () => ({ ok: true, data: { id: "m1" } })),
+}));
 vi.mock("@/lib/daily-menus/daily-menu-actions", () => ({
   createDailyMenu: async () => ({ ok: true, data: { id: "m1" } }),
-  updateDailyMenu: async () => ({ ok: true, data: { id: "m1" } }),
+  updateDailyMenu: updateDailyMenuMock,
+}));
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
 }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
@@ -26,6 +32,7 @@ import type {
   AdminDailyMenu,
   AdminDailyMenuComponent,
 } from "@/lib/admin/daily-menu-query";
+import type { ProductModifierGroup } from "@/lib/daily-menus/daily-menu-modifiers";
 
 /**
  * Reordenar y borrar en el editor del menú del día (spec 076).
@@ -41,25 +48,31 @@ const GRUPO = { entrada: uuid(1), principal: uuid(2), postre: uuid(3) };
 
 let sortOrder = 0;
 let productSeq = 100;
+let componentSeq = 200;
+/** Un uuid de verdad: el schema los valida y hay un test que llega a guardar. */
+const uuidN = (n: number) =>
+  `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
 function option(
   groupId: string,
   groupLabel: string,
   name: string,
   extraCents = 0,
+  modifierGroups: ProductModifierGroup[] = [],
 ): AdminDailyMenuComponent {
   return {
-    id: `opt-${name}`,
+    id: uuidN(componentSeq++),
     label: name,
     description: null,
     sort_order: sortOrder++,
     kind: "choice",
-    product_id: `00000000-0000-4000-8000-0000000${productSeq++}`,
+    product_id: uuidN(productSeq++),
     choice_group_id: groupId,
     choice_group_label: groupLabel,
     product_name: name,
     product_image_url: null,
     extra_price_cents: extraCents,
+    product_modifier_groups: modifierGroups,
   };
 }
 
@@ -234,6 +247,7 @@ describe("editor del menú del día · los valores viajan con la tarjeta (spec 0
       product_name: null,
       product_image_url: null,
       extra_price_cents: 0,
+      product_modifier_groups: [],
     });
     renderForm(menuCon([texto("Entrada"), texto("Principal"), texto("Postre")]));
     const textos = () =>
@@ -367,5 +381,131 @@ describe("editor del menú del día · la condición vive en el grupo (spec 087)
     fireEvent.click(screen.getByRole("checkbox", { name: "Milanesa" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Ravioles" }));
     expect(screen.getByText(/no va a aparecer nunca/)).toBeTruthy();
+  });
+});
+
+describe("editor del menú del día · los modificadores del producto (spec 148)", () => {
+  /**
+   * La spec 083 hace que el asistente pregunte los modificadores del producto
+   * elegido dentro del combo. El editor no lo mostraba en ninguna parte: se
+   * elegía «Milanesa» sin saber que arrastra su propia «Guarnición», y si el
+   * menú además tenía un grupo «Guarnicion», el asistente preguntaba dos veces.
+   * Eso se descubría en el salón, en hora pico — le pasó a la encargada de Golf.
+   */
+  const mg = (
+    name: string,
+    is_required = false,
+    sort_order = 0,
+  ): ProductModifierGroup => ({
+    id: `mg-${name}`,
+    name,
+    is_required,
+    sort_order,
+  });
+
+  it("lista los grupos que el producto va a preguntar, con si son obligatorios", () => {
+    renderForm(
+      menuCon([
+        option(GRUPO.principal, "Principal", "Ñoquis", 0, [
+          mg("Salsa para pasta", true),
+        ]),
+      ]),
+    );
+
+    expect(
+      screen.getByText(/el asistente va a preguntar además/),
+    ).toBeTruthy();
+    expect(screen.getByText("Salsa para pasta")).toBeTruthy();
+    expect(screen.getByText("(obligatoria)")).toBeTruthy();
+  });
+
+  it("un producto sin modificadores no agrega ruido", () => {
+    renderForm(menuCon([option(GRUPO.principal, "Principal", "Flan")]));
+    expect(screen.queryByText(/va a preguntar además/)).toBeNull();
+  });
+
+  it("la doble pregunta se avisa —con tildes distintas— y el menú se guarda igual", async () => {
+    updateDailyMenuMock.mockClear();
+    // El caso exacto de golf-jcr: el combo pregunta «Guarnicion» y la Milanesa
+    // trae «Guarnición».
+    renderForm(
+      menuCon([
+        option(GRUPO.principal, "Principal", "Milanesa", 0, [
+          mg("Guarnición", true),
+        ]),
+        option(GRUPO.postre, "Guarnicion", "Papas"),
+      ]),
+    );
+
+    expect(screen.getByText(/se pregunta dos veces/)).toBeTruthy();
+    expect(
+      screen.getByText(/El combo ya pregunta «Guarnicion»/),
+    ).toBeTruthy();
+
+    // D2: es un aviso, no un bloqueo.
+    fireEvent.click(btn("Guardar"));
+    await waitFor(() => expect(updateDailyMenuMock).toHaveBeenCalled());
+  });
+
+  it("el caso legítimo se lista como información, no como conflicto", () => {
+    // El Puré trae «Variante» dentro de un grupo «Guarnición»: es exactamente
+    // lo que la spec 083 quería, y no tiene que dar conflicto.
+    renderForm(
+      menuCon([
+        option(GRUPO.principal, "Principal", "Milanesa"),
+        option(GRUPO.postre, "Guarnición", "Puré", 0, [mg("Variante")]),
+      ]),
+    );
+
+    expect(screen.getByText("Variante")).toBeTruthy();
+    expect(screen.getByText("(opcional)")).toBeTruthy();
+    expect(screen.queryByText(/se pregunta dos veces/)).toBeNull();
+  });
+
+  it("en el selector de disparadores, el producto que ya pregunta lo mismo queda marcado", () => {
+    renderForm(
+      menuCon([
+        option(GRUPO.principal, "Principal", "Milanesa", 0, [
+          mg("Guarnición", true),
+        ]),
+        option(GRUPO.principal, "Principal", "Ravioles"),
+        option(GRUPO.postre, "Guarnicion", "Papas"),
+      ]),
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: "Sólo si en" }));
+
+    // Es donde se comete el error: se marcan 12 disparadores y tres ya traen
+    // su propia guarnición.
+    expect(
+      screen.getByRole("checkbox", { name: /Milanesa.*ya pregunta «Guarnición»/ }),
+    ).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "Ravioles" })).toBeTruthy();
+  });
+
+  it("en un componente fijo dice que el asistente NO los pregunta", () => {
+    // La spec 083 dejó los fijos explícitamente fuera: la Milanesa fija con
+    // «Punto de cocción» obligatorio no lo pregunta. Mostrarlo con el texto de
+    // las opciones sería mentir.
+    const fijo: AdminDailyMenuComponent = {
+      id: "fijo-1",
+      label: "Principal",
+      description: null,
+      sort_order: sortOrder++,
+      kind: "product",
+      product_id: uuid(7),
+      choice_group_id: null,
+      choice_group_label: null,
+      product_name: "Milanesa",
+      product_image_url: null,
+      extra_price_cents: 0,
+      product_modifier_groups: [mg("Punto de cocción", true)],
+    };
+    renderForm(menuCon([fijo]));
+
+    expect(
+      screen.getByText(/al ser un componente fijo el asistente no los pregunta/),
+    ).toBeTruthy();
+    expect(screen.getByText("Punto de cocción")).toBeTruthy();
   });
 });

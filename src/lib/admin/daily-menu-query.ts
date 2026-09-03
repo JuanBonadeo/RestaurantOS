@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { ProductModifierGroup } from "@/lib/daily-menus/daily-menu-modifiers";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export type AdminDailyMenuComponent = {
@@ -15,6 +16,13 @@ export type AdminDailyMenuComponent = {
   product_image_url: string | null;
   /** Adicional de la opción en centavos (spec 29). 0 = incluida. */
   extra_price_cents: number;
+  /**
+   * Los grupos de modificadores que el producto arrastra por su cuenta
+   * (spec 083). El editor los muestra para que el que arma el menú vea el
+   * asistente completo antes de guardarlo (spec 148); sin esto un menú ya
+   * guardado no mostraría nada hasta re-elegir cada producto.
+   */
+  product_modifier_groups: ProductModifierGroup[];
 };
 
 export type AdminDailyMenu = {
@@ -41,7 +49,7 @@ export type AdminDailyMenu = {
 };
 
 const SELECT =
-  "id, name, slug, description, price_cents, image_url, available_days, is_active, is_available, sort_order, display_context, is_suggestion, daily_menu_choice_groups(id, name, sort_order, applies_when_group_id, applies_when_product_ids), daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, extra_price_cents, products(id, name, image_url))";
+  "id, name, slug, description, price_cents, image_url, available_days, is_active, is_available, sort_order, display_context, is_suggestion, daily_menu_choice_groups(id, name, sort_order, applies_when_group_id, applies_when_product_ids), daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, extra_price_cents, products(id, name, image_url, modifier_groups(id, name, is_required, sort_order)))";
 
 function mapRow(
   row: {
@@ -67,7 +75,12 @@ function mapRow(
           product_id?: string | null;
           choice_group_id?: string | null;
           extra_price_cents?: number | null;
-          products?: { id: string; name: string; image_url: string | null } | null;
+          products?: {
+            id: string;
+            name: string;
+            image_url: string | null;
+            modifier_groups?: ProductModifierGroup[] | null;
+          } | null;
         }[]
       | null;
     daily_menu_choice_groups?:
@@ -126,6 +139,7 @@ function mapRow(
         product_name: c.products?.name ?? null,
         product_image_url: c.products?.image_url ?? null,
         extra_price_cents: Number(c.extra_price_cents ?? 0),
+        product_modifier_groups: c.products?.modifier_groups ?? [],
       })),
   };
 }
