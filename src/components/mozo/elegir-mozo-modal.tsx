@@ -83,9 +83,19 @@ export function ElegirMozoModal({
   const searchRef = useRef<HTMLInputElement>(null);
   const reasonRef = useRef<HTMLTextAreaElement>(null);
 
-  // El buscador aparece recién cuando la lista se hace larga (spec 079): con un
-  // equipo chico entran todos y el input sólo empuja la lista hacia abajo.
-  const showSearch = shouldShowMozoSearch(candidates.length);
+  /**
+   * ¿Va el buscador?
+   *
+   * Donde hay **teclado** (el salón), siempre: se entra tipeando dos letras y
+   * Enter, que es más rápido que mirar una lista aunque tenga cuatro nombres —y
+   * mucho más ahora que el selector se abre solo al entrar a la mesa.
+   *
+   * Donde no (el teléfono del mozo), sigue la regla de la spec 079 · FR-002: a
+   * partir de 7 candidatos. Ahí el modal es un bottom sheet y el input empuja
+   * hacia abajo justo la lista que venís a mirar, con el teclado virtual
+   * comiéndose el resto.
+   */
+  const showSearch = conTeclado || shouldShowMozoSearch(candidates.length);
   const visibles = showSearch ? filterMozos(candidates, search) : candidates;
 
   /**
@@ -127,7 +137,10 @@ export function ElegirMozoModal({
       toast.error(result.error);
       return;
     }
-    toast.success("Mozo asignado.");
+    // Sin toast: asignar no tiene nada que avisar que no se vea solo. La mesa
+    // pasa a decir el nombre en el header y el plano lo escribe debajo, en el
+    // acto (overlay optimista). Un cartel encima de eso es ruido en la pantalla
+    // donde se trabaja apurado. El error sí avisa — eso no se ve.
     onSuccess(mozoId);
   };
 
@@ -209,12 +222,21 @@ export function ElegirMozoModal({
                   type="text"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  // ↓ baja el foco a la lista, igual que el buscador de
-                  // productos del panel (spec 075).
+                  // Mismo contrato que el buscador de productos del panel
+                  // (specs 073/075): ↓ baja el foco a la lista y Enter se queda
+                  // con el primero de lo que quedó a la vista. Tipear «ped» +
+                  // Enter tiene que alcanzar para poner a Pedro en la mesa.
                   onKeyDown={(e) => {
-                    if (e.key !== "ArrowDown") return;
+                    if (e.key === "ArrowDown") {
+                      e.preventDefault();
+                      focusFirst();
+                      return;
+                    }
+                    if (e.key !== "Enter") return;
+                    const primero = visibles[0];
+                    if (!primero) return;
                     e.preventDefault();
-                    focusFirst();
+                    elegir(primero.user_id);
                   }}
                   placeholder="Buscar mozo…"
                   aria-label="Buscar mozo"

@@ -141,11 +141,11 @@ la puerta, no el server.
 **D-A2 · El modal se maneja con el teclado, como el resto del panel.** La lista
 es una zona de `useRovingList` (spec 075): ↑/↓ mueven el **foco real**, Enter
 sobre la fila hace lo del modo —asigna, o marca el destino—, Esc cierra. Desde
-la última fila, ↓ sigue al motivo (en `transferir`). El buscador de mozos sigue apareciendo
-recién a partir de 7 candidatos (spec 079 · FR-002) y ↓ desde el input entra a
-la lista, igual que el buscador de productos.
+la última fila, ↓ sigue al motivo (en `transferir`). El buscador de mozos se rige
+por la superficie (ver D-A13) y ↓ desde el input entra a la lista, igual que el
+buscador de productos.
 
-El foco arranca en la primera fila (o en el buscador, si está). En el teléfono
+El foco arranca en el buscador, si está, y si no en la primera fila. En el teléfono
 del mozo **no** hay autofoco: el teclado virtual se come justo la lista que
 venís a mirar (era el comentario de la 079, y sigue valiendo). Va por prop
 `conTeclado`, que prende la superficie: el salón sí, el teléfono no.
@@ -412,6 +412,28 @@ entero. El panel ahora ignora Esc/Backspace/`?` mientras hay un modal del salón
 abierto; el modal quedó marcado `role="dialog"`, que es el contrato con el que
 las demás superficies deciden que las teclas no son suyas.
 
+**D-A13 · Donde hay teclado, el buscador está siempre — y arranca enfocado.**
+La spec 079 lo mostraba recién a partir de 7 candidatos, con el argumento de que
+con un equipo chico entran todos y el input sólo empuja la lista hacia abajo. Ese
+argumento es **del teléfono**: ahí el modal es un bottom sheet y el teclado
+virtual se come justo la lista que venís a mirar. En el salón, con teclado
+físico, es al revés: tipear dos letras y Enter es más rápido que leer una lista
+de cuatro, y ahora que el selector se abre solo, el primer gesto de la mesa es
+tipear. Así que el corte pasa a ser la superficie (`conTeclado`), no el tamaño
+del equipo; el teléfono conserva la regla de la 079 tal cual.
+
+Y el buscador cierra el contrato del panel (specs 073/075): `↓` baja a la lista y
+**`Enter` se queda con el primero de lo que quedó a la vista**. «ped» + Enter
+pone a Pedro en la mesa sin tocar el mouse ni las flechas.
+
+**D-A14 · Asignar no avisa por toast.** El cartel «Mozo asignado.» se fue: no
+tiene nada que decir que no se vea solo. La pastilla del header pasa a decir el
+nombre y el plano lo escribe debajo de la mesa en el acto (overlay optimista), y
+ahora que el selector se abre en cada mesa libre, ese toast aparecía una vez por
+mesa en la pantalla donde se trabaja apurado. El error sí avisa — eso no se ve.
+La transferencia conserva el suyo: manda una notificación al otro mozo, que es
+una consecuencia fuera de pantalla.
+
 ### Lo que se decidió NO hacer
 
 - **Recordar las mesas descartadas.** Se evaluó no volver a preguntar en una
@@ -435,6 +457,11 @@ las demás superficies deciden que las teclas no son suyas.
 - Con el selector abierto, tocar otra mesa libre en el plano: **un** click cambia
   de mesa y el selector queda apuntando a la nueva, con el foco puesto.
 - Mesa ocupada (T12) y mesa libre **con** mozo (R19, R01): no aparece nada.
+- Con el buscador siempre puesto (D-A13): tocar R02 → el foco cae en «Buscar
+  mozo…», tipear «ped» deja sólo a Pedro y Enter lo asigna. Cero toasts
+  (`[data-sonner-toast]` en 0), la pastilla dice «Pedro Mozo», el plano escribe
+  «Pedro» y el foco termina en el buscador de **productos**: mesa asignada y
+  lista para comandar sin haber tocado el mouse.
 
 ### Queda afuera (anotado)
 

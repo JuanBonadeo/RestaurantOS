@@ -1,6 +1,11 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const toastSuccess = vi.fn();
+vi.mock("sonner", () => ({
+  toast: { success: (...a: unknown[]) => toastSuccess(...a), error: vi.fn() },
+}));
 
 const transferTable = vi.fn(async () => ({ ok: true as const, data: {} }));
 const assignMozoToTable = vi.fn(async () => ({ ok: true as const, data: {} }));
@@ -58,6 +63,7 @@ const cta = () => screen.getByRole("button", { name: /transferir mozo/i });
 beforeEach(() => {
   transferTable.mockClear();
   assignMozoToTable.mockClear();
+  toastSuccess.mockClear();
 });
 
 describe("elegir mozo · modo asignar (spec 146)", () => {
@@ -80,7 +86,9 @@ describe("elegir mozo · modo asignar (spec 146)", () => {
     const user = userEvent.setup();
     renderModal({ modo: "asignar", mozos: equipo.slice(0, 3) });
 
-    // El foco arranca en la primera fila: se entra tecleando, no buscando el mouse.
+    // El foco arranca en el buscador; ↓ entra a la lista.
+    expect(document.activeElement).toBe(buscador());
+    await user.keyboard("{ArrowDown}");
     expect(document.activeElement).toHaveTextContent("Juan Pérez");
     await user.keyboard("{ArrowDown}");
     expect(document.activeElement).toHaveTextContent("Román Gómez");
@@ -89,6 +97,28 @@ describe("elegir mozo · modo asignar (spec 146)", () => {
     await user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
 
     expect(assignMozoToTable).toHaveBeenCalledWith("t1", "u3", "golf-jcr");
+  });
+
+  it("tipear filtra, y Enter en el buscador se queda con el primero", async () => {
+    const user = userEvent.setup();
+    renderModal({ modo: "asignar", mozos: equipo.slice(0, 3) });
+
+    await user.keyboard("roman");
+    expect(screen.queryByText("Juan Pérez")).toBeNull();
+    await user.keyboard("{Enter}");
+
+    expect(assignMozoToTable).toHaveBeenCalledWith("t1", "u2", "golf-jcr");
+  });
+
+  it("no avisa por toast: el cambio ya se ve en la mesa y en el plano", async () => {
+    const user = userEvent.setup();
+    const onSuccess = vi.fn();
+    renderModal({ modo: "asignar", mozos: equipo.slice(0, 3), onSuccess });
+
+    await user.click(screen.getByText("Ana Torres"));
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledWith("u3"));
+    expect(toastSuccess).not.toHaveBeenCalled();
   });
 
   it("Esc cierra sin tocar nada", async () => {
@@ -120,12 +150,30 @@ describe("elegir mozo · modo transferir (spec 079)", () => {
     );
   });
 
-  it("con equipo chico no hay buscador", () => {
+  it("con teclado el buscador está siempre, aunque el equipo sea chico", () => {
     renderModal({ mozos: equipo.slice(0, 4) });
+    expect(buscador()).toBeInTheDocument();
+    expect(screen.getByText("Carla Díaz")).toBeInTheDocument();
+  });
+
+  it("en el teléfono, con equipo chico, sigue sin haber buscador", () => {
+    // Spec 079 · FR-002: ahí el modal es un bottom sheet y el input empuja la
+    // lista hacia abajo, justo la que venís a mirar.
+    render(
+      <ElegirMozoModal
+        modo="transferir"
+        tableId="t1"
+        tableLabel="5"
+        currentMozoId={null}
+        mozos={equipo.slice(0, 4)}
+        businessSlug="golf-jcr"
+        onClose={() => {}}
+        onSuccess={() => {}}
+      />,
+    );
     expect(
       screen.queryByRole("textbox", { name: /buscar mozo/i }),
     ).not.toBeInTheDocument();
-    expect(screen.getByText("Carla Díaz")).toBeInTheDocument();
   });
 
   it("con equipo grande aparece y filtra por nombre", () => {
