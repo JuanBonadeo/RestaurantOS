@@ -211,7 +211,17 @@ describe("SalonDesktop · teclado del panel lateral (spec 075)", () => {
     await user.keyboard("{Enter}");
 
     // Antes eran tres clicks y un formulario hasta poder tipear un producto:
-    // detalle → «Sentar walk-in» → «Abrir mesa». Ahora se entra derecho.
+    // detalle → «Sentar walk-in» → «Abrir mesa». Ahora se entra derecho, con la
+    // única pregunta que la apertura sí necesita: cuántos se sientan (spec 146,
+    // fast-follow 2). Se contesta con una tecla y no vuelve a aparecer.
+    await waitFor(() => {
+      expect(
+        screen.getByRole("dialog", { name: /comensales/i }),
+      ).toBeInTheDocument();
+    });
+    await user.keyboard("4");
+    expect(screen.queryByRole("dialog", { name: /comensales/i })).toBeNull();
+
     await waitFor(() => {
       expect(screen.getByLabelText("Buscar producto")).toHaveFocus();
     });

@@ -35,3 +35,26 @@ export function partySizeFromKey(key: string, current: number): number | null {
   }
   return null;
 }
+
+/**
+ * Lo mismo, pero para el modal de **comensales** que se abre al entrar a una
+ * mesa libre (spec 146, fast-follow 2). La diferencia es qué pasa después de
+ * mover el número:
+ *
+ * - un **dígito** fija la cantidad **y confirma** — «4» y ya estás cargando
+ *   productos. Pedido de Juan: *"no que tenga que poner 4 más Enter, son pasos
+ *   extras que no queremos"*. Es el 99 % de las mesas.
+ * - `+` / `−` sólo **ajustan**: son el camino a las mesas de 10 a 20, donde no
+ *   alcanza un dígito. Ahí confirma el Enter.
+ *
+ * `null` = la tecla no es nuestra.
+ */
+export function comensalesDesdeTecla(
+  key: string,
+  current: number,
+): { valor: number; confirma: boolean } | null {
+  const valor = partySizeFromKey(key, current);
+  if (valor === null) return null;
+  const esDigito = key.length === 1 && key >= "1" && key <= "9";
+  return { valor, confirma: esDigito };
+}

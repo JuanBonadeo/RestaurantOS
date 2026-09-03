@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { pideMozoAlAbrir } from "./pedir-mozo-al-abrir";
+import {
+  pideComensalesAlAbrir,
+  pideMozoAlAbrir,
+} from "./pedir-mozo-al-abrir";
 
 /**
  * Cuándo abrir solo el selector de mozo al entrar a una mesa (spec 146,
@@ -39,5 +42,33 @@ describe("pideMozoAlAbrir", () => {
 
   it("sin candidatos no se abre un modal vacío", () => {
     expect(pideMozoAlAbrir({ ...base, candidatos: 0 })).toBe(false);
+  });
+});
+
+/**
+ * La segunda pregunta de la apertura (spec 146, fast-follow 2). Es más simple
+ * que la del mozo: no depende de permisos de asignación ni de que haya a quién
+ * elegir — cuántos se sientan lo sabe cualquiera que pueda cargar el pedido.
+ */
+describe("pideComensalesAlAbrir", () => {
+  it("mesa libre: sí, siempre — tenga o no mozo", () => {
+    expect(pideComensalesAlAbrir({ estado: "libre", esBarra: false })).toBe(
+      true,
+    );
+  });
+
+  it("mesa ocupada: no. Ya tiene su gente y su orden en curso", () => {
+    expect(pideComensalesAlAbrir({ estado: "ocupada", esBarra: false })).toBe(
+      false,
+    );
+    expect(
+      pideComensalesAlAbrir({ estado: "pidio_cuenta", esBarra: false }),
+    ).toBe(false);
+  });
+
+  it("la barra no tiene comensales: vende de parado (spec 08)", () => {
+    expect(pideComensalesAlAbrir({ estado: "libre", esBarra: true })).toBe(
+      false,
+    );
   });
 });

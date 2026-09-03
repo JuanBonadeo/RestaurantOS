@@ -1,5 +1,12 @@
 /**
- * ¿Al entrar a la mesa hay que preguntar el mozo? — spec 146, fast-follow.
+ * Las preguntas de **apertura de la mesa** — spec 146, fast-follow.
+ *
+ * Abrir una mesa en el salón son dos datos: quién la atiende y cuántos se
+ * sientan. Los dos se preguntan en el único momento en que la respuesta todavía
+ * sirve —al entrar, antes de cargar el primer producto— y ninguno bloquea:
+ * cerrar sin contestar deja seguir comandando.
+ *
+ * ── El mozo ─────────────────────────────────────────────────────────────
  *
  * Pedido de Juan: *"cuando toco una mesa libre lo primero que debería aparecer
  * es el modal del selector de mozo, si está libre y no tiene ningún mozo
@@ -62,5 +69,29 @@ export function pideMozoAlAbrir({
   if (esBarra) return false;
   // Un modal vacío no es una pregunta.
   if (candidatos < 1) return false;
+  return true;
+}
+
+/**
+ * ¿Y hay que preguntar cuántos se sientan?
+ *
+ * Sí, en toda mesa libre que se abre — tenga mozo o no. La pregunta del mozo es
+ * condicional (sólo si falta); ésta no, porque el dato **no existe** hasta que
+ * alguien lo dice: el panel arranca en 2 por defecto y ese 2 es lo que termina
+ * viajando con el primer envío si nadie lo toca.
+ *
+ * No mira el rol: quien puede abrir la mesa y cargarle un pedido puede decir
+ * cuántos son. El único caso sin comensales es la barra, que vende de parado
+ * (spec 08).
+ */
+export function pideComensalesAlAbrir({
+  estado,
+  esBarra,
+}: {
+  estado: string;
+  esBarra: boolean;
+}): boolean {
+  if (estado !== "libre") return false;
+  if (esBarra) return false;
   return true;
 }

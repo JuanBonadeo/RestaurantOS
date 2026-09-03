@@ -434,6 +434,31 @@ mesa en la pantalla donde se trabaja apurado. El error sí avisa — eso no se v
 La transferencia conserva el suyo: manda una notificación al otro mozo, que es
 una consecuencia fuera de pantalla.
 
+**D-A15 · La otra pregunta de la apertura: cuántos se sientan.** Encadenada al
+mozo, mismo modal, mismo teclado: al abrir una mesa libre se pregunta primero
+quién la atiende (si falta) y después siempre cuántos son. **Un dígito confirma
+y cierra** —pedido textual de Juan: *"si pone 4, que pase a la parte de
+adicionar productos, no que tenga que poner 4 más Enter, son pasos extras que no
+queremos"*—; `+`/`−` y las flechas ajustan sin cerrar, que es el camino a las
+mesas de 10 a 20, y ahí confirma el Enter. `Esc` cierra sin tocar nada.
+
+La pregunta del mozo es condicional (sólo si falta); ésta no, y es a propósito:
+el dato **no existe** hasta que alguien lo dice. El panel arranca en 2 por
+defecto y ese 2 es lo que termina viajando con el primer envío si nadie lo toca.
+La única mesa que no la recibe es la barra (spec 08), que vende de parado — en
+`golf-jcr` eso son **63 de 116 mesas**, incluido un salón entero de «Pedidos de
+Mostrador» con 60 posiciones de una silla.
+
+**D-A16 · El número es de la mesa, no del panel.** Lo que hizo falta para que el
+modal no mienta: el panel no se desmonta al saltar de mesa en mesa (keep-alive,
+specs 101/114) y «Personas» se seedeaba **una sola vez para toda su vida**. O
+sea que la mesa de 4 abría la de al lado en 4, y una mesa con orden de 5 se
+quedaba con el número de la anterior. Era un bug de la 111 que casi no se veía
+mientras era un chip chico en el header; con el modal mostrándolo grande se ve
+siempre. Ahora cada mesa parte de lo suyo —su `party_size` si tiene orden, el
+default si no— y el modal se remonta por mesa, así que tocar otra mientras
+pregunta cierra la pregunta vieja en vez de contestar por la nueva.
+
 ### Lo que se decidió NO hacer
 
 - **Recordar las mesas descartadas.** Se evaluó no volver a preguntar en una
@@ -473,6 +498,23 @@ Es el mismo problema por otra puerta y necesita decisión propia: ¿el walk-in
 pregunta el mozo, o `openTable` deja de auto-asignar cuando el actor no es mozo?
 
 ---
+
+## Verificación del fast-follow 2 (comensales)
+
+`pnpm typecheck` + **2165 unitarios** en verde. En vivo en `demo` con Sofía
+(encargada), 1280×800:
+
+- R18 (libre, sin mozo): «Asignar mozo» con el buscador enfocado → «ped» + Enter
+  → **acto seguido** «Comensales · Mesa R18» → `4` → cierra, el chip del header
+  queda en 4, el foco termina en «Buscar producto» y no hubo un solo toast. Toda
+  la apertura sin tocar el mouse.
+- R19 (libre, **con** mozo): salta el paso del mozo y pregunta sólo los
+  comensales.
+- R24: `Esc` en el modal del mozo no corta la cadena — sigue la pregunta de
+  comensales, y `8` la contesta (más de 6 se muestra al lado del `+`).
+- La barra de `demo` **sí** pregunta: sus BAR1-3 no están marcadas `is_bar`. En
+  `golf-jcr`, que sí las marca, no va a preguntar (dato verificado contra el
+  cloud).
 
 ## Nota de proceso
 

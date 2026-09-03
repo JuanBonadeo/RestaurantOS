@@ -83,6 +83,7 @@ import type { DailyMenuForMozo } from "@/lib/mozo/daily-menus-query";
 import { filterDailyMenus } from "@/lib/mozo/daily-menu-search";
 import type { DailyMenuSelection } from "@/lib/mozo/daily-menu-steps";
 import { DailyMenuWizard } from "@/components/mozo/daily-menu-wizard";
+import { ComensalesModal } from "@/components/mozo/comensales-modal";
 import {
   CartaOnlineSelector,
   ProductSearchInput,
@@ -197,6 +198,12 @@ type Props = {
    * alguien toque algo con el mouse.
    */
   mozoPickerAbierto?: boolean;
+  /**
+   * Esta mesa se está **abriendo**: libre, y no es la barra (spec 146,
+   * fast-follow 2). Dispara la otra pregunta de la apertura —cuántos se
+   * sientan— encadenada al selector de mozo.
+   */
+  aperturaDeMesa?: boolean;
   /** Destino del botón "volver" y del post-envío. Default: la vista del mozo.
    *  El admin/encargado lo setea a `/{slug}/admin/operacion` para cargar el
    *  pedido sin salir del panel (misma idea que el cobro admin). */
@@ -339,6 +346,7 @@ export function MozoPedirClient({
   mozoName = null,
   onElegirMozo,
   mozoPickerAbierto = false,
+  aperturaDeMesa = false,
   homeHref,
   embedded = false,
   onClose,
@@ -614,7 +622,8 @@ export function MozoPedirClient({
   // llevó el foco. Sin esta guarda, lo que se tipea en el modal termina en el
   // buscador de productos que está tapado.
   useEffect(() => {
-    if (embedded && !mozoPickerAbierto) searchRef.current?.focus();
+    if (embedded && !mozoPickerAbierto && !comensalesAbierto)
+      searchRef.current?.focus();
     // `mozoPickerAbierto` a propósito fuera de las deps: esto es el foco de
     // **montaje**. Devolverlo cuando el modal se cierra es del efecto de abajo,
     // que sabe distinguir el flanco.
@@ -650,10 +659,52 @@ export function MozoPedirClient({
    * unir.
    */
   const pickerAbiertoAntes = useRef(mozoPickerAbierto);
+
+  /**
+   * La otra pregunta de la apertura: cuántos se sientan (fast-follow 2).
+   *
+   * Va **después** del mozo porque son un solo gesto —abrir la mesa— y se
+   * contestan en orden. Se pregunta **una vez por mesa**: el panel no se
+   * desmonta al saltar de mesa en mesa (keep-alive, specs 101/114), así que sin
+   * este registro volver a una mesa ya contestada la volvería a preguntar.
+   */
+  const [comensalesAbierto, setComensalesAbierto] = useState(false);
+  const comensalesPreguntados = useRef<Set<string>>(new Set());
+  const abrirComensales = useCallback(() => {
+    if (!aperturaDeMesa) return false;
+    // Hasta que no vuelve el estado de la mesa no se pregunta: el `libre` del
+    // plano es un snapshot y el número que el modal muestra sale de acá. Sin
+    // esta espera, la mesa nueva podía abrir con el número de la anterior.
+    if (mesaCargando) return false;
+    if (loPedido != null) return false;
+    if (comensalesPreguntados.current.has(table.id)) return false;
+    comensalesPreguntados.current.add(table.id);
+    setComensalesAbierto(true);
+    return true;
+  }, [aperturaDeMesa, mesaCargando, loPedido, table.id]);
+
+  const mesaDelModal = useRef(table.id);
   useEffect(() => {
-    if (pickerAbiertoAntes.current && !mozoPickerAbierto) focusSearch();
+    const seCerroElPicker = pickerAbiertoAntes.current && !mozoPickerAbierto;
     pickerAbiertoAntes.current = mozoPickerAbierto;
-  }, [mozoPickerAbierto, focusSearch]);
+    // Cambió la mesa con el modal abierto (se puede: el plano sigue vivo
+    // detrás). Lo que estaba preguntando ya no corre —era de la otra mesa— y
+    // dejarlo abierto le aplicaría ese número a ésta. Se cierra y, si la nueva
+    // también lo necesita, se abre de cero unas líneas más abajo.
+    if (mesaDelModal.current !== table.id) {
+      mesaDelModal.current = table.id;
+      setComensalesAbierto(false);
+    }
+    // El mozo va primero: mientras se elige, acá no pasa nada.
+    if (mozoPickerAbierto) return;
+    const abrio = abrirComensales();
+    // Si no había nada más que preguntar, el foco vuelve al buscador — sin
+    // esto, al cerrarse el modal el foco cae al `<body>` y la cadena
+    // buscador → catálogo → carrito queda muerta hasta que alguien use el mouse.
+    // Si SÍ se abrió el de comensales, el foco es suyo y devolverlo acá se lo
+    // robaría (`focusSearch` corre en el próximo tick, después del montaje).
+    if (!abrio && seCerroElPicker) focusSearch();
+  }, [table.id, mozoPickerAbierto, abrirComensales, focusSearch]);
 
   // ── Zonas del panel (spec 075) ────────────────────────────────────────────
   //
@@ -1073,7 +1124,8 @@ export function MozoPedirClient({
     !!openProduct ||
     !!openDailyMenu ||
     !!cancelTarget ||
-    mozoPickerAbierto;
+    mozoPickerAbierto ||
+    comensalesAbierto;
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey)) return;
@@ -1150,16 +1202,36 @@ export function MozoPedirClient({
   // persiste solo; sin orden todavía, viaja con el primer envío —que es el que
   // la crea— así que vive acá hasta entonces.
   const [personas, setPersonas] = useState(loPedido?.party_size ?? 2);
-  // `loPedido` puede llegar DESPUÉS del primer render (spec 115). Sin esto el
-  // contador se quedaba en 2 con una mesa de 5, y el encargado "corregía" un
-  // número que ya estaba bien. Se seedea una sola vez: después manda lo que él
-  // haya elegido.
-  const personasSeedeadas = useRef(loPedido != null);
+  /**
+   * El número se resuelve **una vez por mesa**, cuando ya se sabe cómo está.
+   *
+   * `loPedido` puede llegar DESPUÉS del primer render (spec 115): sin esperarlo,
+   * el contador se quedaba en 2 con una mesa de 5 y el encargado "corregía" un
+   * número que ya estaba bien. Y como el panel no se desmonta al saltar de mesa
+   * (keep-alive, specs 101/114), el seed de una sola vez para toda la vida del
+   * panel dejaba **el número de la mesa anterior** pegado en la siguiente: la
+   * mesa de 4 abría la de al lado en 4. Ahora cada mesa parte de lo suyo — su
+   * `party_size` si tiene orden, el default si no— y a partir de ahí manda lo
+   * que el encargado elija.
+   */
+  const mesaDePersonas = useRef<string | null>(null);
+  const seedeadaConOrden = useRef<string | null>(null);
   useEffect(() => {
-    if (personasSeedeadas.current || loPedido?.party_size == null) return;
-    personasSeedeadas.current = true;
+    if (mesaDePersonas.current !== table.id) {
+      // Mesa nueva: parte de lo suyo, nunca de lo que quedó de la anterior.
+      mesaDePersonas.current = table.id;
+      seedeadaConOrden.current =
+        loPedido?.party_size != null ? table.id : null;
+      setPersonas(loPedido?.party_size ?? 2);
+      return;
+    }
+    // Misma mesa, y recién ahora llegó su orden: se toma el número real. Una
+    // sola vez — después manda lo que el encargado haya elegido.
+    if (seedeadaConOrden.current === table.id) return;
+    if (loPedido?.party_size == null) return;
+    seedeadaConOrden.current = table.id;
     setPersonas(loPedido.party_size);
-  }, [loPedido]);
+  }, [table.id, loPedido]);
 
   // El carrito, aplanado para la columna de la mesa (spec 111, fase 5): ahí se
   // muestra pegado a lo enviado, en verde, en vez de en la otra columna bajo
@@ -1560,6 +1632,28 @@ export function MozoPedirClient({
           </ColumnaLateral>
         </PanelDeCarga>
 
+        {comensalesAbierto && (
+          <ComensalesModal
+            // Por mesa: el número con el que abre es estado interno suyo, así
+            // que remontarlo es lo que garantiza que no muestre el de la
+            // anterior.
+            key={table.id}
+            tableLabel={table.label}
+            valorInicial={personas}
+            onConfirmar={(n) => {
+              // Sólo estado: la mesa está libre —lo garantiza `aperturaDeMesa`—
+              // así que todavía no hay orden que actualizar y el número viaja
+              // con el primer envío, que es el que la crea (spec 111, FR-014).
+              // Corregirlo después es «Personas» en el header, que sí persiste.
+              setPersonas(n);
+            }}
+            onCerrar={() => {
+              setComensalesAbierto(false);
+              // Contestado o no, lo que sigue es cargar: el foco al buscador.
+              focusSearch();
+            }}
+          />
+        )}
         {clienteOpen && (
           <CargarClienteModal
             slug={slug}

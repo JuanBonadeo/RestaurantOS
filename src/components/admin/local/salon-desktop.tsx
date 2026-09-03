@@ -43,7 +43,10 @@ import { ReservationsPanel } from "@/components/admin/local/reservations-panel";
 import { SegmentedSelector } from "@/components/admin/local/segmented-selector";
 import { VentaRapidaPanel } from "@/components/admin/local/venta-rapida-panel";
 import { AsignarMozosPanel } from "@/components/mozo/asignar-mozos-panel";
-import { pideMozoAlAbrir } from "@/lib/mozo/pedir-mozo-al-abrir";
+import {
+  pideComensalesAlAbrir,
+  pideMozoAlAbrir,
+} from "@/lib/mozo/pedir-mozo-al-abrir";
 import { CargarClienteModal } from "@/components/mozo/datos-mesa";
 import {
   FloorPlanViewer,
@@ -2004,6 +2007,14 @@ export function SalonDesktop({
                 // Para devolverle el foco al buscador cuando el modal se cierra
                 // (el modal se abre solo sobre la mesa libre sin mozo).
                 mozoPickerAbierto={mozoTableId === pedirTable.id}
+                // La mesa libre pregunta también cuántos se sientan, encadenado
+                // al mozo (spec 146, fast-follow 2). Sale del estado **vivo**:
+                // con el primer envío la mesa pasa a ocupada y la pregunta deja
+                // de tener sentido.
+                aperturaDeMesa={pideComensalesAlAbrir({
+                  estado: pedirEstado,
+                  esBarra: pedirTable.is_bar ?? false,
+                })}
                 embedded
                 onClose={closePedir}
                 onSent={() => {
