@@ -156,6 +156,8 @@ type ShellProps = {
   role: BusinessRole;
   /** Salones del negocio (id + nombre) para el selector de la barra de tabs. */
   salones: SalonOption[];
+  /** Spec 153 — `?caja=`, para que «Ver ahora» abra esa caja y no la guardada. */
+  cajaPedida?: string | null;
   salon: Promise<SalonData>;
   comandas: Promise<ComandasData>;
   pedidos: Promise<PedidosData>;
@@ -352,12 +354,14 @@ function ComandasPanel({
 function CajaPanel({
   promise,
   slug,
+  cajaPedida,
   active,
   refetchAlMontar,
   onServerData,
 }: {
   promise: Promise<CajaData>;
   slug: string;
+  cajaPedida?: string | null;
   active: boolean;
   refetchAlMontar: boolean;
   onServerData: (d: CajaData) => void;
@@ -367,6 +371,7 @@ function CajaPanel({
     <CajaAdminBoard
       slug={slug}
       cajas={cajas}
+      cajaPedida={cajaPedida}
       active={active}
       refetchAlMontar={refetchAlMontar}
       onServerData={onServerData}
@@ -699,6 +704,7 @@ function TabsInner({
   currentUserId,
   role,
   salones,
+  cajaPedida,
   salon,
   comandas,
   pedidos,
@@ -1003,6 +1009,7 @@ function TabsInner({
                 <CajaPanel
                   promise={caja}
                   slug={slug}
+                  cajaPedida={cajaPedida}
                   active={active === "caja"}
                   refetchAlMontar={tabInicial !== "caja"}
                   onServerData={setCajaData}

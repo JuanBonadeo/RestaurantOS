@@ -24,6 +24,32 @@ function readStored(storageKey: string): string | null {
 }
 
 /**
+ * Qué caja mostrar cuando la URL pide una (spec 153).
+ *
+ * La pedida gana sobre la preferencia guardada: si alguien apretó «Ver ahora»
+ * en la Caja Bar desde la sección Caja, quiere ver esa caja. Una que no existe
+ * (id viejo, caja de otro negocio, caja pausada) se ignora en vez de dejar la
+ * pantalla en blanco.
+ *
+ * **No la persiste**, y es deliberado: la preferencia por máquina es sobre
+ * dónde ese puesto *cobra*, no sobre qué miró una vez. Mirar la caja del bar
+ * desde la compu del salón no tiene por qué cambiarle el default de cobro.
+ * Elegirla en el selector sí lo hace — eso sigue siendo `elegirCaja`.
+ *
+ * Es una función pura y **se resuelve en el render, no en un effect**: así no
+ * hay un parpadeo mostrando la caja equivocada mientras el effect corre, que
+ * en una pantalla de plata es peor que en cualquier otra.
+ */
+export function resolverCajaActiva(
+  pedida: string | null | undefined,
+  preferida: string,
+  cajas: readonly { id: string }[],
+): string {
+  if (pedida && cajas.some((c) => c.id === pedida)) return pedida;
+  return preferida;
+}
+
+/**
  * Caja elegida por máquina, con fallback a la primera de la lista.
  *
  * Devuelve `[cajaId, elegirCaja]`. El estado inicial es sincrónico
@@ -46,6 +72,7 @@ export function useCajaPreferida(
 
   useEffect(() => {
     if (!cajas.length) return;
+
     const stored = readStored(storageKey);
     if (stored && cajas.some((c) => c.id === stored)) {
       setCajaId((prev) => (prev === stored ? prev : stored));

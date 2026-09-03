@@ -25,10 +25,10 @@ export default async function LocalEnVivoPage({
   searchParams,
 }: {
   params: Promise<{ business_slug: string }>;
-  searchParams: Promise<{ tab?: string; date?: string }>;
+  searchParams: Promise<{ tab?: string; date?: string; caja?: string }>;
 }) {
   const { business_slug } = await params;
-  const { date: dateQuery } = await searchParams;
+  const { date: dateQuery, caja: cajaQuery } = await searchParams;
   const business = await getBusiness(business_slug);
   if (!business) notFound();
 
@@ -95,6 +95,7 @@ export default async function LocalEnVivoPage({
   return (
     <LocalShell
       slug={business_slug}
+      cajaPedida={cajaQuery ?? null}
       businessId={business.id}
       timezone={business.timezone}
       currentUserId={ctx.userId}

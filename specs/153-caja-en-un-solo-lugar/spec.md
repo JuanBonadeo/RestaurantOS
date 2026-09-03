@@ -211,6 +211,24 @@ de agosto. El redirect de `/admin/operacion/cierres?caja=abc` llega a
 Como **`terminal`**: navegar a `/demo/admin/caja` rebota a `/admin/operacion`, y
 «Caja» no aparece en su menú (D7).
 
+### Ajustes posteriores (2026-09-03)
+
+**D8 · «Ver ahora» abre esa caja, y no la pisa.** El link de cada caja lleva
+`?caja=<id>`, que la página de Operación pasa como prop hasta el board
+(`resolverCajaActiva`, pura y **resuelta en el render**, no en un effect: así no
+hay parpadeo mostrando la caja equivocada, que en una pantalla de plata molesta
+más que en otra).
+
+**No persiste la elección**, y es deliberado. La preferencia por máquina es
+sobre dónde ese puesto **cobra**; mirar la caja del bar desde la compu del salón
+no tiene por qué cambiarle el default de cobro después. Elegirla en el selector
+sí lo hace — eso sigue siendo `elegirCaja`.
+
+**D9 · Un cierre sin número muestra su fecha, no un guión.** Los cortes
+anteriores a la spec 139 no tienen `numero` y no se retro-numeran. Un «—» grande
+no dice nada: en ese caso el dato que identifica al cierre es **cuándo** fue, así
+que la fecha sube al renglón principal.
+
 ### Nota sobre los cortes de `demo`
 
 Los dos son anteriores a la spec 139, así que no tienen `numero` y la columna

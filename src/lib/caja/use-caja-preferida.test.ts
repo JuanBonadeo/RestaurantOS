@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 
-import { cajaStorageKey, useCajaPreferida } from "./use-caja-preferida";
+import { cajaStorageKey, resolverCajaActiva, useCajaPreferida } from "./use-caja-preferida";
 
 const SALON = { id: "caja-salon" };
 const BAR = { id: "caja-bar" };
@@ -79,5 +79,37 @@ describe("useCajaPreferida", () => {
 
     expect(golf.result.current[0]).toBe("caja-bar");
     expect(house.result.current[0]).toBe("caja-salon");
+  });
+
+});
+
+describe("resolverCajaActiva (spec 153)", () => {
+  it("la caja pedida por URL gana sobre la guardada", () => {
+    expect(resolverCajaActiva("caja-bar", "caja-salon", CAJAS)).toBe("caja-bar");
+  });
+
+  it("sin caja pedida manda la preferencia de la máquina", () => {
+    expect(resolverCajaActiva(null, "caja-salon", CAJAS)).toBe("caja-salon");
+    expect(resolverCajaActiva(undefined, "caja-bar", CAJAS)).toBe("caja-bar");
+  });
+
+  it("una caja que no está en la lista se ignora", () => {
+    // Un id viejo, una caja pausada o una de otro negocio: se cae a lo
+    // guardado en vez de dejar la pantalla sin caja.
+    expect(resolverCajaActiva("caja-de-otro", "caja-salon", CAJAS)).toBe(
+      "caja-salon",
+    );
+  });
+
+  it("con la lista vacía no inventa nada", () => {
+    expect(resolverCajaActiva("caja-bar", "", [])).toBe("");
+  });
+
+  it("no pisa la preferencia guardada: mirar no es elegir", () => {
+    // El puesto del salón sigue cobrando en su caja aunque alguien haya
+    // abierto la del bar desde «Ver ahora».
+    localStorage.setItem(cajaStorageKey("golf-jcr"), "caja-salon");
+    resolverCajaActiva("caja-bar", "caja-salon", CAJAS);
+    expect(localStorage.getItem(cajaStorageKey("golf-jcr"))).toBe("caja-salon");
   });
 });

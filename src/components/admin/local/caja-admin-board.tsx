@@ -41,7 +41,10 @@ import type {
   CajaMovimiento,
   PaymentMethod,
 } from "@/lib/caja/types";
-import { useCajaPreferida } from "@/lib/caja/use-caja-preferida";
+import {
+  resolverCajaActiva,
+  useCajaPreferida,
+} from "@/lib/caja/use-caja-preferida";
 import { useOnActivate } from "@/lib/ui/use-tab-param";
 import { getCajaTabData } from "@/app/[business_slug]/admin/(authed)/operacion/actions";
 import { formatCurrency } from "@/lib/currency";
@@ -56,6 +59,14 @@ type Props = {
   refetchAlMontar?: boolean;
   /** Spec 103: cada snapshot nuevo del refetch, para el badge de la tab. */
   onServerData?: (d: { cajas: CajaConEstado[] }) => void;
+  /**
+   * Spec 153 — el `?caja=` con el que «Ver ahora» abre una caja puntual desde
+   * la sección Caja. Viaja como prop desde el server y no por
+   * `useSearchParams`: la página ya lee sus searchParams y este panel se monta
+   * lazy detrás de un `next/dynamic`, así que el dato explícito es el que
+   * llega seguro.
+   */
+  cajaPedida?: string | null;
 };
 
 export function CajaAdminBoard({
@@ -64,6 +75,7 @@ export function CajaAdminBoard({
   active = true,
   refetchAlMontar = false,
   onServerData,
+  cajaPedida,
 }: Props) {
   const [statsByCaja, setStatsByCaja] = useState<
     Record<string, CajaLiveStats | null>
@@ -117,7 +129,14 @@ export function CajaAdminBoard({
   // ── Selector de caja activa (persiste por máquina) ──
   // Misma preferencia que usa el cobro: el puesto del bar registra en Caja Bar
   // acá y al cobrar. Ver `use-caja-preferida.ts`.
-  const [activeCajaId, selectCaja] = useCajaPreferida(slug, cajas);
+  // Spec 153 — `?caja=` llega desde «Ver ahora» de la sección Caja: abre esa
+  // caja y no la que quedó guardada en esta máquina.
+  const [cajaPreferida, selectCaja] = useCajaPreferida(slug, cajas);
+  // La caja pedida manda para ESTA vista y **no** pisa la preferencia de la
+  // máquina: mirar la Caja Bar desde la compu del salón no tiene por qué
+  // cambiar dónde cobra esa compu después. Elegirla en el selector sí.
+  const activeCajaId = resolverCajaActiva(cajaPedida, cajaPreferida, cajas);
+
 
   // Poll de stats por caja. Depende de `active` (spec 101): con el keep-alive el
   // panel queda montado al cambiar de tab, y sin esta guarda seguiría golpeando

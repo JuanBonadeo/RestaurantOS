@@ -322,7 +322,7 @@ function CajaCard({
 
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <Link
-            href={`/${slug}/admin/operacion?tab=caja`}
+            href={`/${slug}/admin/operacion?tab=caja&caja=${caja.id}`}
             className="inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-4 py-2 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-200"
           >
             Ver ahora
@@ -385,14 +385,25 @@ function CajaCard({
         <Dato label="Último cierre">
           {ultimoCorte ? (
             <>
+              {/* Los cortes anteriores a la spec 139 no tienen número, y no se
+                  retro-numeran. Un «—» grande no dice nada: en ese caso el dato
+                  que identifica al cierre es CUÁNDO fue, así que sube al
+                  renglón principal en vez de dejar el hueco. */}
               <p className="mt-1.5 text-2xl font-bold tracking-tight text-zinc-900 tabular-nums">
-                {ultimoCorte.numero != null ? `Nº ${ultimoCorte.numero}` : "—"}
+                {ultimoCorte.numero != null
+                  ? `Nº ${ultimoCorte.numero}`
+                  : formatInTimeZone(
+                      new Date(ultimoCorte.created_at),
+                      timezone,
+                      "d/M",
+                      { locale: es },
+                    )}
               </p>
               <p className="mt-0.5 text-xs tabular-nums text-zinc-400">
                 {formatInTimeZone(
                   new Date(ultimoCorte.created_at),
                   timezone,
-                  "EEE d/M · HH:mm",
+                  ultimoCorte.numero != null ? "EEE d/M · HH:mm" : "EEE · HH:mm",
                   { locale: es },
                 )}
               </p>
