@@ -2,7 +2,8 @@
 
 **Issue:** [#220](https://github.com/gachetponzellini/RestaurantOS-app/issues/220) ·
 **Milestone:** Post-demo · Growth & hardening ·
-**Estado:** implementada, verificada en vivo (2026-09-03)
+**Estado:** implementada, verificada en vivo (2026-09-03) · con fast-follow
+([#222](https://github.com/gachetponzellini/RestaurantOS-app/issues/222), abajo)
 
 > El número salió 146 y no 145: otra sesión tomó el 145 (*«de qué menú viene el
 > plato»*, [#221](https://github.com/gachetponzellini/RestaurantOS-app/issues/221))
@@ -350,6 +351,101 @@ no dispara la activación nativa que hace el click, y le pasa igual a los camino
 de teclado que ya estaban andando (Enter sobre un producto del catálogo, spec
 075). Queda cubierto por los tests y por el click, que corre exactamente el mismo
 handler.
+
+---
+
+## Fast-follow (2026-09-03) · la mesa libre sin mozo pregunta antes de comandar
+
+**Issue:** [#222](https://github.com/gachetponzellini/RestaurantOS-app/issues/222)
+
+> Juan, mirando el resultado: *"cuando toco una mesa libre lo primero que
+> debería de aparecer debería de ser el modal del selector de mozo, si está
+> libre y no tiene ningún mozo puesto"*.
+
+La parte A puso la puerta. Esto la abre sola en el único momento en que la
+respuesta es obvia y todavía no hay nada escrito.
+
+**D-A7 · Se pregunta al abrir, y sólo cuando las cinco dan.** El rol puede
+asignar (`canAssignMozo`), la mesa está `libre`, no tiene mozo, **no es de
+barra** (`is_bar`, spec 08) y hay al menos un candidato. La regla es pura y
+testeada ([`pedir-mozo-al-abrir.ts`](../../src/lib/mozo/pedir-mozo-al-abrir.ts)).
+
+El `is_bar` no es teórico: en `golf-jcr` son **63 de 116** mesas —los «Pedidos
+de Mostrador», M1–M60, más las tres de la Terraza—, que venden sin mozo por
+diseño. Sin esa guarda el modal saltaría en más de la mitad de los toques.
+
+**D-A8 · Imperativo, dentro de `openPedir`. No un efecto.** Se dispara al
+**abrir la mesa**, una vez. Un `useEffect` sobre «la mesa del panel no tiene
+mozo» se vuelve a disparar con cada repintado: un refetch del realtime, alguien
+que limpia la distribución desde otra máquina, o —el peor— **cambiar de salón
+con el panel abierto**, donde la mesa desaparece del plano activo y el mozo se
+lee como `null` sobre una mesa que sí lo tiene.
+
+**D-A9 · Y por eso el mozo se busca en todos los salones.** Mismo bug, de la
+parte A: `pedirMozoId` salía de `tables`, que son sólo las del plano activo. Al
+cambiar de salón la pastilla decía «Sin mozo» sobre una mesa asignada, y tocarla
+ofrecía **asignar** —que le pisa el mozo real sin motivo ni aviso— en vez de
+transferir. Ahora sale de `allActiveTables`, con el snapshot de la mesa como
+último recurso.
+
+**D-A10 · El modal vive adentro del panel, no encima de la pantalla.**
+`overlay="absolute"`, como el modal de producto y la ayuda de atajos: tapa el
+panel y **deja el plano vivo**. Con un overlay de pantalla completa, tocar otra
+mesa costaba dos gestos —uno para que el backdrop se coma el tap y cierre el
+modal, otro para la mesa— y el «tap al aire» para salir dejaba de salir. Es la
+diferencia entre una pregunta y un peaje. Cuando el selector se reapunta a otra
+mesa vuelve a tomar el foco (mismo componente, otra mesa).
+
+**D-A11 · El foco es parte del cambio, no un detalle.** El panel es
+keyboard-first (specs 055/073/075) y todo su teclado cuelga de handlers de zona:
+con el foco en el `<body>` queda sordo. Tres arreglos:
+
+| | Qué pasaba | Qué se hizo |
+|---|---|---|
+| Al cerrar el selector | El botón enfocado se desmonta → foco al `<body>` → el panel no recibe ni flechas ni letras. Pasaba también en el camino feliz. | Al flanco «abierto → cerrado», el foco vuelve al buscador. |
+| Con el catálogo frío | El panel monta **después** del modal (primero el esqueleto) y su autofoco de montaje le robaba el foco: lo tipeado iba al buscador tapado. | El autofoco de montaje no corre con el selector abierto. |
+| ⌘Enter | Es la única tecla que sobrevive al foco perdido —escucha en `document`—, así que mandaba la comanda desde abajo del modal. | El selector abierto bloquea el envío. |
+
+**D-A12 · Y el panel no se lleva las teclas del modal.** Un Esc con el foco
+atrás disparaba los dos handlers: cerraba el selector **y** el panel de carga
+entero. El panel ahora ignora Esc/Backspace/`?` mientras hay un modal del salón
+abierto; el modal quedó marcado `role="dialog"`, que es el contrato con el que
+las demás superficies deciden que las teclas no son suyas.
+
+### Lo que se decidió NO hacer
+
+- **Recordar las mesas descartadas.** Se evaluó no volver a preguntar en una
+  mesa donde ya se cerró el modal sin elegir. Se descartó: la mesa **sigue sin
+  mozo**, la pregunta sigue siendo válida, y una memoria de descartes dejaría de
+  preguntar justo en la mesa que más lo necesita. El costo de volver a preguntar
+  es un Esc; el de callarse es una mesa mal atribuida. Tocar dos veces la misma
+  mesa tampoco reabre nada: el plano ignora el tap sobre la mesa que ya está en
+  el panel.
+- **Preguntar también en «Sentar reserva» y en el walk-in.** Ver abajo.
+
+### Verificación en vivo (demo, sesión de Sofía, 1280×800)
+
+- Mesa libre sin mozo (R02, R04): el panel abre **con** el selector encima, foco
+  en la primera fila, y el plano detrás sigue a la vista.
+- Elegir a Pedro: *«Mozo asignado.»*, la pastilla pasa a «Pedro Mozo», el plano
+  escribe «Pedro» debajo de la mesa sin recargar, y **el foco vuelve al
+  buscador** (verificado por `document.activeElement`).
+- Esc: cierra sólo el selector —el panel sigue abierto— y el foco vuelve al
+  buscador; tipear «coca» va al buscador y el modal no reaparece.
+- Con el selector abierto, tocar otra mesa libre en el plano: **un** click cambia
+  de mesa y el selector queda apuntando a la nueva, con el foco puesto.
+- Mesa ocupada (T12) y mesa libre **con** mozo (R19, R01): no aparece nada.
+
+### Queda afuera (anotado)
+
+**Sentar reserva y walk-in siguen atribuyendo al que clickea.** No pasan por
+`openPedir`: van por `openTable`, que auto-asigna al actor igual que el envío
+(`open-table.ts`). Después de eso la mesa ya tiene mozo, así que el prompt
+tampoco aparece — el plano se ve «todo asignado» y la rendición sigue mintiendo.
+Es el mismo problema por otra puerta y necesita decisión propia: ¿el walk-in
+pregunta el mozo, o `openTable` deja de auto-asignar cuando el actor no es mozo?
+
+---
 
 ## Nota de proceso
 

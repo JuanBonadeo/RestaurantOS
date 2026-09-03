@@ -43,6 +43,7 @@ import { ReservationsPanel } from "@/components/admin/local/reservations-panel";
 import { SegmentedSelector } from "@/components/admin/local/segmented-selector";
 import { VentaRapidaPanel } from "@/components/admin/local/venta-rapida-panel";
 import { AsignarMozosPanel } from "@/components/mozo/asignar-mozos-panel";
+import { pideMozoAlAbrir } from "@/lib/mozo/pedir-mozo-al-abrir";
 import { CargarClienteModal } from "@/components/mozo/datos-mesa";
 import {
   FloorPlanViewer,
@@ -514,6 +515,8 @@ export function SalonDesktop({
   const closePedir = useCallback(() => {
     setPedirTable(null);
     setPedirState(null);
+    // El selector de mozo vive **dentro** del panel: si el panel se va, se va.
+    setMozoTableId(null);
   }, []);
 
   const closeCobro = useCallback(() => {
@@ -667,6 +670,23 @@ export function SalonDesktop({
       setCuentaData(null);
       setPedirTable(table);
       setPedirState(null);
+      // La mesa libre sin mozo pregunta **antes** de comandar (spec 146,
+      // fast-follow). Es imperativo y no un efecto a propósito: se dispara al
+      // ABRIR la mesa, una vez, y no vuelve a saltar porque el plano se repinte
+      // o porque el realtime traiga otra fila. Cerrarlo sin elegir deja seguir
+      // cargando: la pregunta no bloquea, sólo se hace en el momento en que la
+      // respuesta todavía sirve.
+      if (
+        pideMozoAlAbrir({
+          estado: table.operational_status ?? "libre",
+          mozoId: table.mozo_id ?? null,
+          esBarra: table.is_bar ?? false,
+          puedeAsignar: canAssignMozo(role),
+          candidatos: mozos.length,
+        })
+      ) {
+        setMozoTableId(table.id);
+      }
       (async () => {
         try {
           // El catálogo lo resuelve `useCatalogBundle` (cache + revalidación).
@@ -681,7 +701,7 @@ export function SalonDesktop({
         }
       })();
     },
-    [slug],
+    [slug, role, mozos.length],
   );
 
   // ── Multi-salón ──
@@ -1345,17 +1365,50 @@ export function SalonDesktop({
   /** Estado **vivo** de la mesa que tiene el panel de carga: `pedirTable` es el
    *  snapshot con el que se abrió, y una mesa que se abre cargando pasa a
    *  ocupada recién al enviar (spec 111, FR-011). */
+  /**
+   * La fila **viva** de la mesa que tiene el panel, con el overlay optimista ya
+   * aplicado.
+   *
+   * Sale de `allActiveTables` —todos los salones— y no de `tables`, que son sólo
+   * las del plano activo: con el panel abierto se puede cambiar de salón, y ahí
+   * la mesa del panel desaparece de `tables`. Buscando sólo en el activo, el
+   * mozo volvía `null` y la pastilla decía «Sin mozo» sobre una mesa que sí
+   * tenía uno — y tocarla ofrecía **asignar**, que le pisa el mozo real sin
+   * motivo ni aviso, en vez de transferir.
+   */
+  const pedirLive = pedirTable
+    ? (allActiveTables.find((t) => t.id === pedirTable.id) ?? null)
+    : null;
+
   const pedirEstado = pedirTable
-    ? ((tables.find((t) => t.id === pedirTable.id)?.operational_status ??
+    ? ((pedirLive?.operational_status ??
         pedirTable.operational_status ??
         "libre") as string)
     : "libre";
 
-  /** Mozo **vivo** de esa misma mesa: sale de `tables`, que ya tiene aplicado
-   *  el overlay optimista, así que asignar desde el panel se ve al instante. */
+  /** Mozo vivo de esa misma mesa: asignar desde el panel se ve al instante. */
   const pedirMozoId = pedirTable
-    ? (tables.find((t) => t.id === pedirTable.id)?.mozo_id ?? null)
+    ? (pedirLive?.mozo_id ?? pedirTable.mozo_id ?? null)
     : null;
+
+  /** La mesa que está mirando el selector de mozo, en cualquier salón. */
+  const mozoLive = mozoTableId
+    ? (allActiveTables.find((t) => t.id === mozoTableId) ?? null)
+    : null;
+
+  /**
+   * El selector se cierra si su mesa dejó de estar en el panel.
+   *
+   * Ahora vive adentro del `<aside>`: un selector abierto sobre una mesa que ya
+   * no está en pantalla quedaría flotando encima de la lista de mesas. Se abre
+   * siempre sobre la mesa del panel de carga o la del detalle, así que en cuanto
+   * no es ninguna de las dos, sobra.
+   */
+  useEffect(() => {
+    if (!mozoTableId) return;
+    if (pedirTable?.id === mozoTableId || selectedId === mozoTableId) return;
+    setMozoTableId(null);
+  }, [mozoTableId, pedirTable, selectedId]);
 
   const mesaEnModo =
     cobroTable?.id ??
@@ -1438,6 +1491,12 @@ export function SalonDesktop({
       // rápida cargada—, y el `?` se escribía en el buscador **además** de
       // abrir la ayuda.
       if (e.defaultPrevented) return;
+      // Con un modal del salón abierto encima (elegir mozo, trasladar, cliente)
+      // las teclas son suyas. El `enDialog` de abajo sólo alcanza cuando el
+      // evento sale de adentro del diálogo, y estos son `fixed`, fuera del
+      // `<aside>`: si el foco quedó en el panel, un Esc cerraba el modal **y**
+      // la mesa de una sola tecla.
+      if (mozoTableId || trasladarTableId || clienteTableId) return;
       const el = e.target as HTMLElement;
       const escribiendo =
         el.tagName === "INPUT" ||
@@ -1463,7 +1522,7 @@ export function SalonDesktop({
       if (e.key === "Backspace" && escribiendo) return;
       if (cerrarModoActual()) e.preventDefault();
     },
-    [cerrarModoActual, atajosOpen],
+    [cerrarModoActual, atajosOpen, mozoTableId, trasladarTableId, clienteTableId],
   );
 
   // Extras para el FloorPlanViewer.
@@ -1727,6 +1786,41 @@ export function SalonDesktop({
           {atajosOpen && (
             <AtajosHelp modo={modoPanel} onClose={() => setAtajosOpen(false)} />
           )}
+          {mozoTableId && (
+            /* Un solo modal para las dos cosas (spec 146 · D-A1): la mesa sin mozo
+               se **asigna** (sin motivo ni notificación) y la que ya tiene dueño se
+               **transfiere**, que es lo que hacía la 079. El modo sale de la mesa,
+               así que la misma puerta sirve para las dos.
+
+               Vive **adentro del panel** y con overlay `absolute`, como el modal
+               de producto y la ayuda de atajos: tapa el panel y deja el plano
+               vivo. Si tapara la pantalla entera, tocar otra mesa costaría dos
+               gestos —uno para cerrar el modal, otro para la mesa— y el «tap al
+               aire» para salir dejaría de salir. La mesa la busca en TODOS los
+               salones: con el panel abierto se puede cambiar de plano. */
+            <ElegirMozoModal
+              modo={mozoLive?.mozo_id ? "transferir" : "asignar"}
+              tableId={mozoTableId}
+              tableLabel={mozoLive?.label ?? "?"}
+              currentMozoId={mozoLive?.mozo_id ?? null}
+              mozos={mozos}
+              businessSlug={slug}
+              conTeclado
+              overlay="absolute"
+              onClose={() => setMozoTableId(null)}
+              onSuccess={(toMozoId) => {
+                // Optimista: la mesa cambia de mozo al instante.
+                if (mozoTableId) {
+                  setOptimisticStatus((prev) => ({
+                    ...prev,
+                    [mozoTableId]: { mozo_id: toMozoId },
+                  }));
+                }
+                setMozoTableId(null);
+                void refetchSalon();
+              }}
+            />
+          )}
           {showNewReservation ? (
             <NuevaReservaPanel
               slug={slug}
@@ -1906,6 +2000,9 @@ export function SalonDesktop({
                     ? () => setMozoTableId(pedirTable.id)
                     : undefined
                 }
+                // Para devolverle el foco al buscador cuando el modal se cierra
+                // (el modal se abre solo sobre la mesa libre sin mozo).
+                mozoPickerAbierto={mozoTableId === pedirTable.id}
                 embedded
                 onClose={closePedir}
                 onSent={() => {
@@ -2089,39 +2186,6 @@ export function SalonDesktop({
       </div>
 
       {/* ── Modales ── */}
-      {mozoTableId && (
-        /* Un solo modal para las dos cosas (spec 146 · D-A1): la mesa sin mozo
-           se **asigna** (sin motivo ni notificación) y la que ya tiene dueño se
-           **transfiere**, que es lo que hacía la 079. El modo sale de la mesa,
-           así que la misma puerta sirve para las dos. */
-        <ElegirMozoModal
-          modo={
-            tables.find((t) => t.id === mozoTableId)?.mozo_id
-              ? "transferir"
-              : "asignar"
-          }
-          tableId={mozoTableId}
-          tableLabel={tables.find((t) => t.id === mozoTableId)?.label ?? "?"}
-          currentMozoId={
-            tables.find((t) => t.id === mozoTableId)?.mozo_id ?? null
-          }
-          mozos={mozos}
-          businessSlug={slug}
-          conTeclado
-          onClose={() => setMozoTableId(null)}
-          onSuccess={(toMozoId) => {
-            // Optimista: la mesa cambia de mozo al instante.
-            if (mozoTableId) {
-              setOptimisticStatus((prev) => ({
-                ...prev,
-                [mozoTableId]: { mozo_id: toMozoId },
-              }));
-            }
-            setMozoTableId(null);
-            void refetchSalon();
-          }}
-        />
-      )}
       {clienteTableId && (
         <CargarClienteModal
           slug={slug}

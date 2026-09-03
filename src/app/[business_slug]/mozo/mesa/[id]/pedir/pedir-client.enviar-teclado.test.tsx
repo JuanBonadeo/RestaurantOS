@@ -87,7 +87,7 @@ function fakeStorage(): Storage {
   } satisfies Storage;
 }
 
-function Panel() {
+function Panel({ mozoPickerAbierto = false }: { mozoPickerAbierto?: boolean }) {
   return (
     <MozoPedirClient
       slug="golf"
@@ -104,16 +104,17 @@ function Panel() {
       topProductIds={["p1"]}
       dailyMenus={[]}
       role="encargado"
+      mozoPickerAbierto={mozoPickerAbierto}
       embedded
     />
   );
 }
 
 /** Panel montado con una línea ya cargada, lista para enviar. */
-async function panelConCarrito() {
+async function panelConCarrito(props: { mozoPickerAbierto?: boolean } = {}) {
   localStorage.setItem("mozo-cart:golf:t1", JSON.stringify(borrador));
   await act(async () => {
-    render(<Panel />);
+    render(<Panel {...props} />);
   });
   await screen.findByRole("button", { name: /Enviar/ });
 }
@@ -137,6 +138,20 @@ describe("panel de carga · Ctrl+Enter envía la comanda", () => {
     });
 
     expect(enviarComanda).toHaveBeenCalledTimes(1);
+  });
+
+  it("NO envía con el selector de mozo abierto encima", async () => {
+    // El selector se abre solo sobre la mesa libre sin mozo (spec 146,
+    // fast-follow) y se lleva el foco. Con el foco perdido, ⌘Enter es la única
+    // tecla que sigue llegando —escucha en `document`—, así que sin la guarda
+    // un atajo de inercia mandaba la comanda con el modal en pantalla.
+    await panelConCarrito({ mozoPickerAbierto: true });
+
+    await act(async () => {
+      fireEvent.keyDown(document.body, { key: "Enter", ctrlKey: true });
+    });
+
+    expect(enviarComanda).not.toHaveBeenCalled();
   });
 
   it("desde el buscador envía y NO agrega el primer resultado", async () => {

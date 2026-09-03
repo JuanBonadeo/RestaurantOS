@@ -44,6 +44,17 @@ type Props = {
   businessSlug: string;
   /** La superficie tiene teclado físico (el salón sí, el teléfono no). */
   conTeclado?: boolean;
+  /**
+   * Dónde se ancla el overlay.
+   *
+   * - `"absolute"` — **dentro del panel** del salón, que ya scopea sus modales
+   *   al `<aside>` (igual que el modal de producto y la ayuda de atajos). Tapa
+   *   el panel y **deja el plano vivo**: tocar otra mesa sigue siendo un solo
+   *   gesto, en vez de uno para cerrar el modal y otro para la mesa.
+   * - `"fixed"` (default) — pantalla completa, que es lo que quiere el teléfono
+   *   del mozo: ahí el modal es una hoja que sube desde abajo.
+   */
+  overlay?: "fixed" | "absolute";
   onClose: () => void;
   /** Recibe el `user_id` elegido, para el overlay optimista del llamador. */
   onSuccess: (mozoId: string) => void;
@@ -57,6 +68,7 @@ export function ElegirMozoModal({
   mozos,
   businessSlug,
   conTeclado = false,
+  overlay = "fixed",
   onClose,
   onSuccess,
 }: Props) {
@@ -95,11 +107,17 @@ export function ElegirMozoModal({
 
   // Al abrir, el foco entra donde se empieza a trabajar: el buscador si está
   // (se entra tipeando el nombre), y si no la primera fila.
+  //
+  // `tableId` en las deps porque el modal **no se desmonta al cambiar de mesa**:
+  // con el selector abierto se puede tocar otra mesa en el plano —el modal vive
+  // dentro del panel y lo deja vivo a propósito— y el mismo componente se
+  // reapunta a la mesa nueva. Sin esto, el foco se quedaba en el plano y el
+  // modal aparecía mudo.
   useEffect(() => {
     if (!conTeclado) return;
     if (showSearch) searchRef.current?.focus();
     else focusFirst();
-  }, [conTeclado, showSearch, focusFirst]);
+  }, [conTeclado, showSearch, focusFirst, tableId]);
 
   const asignar = async (mozoId: string) => {
     setSubmitting(true);
@@ -144,16 +162,28 @@ export function ElegirMozoModal({
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 sm:items-center sm:p-4"
+      className={`${overlay} inset-0 z-[60] flex items-end justify-center bg-black/50 sm:items-center sm:p-4`}
       onClick={onClose}
     >
       <div
+        // `role="dialog"` no es decoración: es el contrato con el que las otras
+        // superficies deciden que las teclas son de acá. El panel del salón
+        // ignora Esc/Backspace/`?` cuando el evento sale de un diálogo, y el
+        // ⌘Enter de «enviar la comanda» (spec 143 · D5) se corta cuando hay un
+        // diálogo de afuera abierto. Sin el rol, el modal abierto encima dejaba
+        // pasar el atajo y se iba una comanda a cocina desde abajo.
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="elegir-mozo-titulo"
         className="w-full max-w-md rounded-t-3xl bg-white p-5 pb-[max(env(safe-area-inset-bottom),1.25rem)] shadow-2xl sm:rounded-3xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-zinc-300 sm:hidden" />
         <div className="flex items-start justify-between gap-3">
-          <h3 className="font-heading text-lg leading-tight font-bold">
+          <h3
+            id="elegir-mozo-titulo"
+            className="font-heading text-lg leading-tight font-bold"
+          >
             {titulo} · Mesa {tableLabel}
           </h3>
           <button

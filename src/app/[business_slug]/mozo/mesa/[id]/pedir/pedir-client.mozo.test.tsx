@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -51,7 +51,11 @@ const catalog: CatalogForMozo = {
 };
 
 function renderPanel(
-  mozo: { mozoId?: string | null; mozoName?: string | null } = {},
+  mozo: {
+    mozoId?: string | null;
+    mozoName?: string | null;
+    mozoPickerAbierto?: boolean;
+  } = {},
   onElegirMozo?: () => void,
 ) {
   return render(
@@ -72,6 +76,7 @@ function renderPanel(
       role="encargado"
       mozoId={mozo.mozoId ?? null}
       mozoName={mozo.mozoName ?? null}
+      mozoPickerAbierto={mozo.mozoPickerAbierto ?? false}
       onElegirMozo={onElegirMozo}
       embedded
     />,
@@ -104,6 +109,54 @@ describe("panel del salón · el mozo de la mesa (spec 146)", () => {
     renderPanel({ mozoId: "u1", mozoName: "Pedro" });
     expect(screen.getByText("Pedro")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /pedro/i })).toBeNull();
+  });
+
+  it("con el selector abierto, el panel no le pelea el foco al montar", () => {
+    // El panel no siempre monta en el mismo commit en que se abre la mesa: con
+    // el catálogo frío monta DESPUÉS del modal. Sin la guarda, su autofoco de
+    // montaje se llevaba el foco y lo tipeado en el modal terminaba en el
+    // buscador de productos, tapado por el overlay.
+    renderPanel({ mozoPickerAbierto: true }, () => {});
+    expect(document.activeElement).not.toBe(
+      screen.getByLabelText("Buscar producto"),
+    );
+  });
+
+  it("al cerrarse el selector, el foco vuelve al buscador", async () => {
+    // El modal se abre solo sobre la mesa libre sin mozo y se lleva el foco.
+    // Al cerrarse, el panel tiene que quedar listo para tipear: si el foco se
+    // queda en el `body`, la cadena de teclado del panel muere y hay que ir al
+    // mouse — justo lo que la mesa-libre-directo-a-cargar vino a sacar.
+    const { rerender } = renderPanel({ mozoPickerAbierto: true }, () => {});
+    const buscador = screen.getByLabelText("Buscar producto");
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(document.activeElement).not.toBe(buscador);
+
+    rerender(
+      <MozoPedirClient
+        slug="golf"
+        businessName="Golf"
+        table={{
+          id: "t1",
+          label: "5",
+          operational_status: "libre",
+          opened_at: null,
+        }}
+        catalog={catalog}
+        stationNameById={{}}
+        existingComandas={[]}
+        topProductIds={["p1"]}
+        dailyMenus={[]}
+        role="encargado"
+        mozoId="u1"
+        mozoName="Pedro"
+        mozoPickerAbierto={false}
+        onElegirMozo={() => {}}
+        embedded
+      />,
+    );
+
+    await waitFor(() => expect(document.activeElement).toBe(buscador));
   });
 
   it("sin permiso y sin mozo no se ofrece nada", () => {

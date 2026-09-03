@@ -190,6 +190,13 @@ type Props = {
   mozoId?: string | null;
   mozoName?: string | null;
   onElegirMozo?: () => void;
+  /**
+   * El selector de mozo está abierto **encima** del panel (spec 146,
+   * fast-follow). Sólo se usa para devolver el foco al buscador cuando se
+   * cierra: el modal se lo llevó, y sin esto el panel queda mudo hasta que
+   * alguien toque algo con el mouse.
+   */
+  mozoPickerAbierto?: boolean;
   /** Destino del botón "volver" y del post-envío. Default: la vista del mozo.
    *  El admin/encargado lo setea a `/{slug}/admin/operacion` para cargar el
    *  pedido sin salir del panel (misma idea que el cobro admin). */
@@ -331,6 +338,7 @@ export function MozoPedirClient({
   mozoId = null,
   mozoName = null,
   onElegirMozo,
+  mozoPickerAbierto = false,
   homeHref,
   embedded = false,
   onClose,
@@ -598,8 +606,19 @@ export function MozoPedirClient({
 
   // Foco al buscador al montar, SOLO en el sidebar embebido: en la tablet del
   // mozo (full-screen) abriría el teclado virtual tapando la vista. FR-002.
+  //
+  // Con el selector de mozo abierto encima, no. Este efecto corre al **montar**,
+  // y el panel no siempre monta en el mismo commit en que se abre la mesa: con
+  // el catálogo todavía frío (la primera mesa del turno) primero se pinta el
+  // esqueleto y el panel monta después — o sea, después de que el modal ya se
+  // llevó el foco. Sin esta guarda, lo que se tipea en el modal termina en el
+  // buscador de productos que está tapado.
   useEffect(() => {
-    if (embedded) searchRef.current?.focus();
+    if (embedded && !mozoPickerAbierto) searchRef.current?.focus();
+    // `mozoPickerAbierto` a propósito fuera de las deps: esto es el foco de
+    // **montaje**. Devolverlo cuando el modal se cierra es del efecto de abajo,
+    // que sabe distinguir el flanco.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [embedded]);
 
   // Tras agregar un ítem o cerrar el modal, devolvemos el foco al buscador para
@@ -617,6 +636,24 @@ export function MozoPedirClient({
       input.setSelectionRange(end, end);
     }, 0);
   }, [embedded]);
+
+  /**
+   * El selector de mozo se cerró: el foco vuelve al buscador (spec 146,
+   * fast-follow).
+   *
+   * El modal se abre solo sobre la mesa libre sin mozo y se lleva el foco —está
+   * bien, es lo primero que hay que contestar—. Pero al cerrarse, el botón que
+   * lo tenía se desmonta y el foco cae al `<body>`: desde ahí las zonas del
+   * panel no reciben nada (sus handlers viven en los contenedores) y la cadena
+   * buscador → catálogo → carrito queda muerta hasta que alguien use el mouse.
+   * Elegir el mozo y seguir comandando es una sola maniobra: acá se vuelve a
+   * unir.
+   */
+  const pickerAbiertoAntes = useRef(mozoPickerAbierto);
+  useEffect(() => {
+    if (pickerAbiertoAntes.current && !mozoPickerAbierto) focusSearch();
+    pickerAbiertoAntes.current = mozoPickerAbierto;
+  }, [mozoPickerAbierto, focusSearch]);
 
   // ── Zonas del panel (spec 075) ────────────────────────────────────────────
   //
@@ -1026,8 +1063,17 @@ export function MozoPedirClient({
   // Con un modal propio abierto (alta de producto, menú del día, cancelar
   // ítem) las teclas son suyas; y con un envío en vuelo, el atajo no puede
   // hacer lo que el botón tiene prohibido.
+  // El selector de mozo entra acá y no en el chequeo de `[role='dialog']` de
+  // abajo: ése mira de dónde SALE la tecla, y con el foco perdido detrás del
+  // modal la tecla sale del panel. ⌘Enter es la única que sigue viva con el
+  // foco en el `body` —escucha en `document`—, así que sin esto un atajo de
+  // inercia mandaba la comanda con el modal abierto.
   const envioBloqueado =
-    pending || !!openProduct || !!openDailyMenu || !!cancelTarget;
+    pending ||
+    !!openProduct ||
+    !!openDailyMenu ||
+    !!cancelTarget ||
+    mozoPickerAbierto;
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey)) return;
