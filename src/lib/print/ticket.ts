@@ -24,7 +24,11 @@ const GS = "\x1d";
 // Tamaño de carácter (GS ! n): nibble alto = ancho, nibble bajo = alto.
 //   sm   → normal          tall → doble alto (0x01)
 //   xl   → doble alto Y doble ancho (0x11), reservado para los ítems.
-const CHAR_SIZE: Record<Size, string> = { sm: "\x00", tall: "\x01", xl: "\x11" };
+const CHAR_SIZE: Record<Size, string> = {
+  sm: "\x00",
+  tall: "\x01",
+  xl: "\x11",
+};
 
 // Ancho útil en columnas por tamaño (58mm ≈ 384 pt de ancho de cabezal).
 // Celda Font A = 12 pt + CHAR_RIGHT_SPACING → 16 pt ⇒ 24 col. En doble ancho la
@@ -51,6 +55,15 @@ const CHAR_RIGHT_SPACING = 4;
 
 // Interlineado (ESC 3 n): más alto = más espaciado y evita que el doble alto se pise.
 const LINE_SPACING = 64;
+
+/**
+ * Interlineado para un bloque de cuerpo normal que no necesita el aire del
+ * doble alto: la lista de ítems del control de pedido. La mitad de
+ * `LINE_SPACING`, que sigue dejando 8 pt de margen sobre los 24 que mide un
+ * carácter Font A. Es lo único que de verdad acorta el papel — el `size` de la
+ * línea no lo toca.
+ */
+export const COMPACT_SPACING = 32;
 
 export const RULE = "------------------------"; // 24 col (≈ ancho útil 58mm con el espaciado)
 /** Separador a lo ancho de la condensada (42 col), para el papel del cierre. */
@@ -172,6 +185,18 @@ export type Line = {
    * legible en `renderPlain`.
    */
   qr?: string;
+  /**
+   * Interlineado (`ESC 3 n`) para esta línea, en puntos. Sin esto, todo el
+   * documento avanza `LINE_SPACING` (64) por renglón — un valor elegido para
+   * que el doble alto no se pise, y que por eso **no cambia** aunque la línea
+   * sea `sm`: bajar el `size` achica la letra, no el papel.
+   *
+   * Se emite sólo cuando cambia respecto de la línea anterior, igual que
+   * `size`/`bold`/`align`, y el `ESC @` del cierre devuelve la impresora a
+   * fábrica. Campo aditivo: una línea sin `spacing` produce exactamente los
+   * mismos bytes que antes, así que los fixtures congelados no se mueven.
+   */
+  spacing?: number;
 };
 
 // Reemplazos de los caracteres no-ASCII más comunes. La térmica no recibe
@@ -272,7 +297,8 @@ export function buildTicketLines(c: TicketComanda): Line[] {
   // acercarse al papel. Los `***` se sacaron — a doble ancho no entran en el
   // renglón y el texto solo ya grita bastante.
   const banner = (text: string) => {
-    for (const l of wrap(text, COLS.xl)) push(l, { size: "xl", bold: true, align: "center" });
+    for (const l of wrap(text, COLS.xl))
+      push(l, { size: "xl", bold: true, align: "center" });
   };
 
   // Lo PRIMERO del ticket, arriba incluso del sector: cuándo sale el plato
@@ -300,7 +326,11 @@ export function buildTicketLines(c: TicketComanda): Line[] {
     // Spec 35: reimpresión (por editar o reimprimir manual). Aviso a cocina de
     // que este ticket reemplaza a uno ya impreso, para que no prepare dos veces.
     banner("REIMPRESION");
-    push("reemplaza al anterior", { size: "tall", bold: true, align: "center" });
+    push("reemplaza al anterior", {
+      size: "tall",
+      bold: true,
+      align: "center",
+    });
     push(RULE);
   }
 
@@ -397,12 +427,17 @@ export function buildTicketLines(c: TicketComanda): Line[] {
     if (it.combo_name)
       for (const l of wrap(it.combo_name.toUpperCase(), COLS.tall))
         push(l, { size: "tall", bold: true });
-    for (const l of wrap(`${prefix}${it.quantity}x ${it.product_name}`, COLS.xl))
+    for (const l of wrap(
+      `${prefix}${it.quantity}x ${it.product_name}`,
+      COLS.xl,
+    ))
       push(l, { size: "xl", bold: true });
     if (it.modifiers && it.modifiers.length)
-      for (const l of wrap(`+ ${it.modifiers.join(", ")}`, COLS.tall)) push(l, { size: "tall" });
+      for (const l of wrap(`+ ${it.modifiers.join(", ")}`, COLS.tall))
+        push(l, { size: "tall" });
     if (it.notes)
-      for (const l of wrap(`obs: ${it.notes}`, COLS.tall)) push(l, { size: "tall", bold: true });
+      for (const l of wrap(`obs: ${it.notes}`, COLS.tall))
+        push(l, { size: "tall", bold: true });
   });
   if (items.length === 0) banner("(sin items)");
 
@@ -417,7 +452,10 @@ export function buildTicketLines(c: TicketComanda): Line[] {
     push(RULE);
     push("COMBINA CON", { size: "tall", bold: true, align: "center" });
     for (const sector of otros) {
-      for (const l of wrap(String(sector.station_name).toUpperCase(), COLS.tall))
+      for (const l of wrap(
+        String(sector.station_name).toUpperCase(),
+        COLS.tall,
+      ))
         push(l, { size: "tall", bold: true });
       for (const it of sector.items)
         // La marca del menú también acá (spec 145, D5): sin esto la guarnición
@@ -483,7 +521,10 @@ function escPosQr(data: string, moduleSize = 6): string {
  */
 export type Perfil = "comanda" | "cierre";
 
-export function renderEscPos(lines: Line[], perfil: Perfil = "comanda"): string {
+export function renderEscPos(
+  lines: Line[],
+  perfil: Perfil = "comanda",
+): string {
   const condensada = perfil === "cierre";
   let out = ESC + "@"; // init (resetea tamaño, énfasis, interlineado y espaciado)
   out += ESC + "3" + String.fromCharCode(LINE_SPACING); // interlineado espaciado
@@ -498,12 +539,19 @@ export function renderEscPos(lines: Line[], perfil: Perfil = "comanda"): string 
   let align: Align | null = null;
   let size: Size | null = null;
   let bold: boolean | null = null;
+  let spacing: number = LINE_SPACING;
   for (const ln of lines) {
     const a: Align = ln.align ?? "left";
     const s: Size = ln.size ?? "sm";
     const b = ln.bold ?? false;
+    const sp = ln.spacing ?? LINE_SPACING;
+    if (sp !== spacing) {
+      out += ESC + "3" + String.fromCharCode(sp);
+      spacing = sp;
+    }
     if (a !== align) {
-      out += ESC + "a" + (a === "center" ? "\x01" : a === "right" ? "\x02" : "\x00");
+      out +=
+        ESC + "a" + (a === "center" ? "\x01" : a === "right" ? "\x02" : "\x00");
       align = a;
     }
     if (s !== size) {

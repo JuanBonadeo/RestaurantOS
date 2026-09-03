@@ -14,6 +14,7 @@
 
 import {
   COLS,
+  COMPACT_SPACING,
   renderEscPos,
   renderPlain,
   RULE,
@@ -173,26 +174,30 @@ export function buildControlTicketLines(c: ControlTicketData): Line[] {
   push(RULE, { size: "sm" });
 
   // ── Ítems con precio ──────────────────────────────────────────────────────
-  // La lista va en cuerpo normal, no en el doble alto del resto del ticket: es
-  // lo único que crece con el tamaño del pedido, y una mesa de veinte ítems
-  // salía al doble de largo por nada. Lo operativo —destino, hora, A COBRAR,
-  // dirección— conserva su tamaño, que es lo que el repartidor lee de parado.
-  // Pedido de la encargada de golf (2026-09-03): «el fin de semana que tenemos
-  // mesas muy grandes es como desperdicio de papel».
+  // La lista es lo único que crece con el tamaño del pedido, así que es donde
+  // se gana papel. Va en cuerpo normal Y con interlineado compacto: el `size`
+  // solo NO ahorra nada — el avance del papel lo fija `ESC 3`, que se emite una
+  // vez por documento en 64 pt para que el doble alto no se pise. Bajar el
+  // tamaño sin bajar el interlineado deja la letra chica flotando en el mismo
+  // renglón alto, que es peor legibilidad a cambio de cero.
+  //
+  // Lo operativo —destino, hora, A COBRAR, dirección— conserva tamaño y
+  // espaciado: es lo que el repartidor lee de parado. Pedido de la encargada de
+  // golf (2026-09-03): «el fin de semana que tenemos mesas muy grandes es como
+  // desperdicio de papel».
+  const compacto = { size: "sm", spacing: COMPACT_SPACING } as const;
   const items = c.items ?? [];
   for (const it of items) {
     for (const l of wrap(`${it.quantity}x ${it.product_name}`, COLS.sm))
-      push(l, { size: "sm", bold: true });
+      push(l, { ...compacto, bold: true });
     // Sin sangría: `wrap` corta por palabra y se come los espacios de la
     // izquierda, así que el prefijo tiene que ser un carácter visible.
     if (it.modifiers && it.modifiers.length)
       for (const l of wrap(`+ ${it.modifiers.join(", ")}`, COLS.sm))
-        push(l, { size: "sm" });
+        push(l, { ...compacto });
     // La nota del ítem NO va, por lo mismo que en la cuenta: es la aclaración
     // del mozo para la cocina, y este papel lo ve el cliente que retira.
-    if (it.notes)
-      for (const l of wrap(`obs: ${it.notes}`, COLS.sm)) push(l, { size: "sm" });
-    push(row("", money(it.line_total_cents)), { size: "sm" });
+    push(row("", money(it.line_total_cents)), { ...compacto });
   }
   if (items.length === 0) push("(sin items)");
   push(RULE, { size: "sm" });

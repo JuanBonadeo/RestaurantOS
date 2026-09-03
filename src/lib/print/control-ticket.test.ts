@@ -100,6 +100,31 @@ describe("buildControlTicketLines", () => {
     }
   });
 
+  it("la lista de ítems achica el PAPEL, no sólo la letra", () => {
+    // El avance del papel lo fija `ESC 3`, no el `size` de la línea: el
+    // documento se abre con 64 pt por renglón (elegido para que el doble alto
+    // no se pise) y ése es el avance de una línea `sm` igual que de una `tall`.
+    // O sea: bajar el tamaño sin bajar el interlineado ahorra CERO. Este test
+    // existe para que no volvamos a creer que sí.
+    const items = Array.from({ length: 12 }, (_, i) => ({
+      product_name: `Producto ${i + 1}`,
+      quantity: 1,
+      line_total_cents: 850000,
+    }));
+    const lines = buildControlTicketLines(base({ items }));
+    const avance = (l: (typeof lines)[number]) => l.spacing ?? 64;
+    const papel = lines.reduce((n, l) => n + avance(l), 0);
+    const papelSiTodoFueraNormal = lines.length * 64;
+
+    // Los renglones de la lista avanzan la mitad; el resto del ticket no cambia.
+    expect(lines.filter((l) => l.spacing === 32)).toHaveLength(
+      items.length * 2,
+    );
+    expect(papel).toBeLessThan(papelSiTodoFueraNormal);
+    // 24 renglones a 32 en vez de 64 = 768 pt menos, ~27 mm de papel por ticket.
+    expect(papelSiTodoFueraNormal - papel).toBe(items.length * 2 * 32);
+  });
+
   it("el destino, la hora y el cobro siguen en cuerpo grande", () => {
     const lines = buildControlTicketLines(
       base({ scheduled_at: "2026-07-20T21:30:00-03:00" }),
