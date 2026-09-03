@@ -342,7 +342,20 @@ function CajaCard({
           </div>
           <p className="mt-0.5 text-xs text-zinc-500">
             Período activo {periodoLabel}
-            {caja.ultimo_corte && " · último corte registrado"}
+            {/* Spec 149 · acá decía «· último corte registrado», que anunciaba
+                un dato sin mostrarlo ni llevar a ningún lado. Ahora es la
+                entrada al cierre archivado. */}
+            {caja.ultimo_corte && (
+              <>
+                <span className="mx-1 text-zinc-300">·</span>
+                <Link
+                  href={`/${slug}/admin/operacion/cierres?caja=${caja.id}`}
+                  className="font-medium underline underline-offset-2 transition hover:text-zinc-900"
+                >
+                  ver cierres anteriores
+                </Link>
+              </>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2">

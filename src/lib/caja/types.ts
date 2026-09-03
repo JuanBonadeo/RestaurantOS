@@ -162,6 +162,64 @@ export type CajaConEstado = Caja & {
   periodo_desde: string;
 };
 
+// ── El cierre archivado (spec 149) ──────────────────────────────
+
+/** Una fila del historial de cierres. */
+export type CorteDelHistorial = CajaCorte & {
+  caja_name: string;
+  encargado_name: string | null;
+  /**
+   * Arranque del turno que este corte cerró: el `created_at` del corte
+   * anterior de la misma caja, o el alta de la caja si es el primero.
+   */
+  periodo_desde: string;
+  /**
+   * No hay corte anterior: `periodo_desde` es el alta de la caja.
+   *
+   * Importa para lo que se dice, no para la plata. Una caja creada hace dos
+   * meses y cortada por primera vez anoche tiene una ventana de 74 días —
+   * correcta para sumar cobros, absurda como «turno de 74 d».
+   */
+  es_primer_corte: boolean;
+};
+
+export type RendicionDelCorte = MozoRendicion & { mozo_name: string };
+
+/**
+ * El resumen de un cierre ya hecho.
+ *
+ * ⚠️ No es una foto congelada: sólo los cuatro campos del arqueo
+ * (`expected_cash_cents`, `closing_cash_cents`, `difference_cents`,
+ * `denomination_count`) están guardados en la fila. Todo lo demás se
+ * reconstruye de la ventana del turno, así que una corrección posterior
+ * (spec 070) cambia el resumen de un cierre viejo. Es lo correcto para
+ * auditar — la corrección tiene su propio rastro — pero conviene saberlo.
+ */
+export type ResumenDeCorte = {
+  corte: CajaCorte;
+  caja_name: string;
+  encargado_name: string | null;
+  /** `is_default`: la que barre el salón y gobierna las rendiciones (D5). */
+  barre_salon: boolean;
+  periodo_desde: string;
+  /** No hay corte anterior: `periodo_desde` es el alta de la caja. */
+  es_primer_corte: boolean;
+  stats: CajaLiveStats;
+  /** Los del turno. El retiro del corte anterior ya está neteado, no viene acá. */
+  movimientos: CajaMovimiento[];
+  /**
+   * Lo que este cierre sacó del cajón, por `caja_movimientos.corte_id`.
+   *
+   * `null` no es $0: es «no se sabe». El rótulo lo escribe un `UPDATE`
+   * best-effort después de la transacción (`cerrarCaja`), así que un corte
+   * cuyo update falló tiene el retiro hecho pero sin atar. Mostrar $0 ahí
+   * sería afirmar que no se retiró nada.
+   */
+  retiro_cents: number | null;
+  /** Vacío en una caja que no barre el salón (D5). */
+  rendiciones: RendicionDelCorte[];
+};
+
 export type PaymentMethodConfig = {
   id: string;
   business_id: string;

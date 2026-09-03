@@ -2,7 +2,7 @@
 
 **Issue:** [#225](https://github.com/gachetponzellini/RestaurantOS-app/issues/225) ·
 **Milestone:** Post-demo · Growth & hardening ·
-**Estado:** 📋 propuesta (2026-09-03)
+**Estado:** ✅ implementada (2026-09-03)
 
 **Input:** Juan, 2026-09-03: *"si hacemos un cierre de caja, no podemos ver nunca
 más después el resumen del cierre de esa caja, debería de haber una interfaz que
@@ -193,18 +193,45 @@ que no se mueva. La pantalla lo dice donde se puede leer.
 
 ## Verificación
 
-`pnpm typecheck` + `pnpm test` en verde.
+`pnpm typecheck` en 0 errores y **2092 tests unitarios en verde** (los 21
+archivos `*.integration.test.ts` fallan por falta del stack local, como es
+habitual sin Supabase levantado — ninguna aserción rota).
 
-Tests unitarios del recorte por ventana (que el techo excluya el turno
-siguiente), del primer-corte-sin-anterior, y de que el desglose reconstruido
-reproduce el `expected_cash_cents` congelado en la fila.
+Tests nuevos: `historial-cortes.test.ts` (encadenado por caja, que no se mezclen
+dos cajas, bordes de la ventana) y `formato-cierre.test.ts` (duración del turno,
+incluido el caso corrupto).
 
-Verify en vivo con el rol real —encargada, que es quien cierra— sobre un corte ya
-existente de `demo`:
+Verify en vivo como **Sofía (encargada)** sobre los dos cortes reales de `demo`,
+que entre los dos cubren los bordes:
 
-    node scripts/magic-link.mjs sofia@demo.test "/demo/admin/operacion?tab=caja"
+| | Caja Principal 13/8 | Caja Bar 31/8 |
+|---|---|---|
+| `is_default` | sí → rendiciones a la vista | no → sección ausente (D5) |
+| `denomination_count` | no → «monto declarado» | sí → conteo, total = contado |
+| retiro rotulado | **no** → «no se pudo determinar» (D4) | sí → $ 10.000 |
+| nota | sí (hubo diferencia) | no |
 
-Y el chequeo negativo con `terminal`, que no tiene que poder entrar.
+El desglose reconstruido reprodujo exacto el `expected_cash_cents` congelado en
+las dos filas (`0 + 45.800 + 10.000 − 0 = 55.800`), y el movimiento **anulado**
+de $100.000 quedó tachado sin sumar a sangrías (spec 070).
+
+Chequeo negativo: `terminal@demo.test` navegando a `/admin/operacion/cierres`
+rebota a `/admin/operacion` y sigue viendo sólo sus cuatro tabs (D7).
+
+### Lo que se descubrió verificando
+
+**El primer corte de una caja no es un turno.** Las dos cajas de `demo` nunca se
+habían cortado, así que la ventana arrancaba en el alta de la caja y la pantalla
+decía «turno de 74 d 0 h» — correcto para sumar cobros, absurdo de leer. Se
+agregó `es_primer_corte` al tipo y las dos pantallas lo dicen con todas las
+letras en vez de inventar una duración.
+
+## Pendiente menor
+
+Un `corteId` inexistente (o de otro negocio) corta bien por `notFound()` pero
+renderiza **una pantalla en blanco**: falta un `not-found.tsx` en el segmento que
+diga «ese cierre no existe». No es un agujero —no se filtra nada— pero es una
+punta suelta.
 
 ## Diseño
 

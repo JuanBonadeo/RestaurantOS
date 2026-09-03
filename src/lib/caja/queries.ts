@@ -1,7 +1,6 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
@@ -10,6 +9,7 @@ import { calcularRendicionMozo } from "./liquidacion-mozo";
 import { mozosQueDebenRendir } from "./deben-rendir";
 import { repartirEfectivoEsperado, type RepartoEfectivo } from "./reparto-efectivo";
 import { agruparVentasPorOrigen, origenDeDeliveryType } from "./ventas-por-origen";
+import { encadenarPeriodos, ventanaDelCorte } from "./historial-cortes";
 import type {
   Caja,
   CajaConEstado,
@@ -22,10 +22,13 @@ import type {
   LibroEntry,
   LibroFiltros,
   LibroTotales,
+  CorteDelHistorial,
   MozoRendicion,
   PaymentMethod,
   PaymentMethodConfig,
+  RendicionDelCorte,
   RendicionMozoPendiente,
+  ResumenDeCorte,
 } from "./types";
 
 // Post-migration types not yet regenerated; cast to bypass strict table checks.
@@ -327,6 +330,43 @@ export async function getCajaLiveStats(
   const ultimoCorte = await getUltimoCorte(cajaId, businessId);
   const periodoDesdeFecha = ultimoCorte?.created_at ?? (cajaRow as { created_at: string }).created_at;
 
+  return getCajaStatsEnVentana(cajaId, {
+    desde: periodoDesdeFecha,
+    hasta: null,
+    arrastreBrutoCents: ultimoCorte?.closing_cash_cents ?? 0,
+  });
+}
+
+/**
+ * Los mismos stats, sobre una ventana arbitraria (spec 149 · D3).
+ *
+ * El período vivo es el caso `hasta: null`; el resumen de un cierre pasa el
+ * `created_at` del corte como techo y la ventana queda `(corte anterior, este
+ * corte]` — el mismo criterio estricto por abajo con el que se calcula el
+ * período activo.
+ *
+ * Vive acá y no duplicada del lado del historial **a propósito**: esto calcula
+ * el efectivo esperado, o sea plata. Dos implementaciones del mismo número
+ * derivan, y el día que deriven la pantalla del cierre y su propio resumen van
+ * a decir cosas distintas del mismo turno sin que nadie sepa cuál creer.
+ *
+ * `arrastreBrutoCents` es lo contado por el corte **anterior**: entra como
+ * arrastre bruto porque `separarRetiroDelCierre` le netea el retiro que ese
+ * corte dejó adentro de esta ventana (el del `+1 ms` de la 0052).
+ */
+async function getCajaStatsEnVentana(
+  cajaId: string,
+  ventana: {
+    /** Exclusivo: `created_at > desde`, como el período vivo. */
+    desde: string;
+    /** Inclusivo. `null` = abierta hasta ahora. */
+    hasta: string | null;
+    arrastreBrutoCents: number;
+  },
+): Promise<CajaLiveStats> {
+  const service = db();
+  const { desde, hasta, arrastreBrutoCents } = ventana;
+
   // `orders!inner` es seguro: `payments.order_id` es NOT NULL, así que el join
   // no puede descartar cobros y desbalancear los totales.
   let paymentsQuery = service
@@ -334,7 +374,8 @@ export async function getCajaLiveStats(
     .select("method, amount_cents, tip_cents, orders!inner(delivery_type)")
     .eq("caja_id", cajaId)
     .eq("payment_status", "paid");
-  paymentsQuery = paymentsQuery.gt("created_at", periodoDesdeFecha);
+  paymentsQuery = paymentsQuery.gt("created_at", desde);
+  if (hasta) paymentsQuery = paymentsQuery.lte("created_at", hasta);
 
   // `cancelled_at` viaja para que el efectivo esperado ignore los movimientos
   // anulados (spec 070): siguen en el libro, pero no mueven la caja.
@@ -342,7 +383,8 @@ export async function getCajaLiveStats(
     .from("caja_movimientos")
     .select("kind, amount_cents, cancelled_at, corte_id")
     .eq("caja_id", cajaId);
-  movQuery = movQuery.gt("created_at", periodoDesdeFecha);
+  movQuery = movQuery.gt("created_at", desde);
+  if (hasta) movQuery = movQuery.lte("created_at", hasta);
 
   const [paymentsRes, movimientosRes] = await Promise.all([
     paymentsQuery,
@@ -384,10 +426,7 @@ export async function getCajaLiveStats(
     apertura_cents,
     retiro_cierre_cents,
     del_turno: movimientos,
-  } = separarRetiroDelCierre(
-    ultimoCorte?.closing_cash_cents ?? 0,
-    movimientosDelPeriodo,
-  );
+  } = separarRetiroDelCierre(arrastreBrutoCents, movimientosDelPeriodo);
 
   const ventas_por_metodo: Record<PaymentMethod, number> = { ...EMPTY_BY_METHOD };
   let total_ventas_cents = 0;
@@ -435,7 +474,7 @@ export async function getCajaLiveStats(
     ventas_por_origen: agruparVentasPorOrigen(payments),
     cobros_count: payments.length,
     expected_cash_cents,
-    periodo_desde: periodoDesdeFecha,
+    periodo_desde: desde,
     desglose_esperado,
   };
 }
@@ -471,62 +510,247 @@ export async function getAllPaymentMethodConfigs(
   }));
 }
 
-export async function getCortesByCaja(
+// ── El cierre archivado (spec 149) ──────────────────────────────
+
+/** Nombres de `users` por id, para no repetir el join a mano. */
+async function nombresDeUsuarios(
+  ids: string[],
+): Promise<Map<string, string | null>> {
+  const unicos = Array.from(new Set(ids.filter(Boolean)));
+  if (unicos.length === 0) return new Map();
+  const service = db();
+  const { data } = await service
+    .from("users")
+    .select("id, full_name")
+    .in("id", unicos);
+  return new Map(
+    ((data ?? []) as { id: string; full_name: string | null }[]).map((u) => [
+      u.id,
+      u.full_name,
+    ]),
+  );
+}
+
+/**
+ * El corte inmediatamente anterior de la misma caja. Marca el piso de la
+ * ventana del turno y aporta el arrastre de efectivo.
+ */
+async function getCorteAnterior(
   cajaId: string,
-  businessId: string,
-): Promise<CajaCorte[]> {
+  antesDe: string,
+): Promise<CajaCorte | null> {
   const service = db();
   const { data } = await service
     .from("caja_cortes")
     .select("*")
     .eq("caja_id", cajaId)
-    .eq("business_id", businessId)
-    .order("created_at", { ascending: false });
-  return (data ?? []) as CajaCorte[];
+    .lt("created_at", antesDe)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data ?? null) as CajaCorte | null;
 }
 
-export async function getCortesHoy(
+/**
+ * Los cierres de un rango, el más reciente primero.
+ *
+ * `periodo_desde` (cuándo arrancó el turno que cada corte cerró) se resuelve
+ * **encadenando** la lista: dentro del rango, el turno de un corte arranca en
+ * el corte anterior de su misma caja, que ya está acá. Sólo el más viejo de
+ * cada caja necesita ir a la base — una consulta por caja, no por corte.
+ */
+export async function getCortesDelRango(
   businessId: string,
-): Promise<(CajaCorte & { caja_name: string; encargado_name: string | null })[]> {
+  filtros: { from: string; to: string; cajaId?: string | null },
+): Promise<CorteDelHistorial[]> {
   const service = db();
-  // Inicio del día operativo en timezone AR (spec 36 · R-G2): antes usaba la TZ
-  // del server (UTC en Vercel) → la ventana "hoy" arrancaba 21:00 AR del día
-  // anterior y los cortes nocturnos caían en el día equivocado.
-  const AR_TZ = "America/Argentina/Buenos_Aires";
-  const todayAr = formatInTimeZone(new Date(), AR_TZ, "yyyy-MM-dd");
-  const todayStart = fromZonedTime(`${todayAr}T00:00:00`, AR_TZ);
 
-  const { data } = await service
+  let query = service
     .from("caja_cortes")
-    .select("*, cajas!inner(name)")
+    .select("*, cajas!inner(name, created_at)")
     .eq("business_id", businessId)
-    .gte("created_at", todayStart.toISOString())
+    .gte("created_at", filtros.from)
+    .lte("created_at", filtros.to)
     .order("created_at", { ascending: false });
+  if (filtros.cajaId) query = query.eq("caja_id", filtros.cajaId);
 
-  if (!data || data.length === 0) return [];
+  const { data } = await query;
+  const rows = (data ?? []) as unknown as Array<
+    CajaCorte & { cajas: { name: string; created_at: string } | { name: string; created_at: string }[] }
+  >;
+  if (rows.length === 0) return [];
 
-  const encargadoIds = Array.from(
-    new Set(data.map((row) => (row as { encargado_id: string }).encargado_id)),
+  const caja = (r: (typeof rows)[number]) =>
+    Array.isArray(r.cajas) ? r.cajas[0] : r.cajas;
+
+  const { desdePorCorte, sinPredecesor } = encadenarPeriodos(rows);
+
+  // Los que quedaron sin predecesor son el más viejo de cada caja del rango:
+  // su piso está antes de lo pedido. Una consulta por caja, no por corte.
+  const primeros = new Set<string>();
+  const pisos = await Promise.all(
+    sinPredecesor.map(async (r) => {
+      const anterior = await getCorteAnterior(r.caja_id, r.created_at);
+      if (!anterior) primeros.add(r.id);
+      return [r.id, anterior?.created_at ?? caja(r).created_at] as const;
+    }),
   );
-  const { data: encargados } = await service
-    .from("users")
-    .select("id, full_name")
-    .in("id", encargadoIds);
-  const nameById = new Map(
-    (encargados ?? []).map((u) => [u.id as string, u.full_name as string | null]),
+  for (const [id, desde] of pisos) desdePorCorte.set(id, desde);
+
+  const nombres = await nombresDeUsuarios(rows.map((r) => r.encargado_id));
+
+  return rows.map((r) => ({
+    ...r,
+    caja_name: caja(r).name,
+    encargado_name: nombres.get(r.encargado_id) ?? null,
+    periodo_desde: desdePorCorte.get(r.id) ?? caja(r).created_at,
+    es_primer_corte: primeros.has(r.id),
+  }));
+}
+
+/**
+ * El resumen archivado de un cierre: los números del turno que cerró.
+ *
+ * Devuelve `null` si el corte no existe **o es de otro negocio** — el scope
+ * multi-tenant se chequea acá y no sólo en la ruta.
+ */
+export async function getResumenDeCorte(
+  corteId: string,
+  businessId: string,
+): Promise<ResumenDeCorte | null> {
+  const service = db();
+
+  const { data: corteRow } = await service
+    .from("caja_cortes")
+    .select("*, cajas!inner(name, is_default, created_at)")
+    .eq("id", corteId)
+    .eq("business_id", businessId)
+    .maybeSingle();
+  if (!corteRow) return null;
+
+  const row = corteRow as unknown as CajaCorte & {
+    cajas:
+      | { name: string; is_default: boolean; created_at: string }
+      | { name: string; is_default: boolean; created_at: string }[];
+  };
+  const caja = Array.isArray(row.cajas) ? row.cajas[0] : row.cajas;
+  // El join viaja pegado a la fila; el corte que se devuelve es sólo la fila.
+  const corte: CajaCorte = {
+    id: row.id,
+    caja_id: row.caja_id,
+    business_id: row.business_id,
+    encargado_id: row.encargado_id,
+    expected_cash_cents: row.expected_cash_cents,
+    closing_cash_cents: row.closing_cash_cents,
+    difference_cents: row.difference_cents,
+    closing_notes: row.closing_notes,
+    denomination_count: row.denomination_count,
+    created_at: row.created_at,
+  };
+
+  const anterior = await getCorteAnterior(corte.caja_id, corte.created_at);
+  const ventana = ventanaDelCorte(corte, anterior, caja.created_at);
+  const periodoDesde = ventana.desde;
+
+  const [stats, movimientosRes, retiroRes] = await Promise.all([
+    getCajaStatsEnVentana(corte.caja_id, ventana),
+    // `corte_id is null`: el retiro del corte **anterior** cae en esta ventana
+    // por el `+1 ms` (0052) pero es la última línea de aquel cierre, no un
+    // movimiento de este turno. Los stats ya lo netearon contra la apertura;
+    // listarlo acá sería contar la misma plata dos veces (igual que hace
+    // `getMovimientosPeriodoActual`).
+    service
+      .from("caja_movimientos")
+      .select(
+        "id, caja_id, business_id, kind, amount_cents, reason, created_by, created_at, cancelled_at, cancelled_reason",
+      )
+      .eq("caja_id", corte.caja_id)
+      .eq("business_id", businessId)
+      .is("corte_id", null)
+      .gt("created_at", periodoDesde)
+      .lte("created_at", corte.created_at)
+      .order("created_at", { ascending: true }),
+    // El retiro de **este** cierre vive fuera de su propia ventana (nace un
+    // milisegundo después del corte), así que se lo busca por el rótulo.
+    service
+      .from("caja_movimientos")
+      .select("amount_cents, cancelled_at")
+      .eq("corte_id", corte.id)
+      .eq("business_id", businessId),
+  ]);
+
+  const retiroRows = (retiroRes.data ?? []) as {
+    amount_cents: number;
+    cancelled_at: string | null;
+  }[];
+  const retiro_cents =
+    retiroRows.length === 0
+      ? null
+      : retiroRows
+          .filter((m) => !m.cancelled_at)
+          .reduce((acc, m) => acc + Number(m.amount_cents), 0);
+
+  const rendiciones = caja.is_default
+    ? await getRendicionesDeVentana(businessId, periodoDesde, corte.created_at)
+    : [];
+
+  const nombres = await nombresDeUsuarios([corte.encargado_id]);
+
+  return {
+    corte,
+    caja_name: caja.name,
+    encargado_name: nombres.get(corte.encargado_id) ?? null,
+    barre_salon: caja.is_default,
+    periodo_desde: periodoDesde,
+    es_primer_corte: anterior === null,
+    stats,
+    movimientos: (movimientosRes.data ?? []) as CajaMovimiento[],
+    retiro_cents,
+    rendiciones,
+  };
+}
+
+/**
+ * Las rendiciones registradas dentro de la ventana del turno.
+ *
+ * `mozo_rendiciones` es **por negocio**, no por caja: sólo tiene sentido
+ * colgarlas del cierre de la caja que barre el salón (D5). El nombre se
+ * resuelve contra `business_users`, que es donde vive el del mozo en ESTE
+ * negocio.
+ */
+async function getRendicionesDeVentana(
+  businessId: string,
+  desde: string,
+  hasta: string,
+): Promise<RendicionDelCorte[]> {
+  const service = db();
+  const { data } = await service
+    .from("mozo_rendiciones")
+    .select("*")
+    .eq("business_id", businessId)
+    .gt("created_at", desde)
+    .lte("created_at", hasta)
+    .order("created_at", { ascending: true });
+
+  const rows = (data ?? []) as MozoRendicion[];
+  if (rows.length === 0) return [];
+
+  const { data: bu } = await service
+    .from("business_users")
+    .select("user_id, full_name")
+    .eq("business_id", businessId)
+    .in("user_id", Array.from(new Set(rows.map((r) => r.mozo_id))));
+  const nombre = new Map(
+    ((bu ?? []) as { user_id: string; full_name: string | null }[]).map((u) => [
+      u.user_id,
+      u.full_name,
+    ]),
   );
 
-  return data.map((row) => {
-    const r = row as unknown as CajaCorte & {
-      cajas: { name: string } | { name: string }[];
-    };
-    const cajaName = Array.isArray(r.cajas) ? r.cajas[0].name : r.cajas.name;
-    return {
-      ...r,
-      caja_name: cajaName,
-      encargado_name: nameById.get(r.encargado_id) ?? null,
-    };
-  });
+  return rows.map((r) => ({
+    ...r,
+    mozo_name: nombre.get(r.mozo_id) ?? "Sin nombre",
+  }));
 }
 
 // ── Rendición de mozos ──────────────────────────────────────────
