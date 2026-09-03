@@ -48,9 +48,10 @@ a mano**, más la razón social, más la condición de IVA. Todos los meses, el 
 cliente. En un comprobante fiscal, donde el CUIT equivocado no se corrige con un
 undo sino con una nota de crédito.
 
-Y es un caso real y repetido: en MaxiRest llevaban **~4.000 facturas A** entre
-sus dos puntos de venta. Los dos usos que la encargada describió —el evento
-empresarial y la facturación mensual a los médicos— son los dos a CUIT.
+Y es un caso real y repetido: en MaxiRest llevaban **~4.000 facturas A** entre sus
+dos puntos de venta, sobre una cartera de **410 clientes con CUIT** (`mxcli`, backup
+23/12/2025). Los dos usos que la encargada describió —el evento empresarial y la
+facturación mensual a los médicos— son los dos a CUIT.
 
 ## Las decisiones
 
@@ -87,12 +88,19 @@ consumidor final no tienen cliente, y las 14 que ya existen tampoco.
 automatiza y la razón no cambia: el sistema no puede adivinar **a quién** se le
 factura. Elegir el cliente es la decisión, y la toma una persona.
 
-**D7 · El import masivo desde MaxiRest queda afuera, pero deja de ser
-bloqueante.** Con el alta y el guardado del D4, la encargada carga el sanatorio
-una vez —tipeando el CUIT la primera y última vez— y de ahí en más lo elige. Los
-clientes que factura son un puñado; los ~4.000 comprobantes históricos salen de
-pocos receptores repetidos. El importador se hace si hace falta, no antes de que
-esto sirva.
+**D7 · El import desde MaxiRest entra, y es fast-follow inmediato.** Esta
+decisión decía lo contrario —«son un puñado de clientes, que los cargue a mano»—
+hasta que se abrió el backup. La tabla **`mxcli` existe y tiene los datos
+completos**: `cuit`, `razon`, `tipo_iva`, `dni`, domicilio y contacto. En el
+backup de Golf (23/12/2025) hay **2.786 clientes, 410 con CUIT** (378 distintos:
+hay 30 duplicados a resolver), y el `tipo_iva` mapea la condición casi perfecto —
+399 son tipo `2` y 396 de esos tienen CUIT. En KCC son 782 y 62.
+
+Cargar 410 clientes fiscales a mano no es una opción, así que el importador deja
+de ser opcional. **Sigue sin entrar en esta spec** —el modelo y el flujo tienen
+que existir antes de tener dónde importar— pero es lo que sigue, no un «si hace
+falta». Detalle del relevamiento en
+[`wiki/negocio/maxirest-clientes-mxcli.md`](../../../wiki/negocio/maxirest-clientes-mxcli.md).
 
 ## Alcance
 
@@ -117,7 +125,9 @@ esto sirva.
 
 ## Qué NO entra
 
-- **Importador de Excel de MaxiRest** (D7). Fast-follow si el volumen lo pide.
+- **Importador desde MaxiRest** (D7). Queda afuera de esta spec porque necesita
+  el modelo de datos primero, pero es el fast-follow inmediato: son 410 clientes
+  con CUIT en Golf y 62 en KCC, y salen de `mxcli`, no de un Excel a mano.
 - **Emitir A automáticamente** (D6).
 - **Pisar datos fiscales ya cargados desde el cobro** (D4).
 - **Validar el CUIT contra el padrón de ARCA.** El gateway ya rechaza un CUIT
