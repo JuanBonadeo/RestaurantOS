@@ -2,7 +2,8 @@
 
 **Issue:** [#226](https://github.com/gachetponzellini/RestaurantOS-app/issues/226) ·
 **Milestone:** Post-demo · Growth & hardening ·
-**Estado:** 📋 propuesta (2026-09-03) — sin implementar
+**Estado:** 🟡 parcial (2026-09-03) — **el modelo está aplicado** (migración `0061`,
+al cloud, verificada); el flujo de UI sigue pendiente
 
 **Input:** Juan, 2026-09-03: *"lo de la factura B automática ya lo hicimos, ahora
 faltaría lo de dejarle hacer una factura A a un cliente"*.
@@ -96,6 +97,13 @@ backup de Golf (23/12/2025) hay **2.786 clientes, 410 con CUIT** (378 distintos:
 hay 30 duplicados a resolver), y el `tipo_iva` mapea la condición casi perfecto —
 399 son tipo `2` y 396 de esos tienen CUIT. En KCC son 782 y 62.
 
+**Y hay una trampa esperándolo:** `customers` tiene `UNIQUE (business_id, phone)`,
+pero de los 410 clientes con CUIT de Golf **sólo 20 tienen teléfono**. Un import
+que use el teléfono como clave choca contra ese unique apenas encuentre el segundo
+cliente sin número. La clave de deduplicación del import tiene que ser el **CUIT**,
+no el teléfono — y hay que decidir qué `phone` se les pone a los 390 que no lo
+tienen, porque la columna es `NOT NULL`.
+
 Cargar 410 clientes fiscales a mano no es una opción, así que el importador deja
 de ser opcional. **Sigue sin entrar en esta spec** —el modelo y el flujo tienen
 que existir antes de tener dónde importar— pero es lo que sigue, no un «si hace
@@ -104,9 +112,16 @@ falta». Detalle del relevamiento en
 
 ## Alcance
 
-- **Migración** — `customers`: `cuit text`, `razon_social text`, `condicion_iva
-  text` (nullable). `invoices`: `customer_id uuid references customers(id)`
-  (nullable). Índice por `(business_id, cuit)` para el buscador.
+- ~~**Migración**~~ ✅ **hecha** — `0061_datos_fiscales_del_cliente.sql`, aplicada
+  al cloud el 2026-09-03. `customers` suma `cuit text` (con CHECK de **11 dígitos
+  normalizados**, sin guiones: MaxiRest los trae como `30-50023730-5`),
+  `razon_social text` y `condicion_iva smallint` (CHECK `in (1,4,5,6)`, los códigos
+  ARCA RG 5616 que ya usa `invoices.condicion_iva_receptor` — **no** los internos de
+  MaxiRest). `invoices` suma `customer_id uuid references customers(id) **on delete
+  set null**`: depurar la lista de clientes no puede borrar un comprobante fiscal.
+  Índices parciales en `(business_id, cuit)` y en `customer_id`. Sin cambios de RLS:
+  la policy de `customers` ya es `is_business_member() OR is_platform_admin() OR
+  user_id = auth.uid()`, sólo `authenticated`, así que el CUIT no queda expuesto.
 - **`src/lib/admin/customers-actions.ts`** — `ClienteMatch` suma los datos
   fiscales; `buscarClientes` gana un modo que prioriza/filtra los que tienen
   CUIT, para que en el flujo de facturación no haya que scrollear entre 298
