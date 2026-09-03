@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  buildCuentaTicketLines,
-  type CuentaTicketData,
-} from "./cuenta-ticket";
+import { buildCuentaTicketLines, type CuentaTicketData } from "./cuenta-ticket";
 
 // Spec 080 — la cuenta que se le da al cliente. Lo que se prueba es qué dice el
 // papel: si el cliente no puede chequear que le cobraron bien, el ticket no
@@ -76,9 +73,7 @@ describe("buildCuentaTicketLines", () => {
   });
 
   it("con pago parcial muestra lo pagado y lo que RESTA", () => {
-    const lines = buildCuentaTicketLines(
-      base({ total_paid_cents: 5000000 }),
-    );
+    const lines = buildCuentaTicketLines(base({ total_paid_cents: 5000000 }));
     const t = lines.map((l) => l.text).join("\n");
     expect(t).toContain("Pagado:");
     expect(t).toContain("50000.00");
@@ -116,12 +111,13 @@ describe("buildCuentaTicketLines", () => {
     const t = text(
       base({
         business_name: "Ñandú Café — «Sabor»",
+        discount_cents: 5000,
+        discount_reason: "cortesía 🙂 — «casa»",
         items: [
           {
             product_name: "Ñoquis con crema · 3° porción",
             quantity: 1,
             line_total_cents: 100000,
-            notes: "sin sal 🙂",
           },
         ],
       }),
@@ -129,6 +125,15 @@ describe("buildCuentaTicketLines", () => {
     // eslint-disable-next-line no-control-regex
     expect(t.replace(/\n/g, "")).toMatch(/^[\x20-\x7e]*$/);
     expect(t).toContain("Noquis con crema");
+  });
+
+  it("no imprime la aclaración que el mozo le dejó a la cocina", () => {
+    // `order_items.notes` es «sin sal», «para la señora del fondo»: se escribe
+    // para quien cocina, y este papel se lo lleva el cliente. El tipo ya no
+    // acepta el campo; esto cubre el otro lado — que nada del ticket se parezca
+    // a una observación. Pedido de la encargada de golf (2026-09-03).
+    const t = text(base());
+    expect(t).not.toContain("obs:");
   });
 
   it("aguanta una mesa sin consumo", () => {

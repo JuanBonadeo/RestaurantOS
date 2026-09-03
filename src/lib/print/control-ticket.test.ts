@@ -40,6 +40,11 @@ function base(over: Partial<ControlTicketData> = {}): ControlTicketData {
   };
 }
 
+/** Mismo formato de importe que usa el ticket. */
+function money(cents: number): string {
+  return (cents / 100).toFixed(2);
+}
+
 /** El ticket como texto plano, para asertar sobre el contenido. */
 function text(data: ControlTicketData): string {
   return buildControlTicketLines(data)
@@ -77,9 +82,43 @@ describe("buildControlTicketLines", () => {
     });
   });
 
-  it("nada sale en cuerpo normal salvo las líneas separadoras", () => {
-    for (const l of buildControlTicketLines(base()))
-      if ((l.size ?? "sm") === "sm") expect(l.text).toMatch(/^-*$/);
+  it("todo lo operativo sale en cuerpo grande; sólo la lista de ítems baja", () => {
+    // Antes el ticket entero era doble alto y una mesa grande salía al doble de
+    // largo por nada. La lista bajó a cuerpo normal (2026-09-03); el resto —lo
+    // que el repartidor lee de parado— conserva su tamaño.
+    const data = base();
+    const deItems = new Set(
+      (data.items ?? []).flatMap((it) => [
+        `${it.quantity}x ${it.product_name}`,
+        money(it.line_total_cents),
+      ]),
+    );
+    for (const l of buildControlTicketLines(data)) {
+      if ((l.size ?? "sm") !== "sm") continue;
+      const t = l.text.trim();
+      expect(/^-*$/.test(t) || deItems.has(t) || t.startsWith("+ ")).toBe(true);
+    }
+  });
+
+  it("el destino, la hora y el cobro siguen en cuerpo grande", () => {
+    const lines = buildControlTicketLines(
+      base({ scheduled_at: "2026-07-20T21:30:00-03:00" }),
+    );
+    const grande = (frag: string) =>
+      lines.find((l) => l.text.includes(frag) && (l.size ?? "sm") !== "sm");
+    expect(grande("DELIVERY")).toBeTruthy();
+    expect(grande("ENTREGAR")).toBeTruthy();
+    expect(grande("A COBRAR")).toBeTruthy();
+    expect(grande("TOTAL:")).toBeTruthy();
+  });
+
+  it("no imprime la aclaración que el mozo le dejó a la cocina", () => {
+    // Ídem la cuenta: `order_items.notes` es para quien cocina, y este papel lo
+    // ve el cliente que retira. La nota del CLIENTE (`delivery_notes`, «tocar
+    // timbre») sí va: la escribió él y la necesita el repartidor.
+    const t = text(base({ delivery_notes: "tocar timbre" }));
+    expect(t).not.toContain("obs:");
+    expect(t).toContain("Obs: tocar timbre");
   });
 
   it("desglosa subtotal, envío y descuento; omite los que son cero", () => {

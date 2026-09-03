@@ -24,6 +24,14 @@ export type CuentaTicketItem = {
   quantity: number;
   /** Precio de la línea (unitario × cantidad), en centavos. */
   line_total_cents: number;
+  /**
+   * ⚠️ NO IMPRIMIR. `order_items.notes` es la aclaración que el mozo le deja a
+   * la COCINA («sin sal», «bien cocido», «para la señora del fondo»), y este
+   * papel se lo lleva el cliente: ahí esas notas son ruido en el mejor caso y
+   * una nota sobre él mismo en el peor. Salió del ticket el 2026-09-03, por
+   * pedido de la encargada de golf. El campo se conserva sólo para que un
+   * caller que todavía lo mande siga compilando; el renderer lo ignora.
+   */
   notes?: string | null;
 };
 
@@ -89,7 +97,8 @@ function row(label: string, value: string, cols = COLS.sm): string {
 export function buildCuentaTicketLines(c: CuentaTicketData): Line[] {
   const L: Line[] = [];
   const push = (text: string, opts: Omit<Line, "text"> = {}) => {
-    for (const part of toAscii(text).split("\n")) L.push({ text: part, ...opts });
+    for (const part of toAscii(text).split("\n"))
+      L.push({ text: part, ...opts });
   };
 
   if (c.reprint) {
@@ -100,7 +109,8 @@ export function buildCuentaTicketLines(c: CuentaTicketData): Line[] {
   // ── Cabecera del negocio ──────────────────────────────────────────────────
   push(String(c.business_name).toUpperCase(), { bold: true, align: "center" });
   if (c.business_address)
-    for (const l of wrap(c.business_address, COLS.sm)) push(l, { align: "center" });
+    for (const l of wrap(c.business_address, COLS.sm))
+      push(l, { align: "center" });
   if (c.business_phone) push(c.business_phone, { align: "center" });
   push(RULE);
 
@@ -116,7 +126,11 @@ export function buildCuentaTicketLines(c: CuentaTicketData): Line[] {
   for (const it of items) {
     for (const l of wrap(`${it.quantity}x ${it.product_name}`, COLS.sm))
       push(l, { bold: true });
-    if (it.notes) for (const l of wrap(`obs: ${it.notes}`, COLS.sm)) push(l);
+    // La nota del ítem NO va: `order_items.notes` es lo que el mozo escribe
+    // PARA LA COCINA («sin sal», «bien cocido», «para la señora del fondo»).
+    // Este papel se lo lleva el cliente, y ahí esas aclaraciones son ruido en
+    // el mejor caso y una nota sobre él mismo en el peor. Va en la comanda,
+    // que es para quien cocina. Pedido de la encargada de golf (2026-09-03).
     push(row("", money(it.line_total_cents)));
   }
   if (items.length === 0) push("(sin consumo)");

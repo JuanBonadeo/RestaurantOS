@@ -28,8 +28,14 @@ export type ControlTicketItem = {
   quantity: number;
   /** Precio de la línea (unitario × cantidad), en centavos. */
   line_total_cents: number;
-  notes?: string | null;
   modifiers?: ReadonlyArray<string | null | undefined> | null;
+  /**
+   * ⚠️ NO IMPRIMIR — ver la nota igual en `CuentaTicketItem`. Es la aclaración
+   * del mozo para la cocina, y este papel lo ve el cliente que retira. NO
+   * confundir con `delivery_notes`, que es la nota del CLIENTE sobre la entrega
+   * («tocar timbre») y ésa sí se imprime: la necesita el repartidor.
+   */
+  notes?: string | null;
 };
 
 export type ControlTicketData = {
@@ -89,7 +95,8 @@ function stamp(iso: string): string {
     minute: "2-digit",
     hour12: false,
   }).formatToParts(d);
-  const pick = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  const pick = (type: string) =>
+    parts.find((p) => p.type === type)?.value ?? "";
   // `hour12:false` puede emitir "24" a medianoche en algunos entornos.
   const hh = pick("hour") === "24" ? "00" : pick("hour");
   return `${pick("day")}/${pick("month")} ${hh}:${pick("minute")}`;
@@ -118,9 +125,10 @@ function row(label: string, value: string, cols = COLS.sm): string {
 /** Arma el control de pedido como líneas con formato. */
 export function buildControlTicketLines(c: ControlTicketData): Line[] {
   const L: Line[] = [];
-  // Nada sale en cuerpo normal: el piso de todo el ticket es doble alto
-  // (`tall`), y lo operativo sube a doble alto + doble ancho (`xl`). El
-  // repartidor lo lee de parado, con el papel en la mano y a contraluz.
+  // El piso del ticket es doble alto (`tall`) y lo operativo sube a doble alto
+  // + doble ancho (`xl`): el repartidor lo lee de parado, con el papel en la
+  // mano y a contraluz. La excepción es la LISTA DE ÍTEMS, que baja a cuerpo
+  // normal — ver el comentario donde se arma.
   const push = (text: string, opts: Omit<Line, "text"> = {}) => {
     // `row()` puede devolver dos renglones; los separamos para no mandar un
     // "\n" crudo dentro de una línea ESC/POS.
@@ -143,7 +151,8 @@ export function buildControlTicketLines(c: ControlTicketData): Line[] {
   // ── Cabecera del negocio ──────────────────────────────────────────────────
   push(String(c.business_name).toUpperCase(), { bold: true, align: "center" });
   if (c.business_address)
-    for (const l of wrap(c.business_address, COLS.sm)) push(l, { align: "center" });
+    for (const l of wrap(c.business_address, COLS.sm))
+      push(l, { align: "center" });
   if (c.business_phone) push(c.business_phone, { align: "center" });
   push(RULE, { size: "sm" });
 
@@ -164,23 +173,32 @@ export function buildControlTicketLines(c: ControlTicketData): Line[] {
   push(RULE, { size: "sm" });
 
   // ── Ítems con precio ──────────────────────────────────────────────────────
+  // La lista va en cuerpo normal, no en el doble alto del resto del ticket: es
+  // lo único que crece con el tamaño del pedido, y una mesa de veinte ítems
+  // salía al doble de largo por nada. Lo operativo —destino, hora, A COBRAR,
+  // dirección— conserva su tamaño, que es lo que el repartidor lee de parado.
+  // Pedido de la encargada de golf (2026-09-03): «el fin de semana que tenemos
+  // mesas muy grandes es como desperdicio de papel».
   const items = c.items ?? [];
   for (const it of items) {
     for (const l of wrap(`${it.quantity}x ${it.product_name}`, COLS.sm))
-      push(l, { bold: true });
+      push(l, { size: "sm", bold: true });
     // Sin sangría: `wrap` corta por palabra y se come los espacios de la
     // izquierda, así que el prefijo tiene que ser un carácter visible.
     if (it.modifiers && it.modifiers.length)
-      for (const l of wrap(`+ ${it.modifiers.join(", ")}`, COLS.sm)) push(l);
-    if (it.notes) for (const l of wrap(`obs: ${it.notes}`, COLS.sm)) push(l);
-    push(row("", money(it.line_total_cents)));
+      for (const l of wrap(`+ ${it.modifiers.join(", ")}`, COLS.sm))
+        push(l, { size: "sm" });
+    // La nota del ítem NO va, por lo mismo que en la cuenta: es la aclaración
+    // del mozo para la cocina, y este papel lo ve el cliente que retira.
+    push(row("", money(it.line_total_cents)), { size: "sm" });
   }
   if (items.length === 0) push("(sin items)");
   push(RULE, { size: "sm" });
 
   // ── Plata ─────────────────────────────────────────────────────────────────
   push(row("Subtotal:", money(c.subtotal_cents)));
-  if (c.delivery_fee_cents > 0) push(row("Envio:", money(c.delivery_fee_cents)));
+  if (c.delivery_fee_cents > 0)
+    push(row("Envio:", money(c.delivery_fee_cents)));
   if (c.discount_cents > 0)
     push(row("Descuento:", `-${money(c.discount_cents)}`));
   push(row("TOTAL:", money(c.total_cents)), { size: "tall", bold: true });
@@ -210,7 +228,8 @@ export function buildControlTicketLines(c: ControlTicketData): Line[] {
     for (const l of wrap(`Direccion: ${c.delivery_address}`, COLS.sm))
       push(l, { bold: true });
   if (c.delivery_notes)
-    for (const l of wrap(`Obs: ${c.delivery_notes}`, COLS.sm)) push(l, { bold: true });
+    for (const l of wrap(`Obs: ${c.delivery_notes}`, COLS.sm))
+      push(l, { bold: true });
 
   push(RULE, { size: "sm" });
   push("DOCUMENTO NO VALIDO", { align: "center" });
