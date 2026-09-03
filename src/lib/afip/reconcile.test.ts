@@ -10,6 +10,10 @@ const notifyInvoiceIssued = vi.fn();
 vi.mock("@/lib/notifications/invoice-notify", () => ({
   notifyInvoiceIssued: (...args: unknown[]) => notifyInvoiceIssued(...args),
 }));
+const notifyInvoiceFailed = vi.fn(async (_args: unknown) => {});
+vi.mock("@/lib/notifications/events", () => ({
+  notifyInvoiceFailed: (args: unknown) => notifyInvoiceFailed(args),
+}));
 vi.mock("@/lib/supabase/service", () => ({
   createSupabaseServiceClient: () => {
     throw new Error("los tests inyectan el service client");
@@ -206,6 +210,38 @@ describe("applyGatewayStatus", () => {
       error_message: FAILED.error,
     });
     expect(notifyInvoiceIssued).not.toHaveBeenCalled();
+    // Manual: el error ya se lo devolvió la pantalla a quien apretó el botón.
+    expect(notifyInvoiceFailed).not.toHaveBeenCalled();
+  });
+
+  // Spec 147 · D6 — la mitad que hace segura a la otra. Los 14 rechazos de
+  // golf-jcr se descubrieron consultando la base; con emisión automática eso
+  // pasa de «alguien facturó y le falló» a «todas las mesas fallan y nadie se
+  // entera».
+  it("un rechazo de emisión automática avisa adentro, aunque nadie mire", async () => {
+    const failed = invoice({
+      id: "inv-auto",
+      status: "failed",
+      auto_emitted: true,
+      error_message: FAILED.error ?? null,
+    });
+    const { service } = fakeService({ updateReturns: failed });
+
+    await applyGatewayStatus(service, invoice({ auto_emitted: true }), providerWith(FAILED));
+
+    expect(notifyInvoiceFailed).toHaveBeenCalledWith({
+      businessId: "biz-1",
+      invoiceId: "inv-auto",
+    });
+  });
+
+  it("una automática que SÍ sale con CAE no dispara el aviso de fallo", async () => {
+    const ok = invoice({ status: "authorized", auto_emitted: true, numero: 42 });
+    const { service } = fakeService({ updateReturns: ok });
+
+    await applyGatewayStatus(service, invoice({ auto_emitted: true }), providerWith(AUTHORIZED));
+
+    expect(notifyInvoiceFailed).not.toHaveBeenCalled();
   });
 
   it("mientras el gateway sigue encolando NO se toca la fila", async () => {

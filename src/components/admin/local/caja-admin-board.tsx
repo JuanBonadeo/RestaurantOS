@@ -6,6 +6,7 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   Lock,
+  ReceiptText,
   RefreshCw,
   Settings,
   Wallet,
@@ -619,6 +620,14 @@ function CobroRow({ payment, href }: { payment: CajaPayment; href: string }) {
             {METHOD_LABEL[payment.method]}
             {payment.attributed_mozo_name && (
               <><span className="mx-1 text-zinc-300">·</span>{payment.attributed_mozo_name}</>
+            )}
+            {/* spec 147 — el cobro está bien; lo que falta es el papel de ARCA.
+                Mismo lenguaje visual que la comanda que no imprimió (spec 33). */}
+            {payment.comprobante_fallido && (
+              <span className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700 align-middle">
+                <ReceiptText className="size-3" strokeWidth={2.25} />
+                Sin comprobante
+              </span>
             )}
           </p>
           {payment.tip_cents > 0 && (

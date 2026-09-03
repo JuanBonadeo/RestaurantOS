@@ -2,7 +2,8 @@
 
 **Issue:** [#223](https://github.com/gachetponzellini/RestaurantOS-app/issues/223) ·
 **Milestone:** Post-demo · Growth & hardening ·
-**Estado:** 📋 propuesta (2026-09-03) — **bloqueada por un trámite del cliente**, ver «Antes de implementar»
+**Estado:** ✅ implementada (2026-09-03) — el código está y **apagado por defecto**;
+prenderla en `golf-jcr` sigue **bloqueado por un trámite del cliente**, ver «Antes de implementar»
 
 **Input:** Juan, 2026-09-03, sobre el flujo de cobro del encargado: *"si cobrás
 una mesa común debería de facturarse no?"* → *"o sea que debería emitir
@@ -90,8 +91,13 @@ adentro. **Cero comprobantes emitidos desde que el negocio salió a producción.
 Automatizar la emisión antes de resolver eso no arregla nada: convierte 14
 fallos en **uno por cada mesa cobrada**, y los multiplica en silencio. Es un
 trámite del cliente en el portal de AFIP (alta del punto de venta para
-comprobantes electrónicos), no código. **Esta spec no se implementa antes de que
-salga un CAE real.**
+comprobantes electrónicos), no código.
+
+**Cómo se resolvió (2026-09-03):** el bloqueo es sobre **prender**, no sobre
+escribir. `afip_auto_emit` nace en `false` para todos los negocios (D3), así que
+el código no cambia nada para nadie hasta que alguien mueve el switch. El código
+está implementado y verificado en `demo`; **`golf-jcr` sigue con el flag apagado
+y se prende recién cuando su punto de venta emita un CAE real.**
 
 ## Las decisiones
 
@@ -195,17 +201,70 @@ contador del cliente.
 7. **Dado** un negocio sin AFIP configurado, **entonces** el flag no hace nada y
    no se encola ninguna emisión.
 
+## Cómo quedó
+
+| Pieza | Dónde |
+|---|---|
+| Flag por negocio + origen del comprobante | `supabase/migrations/0060_cobrar_una_mesa_emite_el_comprobante.sql` |
+| El motor de emisión, sin auth ni formulario | `src/lib/afip/emit-core.ts` (nuevo) |
+| Los gates y la Factura B automática | `src/lib/afip/auto-emit.ts` (nuevo) |
+| El gancho en el cobro | `src/lib/billing/cobro-actions.ts` · `closeOrderIfFullyPaid` |
+| El aviso interno | `src/lib/notifications/events.ts` · `notifyInvoiceFailed` + `view.ts` |
+| El fallo que llega tarde | `src/lib/afip/reconcile.ts` · `applyGatewayStatus` |
+| El switch | `src/components/admin/settings/afip-config-form.tsx` |
+| «Sin comprobante» en Operación | `src/lib/caja/queries.ts` + `caja-admin-board.tsx` |
+
+Dos notas de diseño que la spec no anticipaba:
+
+**El motor tuvo que mudarse de archivo.** `emit-invoice.ts` es `"use server"`, y
+ahí **todo export es un endpoint público**. Exportar el motor para que lo llamara
+el cobro habría publicado un action que emite comprobantes fiscales sin pasar por
+`requireMozoActionContext`. Vive en `emit-core.ts`, que es `server-only`:
+`emitInvoice` quedó como la puerta autenticada de tres líneas.
+
+**La mesa no se puede marcar: al cobrarse queda `libre`.** El alcance pedía
+distinguir «la mesa/pedido con comprobante fallido» en Operación, pero
+`closeOrderIfFullyPaid` libera la mesa y una orden `dine_in` no entra al board de
+Pedidos. La única lista de Operación donde el cobro sigue existiendo es
+**Movimientos del período** de la tab Caja, y ahí va el badge. Un cobro se marca
+cuando su orden tiene una factura `failed` y **ninguna viva**: el reintento que
+sale con CAE lo apaga solo.
+
 ## Verificación
 
-Pendiente — la spec no está implementada, y no debe implementarse antes de que
-`golf-jcr` emita un CAE real (ver «Antes de implementar»).
+**Tests** (`pnpm test`, 2057 en verde): los seis gates de `auto-emit.test.ts`
+—flag apagado, sin AFIP, cuenta que es toda propina, comprobante ya vivo (D5),
+Factura B automática con la clave derivada del `order_id`, y el rechazo que se
+reporta— más dos de `reconcile.test.ts` para el fallo que llega por el cron y la
+automática que sí sale con CAE.
 
-Al implementar: tests de la guarda de idempotencia (dos cierres seguidos, una
-sola factura), del gate por flag y por `afipConfigured`, y del camino de fallo
-(el cobro se cierra igual). El verify en vivo se hace primero en `demo` con el
-gateway en sandbox —donde el CAE vuelve— y recién después en golf-jcr:
+**En vivo en `demo`** (2026-09-03), como Sofía, encargada — el rol que cobra:
 
-    node scripts/magic-link.mjs sofia@demo.test "/demo/admin/operacion"
+1. *Escenarios 1 y 2* · Mesa T12, $3.000 en efectivo. Se apretó **Confirmar** y
+   nada más: quedó `factura_b` `authorized`, `auto_emitted: true`, con
+   `idempotency_key = <order_id>:factura_b` (derivada, no random). La pantalla no
+   esperó nada.
+2. *Escenario 3* · Con el gateway apuntado a un puerto muerto, mesa T9 de
+   $36.750: **el cobro cerró igual** (`closed` / `paid`, $36.750 acreditados) y
+   la factura quedó `failed`. Saltó la notificación **«Sin comprobante · Mesa
+   T9»** en la campana y el badge rojo en la fila del cobro, en Movimientos del
+   período. La T12 —la que sí salió— quedó sin badge.
+   De yapa quedó confirmado R-C1: la invoice declaró $35.000, no los $36.750
+   cobrados. La propina no va a la base imponible.
+3. *Escenarios 4 y 7* · Los cubren los tests; `golf-jcr` y `kcc` quedaron con el
+   flag en `false`, que es el estado de todos los negocios tras la migración.
 
-Sofía es encargada: el rol que cobra las mesas, y el que tiene que ver la
-notificación de fallo.
+`demo` queda con `afip_auto_emit` **prendido** y en sandbox: es el negocio de
+pruebas, así que cada mesa que se cobre ahí va a generar su Factura B fake.
+
+    node scripts/magic-link.mjs sofia@demo.test "/demo/admin/operacion?tab=caja"
+
+## Fuera de alcance que apareció en el camino
+
+Un negocio **sin credencial del gateway no podía guardar nada** de la config
+AFIP: el formulario manda siempre el `baseUrl` por defecto, eso entraba a la rama
+de la credencial, no había fila que actualizar y todo el guardado moría en
+«cargá la API key y el slug» — CUIT y punto de venta incluidos. Se descubrió al
+no poder prender el switch nuevo en `demo`, que emite por sandbox y nunca va a
+tener credencial. Arreglado en `config-actions.ts`: un `baseUrl` solo, sin
+credencial cargada, ya no se toma por media credencial.

@@ -224,6 +224,26 @@ export function viewForNotification(n: Notification): NotiView {
     };
   }
 
+  // ── spec 147 ──────────────────────────────────────────────────────
+  if (n.type === "factura.emision_fallida") {
+    const tableLabel = p.tableLabel as string | undefined;
+    const orderNumber = p.orderNumber as number | undefined;
+    const error = p.error as string | undefined;
+    const origen = tableLabel
+      ? `Mesa ${tableLabel}`
+      : orderNumber
+        ? `Pedido #${orderNumber}`
+        : "Un cobro";
+    return {
+      tone: "danger",
+      icon: ReceiptText,
+      title: `Sin comprobante · ${origen}`,
+      // El rechazo de ARCA tal cual: «EL PUNTO DE VENTA INFORMADO DEBE ESTAR
+      // DADO DE ALTA» es accionable, y traducirlo lo volvería adivinanza.
+      body: error ?? "ARCA rechazó la factura — reintentala desde Facturación.",
+    };
+  }
+
   // ── spec 093 ──────────────────────────────────────────────────────
   if (n.type === "pedido.sin_comanda") {
     const orderNumber = p.orderNumber as number | undefined;

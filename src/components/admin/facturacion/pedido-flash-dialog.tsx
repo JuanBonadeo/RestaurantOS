@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Zap } from "lucide-react";
+import { Receipt } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,12 @@ type Props = {
  * Pedido flash (spec 09): factura un evento por monto total sin desglose. Crea
  * una orden de un único renglón (concepto libre) y emite la factura por ese
  * total, sin dar de alta el producto en la carta.
+ *
+ * En pantalla se llama **«Facturar un monto»**: «pedido flash» describía el
+ * mecanismo (una orden de un renglón) y no el resultado, y la encargada de golf
+ * lo buscaba como «cargar un artículo que no existe» —el botón equivalente de
+ * MaxiRest— sin encontrarlo. Los identificadores quedan: renombrarlos arrastra
+ * permisos, actions y specs para no cambiar nada que el usuario vea.
  */
 export function PedidoFlashDialog({ slug }: Props) {
   const router = useRouter();
@@ -47,7 +53,7 @@ export function PedidoFlashDialog({ slug }: Props) {
     const conceptoTrim = concepto.trim();
     const montoNum = Number(monto.replace(",", "."));
     if (!conceptoTrim) {
-      toast.error("Ingresá un concepto para el pedido flash.");
+      toast.error("Ingresá un concepto para facturar.");
       return;
     }
     if (!Number.isFinite(montoNum) || montoNum <= 0) {
@@ -73,7 +79,7 @@ export function PedidoFlashDialog({ slug }: Props) {
       });
       if (!invoiced.ok) {
         toast.error(
-          `Pedido flash creado, pero la factura falló: ${invoiced.error}`,
+          `Monto registrado, pero la factura falló: ${invoiced.error}`,
         );
         router.refresh();
         return;
@@ -87,13 +93,13 @@ export function PedidoFlashDialog({ slug }: Props) {
 
       if (!terminal || terminal.status === "pending") {
         toast.message(
-          "Pedido flash creado. La factura sigue en proceso en ARCA — revisá el listado en unos segundos.",
+          "Monto registrado. La factura sigue en proceso en ARCA — revisá el listado en unos segundos.",
         );
       } else if (terminal.status === "authorized") {
-        toast.success("Pedido flash facturado.");
+        toast.success("Facturado.");
       } else {
         toast.error(
-          `Pedido flash creado, pero la factura falló: ${terminal.error_message ?? "error"}`,
+          `Monto registrado, pero la factura falló: ${terminal.error_message ?? "error"}`,
         );
       }
       reset();
@@ -113,17 +119,17 @@ export function PedidoFlashDialog({ slug }: Props) {
       <DialogTrigger
         render={
           <Button size="sm" variant="outline">
-            <Zap className="size-3.5" />
-            Pedido flash
+            <Receipt className="size-3.5" />
+            Facturar un monto
           </Button>
         }
       />
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Pedido flash</DialogTitle>
+          <DialogTitle>Facturar un monto</DialogTitle>
           <DialogDescription>
-            Facturá un evento por monto total, sin desglose de productos. Se crea
-            una orden de un solo renglón y se emite la factura.
+            Para lo que no está en la carta: un evento, un servicio, un acuerdo
+            mensual. Va una sola línea con el concepto que escribas.
           </DialogDescription>
         </DialogHeader>
 
@@ -132,7 +138,7 @@ export function PedidoFlashDialog({ slug }: Props) {
             <Label htmlFor="flash-concepto">Concepto</Label>
             <Input
               id="flash-concepto"
-              placeholder="Ej: Lunch torneo Banco Macro"
+              placeholder="Ej: Almuerzos médicos - agosto"
               value={concepto}
               onChange={(e) => setConcepto(e.target.value)}
               disabled={pending}

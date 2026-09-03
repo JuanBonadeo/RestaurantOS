@@ -240,6 +240,7 @@ export type Database = {
           afip_cuit: string | null
           afip_default_tipo: string | null
           afip_enabled: boolean
+          afip_auto_emit: boolean
           afip_gateway_connected: boolean
           afip_mode: string
           afip_provider: string | null
@@ -285,6 +286,7 @@ export type Database = {
           afip_cuit?: string | null
           afip_default_tipo?: string | null
           afip_enabled?: boolean
+          afip_auto_emit?: boolean
           afip_gateway_connected?: boolean
           afip_mode?: string
           afip_provider?: string | null
@@ -330,6 +332,7 @@ export type Database = {
           afip_cuit?: string | null
           afip_default_tipo?: string | null
           afip_enabled?: boolean
+          afip_auto_emit?: boolean
           afip_gateway_connected?: boolean
           afip_mode?: string
           afip_provider?: string | null
@@ -1869,6 +1872,7 @@ export type Database = {
           cancelled_by: string | null
           cancelled_reason: string | null
           cancels_invoice_id: string | null
+          auto_emitted: boolean
           condicion_iva_receptor: number | null
           created_at: string
           cuit_receptor: string | null
@@ -1899,6 +1903,7 @@ export type Database = {
           cancelled_by?: string | null
           cancelled_reason?: string | null
           cancels_invoice_id?: string | null
+          auto_emitted?: boolean
           condicion_iva_receptor?: number | null
           created_at?: string
           cuit_receptor?: string | null
@@ -1929,6 +1934,7 @@ export type Database = {
           cancelled_by?: string | null
           cancelled_reason?: string | null
           cancels_invoice_id?: string | null
+          auto_emitted?: boolean
           condicion_iva_receptor?: number | null
           created_at?: string
           cuit_receptor?: string | null

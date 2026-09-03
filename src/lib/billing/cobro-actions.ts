@@ -15,6 +15,7 @@ import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { elegirMozoAtribuido } from "@/lib/billing/atribucion-mozo";
 import { getBusiness } from "@/lib/tenant";
 
+import { autoEmitInvoiceForOrder } from "@/lib/afip/auto-emit";
 import { formatInvoiceNumber, tipoLabel } from "@/lib/afip/format";
 import type { TipoComprobante } from "@/lib/afip/types";
 
@@ -282,6 +283,35 @@ export async function closeOrderIfFullyPaid(
       .eq("business_id", business.id)
       .eq("status", "seated");
     if (resErr) console.error("cobro: completar reserva seated", resErr);
+  }
+
+  // spec 147 — la mesa cobrada termina en comprobante. Va acá y no en un
+  // componente a propósito (D2): los cinco callers de `emitInvoice` son `.tsx`,
+  // así que hasta hoy la emisión dependía de que alguien tuviera una pantalla
+  // abierta y se acordara de apretar. En golf-jcr eso dio 11 mesas cobradas y 1
+  // con intento de comprobante.
+  //
+  // Best-effort y con `await`: **la plata no depende de ARCA**. Si el gateway
+  // no está, el cobro se cierra igual —la orden ya está `closed` unas líneas
+  // arriba— y lo único que se pierde es el encolado. Se espera porque encolar
+  // es un POST corto que devuelve un job id; nadie mira un spinner por eso (el
+  // CAE llega después, spec 088). Un fire-and-forget acá moriría con la
+  // invocación serverless.
+  try {
+    const outcome = await autoEmitInvoiceForOrder({
+      service,
+      businessId: business.id,
+      slug: businessSlug,
+      order: { id: order.id, total_cents: order.total_cents, tip_cents: order.tip_cents },
+    });
+    if (outcome === "rechazada") {
+      // El aviso interno ya salió desde el motor (D6); esto es para el log.
+      console.error("cobro: ARCA rechazó la emisión automática", {
+        orderId: order.id,
+      });
+    }
+  } catch (err) {
+    console.error("cobro: auto-emisión de comprobante", err);
   }
 
   return { orderClosed: true };

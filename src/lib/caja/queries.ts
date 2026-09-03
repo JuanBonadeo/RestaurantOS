@@ -189,6 +189,15 @@ export type CajaPayment = {
   table_label: string | null;
   customer_name: string | null;
   attributed_mozo_name: string | null;
+  /**
+   * El comprobante de esta orden quedó rechazado y no hay otro vivo (spec 147).
+   *
+   * Con la emisión automática el fallo no tiene pantalla: nadie apretó nada, y
+   * la mesa ya se liberó. La campana avisa en el momento; esto es lo que queda
+   * después, en la única lista de Operación donde el cobro sigue existiendo.
+   * Un reintento que sale con CAE lo apaga solo (hay comprobante vivo).
+   */
+  comprobante_fallido: boolean;
 };
 
 export async function getPaymentsPeriodoActual(
@@ -252,6 +261,31 @@ export async function getPaymentsPeriodoActual(
     }
   }
 
+  // spec 147 — comprobantes de las órdenes del período, en una sola query.
+  // "Fallido" es la orden que tiene una factura `failed` y **ninguna viva**:
+  // si el reintento salió con CAE, el cobro ya no tiene nada raro que mostrar.
+  const orderIds = Array.from(new Set(rows.map((r) => r.order_id).filter(Boolean)));
+  const conFallo = new Set<string>();
+  if (orderIds.length > 0) {
+    const { data: invRows } = await service
+      .from("invoices")
+      .select("order_id, status")
+      .in("order_id", orderIds)
+      .in("tipo_comprobante", ["factura_a", "factura_b"]);
+    const vivas = new Set<string>();
+    for (const inv of (invRows ?? []) as {
+      order_id: string | null;
+      status: string;
+    }[]) {
+      if (!inv.order_id) continue;
+      if (inv.status === "failed") conFallo.add(inv.order_id);
+      else if (inv.status === "pending" || inv.status === "authorized") {
+        vivas.add(inv.order_id);
+      }
+    }
+    for (const id of vivas) conFallo.delete(id);
+  }
+
   return rows.map((r) => {
     const ord = Array.isArray(r.orders) ? r.orders[0] : r.orders;
     const tbl = ord?.tables
@@ -271,6 +305,7 @@ export async function getPaymentsPeriodoActual(
       attributed_mozo_name: r.attributed_mozo_id
         ? mozoNameById.get(r.attributed_mozo_id) ?? null
         : null,
+      comprobante_fallido: conFallo.has(r.order_id),
     };
   });
 }

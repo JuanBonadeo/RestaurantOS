@@ -33,6 +33,8 @@ type Props = {
     defaultTipo: TipoComprobante;
     mode: FiscalMode;
     enabled: boolean;
+    /** Emitir solo al cobrar (spec 147). */
+    autoEmit: boolean;
     /** La API key (secreta) ya está cargada. */
     hasGatewayKey: boolean;
     /** Slug del cliente en el gateway (no secreto, se pre-rellena). */
@@ -56,6 +58,7 @@ export function AfipConfigForm({ slug, initial }: Props) {
     initial.gatewayTenantSlug,
   );
   const [gatewayBaseUrl, setGatewayBaseUrl] = useState(initial.gatewayBaseUrl);
+  const [autoEmit, setAutoEmit] = useState(initial.autoEmit);
   const [pending, startTransition] = useTransition();
   const [promoting, startPromote] = useTransition();
 
@@ -76,6 +79,7 @@ export function AfipConfigForm({ slug, initial }: Props) {
         gatewayApiKey: gatewayApiKey || undefined,
         gatewayTenantSlug: gatewayTenantSlug || undefined,
         gatewayBaseUrl: gatewayBaseUrl || undefined,
+        autoEmit,
       });
       if (result.ok) {
         toast.success("Configuración AFIP guardada.");
@@ -222,6 +226,49 @@ export function AfipConfigForm({ slug, initial }: Props) {
           </Select>
         </SectionField>
       </div>
+
+      {/* ── Emisión automática al cobrar (spec 147) ──────────────── */}
+      <button
+        type="button"
+        role="switch"
+        aria-checked={autoEmit}
+        onClick={() => setAutoEmit((v) => !v)}
+        className={cn(
+          "flex w-full items-center justify-between gap-3 rounded-2xl border p-4 text-left transition",
+          autoEmit
+            ? "border-zinc-900 bg-zinc-900 text-zinc-50"
+            : "border-zinc-200 bg-white hover:border-zinc-300",
+        )}
+      >
+        <div className="min-w-0">
+          <p className="text-sm font-semibold">
+            Emitir el comprobante al cobrar
+          </p>
+          <p
+            className={cn(
+              "mt-0.5 text-xs",
+              autoEmit ? "text-zinc-400" : "text-zinc-500",
+            )}
+          >
+            Cada mesa saldada encola una Factura B a consumidor final, sin que
+            nadie apriete nada. La Factura A y la impresión siguen a pedido.
+          </p>
+        </div>
+        <span
+          aria-hidden
+          className={cn(
+            "relative flex h-6 w-11 shrink-0 items-center rounded-full transition",
+            autoEmit ? "bg-emerald-400" : "bg-zinc-300",
+          )}
+        >
+          <span
+            className={cn(
+              "absolute size-5 rounded-full bg-white shadow-sm transition",
+              autoEmit ? "translate-x-5" : "translate-x-0.5",
+            )}
+          />
+        </span>
+      </button>
 
       {/* ── Credencial del ARCA GPSF Gateway (server-only) ───────── */}
       <div className="rounded-xl bg-zinc-50 p-4 ring-1 ring-zinc-200/60">

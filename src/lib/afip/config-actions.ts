@@ -28,6 +28,12 @@ type UpdateAfipConfigInput = {
   gatewayApiKey?: string;
   gatewayTenantSlug?: string;
   gatewayBaseUrl?: string;
+  /**
+   * Emitir automáticamente al saldar una orden (spec 147 · D3). Es un flag por
+   * negocio y no una constante: uno que hoy factura a mano no puede despertarse
+   * emitiendo solo por un deploy.
+   */
+  autoEmit?: boolean;
 };
 
 function revalidateAfip(slug: string) {
@@ -72,8 +78,16 @@ export async function updateAfipConfig(
     tenant_slug: string | null;
   } | null;
 
-  // Sólo tocamos la credencial si el admin mandó algún campo del gateway.
-  if (apiKey || tenantSlug || baseUrl) {
+  // Sólo tocamos la credencial si el admin mandó algo que la cambie.
+  //
+  // Un `baseUrl` solo, sin credencial cargada, NO es media credencial: es el
+  // default que el formulario pre-rellena siempre. Entraba igual acá, no había
+  // fila para actualizar, y el guardado entero moría en «cargá la API key y el
+  // slug» — o sea que un negocio sin gateway no podía guardar **nada** de AFIP,
+  // ni el CUIT ni el punto de venta. Se descubrió al no poder prender el switch
+  // de emisión automática en `demo`, que emite por sandbox y nunca va a tener
+  // credencial (spec 147).
+  if (apiKey || tenantSlug || (baseUrl && existing)) {
     const credPatch: Record<string, unknown> = { business_id: business.id };
     if (apiKey) credPatch.api_key = apiKey;
     if (tenantSlug) credPatch.tenant_slug = tenantSlug;
@@ -110,6 +124,9 @@ export async function updateAfipConfig(
       afip_provider: input.provider,
       afip_default_tipo: input.defaultTipo,
       afip_gateway_connected: hasCred,
+      ...(input.autoEmit === undefined
+        ? {}
+        : { afip_auto_emit: input.autoEmit }),
     })
     .eq("id", business.id);
 

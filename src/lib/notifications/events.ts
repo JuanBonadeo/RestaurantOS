@@ -161,3 +161,58 @@ export async function notifyRendicionPendiente(params: {
     actorUserId: params.actorUserId,
   });
 }
+
+/**
+ * Avisa que un comprobante que se emitió **solo** terminó rechazado (spec 147 · D6).
+ *
+ * Es la mitad que hace segura a la otra: automatizar la emisión sin esto
+ * convierte «alguien facturó y le falló» en «todas las mesas fallan y nadie se
+ * entera». Los 14 rechazos de golf-jcr se descubrieron consultando la base —la
+ * spec 088 ya lo había advertido con dos, y un mes después eran catorce—, así
+ * que el fallo silencioso no es una hipótesis.
+ *
+ * Sólo para la emisión automática: la manual falla en la cara del operador, que
+ * ve el error en la pantalla donde apretó. El caller filtra por `auto_emitted`.
+ *
+ * Broadcast a `encargado`, y con eso alcanza para los dos roles que pide la
+ * spec: `visibleTargetRoles` hace que el `admin` vea el feed del encargado
+ * («el dueño ve todo»). Una segunda fila a `admin` sería el mismo aviso dos
+ * veces en la campana del dueño.
+ *
+ * Sin actor: lo dispara el cobro o el cron, no una persona. Best-effort.
+ */
+export async function notifyInvoiceFailed(params: {
+  businessId: string;
+  invoiceId: string;
+}): Promise<void> {
+  const service = createSupabaseServiceClient();
+
+  const { data: invoice } = await service
+    .from("invoices")
+    .select(
+      "error_message, total_cents, orders(order_number, tables!orders_table_id_fkey(label))",
+    )
+    .eq("id", params.invoiceId)
+    .maybeSingle();
+  if (!invoice) return;
+
+  const order = (invoice as {
+    orders: {
+      order_number: number | null;
+      tables: { label: string } | null;
+    } | null;
+  }).orders;
+
+  await createNotification({
+    businessId: params.businessId,
+    targetRole: "encargado",
+    type: "factura.emision_fallida",
+    payload: {
+      invoiceId: params.invoiceId,
+      orderNumber: order?.order_number ?? undefined,
+      tableLabel: order?.tables?.label,
+      totalCents: Number((invoice as { total_cents: number }).total_cents),
+      error: (invoice as { error_message: string | null }).error_message ?? undefined,
+    },
+  });
+}

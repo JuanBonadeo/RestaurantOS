@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { notifyInvoiceFailed } from "@/lib/notifications/events";
 import { notifyInvoiceIssued } from "@/lib/notifications/invoice-notify";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
@@ -228,6 +229,17 @@ export async function applyGatewayStatus(
         // por `customer_message_log`, así que es seguro desde los dos caminos.
         await notifyInvoiceIssued({ invoiceId: row.id });
       }
+    }
+    if (row.status === "failed" && row.auto_emitted) {
+      // spec 147 · D6 — el rechazo que llega tarde. El `.eq("status","pending")`
+      // del update de arriba hace que sólo el que ganó la carrera llegue acá,
+      // así que el aviso sale una vez aunque el cron y un poll de pantalla
+      // miren la misma factura. Sólo para las automáticas: una manual ya le
+      // devolvió el error a quien apretó el botón.
+      await notifyInvoiceFailed({
+        businessId: row.business_id,
+        invoiceId: row.id,
+      }).catch((err) => console.error("reconcile · aviso de fallo", err));
     }
     return {
       invoice: row,

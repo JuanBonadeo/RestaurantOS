@@ -80,6 +80,7 @@ export default async function ConfiguracionCobrosPage({
                 | "nota_credito_b") ?? "factura_b",
             mode: (b.afip_mode as "sandbox" | "produccion") ?? "sandbox",
             enabled: Boolean(b.afip_enabled),
+            autoEmit: Boolean(b.afip_auto_emit),
             // API key: sólo el flag de presencia (el secreto NUNCA va al cliente).
             hasGatewayKey: Boolean(gateway?.api_key),
             // Slug y base URL no son secretos: se pre-rellenan.

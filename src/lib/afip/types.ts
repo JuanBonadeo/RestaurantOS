@@ -136,4 +136,10 @@ export type Invoice = {
   cancelled_reason: string | null;
   /** Si la fila ES una nota de crédito, apunta a la factura que anula. */
   cancels_invoice_id: string | null;
+  /**
+   * Nació del cobro (spec 147), no de un botón. Decide a quién se le avisa
+   * cuando termina en `failed`: la manual ya le mostró el error a quien la
+   * disparó, la automática no tenía a nadie mirando.
+   */
+  auto_emitted: boolean;
 };
