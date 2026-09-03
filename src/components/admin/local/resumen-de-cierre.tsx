@@ -48,6 +48,10 @@ export function ResumenDeCierre({
     { locale: es },
   );
 
+  // Lo que entró por medios que no tocan el cajón. Es la explicación de por qué
+  // el arqueo es mucho más chico que la venta del turno.
+  const noEfectivo = stats.total_ventas_cents - d.efectivo_cents;
+
   const conteo = corte.denomination_count ?? null;
   const denominaciones = conteo
     ? Object.entries(conteo)
@@ -131,12 +135,12 @@ export function ResumenDeCierre({
       {/* ── El veredicto ─────────────────────────────────────── */}
       <section className="grid grid-cols-1 gap-px overflow-hidden rounded-2xl bg-zinc-800 ring-1 ring-zinc-900 sm:grid-cols-3">
         <Veredicto
-          label="Debía haber"
+          label="Efectivo que debía haber"
           value={formatCurrency(corte.expected_cash_cents)}
           hint="Calculado por el sistema"
         />
         <Veredicto
-          label="Se contó"
+          label="Efectivo contado"
           value={formatCurrency(corte.closing_cash_cents)}
           hint={conteo ? "Conteo por billete" : "Monto declarado"}
         />
@@ -159,6 +163,27 @@ export function ResumenDeCierre({
           }
         />
       </section>
+
+      {/* Sólo cuando hay brecha: el número grande se lee como si faltara plata
+          en un turno que vendió cuatro veces más, porque el resto se cobró con
+          tarjeta y nunca entró al cajón. Sin brecha no hay nada que explicar —
+          y decirlo igual confunde en un turno donde el esperado SUPERA a la
+          venta por un ingreso, que es el otro caso real que hay en la base. */}
+      {noEfectivo > 0 && (
+        <p className="-mt-4 text-sm leading-relaxed text-zinc-600">
+          El turno vendió{" "}
+          <span className="font-semibold tabular-nums text-zinc-900">
+            {formatCurrency(stats.total_ventas_cents)}
+          </span>
+          , pero al cajón sólo entraron los{" "}
+          <span className="font-semibold tabular-nums text-zinc-900">
+            {formatCurrency(d.efectivo_cents)}
+          </span>{" "}
+          cobrados en efectivo: los otros{" "}
+          <span className="tabular-nums">{formatCurrency(noEfectivo)}</span> se
+          cobraron con tarjeta, QR o transferencia.
+        </p>
+      )}
 
       {/* ── De dónde salía ese número ────────────────────────── */}
       <section className="rounded-2xl bg-white p-6 ring-1 ring-zinc-200/70">

@@ -191,6 +191,26 @@ que no se mueva. La pantalla lo dice donde se puede leer.
     arranca en `cajas.created_at` y el resumen no explota por no tener corte
     anterior.
 
+## Ajuste posterior · el veredicto dice «efectivo» (2026-09-03)
+
+Juan, mirando un cierre real de golf: *"acá el número de arriba debería ser el
+total no???"*. El turno vendió **$ 819.600** y el número grande decía
+**$ 170.000**.
+
+El número estaba bien —es el arqueo, y sólo el efectivo pasa por el cajón: los
+$ 649.600 de tarjeta nunca entraron— pero **el rótulo mentía por omisión**:
+«Debía haber» sin decir «efectivo», en la tipografía más grande de la pantalla.
+Leído así parece que falta plata.
+
+- Los rótulos pasan a **«Efectivo que debía haber»** y **«Efectivo contado»**.
+- Cuando hay brecha entre lo vendido y lo que entró al cajón, una línea debajo
+  la explica con los dos números.
+
+La línea aparece **sólo si hay brecha**, y eso importa: en el otro corte real de
+`demo` el esperado ($ 55.800) **supera** a la venta ($ 45.800) por un ingreso de
+caja, y ahí una frase sobre «el resto se cobró con tarjeta» confundiría más de lo
+que aclara. Sin brecha no hay nada que explicar.
+
 ## Verificación
 
 `pnpm typecheck` en 0 errores y **2092 tests unitarios en verde** (los 21
