@@ -1,17 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
-import {
-  Banknote,
-  CheckCircle2,
-  CreditCard,
-  Link2,
-  MoreHorizontal,
-  QrCode,
-  RefreshCw,
-  User,
-  Wallet,
-} from "lucide-react";
+import { CheckCircle2, RefreshCw, User } from "lucide-react";
 import { toast } from "sonner";
 
 import { Surface } from "@/components/admin/shell/page-shell";
@@ -32,7 +22,6 @@ import type {
   Caja,
   CajaUserAssignment,
   MozoRendicion,
-  PaymentMethod,
   RendicionMozoPendiente,
 } from "@/lib/caja/types";
 import { formatCurrency } from "@/lib/currency";
@@ -40,15 +29,6 @@ import { useOnActivate } from "@/lib/ui/use-tab-param";
 import { getRendicionTabData } from "@/app/[business_slug]/admin/(authed)/operacion/actions";
 import type { RendicionData } from "@/app/[business_slug]/admin/(authed)/operacion/data";
 import { cn } from "@/lib/utils";
-
-const METHOD_LABEL: Record<PaymentMethod, string> = {
-  cash: "Efectivo",
-  mp_qr: "MercadoPago QR",
-  mp_link: "MercadoPago link",
-  card_manual: "Tarjeta",
-  transfer: "Transferencia",
-  other: "Otro",
-};
 
 type AssignmentWithNames = CajaUserAssignment & {
   user_name: string | null;
@@ -307,9 +287,6 @@ function MozoPendienteCard({
   onRendir: () => void;
 }) {
   const p = pendiente;
-  const metodos = (
-    Object.entries(p.por_metodo) as [PaymentMethod, number][]
-  ).filter(([, v]) => v > 0);
 
   return (
     <article className="flex flex-col rounded-2xl bg-white ring-1 ring-zinc-200/70">
@@ -336,14 +313,6 @@ function MozoPendienteCard({
             {formatCurrency(p.efectivo_cents)}
           </p>
         </div>
-        {p.tickets_cents > 0 && (
-          <div className="mt-2 flex items-baseline justify-between gap-2">
-            <p className="text-xs text-zinc-500">Tickets (tarj./transf.)</p>
-            <p className="text-sm font-semibold tabular-nums text-zinc-600">
-              {formatCurrency(p.tickets_cents)}
-            </p>
-          </div>
-        )}
         {p.total_propinas_cents > 0 && (
           <div className="mt-1 flex items-baseline justify-between gap-2">
             <p className="text-xs text-zinc-500">Propinas (aparte)</p>
@@ -353,30 +322,6 @@ function MozoPendienteCard({
           </div>
         )}
       </div>
-
-      {metodos.length > 0 && (
-        <div className="border-b border-zinc-100 p-4">
-          <p className="mb-2 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
-            Detalle por método
-          </p>
-          <ul className="space-y-1">
-            {metodos.map(([method, amount]) => (
-              <li
-                key={method}
-                className="flex items-center justify-between gap-2 text-sm"
-              >
-                <span className="inline-flex items-center gap-2 text-zinc-600">
-                  <MethodIcon method={method} />
-                  {METHOD_LABEL[method]}
-                </span>
-                <span className="font-semibold tabular-nums text-zinc-900">
-                  {formatCurrency(amount)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
 
       <div className="p-3">
         <Button
@@ -389,24 +334,6 @@ function MozoPendienteCard({
       </div>
     </article>
   );
-}
-
-function MethodIcon({ method }: { method: PaymentMethod }) {
-  const cls = "size-3.5";
-  switch (method) {
-    case "cash":
-      return <Banknote className={cls} />;
-    case "mp_qr":
-      return <QrCode className={cls} />;
-    case "mp_link":
-      return <Link2 className={cls} />;
-    case "card_manual":
-      return <CreditCard className={cls} />;
-    case "transfer":
-      return <Wallet className={cls} />;
-    default:
-      return <MoreHorizontal className={cls} />;
-  }
 }
 
 function RendirModal({
@@ -460,12 +387,6 @@ function RendirModal({
           <p className="mt-1 text-2xl font-semibold tabular-nums text-zinc-900">
             {formatCurrency(pendiente.efectivo_cents)}
           </p>
-          {pendiente.tickets_cents > 0 && (
-            <p className="mt-1 text-xs text-zinc-600">
-              + {formatCurrency(pendiente.tickets_cents)} en tickets
-              (tarjeta/transferencia)
-            </p>
-          )}
         </div>
 
         {noEntrego && (
