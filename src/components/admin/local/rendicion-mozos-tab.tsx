@@ -116,7 +116,7 @@ export function RendicionMozosTab({
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-[0.6rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+        <p className="text-[0.6rem] font-semibold tracking-[0.14em] text-zinc-500 uppercase">
           Rendición de mozos · pendientes del turno
         </p>
         <button
@@ -180,29 +180,29 @@ export function RendicionMozosTab({
 
       {historial.length > 0 && (
         <div>
-          <p className="mb-3 text-[0.6rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+          <p className="mb-3 text-[0.6rem] font-semibold tracking-[0.14em] text-zinc-500 uppercase">
             Últimas rendiciones
           </p>
           <div className="overflow-hidden rounded-lg ring-1 ring-zinc-200/70">
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-zinc-100 bg-zinc-50/60">
-                  <th className="px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                  <th className="px-3 py-2 text-[0.65rem] font-semibold tracking-[0.14em] text-zinc-500 uppercase">
                     Mozo
                   </th>
-                  <th className="px-3 py-2 text-right text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                  <th className="px-3 py-2 text-right text-[0.65rem] font-semibold tracking-[0.14em] text-zinc-500 uppercase">
                     Esperado
                   </th>
-                  <th className="px-3 py-2 text-right text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                  <th className="px-3 py-2 text-right text-[0.65rem] font-semibold tracking-[0.14em] text-zinc-500 uppercase">
                     Entregado
                   </th>
-                  <th className="px-3 py-2 text-right text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                  <th className="px-3 py-2 text-right text-[0.65rem] font-semibold tracking-[0.14em] text-zinc-500 uppercase">
                     Dif.
                   </th>
-                  <th className="px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                  <th className="px-3 py-2 text-[0.65rem] font-semibold tracking-[0.14em] text-zinc-500 uppercase">
                     Registrado por
                   </th>
-                  <th className="px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                  <th className="px-3 py-2 text-[0.65rem] font-semibold tracking-[0.14em] text-zinc-500 uppercase">
                     Hora
                   </th>
                 </tr>
@@ -215,10 +215,10 @@ export function RendicionMozosTab({
                       <td className="px-3 py-2 font-medium text-zinc-900">
                         {r.mozo_name}
                       </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-zinc-700">
+                      <td className="px-3 py-2 text-right text-zinc-700 tabular-nums">
                         {formatCurrency(r.expected_cash_cents)}
                       </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-zinc-700">
+                      <td className="px-3 py-2 text-right text-zinc-700 tabular-nums">
                         {formatCurrency(r.delivered_cash_cents)}
                       </td>
                       <td
@@ -238,7 +238,7 @@ export function RendicionMozosTab({
                       <td className="px-3 py-2 text-zinc-600">
                         {r.registered_by_name ?? "—"}
                       </td>
-                      <td className="px-3 py-2 tabular-nums text-zinc-500">
+                      <td className="px-3 py-2 text-zinc-500 tabular-nums">
                         {new Date(r.created_at).toLocaleTimeString("es-AR", {
                           hour: "2-digit",
                           minute: "2-digit",
@@ -306,17 +306,17 @@ function MozoPendienteCard({
 
       <div className="border-b border-zinc-100 p-4">
         <div className="flex items-baseline justify-between gap-2">
-          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+          <p className="text-[0.65rem] font-semibold tracking-[0.14em] text-zinc-500 uppercase">
             Efectivo a entregar
           </p>
-          <p className="text-xl font-bold tabular-nums text-zinc-900">
+          <p className="text-xl font-bold text-zinc-900 tabular-nums">
             {formatCurrency(p.efectivo_cents)}
           </p>
         </div>
         {p.total_propinas_cents > 0 && (
           <div className="mt-1 flex items-baseline justify-between gap-2">
             <p className="text-xs text-zinc-500">Propinas (aparte)</p>
-            <p className="text-sm tabular-nums text-emerald-700">
+            <p className="text-sm text-emerald-700 tabular-nums">
               {formatCurrency(p.total_propinas_cents)}
             </p>
           </div>
@@ -324,10 +324,7 @@ function MozoPendienteCard({
       </div>
 
       <div className="p-3">
-        <Button
-          className="w-full"
-          onClick={onRendir}
-        >
+        <Button className="w-full" onClick={onRendir}>
           <CheckCircle2 className="mr-2 size-4" />
           Registrar rendición
         </Button>
@@ -365,29 +362,52 @@ function RendirModal({
   }, [open]);
 
   const cents =
-    delivered === ""
-      ? null
-      : Math.max(0, Math.round(Number(delivered) * 100));
+    delivered === "" ? null : Math.max(0, Math.round(Number(delivered) * 100));
   const diff = cents === null ? 0 : cents - pendiente.efectivo_cents;
   const requiresNotes = cents !== null && diff !== 0;
+
+  /**
+   * El mozo cobró, pero nada en efectivo: hizo todo con tarjeta, QR o
+   * transferencia. Sigue apareciendo acá a propósito —la spec 139 · D4 pide que
+   * cierre su período igual, o arrastra cobros viejos a la rendición de
+   * mañana—, pero **no tiene nada que entregar**, así que las dos salidas
+   * normales mienten: «Registrar rendición» le hace tipear un cero a mano, y
+   * «No entregó» le deja una deuda declarada de $0 avisada al dueño.
+   *
+   * Reportado por la encargada de golf (2026-09-03): *"si un mozo vende todo en
+   * tarjeta, ¿cómo saca eso? No me da opción de poner otra cosa que no es
+   * efectivo"*. La spec 151 sacó los montos de tarjeta de esta pantalla pero
+   * dejó este caso afuera a propósito; esto lo cierra.
+   */
+  const sinEfectivo = pendiente.efectivo_cents === 0;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>
-            Rendición de {pendiente.mozo_name}
-          </DialogTitle>
+          <DialogTitle>Rendición de {pendiente.mozo_name}</DialogTitle>
         </DialogHeader>
 
-        <div className="rounded-xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70">
-          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
-            Efectivo que debería entregar
-          </p>
-          <p className="mt-1 text-2xl font-semibold tabular-nums text-zinc-900">
-            {formatCurrency(pendiente.efectivo_cents)}
-          </p>
-        </div>
+        {sinEfectivo ? (
+          <div className="rounded-xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70">
+            <p className="text-[0.65rem] font-semibold tracking-[0.14em] text-zinc-500 uppercase">
+              No tiene efectivo para entregar
+            </p>
+            <p className="mt-1 text-sm text-zinc-600">
+              Cobró todo con tarjeta, QR o transferencia — esa plata ya entró a
+              la caja. Sólo queda cerrarle el período del turno.
+            </p>
+          </div>
+        ) : (
+          <div className="rounded-xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70">
+            <p className="text-[0.65rem] font-semibold tracking-[0.14em] text-zinc-500 uppercase">
+              Efectivo que debería entregar
+            </p>
+            <p className="mt-1 text-2xl font-semibold text-zinc-900 tabular-nums">
+              {formatCurrency(pendiente.efectivo_cents)}
+            </p>
+          </div>
+        )}
 
         {noEntrego && (
           <p className="mt-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-900 ring-1 ring-rose-200">
@@ -399,12 +419,15 @@ function RendirModal({
           </p>
         )}
 
-        <div className={cn("mt-4 grid gap-1.5", noEntrego && "hidden")}>
-          <Label className="text-sm font-medium">
-            Efectivo que entrega
-          </Label>
+        <div
+          className={cn(
+            "mt-4 grid gap-1.5",
+            (noEntrego || sinEfectivo) && "hidden",
+          )}
+        >
+          <Label className="text-sm font-medium">Efectivo que entrega</Label>
           <div className="relative">
-            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base font-semibold text-zinc-400">
+            <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-base font-semibold text-zinc-400">
               $
             </span>
             <Input
@@ -424,8 +447,8 @@ function RendirModal({
             className={cn(
               "mt-4 flex items-center justify-between rounded-lg p-3 ring-1",
               diff < 0
-                ? "bg-rose-50 ring-rose-200 text-rose-900"
-                : "bg-amber-50 ring-amber-200 text-amber-900",
+                ? "bg-rose-50 text-rose-900 ring-rose-200"
+                : "bg-amber-50 text-amber-900 ring-amber-200",
             )}
           >
             <span className="text-sm font-semibold">
@@ -439,7 +462,7 @@ function RendirModal({
         )}
 
         {!noEntrego && cents !== null && diff === 0 && (
-          <div className="mt-4 flex items-center justify-between rounded-lg bg-emerald-50 p-3 ring-1 ring-emerald-200 text-emerald-900">
+          <div className="mt-4 flex items-center justify-between rounded-lg bg-emerald-50 p-3 text-emerald-900 ring-1 ring-emerald-200">
             <span className="text-sm font-semibold">Cuadra perfecto</span>
             <CheckCircle2 className="size-4" />
           </div>
@@ -461,19 +484,26 @@ function RendirModal({
         )}
 
         <DialogFooter>
-          <Button
-            variant="ghost"
-            onClick={() => setNoEntrego((v) => !v)}
-            className={cn(noEntrego && "text-zinc-900")}
-          >
-            {noEntrego ? "Volver a rendir" : "No entregó"}
-          </Button>
+          {/* Sin efectivo no hay nada que «no entregar»: la salida de deuda
+              declarada (spec 139 · D1) no se ofrece, porque una deuda de $0
+              avisada al dueño es ruido y asusta a quien la registra. */}
+          {!sinEfectivo && (
+            <Button
+              variant="ghost"
+              onClick={() => setNoEntrego((v) => !v)}
+              className={cn(noEntrego && "text-zinc-900")}
+            >
+              {noEntrego ? "Volver a rendir" : "No entregó"}
+            </Button>
+          )}
           <Button
             variant={noEntrego ? "destructive" : "default"}
             disabled={
-              noEntrego
-                ? notes.trim() === ""
-                : cents === null || (requiresNotes && notes.trim() === "")
+              sinEfectivo
+                ? false
+                : noEntrego
+                  ? notes.trim() === ""
+                  : cents === null || (requiresNotes && notes.trim() === "")
             }
             onClick={() =>
               startTransition(async () => {
@@ -489,16 +519,22 @@ function RendirModal({
                   return;
                 }
                 toast.success(
-                  noEntrego
-                    ? `${pendiente.mozo_name} quedó como «no entregó»`
-                    : `Rendición de ${pendiente.mozo_name} registrada`,
+                  sinEfectivo
+                    ? `Período de ${pendiente.mozo_name} cerrado`
+                    : noEntrego
+                      ? `${pendiente.mozo_name} quedó como «no entregó»`
+                      : `Rendición de ${pendiente.mozo_name} registrada`,
                 );
                 onSuccess();
               })
             }
           >
             <CheckCircle2 className="mr-2 size-4" />
-            {noEntrego ? "Marcar como no entregó" : "Registrar rendición"}
+            {sinEfectivo
+              ? "Cerrar período"
+              : noEntrego
+                ? "Marcar como no entregó"
+                : "Registrar rendición"}
           </Button>
         </DialogFooter>
       </DialogContent>

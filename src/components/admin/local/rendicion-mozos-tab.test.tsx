@@ -9,7 +9,10 @@ vi.mock("@/lib/caja/actions", () => ({
 }));
 
 vi.mock("@/app/[business_slug]/admin/(authed)/operacion/actions", () => ({
-  getRendicionTabData: async () => ({ ok: false as const, error: "sin refetch" }),
+  getRendicionTabData: async () => ({
+    ok: false as const,
+    error: "sin refetch",
+  }),
 }));
 
 // El panel de asignaciones trae su propio árbol (y sus propias actions); acá se
@@ -85,7 +88,9 @@ describe("rendición · sólo se rinde el efectivo (spec 151)", () => {
     const user = userEvent.setup();
     renderTab([pendienteMixto()]);
 
-    await user.click(screen.getByRole("button", { name: /registrar rendición/i }));
+    await user.click(
+      screen.getByRole("button", { name: /registrar rendición/i }),
+    );
 
     expect(
       await screen.findByText(/efectivo que debería entregar/i),
@@ -116,5 +121,79 @@ describe("rendición · sólo se rinde el efectivo (spec 151)", () => {
     expect(screen.getByText("Diego Mozo")).toBeInTheDocument();
     expect(screen.getByText("$ 0")).toBeInTheDocument();
     expect(screen.queryByText("$ 38.500")).not.toBeInTheDocument();
+  });
+
+  describe("el mozo que no tiene efectivo para entregar", () => {
+    function soloTarjeta() {
+      return pendienteMixto({
+        mozo_name: "Diego Mozo",
+        efectivo_cents: 0,
+        por_metodo: { ...EMPTY_METODO, card_manual: 3_850_000 },
+        pagos_count: 1,
+      });
+    }
+
+    it("le explica que no hay nada que entregar, en vez de pedirle $0", async () => {
+      renderTab([soloTarjeta()]);
+      await userEvent.click(
+        screen.getByRole("button", { name: /registrar rendición/i }),
+      );
+
+      expect(
+        screen.getByText(/no tiene efectivo para entregar/i),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText(/efectivo que debería entregar/i),
+      ).not.toBeInTheDocument();
+    });
+
+    it("no ofrece «No entregó»: una deuda de $0 avisada al dueño es ruido", async () => {
+      renderTab([soloTarjeta()]);
+      await userEvent.click(
+        screen.getByRole("button", { name: /registrar rendición/i }),
+      );
+
+      expect(
+        screen.queryByRole("button", { name: /no entregó/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("cierra el período de un toque, sin tipear un cero a mano", async () => {
+      const { registrarRendicionMozo } = await import("@/lib/caja/actions");
+      renderTab([soloTarjeta()]);
+      await userEvent.click(
+        screen.getByRole("button", { name: /registrar rendición/i }),
+      );
+
+      const cerrar = screen.getByRole("button", { name: /cerrar período/i });
+      expect(cerrar).toBeEnabled();
+      await userEvent.click(cerrar);
+
+      // Se registra como rendición normal en $0, NO como deuda declarada.
+      expect(registrarRendicionMozo).toHaveBeenCalledWith(
+        "m1",
+        0,
+        null,
+        "demo",
+        "rendida",
+      );
+    });
+
+    it("con efectivo, el flujo de siempre no cambia", async () => {
+      renderTab([pendienteMixto()]);
+      await userEvent.click(
+        screen.getByRole("button", { name: /registrar rendición/i }),
+      );
+
+      expect(
+        screen.getByText(/efectivo que debería entregar/i),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /no entregó/i }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText(/no tiene efectivo para entregar/i),
+      ).not.toBeInTheDocument();
+    });
   });
 });
