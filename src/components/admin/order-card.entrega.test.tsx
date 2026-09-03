@@ -104,4 +104,22 @@ describe("OrderCard · el pedido programado", () => {
     );
     expect(screen.getByText("No marchó")).toBeTruthy();
   });
+
+  // issue #219 — el mismo pedido de arriba, pero ya en «En cocina». El aviso
+  // era puro reloj y no miraba el estado, así que un encargue que el cron
+  // marchó bien —comanda impresa, pedido cocinándose— seguía en rojo diciendo
+  // «revisá que salga la comanda». El encargado ve una alarma sobre algo que
+  // está andando: la alarma que no significa nada es peor que no tenerla.
+  it("un agendado que ya marchó no lleva el aviso rojo", () => {
+    renderCard(
+      order({
+        scheduled_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        kitchen_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+        status: "preparing",
+      }),
+      { marchLeadKitchenMin: 40 },
+    );
+    expect(screen.queryByText("No marchó")).toBeNull();
+    expect(screen.getByText("Programado")).toBeTruthy();
+  });
 });

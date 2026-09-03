@@ -153,7 +153,16 @@ export function OrderCard({
         scheduled_march_lead_kitchen_min: marchLeadKitchenMin,
       })
     : null;
-  const noMarcho = marchAt !== null && marchAt.getTime() < Date.now();
+  // …y sólo mientras el pedido siga esperando su marcha. `pending`/`confirmed`
+  // es la columna «Pendientes», que es de donde el cron lo saca a `preparing`
+  // (`march-scheduled`); de ahí en adelante ya marchó y la comanda está en
+  // cocina. Sin este corte el aviso era puro reloj: un encargue que marchó bien
+  // seguía en rojo pidiendo revisar una comanda que ya había salido, y una
+  // alarma que suena sobre algo que anda deja de mirarse (issue #219).
+  const esperaMarcha =
+    order.status === "pending" || order.status === "confirmed";
+  const noMarcho =
+    esperaMarcha && marchAt !== null && marchAt.getTime() < Date.now();
   // El programado impago del checkout **no marcha solo** hasta que alguien lo
   // avala (spec 047): sin este gesto se queda esperando para siempre. El que
   // carga el encargado nace `confirmed`, así que no lo pide.

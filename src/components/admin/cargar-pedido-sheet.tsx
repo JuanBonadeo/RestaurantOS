@@ -8,6 +8,7 @@ import {
   useState,
   useTransition,
 } from "react";
+import { createPortal } from "react-dom";
 import { fromZonedTime } from "date-fns-tz";
 import {
   ArrowLeft,
@@ -56,6 +57,7 @@ import {
 } from "@/components/mozo/panel-de-carga";
 import { useCartZone } from "@/lib/mozo/use-cart-zone";
 import { isPrintableKey } from "@/lib/ui/roving";
+import { useEscapeToClose } from "@/lib/ui/use-escape-to-close";
 import { useRovingList } from "@/lib/ui/use-roving-list";
 import {
   ProductSearchInput,
@@ -315,6 +317,38 @@ export function CargarPedidoSheet({
     [timezone],
   );
 
+  // Segunda salida de la hoja (issue #219). La X, que era la única, terminó
+  // abajo de la campana del layout —el porqué está en el bloque de acá abajo— y
+  // el encargado quedó encerrado. Aunque eso ya esté arreglado, un modal sin
+  // Esc es media salida: en pantalla angosta la hoja ocupa todo y no queda ni
+  // franja de overlay para clickear afuera. Se apaga cuando hay un modal
+  // encima: ahí Esc es de ellos, y `ProductModal` engancha el mismo hook.
+  useEscapeToClose(onClose, open && !openProduct && !priceTargetKey);
+
+  /**
+   * Dónde se cuelga la hoja (issue #219).
+   *
+   * Antes se renderizaba donde está escrita, y donde está escrita es **adentro
+   * del shell del local** (`fixed … z-30`), que por ser `fixed` + `z-index`
+   * abre un stacking context propio. Todo lo de adentro queda encerrado abajo
+   * de 30, así que la campana del layout (`fixed right-4 top-3 z-50`, hermana
+   * del shell) le ganaba a la hoja **cualquiera fuese su z** y le tapaba el 84%
+   * de la X: el encargado apretaba cerrar y se le abría el drawer de
+   * notificaciones. Subir el z no arregla nada desde adentro de una caja.
+   *
+   * El portal la saca de la caja, que es lo que hacen los `Sheet` de base-ui
+   * —por eso ellos nunca tuvieron el problema—. Va al root del admin y no a
+   * `body` para no perder el `[data-admin-brand]` que scopea las variables de
+   * marca; ese nodo no crea stacking context, así que el `z-[60]` de abajo se
+   * mide contra la campana de igual a igual.
+   */
+  const [portalHost, setPortalHost] = useState<Element | null>(null);
+  useEffect(() => {
+    setPortalHost(
+      document.querySelector("[data-admin-brand]") ?? document.body,
+    );
+  }, []);
+
   function reset() {
     setView("carga");
     searchApi.setSearch("");
@@ -332,7 +366,7 @@ export function CargarPedidoSheet({
     setClienteDirecciones([]);
   }
 
-  if (!open) return null;
+  if (!open || !portalHost) return null;
 
   const cartTotal = cart.reduce((a, c) => a + c.line_subtotal_cents, 0);
   const cartCount = cart.reduce((a, c) => a + c.quantity, 0);
@@ -411,16 +445,58 @@ export function CargarPedidoSheet({
     });
   }
 
-  const canSubmit =
-    cart.length > 0 &&
-    !pending &&
+  /**
+   * Qué falta para poder enviar, dicho con palabras (issue #219).
+   *
+   * Antes esto era un booleano y nada más: si faltaba la dirección de un
+   * delivery —o el teléfono, o una de las dos horas— los dos botones del pie
+   * quedaban grises y **la pantalla no decía por qué**. El encargado apretaba,
+   * no pasaba nada, y lo que llegó al Discord fue «no envía el pedido». Ahora
+   * el motivo es el dato y `canSubmit` se deriva de él: una sola regla, sin
+   * chance de que el texto y el `disabled` se cuenten historias distintas.
+   */
+  const faltaParaEnviar: string | null = (() => {
+    if (cart.length === 0) return "Agregá al menos un producto.";
     // Un programado sin día ni horas no es un pedido, es una intención. Y las
     // dos horas van juntas siempre: media hora cargada es un pedido del que no
     // se sabe si es para ahora (spec 127).
-    (!esProgramado || (!!dia && hayHoras)) &&
-    (!horaCocina === !horaPedido) &&
-    (deliveryType === "pickup" ||
-      (deliveryAddress.trim().length > 0 && customerPhone.trim().length >= 6));
+    if (esProgramado && !dia) return "Elegí el día del encargue.";
+    if (Boolean(horaCocina) !== Boolean(horaPedido))
+      return horaCocina
+        ? "Falta la hora del pedido: van las dos o ninguna."
+        : "Falta la hora de cocina: van las dos o ninguna.";
+    if (esProgramado && !hayHoras)
+      return "Un encargue programado necesita las dos horas.";
+    if (deliveryType === "delivery" && deliveryAddress.trim().length === 0)
+      return "El delivery necesita la dirección de entrega.";
+    if (deliveryType === "delivery" && customerPhone.trim().length < 6)
+      return "El delivery necesita el teléfono del cliente.";
+    return null;
+  })();
+
+  const canSubmit = faltaParaEnviar === null && !pending;
+
+  /**
+   * La transición de enviar, con red abajo (issue #219).
+   *
+   * Las server actions de acá pueden **tirar** en vez de devolver
+   * `{ ok: false }`: el local trabaja contra la nube y un corte de red a mitad
+   * de camino rechaza la promesa. Sin catch, la transición moría en silencio —
+   * ni toast, ni cierre, ni pedido— y la hoja quedaba exactamente igual que
+   * antes de apretar. Desde afuera eso es «no envía el pedido».
+   */
+  function enviar(accion: () => Promise<void>) {
+    startTransition(async () => {
+      try {
+        await accion();
+      } catch (err) {
+        console.error("cargar-pedido-sheet · enviar", err);
+        toast.error(
+          "No se pudo enviar. Revisá la conexión y fijate en el board si el pedido entró antes de volver a cargarlo.",
+        );
+      }
+    });
+  }
 
   function submit(marchar: boolean) {
     if (cart.length === 0) {
@@ -432,7 +508,7 @@ export function CargarPedidoSheet({
     // Las líneas van por `enviarComanda`, que las inserta en la orden y crea la
     // comanda del sector con la tanda siguiente.
     if (agregarA) {
-      startTransition(async () => {
+      enviar(async () => {
         const r = await enviarComanda({
           orderId: agregarA.orderId,
           slug,
@@ -486,8 +562,14 @@ export function CargarPedidoSheet({
       return;
     }
     if (hayHoras) {
-      const cocina = fromZonedTime(`${diaDelPedido}T${horaCocina}:00`, timezone);
-      const pedido = fromZonedTime(`${diaDelPedido}T${horaPedido}:00`, timezone);
+      const cocina = fromZonedTime(
+        `${diaDelPedido}T${horaCocina}:00`,
+        timezone,
+      );
+      const pedido = fromZonedTime(
+        `${diaDelPedido}T${horaPedido}:00`,
+        timezone,
+      );
       if (Number.isNaN(cocina.getTime()) || Number.isNaN(pedido.getTime())) {
         toast.error("Revisá las horas.");
         return;
@@ -506,7 +588,7 @@ export function CargarPedidoSheet({
       kitchenAtIso = cocina.toISOString();
     }
 
-    startTransition(async () => {
+    enviar(async () => {
       const r = await cargarPedidoStaff({
         business_slug: slug,
         delivery_type: deliveryType,
@@ -571,9 +653,11 @@ export function CargarPedidoSheet({
     });
   }
 
-  return (
+  return createPortal(
+    // `z-[60]` y no `z-50`: ya fuera de la caja, el empate con la campana lo
+    // resolvería el orden del DOM, y el orden del DOM acá no es estable.
     <div
-      className="fixed inset-0 z-50 flex justify-end bg-black/40"
+      className="fixed inset-0 z-[60] flex justify-end bg-black/40"
       onClick={onClose}
     >
       <div
@@ -1102,6 +1186,19 @@ export function CargarPedidoSheet({
             {/* Footer datos — programado: una sola acción, porque "enviar a
                 cocina" contradice el diferido (spec 085). */}
             <footer className="shrink-0 space-y-2 border-t border-zinc-200 bg-white px-3 py-3">
+              {/* Por qué el botón está gris (issue #219). Con el carrito vacío
+                  no se dice: «Tu pedido · vacío» está tres centímetros arriba y
+                  repetirlo es ruido. El caso que importa es el otro — hay
+                  productos cargados, el encargado apunta al botón y está
+                  muerto. */}
+              {!agregarA && faltaParaEnviar && cart.length > 0 && (
+                <p
+                  role="status"
+                  className="rounded-xl bg-amber-50 px-3 py-2 text-[11px] leading-snug font-medium text-amber-900 ring-1 ring-amber-100"
+                >
+                  {faltaParaEnviar}
+                </p>
+              )}
               {agregarA ? (
                 // Una sola acción: lo que se agrega a un pedido vivo va a
                 // cocina ahora. «Cargar sin marchar» era para el pedido que
@@ -1186,6 +1283,7 @@ export function CargarPedidoSheet({
           embedded
         />
       </div>
-    </div>
+    </div>,
+    portalHost,
   );
 }
