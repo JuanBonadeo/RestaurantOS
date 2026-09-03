@@ -119,15 +119,25 @@ Antes traía además un bloque «Detalle por método» que repetía el mismo efe
 únicos matches de «ticket» en la página están en el payload serializado del
 server, no en el markup.
 
-### Lo que NO se pudo ejercitar
+### Con datos mixtos de verdad
 
-**`demo` no tiene ni un cobro no-efectivo atribuido a un mozo** — los 6 pagos con
-mozo son todos `cash`. Así que la línea «Tickets (tarj./transf.)» y la del modal
-nunca se pudieron ver rotas *ni* arregladas con datos reales. Lo que sí es
-verificable por construcción: eran los **dos únicos** renderers de
-`tickets_cents` en la rendición y se borraron enteros, así que no queda rama que
-pueda mostrarlo.
+`demo` no tenía **ningún** cobro no-efectivo atribuido a un mozo, así que el caso
+que motivó la spec no se podía ver. Se cobró una mesa de verdad: **BAR1, $35.000
+con tarjeta (+10 % → $38.500), atribuida a Lucía Moza**, que ya tenía $18.500 en
+efectivo pendientes. Con eso la tarjeta del mozo quedó en:
 
-El modal tampoco se pudo abrir en el navegador headless (el diálogo Radix no
-monta con el pane oculto). Su cambio es la eliminación de un bloque condicional,
-cubierta por typecheck y lint.
+    Lucía Moza · 2 cobros en el turno · Pendiente · Efectivo a entregar $ 18.500
+
+Dos cobros reconocidos, **un solo monto a la vista**, y los $38.500 en ningún
+lado. Ni «Tickets (tarj./transf.)» ni «Detalle por método».
+
+### Test de regresión
+
+El modal no se pudo abrir en el navegador (el pane oculto no calcula layout y el
+diálogo Radix no monta), así que el escenario 2 se fijó donde vale más: en
+[`rendicion-mozos-tab.test.tsx`](../../src/components/admin/local/rendicion-mozos-tab.test.tsx),
+con el mismo caso mixto de Lucía.
+
+Los 5 tests pasan con este código y **4 de 5 fallan contra el commit anterior**
+—incluido el del modal—, así que no son vacíos: si alguien vuelve a poner un
+monto de tarjeta en la rendición, se entera.
