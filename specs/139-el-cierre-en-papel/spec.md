@@ -359,6 +359,108 @@ ahí abre el cajón de la caja.
 
 ---
 
+## Lo que contestó la foto (2026-09-03)
+
+Juan mandó la foto del cierre de MaxiRest de Golf. **Contesta 6 de las 12
+preguntas de abajo y deja 6 abiertas**: el turno es de los vacíos (todos los
+totales en `0.00`) y el papel está **cortado después de `RESUMEN`**, así que se
+ve el esqueleto y la cabecera, pero **ni una fila con datos** ni la mitad de
+abajo.
+
+### El ancho: 42 columnas, mismo papel (cierra la pregunta 1)
+
+Juan: *"no inventes ningún ancho, salen de la misma comandera, así que calculo
+que el ancho debe ser el mismo"*. Es correcto, y el número sale de la aritmética
+del cabezal (384 pt, 58 mm):
+
+| | Celda | Columnas |
+|---|---|---|
+| Font A | 12 pt | 32 |
+| Font A + nuestro `CHAR_RIGHT_SPACING = 4` | 16 pt | **24** ← lo que imprimimos hoy |
+| **Font B (condensada)** | 9 pt | **42** ← el ticket de la foto |
+
+La línea más larga de la foto —`IVA: Resp. Inscripto   CUIT: 30-71323440-7`—
+mide **exactamente 42 caracteres**. Eso es prueba y no estimación: **42
+caracteres no entran en Font A en esta impresora** (el techo es 32). MaxiRest
+imprime el cierre en **Font B**, misma comandera y mismo papel.
+
+`renderEscPos` nunca manda `ESC M`, así que todo lo nuestro sale en Font A, y
+encima le suma espaciado lateral para que cocina lea de lejos. El papel del
+cierre se lee en la mano: **Font B, 42 columnas, sin espaciado extra**. No hay
+que ampliar `COLS` para 80 mm — hay que agregar el tamaño condensado.
+
+⚠️ Y hay que respetar lo que ya documenta `renderEscPos`: **en golf esa
+comandera la comparte MaxiRest**, que no manda `ESC @` al empezar. El job del
+cierre tiene que devolver la impresora a fábrica al terminar, como los demás.
+
+### El esqueleto (cierra 4, 6 y parte de 3)
+
+```
+Restaurante Golf                            ← businesses.name
+SESER SRL                                   ← razón social  ⚠️ no la tenemos
+Bv. Wilde y Eva Peron                       ← businesses.address
+Sucursal: RESTO                             ⚠️ no la tenemos
+IVA: Resp. Inscripto  CUIT: 30-71323440-7   ⚠️ condición IVA no la tenemos
+
+TOTALES DEL DIA:
+Jueves 3 de Septiembre de 2026               ← fecha larga en español
+Turno 1 (MEDIODIA)                           ⚠️ no tenemos turnos
+Cierre nº 3969.                              ← correlativo (D14)
+Apertura: 10:20 - Usuario: SUPERVISOR        ← periodo_desde + encargado
+  Cierre: 15:20 - Usuario: SUPERVISOR
+
+MOVIMIENTOS DE CAJA
+Conc.  Detalle                    Total      ← línea por línea, con concepto
+  INGRESOS / EGRESOS                         ← agrupado por signo
+
+RESUMEN DE VENTAS
+Detalle                     Total  Cant
+
+VENTAS POR FORMA DE COBRO
+Forma de cobro              Total  Cant      ← ⚠️ hoy no contamos por método
+
+RESUMEN                                      ← cortado en la foto
+```
+
+- **Pregunta 4 (cómo lo llaman):** «cierre», con número. El rótulo del bloque es
+  `TOTALES DEL DIA:`.
+- **Pregunta 6 (movimientos):** **línea por línea**, con concepto y detalle,
+  agrupados en INGRESOS y EGRESOS. No son totales.
+- **Pregunta 12 (numeración):** sí, `Cierre nº 3969`. El valor alto sugiere
+  correlativo **por local** y no por caja, pero con una sola muestra no se puede
+  afirmar — se implementa por local (D14 dice por caja: **se corrige a por
+  local**, que es lo que se puede cantar por teléfono sin ambigüedad).
+
+### Lo que la foto NO contesta
+
+Sigue abierto: **2** (cuántas copias y quién se queda con cada una), **7**
+(desglose por mozo), **8** (qué hay en «Detalle» del resumen de ventas — con
+cero filas no se ve si es rubro, producto o categoría), **9** (cubiertos, mesas,
+ticket promedio), **10** (anulaciones), **11** (firma). Las últimas cinco caen
+en la mitad que quedó fuera del encuadre.
+
+**Decisión para no bloquear:** se implementa lo que la foto fija, y para lo que
+no fija se usa nuestro modelo con criterio propio, marcado en el código. Una
+segunda foto —de un cierre **con movimiento** y **entera**— corrige el layout
+sin tocar la mecánica.
+
+### Lo que no se copia, y por qué
+
+**`Turno 1 (MEDIODIA)`** (pregunta 5) — el papel de MaxiRest es **por turno con
+nombre**. Nosotros tenemos **caja continua con cortes**, que es una decisión
+vieja y deliberada del producto. Reproducir esa línea sería revertirla de
+prepo desde un ticket. En su lugar va **el nombre de la caja**, que es la unidad
+real de nuestro cierre.
+
+**Los datos fiscales de la cabecera** (pregunta 3) — la foto confirma que el
+papel lleva razón social, sucursal y condición de IVA, y **ninguno de los tres
+está en `businesses`** (tenemos `name`, `address` y `afip_cuit`). Es el pendiente
+[#134](https://github.com/gachetponzellini/RestaurantOS-app/issues/134). Se
+imprime lo que hay y las líneas que faltan **se omiten** en vez de inventarse:
+un dato fiscal inventado en un papel que se archiva es peor que una línea menos.
+
+---
+
 ## Lo que define la foto (para pedírsela al local)
 
 La mecánica de arriba (D7–D16) no depende de la foto. Lo que la foto define es
