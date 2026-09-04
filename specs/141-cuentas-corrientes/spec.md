@@ -82,7 +82,29 @@ plano— arrastra una orden abierta por días adentro del arqueo diario, del cie
 de caja, de la rendición del mozo y de los reportes. Se descartó: el problema es
 de **cobranza**, no de operación de salón.
 
-### D2 · Sólo clientes habilitados, y sin tope
+### D2 · ~~Sólo clientes habilitados~~ → fiarle a alguien lo habilita
+
+> **Revisada el 2026-09-03**, apenas se probó el flujo. Juan: *"debería de ser más
+> fácil abrir una cuenta corriente, no tendríamos que ir a la parte de cliente
+> sino va a ser muy engorroso"*.
+>
+> La versión de abajo exigía habilitar al cliente **antes**, desde su ficha. Eso
+> hacía el flujo impracticable: el socio dice «ponelo en mi cuenta» y el encargado
+> tenía que abandonar el cobro, ir a Clientes, buscarlo, prender el switch y
+> volver. En hora pico no pasa — se cobra en efectivo y el fiado **queda sin
+> registrar**, que es justo lo que esta spec viene a evitar.
+>
+> **Ahora:** el buscador del cobro ve a **todos** los clientes, con los que ya
+> tienen cuenta primero, y da de alta uno nuevo ahí mismo (nombre + teléfono).
+> Fiarle a alguien lo habilita. El switch de la ficha no se va, pero cambia de
+> rol: deja de ser un prerrequisito y pasa a ser donde se le **quita** el permiso
+> a un moroso.
+>
+> **El control no se pierde**, porque nunca estuvo en la lista blanca: está en
+> `canFiar` (el rol) y en el saldo a la vista antes de confirmar — que es lo que
+> el párrafo de abajo ya decía.
+
+### ~~D2 original~~ · Sólo clientes habilitados, y sin tope
 
 Flag `credit_enabled` en la ficha del cliente. El que no está habilitado **no
 aparece** en el buscador del cobro. **Sin límite de monto**: el control es el gate
@@ -224,7 +246,9 @@ desde el mismo cobro (nombre + teléfono, que es la clave única).
 ### US2 · Fiar una cuenta
 
 En el cobro (mesa, pedido sin mesa o mostrador), método **«Cuenta corriente»** →
-buscador de cliente **habilitado**, obligatorio. Sin cliente no hay botón. Se
+buscador de cliente, obligatorio. Busca sobre **todos** (D2 revisada) y permite
+dar de alta a uno nuevo sin salir del cobro. La **venta rápida de mostrador**
+también lo ofrece: es justo el lugar donde el socio pide que se lo anoten. Sin cliente no hay botón. Se
 registra el pago por `registrar_pago_tx` con `credit_customer_id`, la orden se
 cierra, la mesa se libera y la factura se emite como siempre.
 
