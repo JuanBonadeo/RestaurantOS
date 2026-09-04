@@ -68,9 +68,8 @@ export function CobrarPedidoSheet({
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [cajaId, setCajaId] = useCajaPreferida(slug, init?.cajas ?? []);
-  const [comprobante, setComprobante] = useState<ComprobanteState>(
-    comprobanteInicial(),
-  );
+  const [comprobante, setComprobante] =
+    useState<ComprobanteState>(comprobanteInicial());
 
   useEffect(() => {
     if (!open) return;
@@ -118,7 +117,7 @@ export function CobrarPedidoSheet({
 
         <div className="flex-1 overflow-y-auto px-5 py-4">
           {loading ? (
-            <div className="flex h-32 items-center justify-center text-muted-foreground">
+            <div className="text-muted-foreground flex h-32 items-center justify-center">
               <Loader2 className="size-6 animate-spin" />
             </div>
           ) : loadError ? (
@@ -127,13 +126,25 @@ export function CobrarPedidoSheet({
             </div>
           ) : init ? (
             <div className="space-y-5">
-              <div className="flex items-baseline justify-between rounded-xl bg-muted/50 px-4 py-3">
-                <span className="text-sm font-medium text-muted-foreground">
+              <div className="bg-muted/50 flex items-baseline justify-between rounded-xl px-4 py-3">
+                <span className="text-muted-foreground text-sm font-medium">
                   Total a cobrar
                 </span>
                 <span className="text-2xl font-extrabold tabular-nums">
                   {formatCurrency(amountDueCents)}
                 </span>
+              </div>
+
+              {/* spec 156 · D1 · 157 · D3 — el comprobante se elige ANTES de
+                  cobrar, y en el mismo lugar que en la mesa y en el mostrador:
+                  arriba del cobro. Estaba abajo, así que la única de las tres
+                  pantallas que lo pedía después era ésta. */}
+              <div className="border-border/60 border-t pt-4">
+                <ComprobanteFields
+                  slug={slug}
+                  value={comprobante}
+                  onChange={setComprobante}
+                />
               </div>
 
               <CobroForm<CobroData>
@@ -188,14 +199,6 @@ export function CobrarPedidoSheet({
                   onClose();
                 }}
               />
-
-              <div className="border-border/60 border-t pt-4">
-                <ComprobanteFields
-                  slug={slug}
-                  value={comprobante}
-                  onChange={setComprobante}
-                />
-              </div>
             </div>
           ) : null}
         </div>

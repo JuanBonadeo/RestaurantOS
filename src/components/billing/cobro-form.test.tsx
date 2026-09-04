@@ -19,10 +19,7 @@ const CAJA: Caja = {
 
 const okResult = { ok: true as const, data: {} };
 
-function config(
-  method: string,
-  percent: number,
-): PaymentMethodConfig {
+function config(method: string, percent: number): PaymentMethodConfig {
   return {
     id: `cfg-${method}`,
     business_id: "biz-1",
@@ -146,7 +143,7 @@ describe("<CobroForm /> — las reglas de dinero, una sola vez", () => {
     });
   });
 
-  it('«otro» sigue exigiendo nota: es lo único que dice qué fue el cobro', () => {
+  it("«otro» sigue exigiendo nota: es lo único que dice qué fue el cobro", () => {
     setup();
     pick(/otro/i);
     expect(screen.getByRole("button", { name: /confirmar/i })).toBeDisabled();
@@ -160,8 +157,12 @@ describe("<CobroForm /> — las reglas de dinero, una sola vez", () => {
     // Es la palanca con la que el cobro del pedido online los saca (spec 126):
     // generar una preference no cobra nada, deja el pedido abierto.
     setup();
-    expect(screen.queryByRole("button", { name: /link mercado pago/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: /qr mercado pago/i })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /link mercado pago/i }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /qr mercado pago/i }),
+    ).toBeNull();
   });
 
   it("los últimos 4 dígitos son opcionales, pero si van tienen que ser 4", async () => {
@@ -209,7 +210,9 @@ describe("<CobroForm /> — las reglas de dinero, una sola vez", () => {
 
   it("allowedMethods filtra los métodos ofrecidos", () => {
     setup({ allowedMethods: ["cash"] });
-    expect(screen.getByRole("button", { name: /efectivo/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /efectivo/i }),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /tarjeta/i })).toBeNull();
   });
 });
@@ -375,5 +378,111 @@ describe("<CobroForm /> — elegir método con el teclado", () => {
     await waitFor(() => {
       expect(screen.getByLabelText(/monto/i)).toHaveValue(110);
     });
+  });
+});
+
+/**
+ * El flujo rápido (spec 157 · D2). El mostrador venía con **otro** formulario
+ * para lograr «tipear, Enter, Enter, cobrar»; ahora esa ergonomía es un modo de
+ * éste. Lo que estos tests fijan no es que se vea parecido: es que **no cueste
+ * un tap más** que el formulario propio que reemplaza.
+ */
+describe("<CobroForm /> — el flujo rápido del mostrador", () => {
+  const metodos = () =>
+    screen.getAllByRole("button").filter((b) => b.dataset.metodo === "true");
+
+  it("abre con el método ya elegido: cobrar es un solo click", async () => {
+    const { onSubmit } = setup({ flujo: "rapido" });
+
+    // Sin elegir método antes — eso es el tap que la spec 058 no puede pagar.
+    confirm();
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ method: "cash" });
+  });
+
+  it("los métodos quedan a la vista y cambiarlos no esconde el botón", () => {
+    setup({ methodConfigs: [config("card_manual", 10)], flujo: "rapido" });
+
+    expect(metodos().length).toBeGreaterThan(1);
+    pick(/tarjeta/i);
+    // Sigue todo en una pantalla: no hay paso 2 al que ir.
+    expect(metodos().length).toBeGreaterThan(1);
+    // $100 + 10% = $110: el ajuste del método se ve sin cambiar de pantalla.
+    expect(
+      screen.getByRole("button", { name: /confirmar/i }),
+    ).toHaveTextContent("110");
+  });
+
+  it("Esc es del panel, no del formulario: no hay selector al que volver", async () => {
+    const user = userEvent.setup();
+    const onEscDelPanel = vi.fn();
+    render(
+      <div onKeyDown={(e) => e.key === "Escape" && onEscDelPanel()}>
+        <CobroForm
+          amountDueCents={10_000}
+          cajas={[CAJA]}
+          cajaId={CAJA.id}
+          methodConfigs={[]}
+          flujo="rapido"
+          onSubmit={async () => okResult}
+        />
+      </div>,
+    );
+
+    metodos()[0].focus();
+    await user.keyboard("{Escape}");
+    // En el mostrador Esc cierra la venta rápida. Comérselo acá encerraría al
+    // encargado en un formulario que no tiene "atrás".
+    expect(onEscDelPanel).toHaveBeenCalled();
+  });
+
+  it("no le roba el foco al buscador al montarse", () => {
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.focus();
+
+    setup({ flujo: "rapido" });
+
+    // El panel del mostrador enfoca el buscador al abrir (spec 058): si el
+    // cobro se quedara con el foco, la primera letra no llegaría a ningún lado.
+    expect(input).toHaveFocus();
+    input.remove();
+  });
+
+  it("después de cobrar se limpia para la venta siguiente, pero se queda con el método", async () => {
+    const { onSubmit } = setup({ flujo: "rapido" });
+
+    pick(/tarjeta/i);
+    fireEvent.change(screen.getByLabelText(/últimos 4/i), {
+      target: { value: "1234" },
+    });
+    confirm();
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+
+    // Tres cafés seguidos con la misma tarjeta no se re-eligen tres veces…
+    await waitFor(() =>
+      expect(screen.getByLabelText(/últimos 4/i)).toHaveValue(""),
+    );
+    // …pero los datos del cliente anterior no se arrastran al próximo cobro.
+    expect(onSubmit.mock.calls[0][0].lastFour).toBe("1234");
+  });
+
+  it("el requestId se renueva entre ventas (cada venta es una, no un reintento)", async () => {
+    const { onSubmit } = setup({ flujo: "rapido" });
+    confirm();
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /confirmar/i })).toBeEnabled(),
+    );
+    confirm();
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+
+    const ids = onSubmit.mock.calls.map((c) => c[0].requestId);
+    expect(ids[0]).not.toBe(ids[1]);
+  });
+
+  it("el flujo estándar sigue arrancando en el selector", () => {
+    setup();
+    expect(screen.queryByRole("button", { name: /confirmar/i })).toBeNull();
   });
 });

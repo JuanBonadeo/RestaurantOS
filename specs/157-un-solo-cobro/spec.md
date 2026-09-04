@@ -2,7 +2,7 @@
 
 **Issue:** [#234](https://github.com/gachetponzellini/RestaurantOS-app/issues/234) ·
 **Milestone:** Post-demo · Growth & hardening ·
-**Estado:** 📋 propuesta (2026-09-03) — sin implementar
+**Estado:** ✅ implementada (2026-09-04)
 
 **Input:** Juan, 2026-09-03, mirando el cobro después de meter cuentas
 corrientes: *"habría que unificar el cobro en venta rápida y en las mesas y en
@@ -86,9 +86,33 @@ el mostrador tiene su botón «facturar la última venta» por la misma razón y
 funciona. Unificar el **componente** sí; unificar el **momento** no — el pedido
 sin mesa se factura al cobrar y no necesita el bloque post-cobro.
 
+> **D4 corregida al implementar (2026-09-04): el botón del mostrador ya no
+> funcionaba.** La premisa era de antes de la spec 147. Desde que existe la
+> emisión automática, cobrar en el mostrador **ya emite una Factura B**, y la
+> guarda de la spec 100 (no se cambia de tipo sobre una factura viva) bloquea la
+> A para siempre: se reprodujo en vivo, «No se pudo facturar: esta orden ya tiene
+> la Factura B 0001-00000007 autorizada». Y en golf-jcr —`afip_auto_emit`
+> apagado, el único negocio real que factura A— el camino post-cobro tampoco
+> alcanza, porque sin elección explícita no se emite nada.
+>
+> El momento **ya estaba unificado** por las specs 147/156 en las tres pantallas:
+> el comprobante viaja con el cobro. Lo que el mostrador tenía no era otro
+> momento, era el único caller que se había quedado afuera. Se alineó. El botón
+> post-venta sobrevive con el único rol que le queda: **reintentar lo que ARCA
+> rechazó**, sin frenar la venta siguiente.
+
 **D5 · Sin cambios de server.** `registrarPago`, `venderMostrador` y
 `emitInvoice` quedan como están: esto es una spec de pantallas. Si aparece la
 tentación de tocar el motor, es señal de que el alcance se fue.
+
+> **D5 acotada al implementar: `venderMostrador` sí se tocó, en dos renglones.**
+> No se puede satisfacer el escenario 1 sin eso (ver D4). El motor no cambió:
+> `registrarPago` **ya acepta** `comprobante` desde la spec 156 y la mesa y el
+> pedido ya se lo mandan; `venderMostrador` era el único caller que no lo
+> reenviaba. Lo que se agregó es el passthrough —un parámetro opcional que baja
+> tal cual al `registrarPago` que ya se llamaba, más el desenlace en el
+> resultado—. Cero lógica nueva, cero migración, `registrar_pago_tx`,
+> `emitInvoice` y `emitInvoiceCore` intactos.
 
 ## Alcance
 
@@ -124,11 +148,53 @@ tentación de tocar el motor, es señal de que el alcance se fue.
 
 ## Verificación
 
-Pendiente — sin implementar.
+**Implementada y verificada el 2026-09-04.** En vivo en `demo` con el rol real
+(Sofía, encargada), vía `node scripts/magic-link.mjs sofia@demo.test
+"/demo/admin/operacion"`. `pnpm typecheck` limpio y `pnpm test` con 2290 unitarios
+en verde (los 21 `*.integration.test.ts` fallan con `fetch failed` sin stack
+local: ruido conocido, mismo estado que antes del cambio).
 
-El riesgo está concentrado en la venta rápida, que es la que se reescribe: el
-verify en vivo tiene que ser **cronometrado**, no sólo funcional — contar las
-teclas de una venta de mostrador antes y después. Y el escenario 1 se prueba
-emitiendo una A real contra el sandbox, con uno de los 378 receptores importados:
+**Escenario 1 — Factura A desde el mostrador.** Hecha de punta a punta con el
+receptor guardado, que es el caso real de la encargada: buscador → «SANATORIO
+PARQUE S.A.» → CUIT, razón social y condición IVA se completan solos → cobrar.
+La fila que quedó en la base es la prueba:
 
-    node scripts/magic-link.mjs sofia@demo.test "/demo/admin/operacion"
+    factura_a · 0001-00000004 · authorized · CAE SANDBOX-FA-1788544085091
+    CUIT 30500237305 · SANATORIO PARQUE S.A. · condición IVA 1 (RI) · $ 8.500
+    sobre la orden #4, customer_name = "Mostrador"
+
+Y la guarda frena **antes** de cobrar: con la A tildada y el CUIT vacío, el botón
+devuelve «Para la Factura A falta el CUIT del receptor (11 dígitos)» y no se cobra
+nada — no queda una venta cobrada sin la factura que se pidió.
+
+**Escenario 2 — cronometrado.** La venta de mostrador cuesta **lo mismo que
+antes**: tipear · Enter (elige el producto) · Enter (lo agrega) · Confirmar. El
+método abre ya elegido (efectivo) y la caja sigue siendo la recordada, así que no
+hay tap nuevo; el ↓ del carrito aterriza en «Confirmar» igual que aterrizaba en
+«Cobrar» (verificado leyendo el `activeElement`: `BUTTON "Confirmar $ 3.000"`).
+Y **gana** teclas que no tenía: los dígitos 1-5 eligen método sin cambiar de
+pantalla (`2` → Tarjeta, +10 %, «Confirmar $ 3.300»), y Esc sigue siendo del panel
+—cierra la venta rápida desde adentro del cobro—, no del formulario.
+
+**Escenario 3 — las tres iguales.** El mostrador monta el mismo `CobroForm`: los
+mismos métodos con su ajuste, la misma guarda de efectivo con vuelto, y el fiado
+con el buscador `FiarAQuien` compartido (el `5` abre «¿A quién se le fía?» y sin
+cliente el botón queda deshabilitado). Se fueron la grilla `METODOS` propia, el
+selector de caja propio y el fiado cableado a mano.
+
+**Escenario 4 — un método nuevo, un solo archivo.** El mostrador dejó de pasar
+`allowedMethods`: la lista sale de `METHODS`. La prueba llegó sola —«Otro»
+apareció en la venta rápida sin que nadie lo agregara ahí.
+
+**Escenario 5 — la venta siguiente.** Después de cobrar: carrito vacío, foco en
+el buscador, comprobante de vuelta en B y el método conservado (tres cafés
+seguidos con la misma tarjeta no se re-eligen tres veces). El aviso de la última
+venta dice qué salió —«Venta #4 cobrada · $ 8.500 · Factura A ✓»— y sólo ofrece
+«Reintentar» cuando ARCA rechazó.
+
+**El pedido** quedó alineado: el comprobante se pide **arriba** del cobro, como en
+la mesa y en el mostrador. Era la única de las tres que lo pedía después.
+
+**Rastro en `demo`:** las órdenes #28 y #29 son de este verify, y la
+`factura_b 0001-00000007` sobre la #28 salió del primer intento —el que emitía
+después de cobrar— que es justamente el que destapó lo de la D4.

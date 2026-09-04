@@ -96,6 +96,25 @@ export type CobroFormProps<T = unknown> = {
   tip?: CobroTip;
   /** Ergonomía. `touch` = mozo en el celular; `compact` = paneles del admin. */
   size?: "touch" | "compact";
+  /**
+   * El camino del formulario (spec 157 · D2).
+   *
+   * `estandar` (default) — dos pasos: elegir método y después cargar los datos.
+   * Es lo que quieren la mesa y el pedido, donde cobrar es un momento con su
+   * propia pantalla.
+   *
+   * `rapido` — una sola pantalla, con el método ya elegido. Es la ergonomía del
+   * mostrador (spec 058): «tipear, Enter, Enter, cobrar». Ahí un paso de más no
+   * es un paso de más — es una venta más lenta en la barra en hora pico, que es
+   * exactamente lo que hizo que esa pantalla se escribiera aparte. Ahora la
+   * ergonomía entra acá y el código deja de estar dos veces.
+   */
+  flujo?: "estandar" | "rapido";
+  /**
+   * Para encadenar el foco desde afuera: en el mostrador el ↓ del carrito
+   * aterriza en Confirmar, que es la acción del panel (spec 075).
+   */
+  confirmRef?: React.RefObject<HTMLButtonElement | null>;
   /** Se llama al confirmar. El caller elige el action — el form no importa
    *  server actions. Devuelve el resultado completo: el mozo lo usa para
    *  mergear la fila ya persistida sin refrescar (spec 41). */
@@ -121,17 +140,39 @@ export type CobroFormProps<T = unknown> = {
 const METHODS: Array<{
   value: PaymentMethod;
   label: string;
+  /**
+   * Etiqueta del flujo rápido. El cobro del mostrador comparte columna con el
+   * carrito y el catálogo: ahí «Transferencia» entra truncada, que es peor que
+   * abreviada. Son las mismas palabras que usaba la grilla propia de la venta
+   * rápida antes de la spec 157.
+   */
+  corto?: string;
   icon: typeof Banknote;
 }> = [
   { value: "cash", label: "Efectivo", icon: Banknote },
   { value: "card_manual", label: "Tarjeta", icon: CreditCard },
-  { value: "mp_link", label: "Link Mercado Pago", icon: LinkIcon },
-  { value: "mp_qr", label: "QR Mercado Pago", icon: QrCode },
-  { value: "transfer", label: "Transferencia", icon: Wallet },
+  {
+    value: "mp_link",
+    label: "Link Mercado Pago",
+    corto: "Link MP",
+    icon: LinkIcon,
+  },
+  { value: "mp_qr", label: "QR Mercado Pago", corto: "QR MP", icon: QrCode },
+  {
+    value: "transfer",
+    label: "Transferencia",
+    corto: "Transfer.",
+    icon: Wallet,
+  },
   { value: "other", label: "Otro", icon: MoreHorizontal },
   // spec 141 — el fiado. Va último a propósito: cierra el ticket sin que entre
   // plata, así que no compite con los métodos que sí cobran.
-  { value: "cuenta_corriente", label: "Cuenta corriente", icon: BookUser },
+  {
+    value: "cuenta_corriente",
+    label: "Cuenta corriente",
+    corto: "Cuenta cte.",
+    icon: BookUser,
+  },
 ];
 
 const CARD_BRANDS: Array<{
@@ -148,6 +189,28 @@ function isMpMethod(m: PaymentMethod | null): m is "mp_link" | "mp_qr" {
   return m === "mp_link" || m === "mp_qr";
 }
 
+/**
+ * Los métodos que esta pantalla ofrece.
+ *
+ * Vive afuera del componente porque el flujo rápido necesita el primero **en el
+ * `useState` inicial**, antes de que haya render. Es también lo que hace que
+ * agregar un método sea un renglón acá y no tres archivos (spec 157, esc. 4).
+ */
+function metodosOfrecidos(opts: {
+  allowedMethods?: PaymentMethod[];
+  mp: boolean;
+  cuentaCorriente: boolean;
+}) {
+  return METHODS.filter((m) => {
+    if (opts.allowedMethods && !opts.allowedMethods.includes(m.value))
+      return false;
+    if (isMpMethod(m.value) && !opts.mp) return false;
+    // Sin la prop no hay fiado: el rol no puede, o el negocio no lo usa.
+    if (m.value === "cuenta_corriente" && !opts.cuentaCorriente) return false;
+    return true;
+  });
+}
+
 export function CobroForm<T = unknown>({
   amountDueCents,
   cajas,
@@ -158,6 +221,8 @@ export function CobroForm<T = unknown>({
   cuentaCorriente,
   tip: tipConfig = { mode: "none" },
   size = "compact",
+  flujo = "estandar",
+  confirmRef: confirmRefProp,
   onSubmit,
   onPaid,
   onCancel,
@@ -171,7 +236,19 @@ export function CobroForm<T = unknown>({
   // un cobro OK. El server dedup por (business_id, request_id).
   const requestIdRef = useRef<string | null>(null);
 
-  const [method, setMethod] = useState<PaymentMethod | null>(null);
+  const rapido = flujo === "rapido";
+  const methods = metodosOfrecidos({
+    allowedMethods,
+    mp: !!mp,
+    cuentaCorriente: !!cuentaCorriente,
+  });
+
+  // En el flujo rápido el formulario abre **con método**: el mostrador cobra en
+  // efectivo salvo aviso, y hacerlo elegir cada vez es el tap que la spec 058
+  // no puede pagar.
+  const [method, setMethod] = useState<PaymentMethod | null>(
+    rapido ? (methods[0]?.value ?? null) : null,
+  );
   /** A quién se le fía. Se limpia al cambiar de método (efecto más abajo). */
   const [creditCustomerId, setCreditCustomerId] = useState<string | null>(null);
   const [cliente, setCliente] = useState<ClienteParaFiar | null>(null);
@@ -217,14 +294,6 @@ export function CobroForm<T = unknown>({
     remaining_cents: amountDueCents,
   });
 
-  const methods = METHODS.filter((m) => {
-    if (allowedMethods && !allowedMethods.includes(m.value)) return false;
-    if (isMpMethod(m.value) && !mp) return false;
-    // Sin la prop no hay fiado: el rol no puede, o el negocio no lo usa.
-    if (m.value === "cuenta_corriente" && !cuentaCorriente) return false;
-    return true;
-  });
-
   // Selector de método navegable con flechas (grilla de 2 columnas) — spec 075.
   const metodoZona = useRovingList<HTMLButtonElement>({
     length: methods.length,
@@ -234,15 +303,19 @@ export function CobroForm<T = unknown>({
   // Elegir método desmonta el selector: sin esto el foco se cae al `<body>` y
   // el Esc y el ⌘Enter del paso 2 dejan de llegar. Va al botón de confirmar,
   // que es la acción del paso (mismo criterio que `ProductModal`).
-  const confirmRef = useRef<HTMLButtonElement>(null);
+  const confirmRefInterno = useRef<HTMLButtonElement>(null);
+  const confirmRef = confirmRefProp ?? confirmRefInterno;
   useEffect(() => {
-    if (!method) return;
+    // En el flujo rápido no hay tal desmontaje —los métodos quedan a la vista—
+    // y el panel del mostrador enfoca el buscador al abrir: robarle el foco acá
+    // haría que la primera letra tipeada no llegue a ningún lado.
+    if (!method || rapido) return;
     const t = setTimeout(
       () => confirmRef.current?.focus({ preventScroll: true }),
       0,
     );
     return () => clearTimeout(t);
-  }, [method]);
+  }, [method, rapido, confirmRef]);
 
   /**
    * Volver al selector dejando el foco en el método que estaba elegido.
@@ -356,7 +429,23 @@ export function CobroForm<T = unknown>({
       }
       // Cobro OK → el próximo intento usa una clave nueva.
       requestIdRef.current = null;
-      toast.success("Pago registrado");
+      // El mostrador encadena ventas: el formulario vuelve a cero para la que
+      // sigue, pero **se queda con el método** — tres cafés en efectivo no se
+      // eligen tres veces. Sin esto, los últimos 4 dígitos del cliente anterior
+      // viajarían con el cobro del siguiente.
+      if (rapido) {
+        setHasSetAmount(false);
+        setLastFour("");
+        setNotes("");
+        setCliente(null);
+        setCreditCustomerId(null);
+        setTip(
+          tipConfig.mode === "editable" ? (tipConfig.initialCents ?? 0) : 0,
+        );
+      }
+      // El caller del flujo rápido siempre dice algo más específico (número de
+      // venta y comandas a cocina): dos toasts por venta, en una barra, es ruido.
+      if (!rapido) toast.success("Pago registrado");
       onPaid?.(r.data);
     });
   };
@@ -427,49 +516,89 @@ export function CobroForm<T = unknown>({
     );
   }
 
-  // ── Paso 1: elegir método ─────────────────────────────────────────────
-  if (!method) {
-    return (
-      <div className="space-y-3">
-        <CajaPicker cajas={cajas} cajaId={cajaId} onChange={onCajaChange} />
-        {/* Grilla navegable con flechas y, sobre todo, con dígitos: en la caja
-            en hora pico «efectivo» es apretar 1 (spec 075, FR-018). El número
-            va escrito en cada método para que se aprenda solo.
-
-            Enter acá SÓLO elige — el cobro se dispara desde Confirmar, del
-            paso siguiente (FR-020). */}
-        <div
-          onKeyDown={(e) => {
-            if (metodoZona.handleKeyDown(e)) return;
-            const i = indexFromDigit(e.key, methods.length);
-            if (i === null) return;
-            e.preventDefault();
-            setMethod(methods[i].value);
-          }}
-          className="grid grid-cols-2 gap-2"
-        >
-          {methods.map((m, i) => {
-            const adj =
-              methodConfigs.find((c) => c.method === m.value)
-                ?.adjustment_percent ?? 0;
-            const { finalCents: adjFinal } = calculateAdjustment(
-              amountDueCents,
-              adj,
-            );
-            const Icon = m.icon;
-            return (
-              <button
-                key={m.value}
-                type="button"
-                onClick={() => setMethod(m.value)}
-                data-metodo="true"
-                {...metodoZona.itemProps(i)}
-                className={cn(
-                  "flex flex-col items-start gap-1 rounded-2xl bg-white p-3 text-left ring-1 ring-zinc-200 transition outline-none hover:ring-zinc-300 active:scale-[0.98]",
-                  "focus-visible:ring-2 focus-visible:ring-zinc-900",
-                  touch && "p-4",
+  // ── El selector de método ─────────────────────────────────────────────
+  // Grilla navegable con flechas y, sobre todo, con dígitos: en la caja en hora
+  // pico «efectivo» es apretar 1 (spec 075, FR-018). El número va escrito en
+  // cada método para que se aprenda solo.
+  //
+  // Enter acá SÓLO elige — el cobro se dispara desde Confirmar (FR-020). En el
+  // camino estándar eso es el paso siguiente; en el rápido, el botón de abajo:
+  // es la misma grilla, pero **sin desmontarse**, porque el mostrador quiere
+  // cambiar de método sin perder de vista lo que está por cobrar.
+  const selectorDeMetodo = (
+    <div
+      onKeyDown={(e) => {
+        if (metodoZona.handleKeyDown(e)) return;
+        const i = indexFromDigit(e.key, methods.length);
+        if (i === null) return;
+        e.preventDefault();
+        setMethod(methods[i].value);
+      }}
+      className={cn("grid grid-cols-2", rapido ? "gap-1.5" : "gap-2")}
+    >
+      {methods.map((m, i) => {
+        const adj =
+          methodConfigs.find((c) => c.method === m.value)?.adjustment_percent ??
+          0;
+        const { finalCents: adjFinal } = calculateAdjustment(
+          amountDueCents,
+          adj,
+        );
+        const Icon = m.icon;
+        const elegido = rapido && method === m.value;
+        return (
+          <button
+            key={m.value}
+            type="button"
+            onClick={() => setMethod(m.value)}
+            data-metodo="true"
+            {...metodoZona.itemProps(i)}
+            className={cn(
+              "rounded-2xl bg-white text-left ring-1 ring-zinc-200 transition outline-none hover:ring-zinc-300 active:scale-[0.98]",
+              "focus-visible:ring-2 focus-visible:ring-zinc-900",
+              rapido
+                ? "flex items-center gap-1.5 px-2.5 py-2"
+                : "flex flex-col items-start gap-1 p-3",
+              !rapido && touch && "p-4",
+              elegido && "bg-zinc-900 text-white ring-zinc-900",
+            )}
+          >
+            {rapido ? (
+              // Sin ícono: el ancho que ocupa es el que le falta a la etiqueta.
+              <>
+                <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+                  {m.corto ?? m.label}
+                </span>
+                {adj !== 0 && (
+                  <span
+                    className={cn(
+                      "shrink-0 text-[10px] font-bold",
+                      elegido
+                        ? "text-white/70"
+                        : adj < 0
+                          ? "text-emerald-600"
+                          : "text-rose-600",
+                    )}
+                  >
+                    {adj > 0 ? "+" : ""}
+                    {adj}%
+                  </span>
                 )}
-              >
+                {i < 9 && (
+                  <kbd
+                    className={cn(
+                      "shrink-0 rounded px-1 text-[10px] font-bold",
+                      elegido
+                        ? "bg-white/15 text-white/70"
+                        : "bg-zinc-100 text-zinc-500",
+                    )}
+                  >
+                    {i + 1}
+                  </kbd>
+                )}
+              </>
+            ) : (
+              <>
                 <div className="flex w-full items-center justify-between gap-2">
                   <Icon
                     className={cn("size-4 text-zinc-500", touch && "size-5")}
@@ -499,10 +628,20 @@ export function CobroForm<T = unknown>({
                     {adj}% · {formatCurrency(adjFinal)}
                   </span>
                 )}
-              </button>
-            );
-          })}
-        </div>
+              </>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  // ── Paso 1: elegir método (sólo el camino estándar) ───────────────────
+  if (!method) {
+    return (
+      <div className="space-y-3">
+        <CajaPicker cajas={cajas} cajaId={cajaId} onChange={onCajaChange} />
+        {selectorDeMetodo}
       </div>
     );
   }
@@ -518,6 +657,9 @@ export function CobroForm<T = unknown>({
         // entero (spec 075, FR-019): el `stopPropagation` corta la cadena de
         // modos del `<aside>` un nivel más arriba.
         if (e.key === "Escape") {
+          // En el mostrador no hay selector al que volver y Esc cierra la venta
+          // rápida: comérselo acá encerraría al encargado en el formulario.
+          if (rapido) return;
           e.stopPropagation();
           e.preventDefault();
           volverAlSelector();
@@ -534,27 +676,38 @@ export function CobroForm<T = unknown>({
       // todavía no entra en dos columnas (spec 111): el input de monto y el
       // botón de confirmar no ganan nada midiendo 560px. Inerte fuera del
       // panel: sin ancestro `@container` la query nunca matchea.
-      className="space-y-4 @xl:max-w-[480px]"
+      // El rápido va más apretado: en el panel del salón el cobro comparte
+      // columna con el carrito, y cada 4px de aire es un scroll más.
+      className={cn("@xl:max-w-[480px]", rapido ? "space-y-2.5" : "space-y-4")}
     >
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <MetaIcon className="size-4 text-zinc-500" />
-          <p className="text-sm font-semibold text-zinc-900">{meta.label}</p>
+      {rapido ? (
+        // El mostrador no tiene «Cambiar»: los métodos nunca se fueron, y la
+        // caja se elige acá y no en una franja aparte del panel.
+        <>
+          <CajaPicker cajas={cajas} cajaId={cajaId} onChange={onCajaChange} />
+          {selectorDeMetodo}
+        </>
+      ) : (
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <MetaIcon className="size-4 text-zinc-500" />
+            <p className="text-sm font-semibold text-zinc-900">{meta.label}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              volverAlSelector();
+              onCancel?.();
+            }}
+            className="text-xs font-semibold text-zinc-500 underline"
+          >
+            Cambiar
+            <kbd className="ml-1 rounded bg-zinc-100 px-1 text-[10px] font-bold text-zinc-500">
+              Esc
+            </kbd>
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            volverAlSelector();
-            onCancel?.();
-          }}
-          className="text-xs font-semibold text-zinc-500 underline"
-        >
-          Cambiar
-          <kbd className="ml-1 rounded bg-zinc-100 px-1 text-[10px] font-bold text-zinc-500">
-            Esc
-          </kbd>
-        </button>
-      </div>
+      )}
 
       <div className="grid gap-1.5">
         <label

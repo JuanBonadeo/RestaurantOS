@@ -8,7 +8,7 @@ import {
   useState,
   useTransition,
 } from "react";
-import { Loader2, Minus, Plus, Receipt, Store, Trash2, X } from "lucide-react";
+import { Loader2, Minus, Plus, Store, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -28,39 +28,48 @@ import {
   ProductSearchInput,
   useProductSearch,
 } from "@/components/mozo/product-search-box";
+import { actionError } from "@/lib/actions";
 import { emitInvoice } from "@/lib/afip/emit-invoice";
-import { calculateAdjustment } from "@/lib/billing/adjustment";
-import type {
-  Caja,
-  PaymentMethod,
-  PaymentMethodConfig,
-} from "@/lib/caja/types";
+import { CobroForm, type CobroSubmit } from "@/components/billing/cobro-form";
+import {
+  ComprobanteFields,
+  comprobanteEsValido,
+  comprobanteInicial,
+  comprobanteToInvoiceInput,
+  type ComprobanteState,
+} from "@/components/billing/comprobante-fields";
+import type { Caja, PaymentMethodConfig } from "@/lib/caja/types";
 import { useCajaPreferida } from "@/lib/caja/use-caja-preferida";
 import { formatCurrency } from "@/lib/currency";
-import {
-  FiarAQuien,
-  type ClienteParaFiar,
-} from "@/components/billing/fiar-a-quien";
 import type { CatalogForMozo, CatalogProduct } from "@/lib/mozo/catalog-query";
 import { loadPedirCatalog } from "@/lib/mozo/pedir-panel-data";
 import {
   iniciarVentaMostrador,
   venderMostrador,
+  type VentaMostradorResult,
 } from "@/lib/orders/venta-mostrador";
 
 type CartItem = AddToCartItem & { _key: string };
 
-/** Métodos de mostrador. MP link/QR quedan fuera (van por `iniciarPagoMp`). */
-const METODOS: { value: PaymentMethod; label: string }[] = [
-  { value: "cash", label: "Efectivo" },
-  { value: "card_manual", label: "Tarjeta" },
-  { value: "transfer", label: "Transfer." },
-  // spec 141 — el mostrador es justo donde el socio dice «ponelo en mi cuenta».
-  { value: "cuenta_corriente", label: "Cuenta cte." },
-];
-
-/** Última venta cobrada, para ofrecer la factura sin frenar la siguiente. */
-type UltimaVenta = { orderId: string; orderNumber: number; totalCents: number };
+/**
+ * La última venta cobrada. Sirve para dos cosas distintas y las dos importan:
+ * decir **qué pasó con su comprobante**, y ofrecer el reintento cuando no salió.
+ *
+ * El comprobante ya no se elige acá: viaja **con el cobro** (spec 156 · D1),
+ * como en la mesa y en el pedido. Antes se emitía después, con `factura_b`
+ * hardcodeado, y por eso el mostrador no podía facturar una A (spec 157). Con
+ * `afip_auto_emit` prendido tampoco alcanzaba con arreglar el botón: la B
+ * automática sale al cobrar y la guarda de la spec 100 bloquea la A para
+ * siempre. El botón queda entonces para lo único que sigue siendo suyo —
+ * reintentar lo que ARCA rechazó, sin frenar la venta siguiente.
+ */
+type UltimaVenta = {
+  orderId: string;
+  orderNumber: number;
+  totalCents: number;
+  comprobante: ComprobanteState;
+  emision?: VentaMostradorResult["comprobante"];
+};
 
 /**
  * Spec 058 — **Venta rápida** de kiosko / barra: una sola pantalla para elegir
@@ -94,18 +103,14 @@ export function VentaRapidaPanel({
   const [cart, setCart] = useState<CartItem[]>([]);
 
   const [cajaId, setCajaId] = useCajaPreferida(slug, cajas);
-  const [method, setMethod] = useState<PaymentMethod>("cash");
-  /** A quién se le fía (spec 141). Sólo con `cuenta_corriente`. */
-  const [clienteFiado, setClienteFiado] = useState<ClienteParaFiar | null>(
-    null,
-  );
+  // spec 156 · D1 — qué comprobante sale se elige ANTES de cobrar, con el
+  // cliente delante. Acá se emite después (D4), pero el receptor ya está.
+  const [comprobante, setComprobante] =
+    useState<ComprobanteState>(comprobanteInicial());
   const [ultima, setUltima] = useState<UltimaVenta | null>(null);
 
-  const [pending, startTransition] = useTransition();
   const [facturando, startFacturar] = useTransition();
   const searchRef = useRef<HTMLInputElement>(null);
-  /** Idempotencia del cobro (issue #58): una clave por intento, no por click. */
-  const requestIdRef = useRef<string | null>(null);
 
   // ── Carga inicial: catálogo + cajas, en paralelo. ──
   useEffect(() => {
@@ -185,16 +190,6 @@ export function VentaRapidaPanel({
 
   const subtotal = cart.reduce((a, c) => a + c.line_subtotal_cents, 0);
   const cartCount = cart.reduce((a, c) => a + c.quantity, 0);
-
-  // El ajuste que muestra la UI es el mismo que el server recalcula al cobrar
-  // (`payment_method_configs`) — acá sólo se anticipa para que el encargado
-  // cante el precio correcto antes de confirmar. La cuenta sale de
-  // `calculateAdjustment`, la misma que usan el resto de los cobros (spec 062):
-  // estaba escrita a mano acá, que es exactamente cómo se despegan los precios.
-  const ajustePercent =
-    methodConfigs.find((c) => c.method === method)?.adjustment_percent ?? 0;
-  const { adjustmentCents: ajusteCents, finalCents: totalACobrar } =
-    calculateAdjustment(subtotal, ajustePercent);
 
   const focusSearch = useCallback(() => {
     setTimeout(() => {
@@ -276,71 +271,95 @@ export function VentaRapidaPanel({
     onType: escribirEnBuscador,
   });
 
-  const canCobrar =
-    cart.length > 0 &&
-    !!cajaId &&
-    !pending &&
-    !initError &&
-    // spec 141 — un fiado sin dueño no está en el saldo de nadie (y el check de
-    // la base lo rechaza igual).
-    (method !== "cuenta_corriente" || !!clienteFiado);
-
-  function cobrar() {
-    if (cart.length === 0) {
-      toast.error("Agregá al menos un producto.");
-      return;
+  /**
+   * Cobrar es del `CobroForm` (spec 157 · D1): el método, el ajuste, la guarda
+   * de efectivo, el vuelto, la nota, el fiado y la idempotencia viven ahí, una
+   * sola vez para las tres pantallas. Acá queda lo que es del mostrador: de
+   * dónde salen los ítems y qué hacer cuando la venta ya está cobrada.
+   */
+  async function cobrar(input: CobroSubmit) {
+    if (initError) return actionError(initError);
+    if (cart.length === 0) return actionError("Agregá al menos un producto.");
+    if (!cajaId) return actionError("Elegí una caja para registrar el cobro.");
+    // Tildó Factura A y el CUIT no está completo: se frena ACÁ. Cobrar igual
+    // dejaría a la empresa sin su A, y arreglarlo después es una nota de
+    // crédito — un comprobante fiscal real, no un undo (spec 053 · 156).
+    if (!comprobanteEsValido(comprobante)) {
+      return actionError(
+        "Para la Factura A falta el CUIT del receptor (11 dígitos).",
+      );
     }
-    if (!cajaId) {
-      toast.error("Elegí una caja para registrar el cobro.");
-      return;
-    }
-    startTransition(async () => {
-      const r = await venderMostrador({
+    return venderMostrador(
+      {
         business_slug: slug,
-        method,
-        caja_id: cajaId,
-        tip_cents: 0,
+        method: input.method,
+        caja_id: input.cajaId,
+        tip_cents: input.tipCents,
+        last_four: input.lastFour,
+        card_brand: input.cardBrand,
+        notes: input.notes,
         items: cart.map((c) => ({
           product_id: c.product_id,
           quantity: c.quantity,
           notes: c.notes || undefined,
           modifier_ids: c.modifiers.map((m) => m.id),
         })),
-        request_id: (requestIdRef.current ??= crypto.randomUUID()),
-        credit_customer_id:
-          method === "cuenta_corriente" ? clienteFiado?.id : undefined,
-      });
-      if (!r.ok) {
-        toast.error(r.error);
-        return;
-      }
-      requestIdRef.current = null; // cobro OK → la próxima venta usa clave nueva
-
-      if (r.data.ruteo_error) {
-        toast.warning(
-          `Venta #${r.data.daily_number} cobrada, pero la comanda no salió: ${r.data.ruteo_error}`,
-        );
-      } else if (r.data.comandas_creadas > 0) {
-        toast.success(
-          `Venta #${r.data.daily_number} cobrada · ${r.data.comandas_creadas} comanda${r.data.comandas_creadas === 1 ? "" : "s"} a cocina`,
-        );
-      } else {
-        toast.success(
-          `Venta #${r.data.daily_number} cobrada · ${formatCurrency(r.data.cobrado_cents)}`,
-        );
-      }
-
-      setUltima({
-        orderId: r.data.order_id,
-        orderNumber: r.data.daily_number,
-        totalCents: r.data.cobrado_cents,
-      });
-      // Listo para el próximo cliente: carrito limpio, foco en el buscador.
-      setCart([]);
-      searchApi.setSearch("");
-      focusSearch();
-    });
+        request_id: input.requestId,
+        credit_customer_id: input.creditCustomerId ?? undefined,
+      },
+      // spec 156 · D1 · 157 — lo elegido viaja CON el cobro, igual que en la mesa
+      // y en el pedido. Emitirlo después no alcanza: la automática ya salió.
+      comprobanteToInvoiceInput(comprobante),
+    );
   }
+
+  function cobrada(data: VentaMostradorResult) {
+    if (data.ruteo_error) {
+      toast.warning(
+        `Venta #${data.daily_number} cobrada, pero la comanda no salió: ${data.ruteo_error}`,
+      );
+    } else if (data.comandas_creadas > 0) {
+      toast.success(
+        `Venta #${data.daily_number} cobrada · ${data.comandas_creadas} comanda${data.comandas_creadas === 1 ? "" : "s"} a cocina`,
+      );
+    } else {
+      toast.success(
+        `Venta #${data.daily_number} cobrada · ${formatCurrency(data.cobrado_cents)}`,
+      );
+    }
+
+    // El comprobante lo emite el cobro. Si no salió, el pago igual quedó
+    // registrado: la plata nunca depende de ARCA (spec 147).
+    if (data.comprobante?.outcome === "rechazada") {
+      toast.warning(
+        `Venta #${data.daily_number} cobrada, pero el comprobante no se emitió: ${
+          data.comprobante.error ?? "error desconocido"
+        }.`,
+      );
+    }
+
+    setUltima({
+      orderId: data.order_id,
+      orderNumber: data.daily_number,
+      totalCents: data.cobrado_cents,
+      comprobante,
+      emision: data.comprobante,
+    });
+    // Listo para el próximo cliente: carrito limpio, comprobante en B otra vez
+    // —el CUIT del anterior no se le emite al que sigue— y foco en el buscador.
+    setCart([]);
+    setComprobante(comprobanteInicial());
+    searchApi.setSearch("");
+    focusSearch();
+  }
+
+  /** «Factura A» / «Factura B» — lo que se pidió al cobrar. */
+  const comprobanteLabel =
+    ultima?.comprobante.tipo === "factura_a" ? "Factura A" : "Factura B";
+  /** Salió (o ya estaba): no hay nada que reintentar. */
+  const emisionOk =
+    ultima?.emision?.outcome === "encolada" ||
+    ultima?.emision?.outcome === "ya-tiene";
 
   function facturarUltima() {
     if (!ultima) return;
@@ -348,7 +367,11 @@ export function VentaRapidaPanel({
       const r = await emitInvoice({
         orderId: ultima.orderId,
         slug,
-        tipoComprobante: "factura_b",
+        // El reintento emite **lo que se pidió al cobrar**. Antes iba
+        // `factura_b` hardcodeado: el mostrador —justo donde se factura el
+        // evento empresarial y el abono del sanatorio— no podía emitir una A
+        // ni cargando el CUIT (spec 157).
+        ...comprobanteToInvoiceInput(ultima.comprobante),
       });
       if (!r.ok) {
         toast.error(`No se pudo facturar: ${r.error}`);
@@ -522,129 +545,85 @@ export function VentaRapidaPanel({
               </ul>
             )}
 
-            {/* Caja — sólo si hay más de una que elegir. */}
-            {cajas.length > 1 && (
-              <div className="flex flex-wrap items-center gap-1.5 border-t border-zinc-100 px-3 py-2">
-                <span className="text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
-                  Caja
-                </span>
-                {cajas.map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={() => setCajaId(c.id)}
-                    className={`rounded-full px-2.5 py-1 text-xs font-semibold transition ${
-                      cajaId === c.id
-                        ? "bg-zinc-900 text-white"
-                        : "bg-white text-zinc-700 ring-1 ring-zinc-200"
-                    }`}
-                  >
-                    {c.name}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {/* Método de pago, con su recargo/descuento a la vista. */}
-            <div className="grid grid-cols-3 gap-1.5 border-t border-zinc-100 px-3 py-2">
-              {METODOS.map((m) => {
-                const pct =
-                  methodConfigs.find((c) => c.method === m.value)
-                    ?.adjustment_percent ?? 0;
-                return (
-                  <button
-                    key={m.value}
-                    onClick={() => setMethod(m.value)}
-                    className={`rounded-xl py-2 text-sm font-semibold transition ${
-                      method === m.value
-                        ? "bg-zinc-900 text-white"
-                        : "bg-white text-zinc-700 ring-1 ring-zinc-200"
-                    }`}
-                  >
-                    {m.label}
-                    {pct !== 0 && (
-                      <span
-                        className={`ml-1 text-[10px] font-bold ${
-                          method === m.value
-                            ? "text-white/70"
-                            : pct < 0
-                              ? "text-emerald-600"
-                              : "text-rose-600"
-                        }`}
-                      >
-                        {pct > 0 ? "+" : ""}
-                        {pct}%
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
+            {/* El total del carrito, sin ajuste de método: el mismo encuadre
+                que el sheet del pedido (spec 157 · D1). El recargo/descuento y
+                lo que se cobra de verdad los canta el botón de Confirmar. */}
+            <div className="flex items-baseline justify-between border-t border-zinc-100 px-3 py-2">
+              <span className="text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
+                Total
+              </span>
+              <span className="text-lg font-bold text-zinc-900 tabular-nums">
+                {formatCurrency(subtotal)}
+              </span>
             </div>
 
-            {method === "cuenta_corriente" && (
-              <div className="border-t border-zinc-100 px-3 py-2.5">
-                <FiarAQuien
-                  slug={slug}
-                  iniciales={[]}
-                  value={clienteFiado}
-                  onChange={setClienteFiado}
-                />
-              </div>
-            )}
-
-            <div className="flex items-center gap-2 border-t border-zinc-100 px-3 py-2.5">
-              <div className="min-w-0 flex-1">
-                <p className="text-[11px] text-zinc-500">
-                  {ajustePercent !== 0 ? (
-                    <>
-                      {formatCurrency(subtotal)}{" "}
-                      <span
-                        className={
-                          ajustePercent < 0
-                            ? "text-emerald-700"
-                            : "text-rose-600"
-                        }
-                      >
-                        {ajustePercent < 0 ? "−" : "+"}
-                        {formatCurrency(Math.abs(ajusteCents))}
-                      </span>
-                    </>
-                  ) : (
-                    "Total"
-                  )}
-                </p>
-                <p className="text-lg font-bold text-zinc-900 tabular-nums">
-                  {formatCurrency(totalACobrar)}
-                </p>
-              </div>
-              <button
-                onClick={cobrar}
-                ref={cobrarRef}
-                disabled={!canCobrar}
-                className="flex h-11 items-center gap-2 rounded-2xl bg-emerald-600 px-5 text-sm font-semibold text-white transition active:scale-[0.98] disabled:opacity-40"
-              >
-                {pending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Receipt className="h-4 w-4" />
-                )}
-                Cobrar {formatCurrency(totalACobrar)}
-              </button>
+            {/* spec 157 · D3 — el comprobante, el mismo de la mesa y el pedido.
+                Colapsado en Factura B, que es el 95 % del mostrador: la A cuesta
+                un tap, la B no cuesta ninguno. */}
+            <div className="border-t border-zinc-100 px-3 py-2.5">
+              <ComprobanteFields
+                slug={slug}
+                value={comprobante}
+                onChange={setComprobante}
+              />
             </div>
 
-            {/* Factura de la última venta — opcional, nunca frena la siguiente. */}
+            {/* spec 157 · D1 — el mismo formulario de la mesa y del pedido, en
+                su modo rápido (D2): método ya elegido, todo en una pantalla y el
+                foco intacto en el buscador. La grilla propia, el selector de
+                caja y el fiado cableado a mano vivían acá y se fueron: los tres
+                ya estaban resueltos adentro. */}
+            <div className="border-t border-zinc-100 px-3 py-2.5">
+              <CobroForm<VentaMostradorResult>
+                flujo="rapido"
+                confirmRef={cobrarRef}
+                amountDueCents={subtotal}
+                cajas={cajas}
+                cajaId={cajaId}
+                onCajaChange={setCajaId}
+                methodConfigs={methodConfigs}
+                // Sin `mp`: link y QR quedan afuera solos. Y sin
+                // `allowedMethods` a propósito — un método nuevo tiene que
+                // aparecer en las tres pantallas sin tocar tres archivos.
+                tip={{ mode: "none" }}
+                // spec 141 — el mostrador es justo donde el socio dice «ponelo
+                // en mi cuenta». Va sin lista de apertura: acá no hay cliente
+                // conocido de antemano, se busca o se da de alta en el momento.
+                cuentaCorriente={{ slug, clientes: [] }}
+                onSubmit={cobrar}
+                onPaid={cobrada}
+              />
+            </div>
+
+            {/* El desenlace del comprobante de la última venta. Nunca frena a
+                la siguiente: para cuando aparece, la venta ya está cobrada y el
+                carrito ya está vacío (spec 157 · D4). */}
             {ultima && (
               <div className="flex items-center gap-2 border-t border-zinc-100 bg-zinc-50 px-3 py-2">
-                <p className="min-w-0 flex-1 truncate text-[11px] text-zinc-600">
+                <p className="min-w-0 flex-1 text-[11px] text-zinc-600">
                   Venta #{ultima.orderNumber} cobrada ·{" "}
                   {formatCurrency(ultima.totalCents)}
+                  {emisionOk ? (
+                    <span className="font-semibold text-emerald-700">
+                      {" "}
+                      · {comprobanteLabel} ✓
+                    </span>
+                  ) : ultima.emision?.outcome === "rechazada" ? (
+                    <span className="block truncate font-semibold text-rose-600">
+                      {comprobanteLabel} rechazada:{" "}
+                      {ultima.emision.error ?? "error desconocido"}
+                    </span>
+                  ) : null}
                 </p>
-                <button
-                  onClick={facturarUltima}
-                  disabled={facturando}
-                  className="shrink-0 rounded-full bg-white px-3 py-1 text-[11px] font-semibold text-zinc-700 ring-1 ring-zinc-200 transition active:bg-zinc-100 disabled:opacity-40"
-                >
-                  {facturando ? "Facturando…" : "Facturar"}
-                </button>
+                {!emisionOk && (
+                  <button
+                    onClick={facturarUltima}
+                    disabled={facturando}
+                    className="shrink-0 rounded-full bg-white px-3 py-1 text-[11px] font-semibold text-zinc-700 ring-1 ring-zinc-200 transition active:bg-zinc-100 disabled:opacity-40"
+                  >
+                    {facturando ? "Facturando…" : "Reintentar"}
+                  </button>
+                )}
                 <button
                   onClick={() => setUltima(null)}
                   className="shrink-0 rounded-full p-1 text-zinc-400 active:bg-zinc-100"

@@ -3,6 +3,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
+import type { AutoEmitResult, ComprobanteElegido } from "@/lib/afip/auto-emit";
 import { calculateAdjustment } from "@/lib/billing/adjustment";
 import { registrarPago } from "@/lib/billing/cobro-actions";
 import {
@@ -35,6 +36,12 @@ export type VentaMostradorResult = {
   items_sin_sector: number;
   /** El ruteo falló pero la venta quedó cobrada igual (el aviso es del caller). */
   ruteo_error: string | null;
+  /**
+   * Qué pasó con el comprobante, tal cual lo devuelve `registrarPago`. La
+   * pantalla lo usa para avisar si el que se pidió no salió — la plata nunca
+   * depende de ARCA (spec 147 · 156).
+   */
+  comprobante?: AutoEmitResult;
 };
 
 export type VentaMostradorInit = {
@@ -111,6 +118,19 @@ const TELEFONO_MOSTRADOR = "-";
  */
 export async function venderMostrador(
   input: unknown,
+  /**
+   * El comprobante que el operador eligió al cobrar (spec 156 · D1), tal como
+   * ya lo mandan la mesa y el pedido. Es un **passthrough** al `registrarPago`
+   * de abajo, que es quien lo valida y lo emite; acá no se decide nada.
+   *
+   * Sin esto el mostrador no puede emitir una Factura A por más que la pantalla
+   * la pida (spec 157). Con `afip_auto_emit` prendido, la B automática sale
+   * primero y la guarda de la spec 100 bloquea la A para siempre; con el flag
+   * apagado —el caso de golf-jcr, el único negocio real que factura A— no sale
+   * nada. Los dos se resuelven acá: una elección explícita saltea el gate del
+   * flag y emite lo que se pidió (spec 156 · D3).
+   */
+  comprobante?: ComprobanteElegido | null,
 ): Promise<ActionResult<VentaMostradorResult>> {
   const parsed = VentaMostradorInput.safeParse(input);
   if (!parsed.success) {
@@ -187,6 +207,9 @@ export async function venderMostrador(
     slug: data.business_slug,
     requestId: data.request_id,
     creditCustomerId: data.credit_customer_id ?? null,
+    // La forma la valida `registrarPago` (`ComprobanteElegidoSchema`): esto
+    // llega del navegador y el borde es el suyo, no uno nuevo acá.
+    comprobante: comprobante ?? undefined,
   });
 
   if (!pago.ok) {
@@ -259,5 +282,6 @@ export async function venderMostrador(
     comandas_creadas: comandasCreadas,
     items_sin_sector: itemsSinSector,
     ruteo_error: ruteoError,
+    comprobante: pago.data.comprobante,
   });
 }
