@@ -24,6 +24,11 @@ export type RegistrarPagoResult = {
   payment: PaymentMergeInput;
   splitDone: boolean;
   orderClosed: boolean;
+  /**
+   * Qué pasó con el comprobante que se eligió al cobrar (spec 156 · D1). El
+   * merge no lo usa; la pantalla sí, para avisar si no salió.
+   */
+  comprobante?: { outcome: string; error?: string };
 };
 
 export type CobroMergeState = {

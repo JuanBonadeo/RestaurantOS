@@ -22,6 +22,14 @@ import {
 import type { CuentaState, OrderSplit } from "@/lib/billing/types";
 import { CobroForm } from "@/components/billing/cobro-form";
 import { FacturacionSection } from "@/components/billing/facturacion-section";
+import {
+  ComprobanteFields,
+  comprobanteEsValido,
+  comprobanteInicial,
+  comprobanteToInvoiceInput,
+  type ComprobanteState,
+} from "@/components/billing/comprobante-fields";
+import { actionError } from "@/lib/actions";
 import type { PaymentMethodConfig } from "@/lib/caja/types";
 import { useCajaPreferida } from "@/lib/caja/use-caja-preferida";
 import { formatCurrency } from "@/lib/currency";
@@ -115,6 +123,11 @@ export function CobrarClient({
 
   const [activeSplitId, setActiveSplitId] = useState<string | null>(null);
   const [cajaId, setCajaId] = useCajaPreferida(slug, init.cajas);
+  // spec 156 · D1 — el comprobante se elige ANTES de cobrar, no en la pantalla
+  // de después. Es de la orden, no del split: dividir no reinicia la elección.
+  const [comprobante, setComprobante] = useState<ComprobanteState>(
+    comprobanteInicial(),
+  );
   const activeSplit = splits.find((s) => s.id === activeSplitId) ?? null;
 
   // Stats globales para el header.
@@ -303,9 +316,18 @@ export function CobrarClient({
           isImplicit={init.hasImplicitSplit}
           methodConfigs={init.methodConfigs}
           orderTipCents={cuenta.order.tip_cents}
+          comprobante={comprobante}
+          onComprobanteChange={setComprobante}
           onClose={() => setActiveSplitId(null)}
           onPaid={(result) => {
             setActiveSplitId(null);
+            if (result?.comprobante?.outcome === "rechazada") {
+              toast.warning(
+                `Mesa cobrada. El comprobante no se emitió: ${
+                  result.comprobante.error ?? "error desconocido"
+                }. Avisale al encargado.`,
+              );
+            }
             if (result) {
               // Efectivo/tarjeta: mergeamos la fila que el server persistió
               // (instantáneo, sin recargar). Nunca antes del `ok`.
@@ -461,6 +483,8 @@ function CobrarSplitSheet({
   isImplicit,
   methodConfigs,
   orderTipCents,
+  comprobante,
+  onComprobanteChange,
   onClose,
   onPaid,
 }: {
@@ -471,6 +495,9 @@ function CobrarSplitSheet({
   isImplicit: boolean;
   methodConfigs: PaymentMethodConfig[];
   orderTipCents: number;
+  /** spec 156 · D1 — qué comprobante sale, elegido acá y no después. */
+  comprobante: ComprobanteState;
+  onComprobanteChange: (next: ComprobanteState) => void;
   onClose: () => void;
   /** `result` presente = efectivo/tarjeta (mergear); `null` = MP (refresh). */
   onPaid: (result: RegistrarPagoResult | null) => void;
@@ -507,6 +534,16 @@ function CobrarSplitSheet({
             </div>
           )}
 
+          {/* spec 156 · D1 — colapsado en Factura B: es el 95 % de los cobros
+              y no puede costar un tap de más en el teléfono del mozo (D2). */}
+          <div className="border-t border-zinc-100 pt-3">
+            <ComprobanteFields
+              slug={slug}
+              value={comprobante}
+              onChange={onComprobanteChange}
+            />
+          </div>
+
           <CobroForm
             amountDueCents={remaining}
             cajas={[]}
@@ -516,8 +553,19 @@ function CobrarSplitSheet({
             // La propina se carga en el paso Cuenta y viaja con la orden: acá
             // no se edita, sólo se muestra (hallazgo T002-2).
             tip={{ mode: "fixed", cents: orderTipCents }}
-            onSubmit={(input) =>
-              registrarPago({
+            onSubmit={(input) => {
+              // Tildó Factura A sin CUIT completo: se frena acá, no después de
+              // cobrar. Emitir una B que no se pidió obliga a una nota de
+              // crédito, que es un comprobante fiscal real y no un undo.
+              if (!comprobanteEsValido(comprobante)) {
+                return Promise.resolve(
+                  actionError(
+                    "Para la Factura A falta el CUIT del receptor (11 dígitos).",
+                  ),
+                );
+              }
+              return registrarPago({
+                comprobante: comprobanteToInvoiceInput(comprobante),
                 orderId,
                 splitId: isImplicit ? null : split.id,
                 method: input.method,
@@ -531,8 +579,8 @@ function CobrarSplitSheet({
                 adjustment_cents: input.adjustmentCents,
                 slug,
                 requestId: input.requestId,
-              })
-            }
+              });
+            }}
             onPaid={(data) => onPaid(data)}
             mp={{
               start: (input) =>

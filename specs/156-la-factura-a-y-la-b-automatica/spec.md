@@ -2,7 +2,7 @@
 
 **Issue:** [#233](https://github.com/gachetponzellini/RestaurantOS-app/issues/233) ·
 **Milestone:** Post-demo · Growth & hardening ·
-**Estado:** 📋 propuesto (2026-09-03)
+**Estado:** ✅ implementado (2026-09-04)
 
 **Input:** Juan, 2026-09-03, pegando el error que le salió al cobrar:
 
@@ -32,8 +32,9 @@ En el cobro de un pedido (`cobrar-pedido-sheet.tsx`):
 
 1. El operador **tilda «Factura A»** y carga el CUIT. La pantalla ya tiene el dato.
 2. Aprieta cobrar → `registrarPago` ([cobro-actions.ts:301](../../src/lib/billing/cobro-actions.ts))
-   cierra la orden y llama a `autoEmitInvoiceForOrder`, que emite **Factura B**:
-   nadie le pasó el tipo elegido, así que usa `afip_default_tipo`.
+   cierra la orden y llama a `autoEmitInvoiceForOrder`, que emite **Factura B**
+   —hardcodeada, ni siquiera `afip_default_tipo`: nadie le pasó el tipo elegido
+   porque hoy no hay por dónde pasárselo.
 3. Recién ahí el `onPaid` de la pantalla llama a `facturar()` con la A.
 4. El guard de la spec 100 encuentra la B `authorized` y devuelve el mensaje.
 
@@ -118,6 +119,14 @@ nada —`autoEmitInvoiceForOrder` corre después de cerrar la orden— y el pago
 la cierra es el que lo aplica. Si la mesa se cobra en dos sesiones distintas y la
 segunda no eligió, cae al comportamiento de siempre.
 
+**D8 · Si se tildó A y el CUIT no está completo, se frena el cobro.** Apareció
+al implementar y no estaba en la spec. Con la elección **antes** del cobro, las
+dos salidas malas son emitir una B que nadie pidió (obliga a una nota de crédito)
+o no emitir nada (la mesa cierra sin comprobante). La tercera es pedir los 11
+dígitos: quien tildó «Factura A» ya decidió que quiere una A, y completarla o
+destildarla son dos taps. El error sale en el mismo botón de cobrar, antes de
+tocar la plata.
+
 ## Alcance
 
 - **`registrarPago` acepta el comprobante elegido** (`cobro-actions.ts`) y lo
@@ -181,22 +190,46 @@ segunda no eligió, cae al comportamiento de siempre.
     (es parte de cobrar) pero **no** puede cambiar el tipo de un comprobante ya
     emitido (`canAnularFactura` lo deja afuera).
 
+## Qué se construyó
+
+| Archivo | Qué hace |
+|---|---|
+| `src/lib/afip/auto-emit.ts` | Acepta el comprobante elegido, saltea el flag con elección explícita (D3) y devuelve el motivo del rechazo |
+| `src/lib/billing/cobro-actions.ts` | `registrarPago` lo recibe (Zod en el borde), lo pasa a `closeOrderIfFullyPaid` y devuelve qué pasó |
+| Las tres pantallas de cobro | Montan `ComprobanteFields` **antes** del botón de cobrar, con la guarda del D8 |
+| `src/lib/afip/emit-invoice.ts` | `cambiarTipoDeComprobante`: NC de la B + emisión de la A (D5) |
+| `src/components/billing/cambiar-a-factura-a.tsx` | El botón, compartido entre Facturación y el cobro de mesa |
+
+`cobrar-pedido-sheet.tsx` dejó de llamar a `emitInvoice` por separado: era esa
+segunda llamada la que chocaba con el guard.
+
 ## Verificación
 
-Pendiente — spec propuesta, sin código.
+**Tests** — `pnpm typecheck` limpio y **2271 en verde** (209 archivos). En
+`auto-emit.test.ts`, cinco nuevos: que el tipo elegido llegue al motor con todos
+los datos del receptor, que una elección emita con el flag apagado, que una A
+rechazada **no** se caiga a B, que sin elección siga saliendo la B de la 147, y
+que una orden con comprobante vivo no emita aunque se haya elegido.
 
-El verify va en `demo`, que es el negocio con `afip_auto_emit` **prendido** y
-donde el bug se reproduce de una. Con el gateway en sandbox el CAE vuelve al
-instante y se ve la A completa. Con **Sofía (encargada)** para el cobro de mesa y
-el cambio de tipo, y con **Pedro (mozo)** para el escenario 12 — el mozo elige,
-pero no cambia.
+**En vivo** en `demo` (gateway en sandbox, `afip_auto_emit` prendido), con
+**Sofía (encargada)**:
 
-El escenario 5 (flag apagado + elección explícita) es el que **no** se puede
-probar en `demo` sin tocarle la config: se prueba con un negocio de prueba
-propio, o se deja anotado como verificado sólo por test.
+| # | Escenario | |
+|---|---|---|
+| 1 | Cobro de **pedido** con Factura A elegida → **una A, ninguna B** (CAE, CUIT, razón social, condición 1, `fiscal_entity_id`) | ✅ |
+| 2 | Cobro de **mesa** con Factura A elegida → lo mismo, **sin pantalla intermedia** | ✅ |
+| 3 | El error «esta orden ya tiene la Factura B» no apareció en ninguno de los dos | ✅ |
+| 4 | Cobro **sin tocar el control** → Factura B automática con CAE, igual que antes | ✅ |
+| 9 | «Cambiar a Factura A» sobre la B del escenario 4 → los **tres** comprobantes: B `cancelled` con motivo «Se reemplaza por Factura A a 30-50023730-5», NC B `authorized` con CAE, y Factura A `authorized` con CAE y receptor vinculado | ✅ |
 
-Ojo con el escenario 9: deja **tres** comprobantes en la orden (B anulada, NC, A)
-y hay que mirar los tres, no sólo que la A tenga CAE.
+El escenario 2 es el que importa: el control aparece **arriba de los métodos de
+pago**, colapsado en una línea, y el cobro de mesa —que antes no tenía forma de
+pedir una A a tiempo— emitió la A directo.
+
+**Sin verificar en vivo:** el escenario 5 (flag apagado + elección explícita)
+necesita tocarle la config a `demo`; queda cubierto por test. Los escenarios 6,
+7, 8, 10, 11 y 12 (rechazos de ARCA, pagos parciales, permisos del mozo) también
+quedan por test o sin ejercitar — ninguno es del camino feliz.
 
 ## Preguntas abiertas
 

@@ -22,6 +22,10 @@ import { formatCurrency } from "@/lib/currency";
 import { cn } from "@/lib/utils";
 
 import { FiscalEntitySearchField } from "./fiscal-entity-search-field";
+import {
+  CambiarAFacturaA,
+  sePuedeCambiarAFacturaA,
+} from "./cambiar-a-factura-a";
 
 // ============================================================================
 // Facturación AFIP post-cobro (spec 06 · 053), compartida.
@@ -212,6 +216,19 @@ export function FacturacionSection({
           >
             <FileText className="size-3" /> Ver PDF
           </a>
+        )}
+
+        {/* spec 156 · D5 — acá es donde el operador se entera: el cliente pide
+            la A mirando el ticket que le acaba de dar. Antes tenía que ir a
+            Facturación, anular a mano y quedarse sin dónde emitir la A. */}
+        {sePuedeCambiarAFacturaA(invoice) && (
+          <div className="mt-3">
+            <CambiarAFacturaA
+              invoice={invoice}
+              slug={slug}
+              onChanged={(facturaA) => facturaA && setInvoice(facturaA)}
+            />
+          </div>
         )}
       </section>
     );

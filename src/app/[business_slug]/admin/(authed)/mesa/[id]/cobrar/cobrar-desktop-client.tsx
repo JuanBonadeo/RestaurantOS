@@ -46,7 +46,15 @@ import {
 } from "@/lib/billing/cobro-actions";
 import type { CuentaState, OrderSplit } from "@/lib/billing/types";
 import { CobroForm } from "@/components/billing/cobro-form";
+import { actionError } from "@/lib/actions";
 import { FacturacionSection } from "@/components/billing/facturacion-section";
+import {
+  ComprobanteFields,
+  comprobanteEsValido,
+  comprobanteInicial,
+  comprobanteToInvoiceInput,
+  type ComprobanteState,
+} from "@/components/billing/comprobante-fields";
 import type { PaymentMethodConfig } from "@/lib/caja/types";
 import { useCajaPreferida } from "@/lib/caja/use-caja-preferida";
 import { formatCurrency } from "@/lib/currency";
@@ -83,6 +91,12 @@ type Props = {
    *  facturaba, y el encargado no llega a la sección Facturación (#137). */
   afipConfigured?: boolean;
 };
+
+/** Lo que devuelve un cobro OK — incluye el desenlace del comprobante (spec 156). */
+type CobroData = Extract<
+  Awaited<ReturnType<typeof registrarPago>>,
+  { ok: true }
+>["data"];
 
 export function CobrarDesktopClient({
   slug,
@@ -126,6 +140,11 @@ export function CobrarDesktopClient({
       null,
   );
   const [cajaId, setCajaId] = useCajaPreferida(slug, init.cajas);
+  // spec 156 · D1 — qué comprobante sale, elegido antes de cobrar. Es de la
+  // orden entera: si la cuenta se divide, la elección no se reinicia por split.
+  const [comprobante, setComprobante] = useState<ComprobanteState>(
+    comprobanteInicial(),
+  );
   const activeSplit = splits.find((s) => s.id === activeSplitId) ?? null;
 
   const total = cuenta.totals.total_cents;
@@ -316,7 +335,18 @@ export function CobrarDesktopClient({
               isImplicit={init.hasImplicitSplit}
               methodConfigs={init.methodConfigs}
               orderTipCents={cuenta.order.tip_cents}
-              onPaid={({ orderClosed }) => {
+              // El comprobante es de la ORDEN, no del split: vive en el padre
+              // para que dividir la cuenta no lo reinicie.
+              comprobante={comprobante}
+              onComprobanteChange={setComprobante}
+              onPaid={({ orderClosed, comprobante: emision }) => {
+                if (emision?.outcome === "rechazada") {
+                  toast.warning(
+                    `Mesa cobrada. El comprobante no se emitió: ${
+                      emision.error ?? "error desconocido"
+                    }. Reintentá desde Facturación.`,
+                  );
+                }
                 if (orderClosed) {
                   toast.success("Mesa cobrada");
                   // Con AFIP configurado NO nos vamos ni recargamos: la
@@ -520,6 +550,8 @@ function CobrarSplitPanel({
   isImplicit,
   methodConfigs,
   orderTipCents,
+  comprobante,
+  onComprobanteChange,
   onPaid,
   onClear,
 }: {
@@ -530,7 +562,10 @@ function CobrarSplitPanel({
   isImplicit: boolean;
   methodConfigs: PaymentMethodConfig[];
   orderTipCents: number;
-  onPaid: (result: { orderClosed: boolean }) => void;
+  /** spec 156 · D1 — el comprobante se elige ANTES de cobrar, acá mismo. */
+  comprobante: ComprobanteState;
+  onComprobanteChange: (next: ComprobanteState) => void;
+  onPaid: (result: { orderClosed: boolean; comprobante?: CobroData["comprobante"] }) => void;
   onClear: () => void;
 }) {
   const remaining = split.expected_amount_cents - split.paid_amount_cents;
@@ -557,7 +592,17 @@ function CobrarSplitPanel({
         </button>
       </header>
 
-      <CobroForm
+      {/* spec 156 · D1 — colapsado en Factura B por defecto: es el 95 % de los
+          cobros y no puede costar un tap de más en el camino caliente (D2). */}
+      <div className="border-t border-zinc-100 pt-3">
+        <ComprobanteFields
+          slug={slug}
+          value={comprobante}
+          onChange={onComprobanteChange}
+        />
+      </div>
+
+      <CobroForm<CobroData>
         amountDueCents={remaining}
         cajas={[]}
         cajaId={cajaId}
@@ -569,8 +614,19 @@ function CobrarSplitPanel({
         // apretaba el botón**. Es el mismo `mode: "fixed"` que usa la pantalla
         // del mozo.
         tip={{ mode: "fixed", cents: orderTipCents }}
-        onSubmit={(input) =>
-          registrarPago({
+        onSubmit={(input) => {
+          // Tildó Factura A sin CUIT completo: se frena acá. Emitir una B que no
+          // se pidió obliga después a una nota de crédito, que es un
+          // comprobante fiscal real y no un undo.
+          if (!comprobanteEsValido(comprobante)) {
+            return Promise.resolve(
+              actionError(
+                "Para la Factura A falta el CUIT del receptor (11 dígitos).",
+              ),
+            );
+          }
+          return registrarPago({
+            comprobante: comprobanteToInvoiceInput(comprobante),
             orderId,
             splitId: isImplicit ? null : split.id,
             method: input.method,
@@ -584,9 +640,11 @@ function CobrarSplitPanel({
             adjustment_cents: input.adjustmentCents,
             slug,
             requestId: input.requestId,
-          })
+          });
+        }}
+        onPaid={(data) =>
+          onPaid({ orderClosed: data.orderClosed, comprobante: data.comprobante })
         }
-        onPaid={(data) => onPaid({ orderClosed: data.orderClosed })}
         mp={{
           start: (input) =>
             iniciarPagoMp({

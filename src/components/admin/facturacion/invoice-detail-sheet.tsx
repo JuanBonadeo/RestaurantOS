@@ -6,6 +6,7 @@ import {
   Ban,
   Copy,
   ExternalLink,
+  FileText,
   Printer,
   RefreshCw,
   RotateCcw,
@@ -23,6 +24,10 @@ import {
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { anularFactura, emitInvoice, retryInvoice } from "@/lib/afip/emit-invoice";
+import {
+  CambiarAFacturaA,
+  sePuedeCambiarAFacturaA,
+} from "@/components/billing/cambiar-a-factura-a";
 import { classifyProviderError } from "@/lib/afip/error-classification";
 import { waitForInvoiceTerminal } from "@/lib/afip/poll";
 import {
@@ -326,6 +331,16 @@ export function InvoiceDetailSheet({
               />
               {imprimiendo ? "Enviando…" : "Imprimir factura"}
             </Button>
+          )}
+
+          {/* spec 156 · D5 — el cliente pide la A después, mirando el ticket
+              que ya se le dio. Mismo componente que monta el cobro de mesa. */}
+          {sePuedeCambiarAFacturaA(invoice) && (
+            <CambiarAFacturaA
+              invoice={invoice}
+              slug={slug}
+              onChanged={() => onRetried?.()}
+            />
           )}
 
           {invoice.status === "authorized" && (

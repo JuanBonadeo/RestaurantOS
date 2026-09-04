@@ -10,6 +10,7 @@ import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
 import { calculateAmounts } from "./calculate-amounts";
+import { formatCuit } from "./cuit";
 import { emitInvoiceCore, type EmitInput, type EmitResult } from "./emit-core";
 import type { AFIPProviderClient } from "./provider";
 import { selectProvider } from "./provider-config";
@@ -19,7 +20,12 @@ import {
   loadAFIPConfig,
   terminalPatch,
 } from "./reconcile";
-import type { Invoice, ProviderResult, TipoComprobante } from "./types";
+import type {
+  CondicionIvaReceptor,
+  Invoice,
+  ProviderResult,
+  TipoComprobante,
+} from "./types";
 
 type GenericClient = SupabaseClient;
 
@@ -425,5 +431,129 @@ export async function anularFactura(
   return actionOk({
     original: cancelledRow as Invoice,
     notaCredito,
+  });
+}
+
+
+type CambiarTipoInput = {
+  /** La factura vigente que se reemplaza (hoy, siempre una B). */
+  invoiceId: string;
+  slug: string;
+  cuitReceptor: string;
+  razonSocialReceptor?: string;
+  condicionIvaReceptor: CondicionIvaReceptor;
+  /** Entidad fiscal elegida en el buscador (spec 150). */
+  fiscalEntityId?: string;
+};
+
+type CambiarTipoResult = {
+  notaCredito: Invoice;
+  facturaA: Invoice;
+};
+
+/**
+ * Reemplaza una Factura B ya autorizada por una Factura A (spec 156 · D5).
+ *
+ * Es el caso que queda cuando **el cliente pide la A después**, mirando el
+ * ticket que ya se le dio. Con la elección antes de cobrar (D1) el otro caso
+ * —«la eligió y salió otra cosa»— desaparece; éste no, porque nadie puede
+ * adivinar que el comensal iba a pedir factura al irse.
+ *
+ * Hasta hoy el camino existía pero era inviable: el mensaje del guard decía
+ * «anulala antes de emitir otro tipo», y hacerlo significaba salir del cobro,
+ * buscar el comprobante en Facturación, anularlo… y después no había dónde
+ * emitir la A, porque la orden ya está cerrada y el sheet de cobro no vuelve.
+ *
+ * El orden importa y no es simétrico:
+ *
+ *  1. Se emite la **nota de crédito** de la B y se la marca anulada. Si esto
+ *     falla, la B sigue viva y no se emitió nada: se puede reintentar.
+ *  2. Recién ahí se emite la **A**. Si ESTO falla, la NC ya tiene CAE y no se
+ *     deshace — así que el error lo dice con todas las letras en vez de fingir
+ *     que no pasó nada.
+ *
+ * El motivo de la anulación no se le pregunta a nadie: lo sabemos. Un campo
+ * libre acá se llena con «cambio» y no explica nada dentro de seis meses.
+ */
+export async function cambiarTipoDeComprobante(
+  input: CambiarTipoInput,
+): Promise<ActionResult<CambiarTipoResult>> {
+  const business = await getBusiness(input.slug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  if (!canAnularFactura(ctxResult.data.role)) {
+    return actionError(
+      "Solo encargado o admin pueden cambiar el tipo de comprobante.",
+    );
+  }
+
+  const cuit = input.cuitReceptor.replace(/\D/g, "");
+  if (cuit.length !== 11) {
+    return actionError("El CUIT del receptor debe tener 11 dígitos.");
+  }
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+
+  const { data: originalRow } = await service
+    .from("invoices")
+    .select("*")
+    .eq("id", input.invoiceId)
+    .maybeSingle();
+  if (
+    !originalRow ||
+    (originalRow as { business_id: string }).business_id !== business.id
+  ) {
+    return actionError("Factura no encontrada.");
+  }
+  const original = originalRow as Invoice;
+
+  if (original.tipo_comprobante !== "factura_b") {
+    return actionError("Solo se puede cambiar una Factura B por una Factura A.");
+  }
+  if (!original.order_id) {
+    return actionError(
+      "Este comprobante no está asociado a un pedido; no se puede reemplazar.",
+    );
+  }
+
+  // ── 1. Anular la B ───────────────────────────────────────────────
+  // Reusa el camino de la spec 09, que ya emite la NC, espera su CAE y sólo
+  // entonces marca la original `cancelled`. Si la NC no se autoriza, la B queda
+  // intacta (escenario 10).
+  const anulada = await anularFactura({
+    invoiceId: original.id,
+    motivo: `Se reemplaza por Factura A a ${formatCuit(cuit)}`,
+    slug: input.slug,
+  });
+  if (!anulada.ok) return anulada;
+
+  // ── 2. Emitir la A ───────────────────────────────────────────────
+  // Clave de idempotencia propia: la derivada del pedido ya la gastó la B.
+  const emitida = await emitInvoiceCore(business.id, {
+    orderId: original.order_id,
+    paymentId: original.payment_id ?? undefined,
+    tipoComprobante: "factura_a",
+    cuitReceptor: cuit,
+    razonSocialReceptor: input.razonSocialReceptor,
+    condicionIvaReceptor: input.condicionIvaReceptor,
+    fiscalEntityId: input.fiscalEntityId,
+    slug: input.slug,
+    idempotencyKey: `cambio:${original.id}:factura_a`,
+  });
+
+  if (!emitida.ok) {
+    // La NC ya tiene CAE: no se puede volver atrás. Decirlo es lo único
+    // honesto — la orden quedó sin comprobante vigente y alguien tiene que
+    // emitir la A desde Facturación.
+    return actionError(
+      `La Factura B quedó anulada con su nota de crédito, pero la Factura A no se emitió: ${emitida.error} — reintentala desde Facturación.`,
+    );
+  }
+
+  return actionOk({
+    notaCredito: anulada.data.notaCredito,
+    facturaA: emitida.data.invoice,
   });
 }

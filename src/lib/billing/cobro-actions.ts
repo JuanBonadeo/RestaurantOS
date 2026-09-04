@@ -15,7 +15,12 @@ import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { elegirMozoAtribuido } from "@/lib/billing/atribucion-mozo";
 import { getBusiness } from "@/lib/tenant";
 
-import { autoEmitInvoiceForOrder } from "@/lib/afip/auto-emit";
+import {
+  autoEmitInvoiceForOrder,
+  ComprobanteElegidoSchema,
+  type AutoEmitResult,
+  type ComprobanteElegido,
+} from "@/lib/afip/auto-emit";
 import { formatInvoiceNumber, tipoLabel } from "@/lib/afip/format";
 import type { TipoComprobante } from "@/lib/afip/types";
 
@@ -165,7 +170,14 @@ export async function closeOrderIfFullyPaid(
   service: GenericClient,
   orderId: string,
   businessSlug: string,
-): Promise<{ orderClosed: boolean }> {
+  /**
+   * El comprobante que el operador eligió al cobrar (spec 156 · D1). Opcional:
+   * los otros caminos que cierran una orden —el webhook de MP, la corrección de
+   * un cobro— no tienen a nadie eligiendo nada y siguen cayendo en la B
+   * automática de la 147.
+   */
+  comprobante?: ComprobanteElegido | null,
+): Promise<{ orderClosed: boolean; comprobante?: AutoEmitResult }> {
   const business = await getBusiness(businessSlug);
   if (!business) return { orderClosed: false };
 
@@ -297,24 +309,29 @@ export async function closeOrderIfFullyPaid(
   // es un POST corto que devuelve un job id; nadie mira un spinner por eso (el
   // CAE llega después, spec 088). Un fire-and-forget acá moriría con la
   // invocación serverless.
+  let emision: AutoEmitResult | undefined;
   try {
-    const outcome = await autoEmitInvoiceForOrder({
+    emision = await autoEmitInvoiceForOrder({
       service,
       businessId: business.id,
       slug: businessSlug,
       order: { id: order.id, total_cents: order.total_cents, tip_cents: order.tip_cents },
+      comprobante,
     });
-    if (outcome === "rechazada") {
-      // El aviso interno ya salió desde el motor (D6); esto es para el log.
-      console.error("cobro: ARCA rechazó la emisión automática", {
+    if (emision.outcome === "rechazada") {
+      // El aviso interno ya salió desde el motor (D6); esto es para el log. El
+      // motivo además vuelve al caller: si el operador ELIGIÓ el comprobante,
+      // se enteró en la pantalla (spec 156).
+      console.error("cobro: ARCA rechazó la emisión", {
         orderId: order.id,
+        error: emision.error,
       });
     }
   } catch (err) {
     console.error("cobro: auto-emisión de comprobante", err);
   }
 
-  return { orderClosed: true };
+  return { orderClosed: true, comprobante: emision };
 }
 
 // ── Iniciar cobro ─────────────────────────────────────────────
@@ -400,6 +417,13 @@ export type RegistrarPagoInput = {
   slug: string;
   /** Idempotency key por intento de cobro (issue #58). Dedup en la RPC. */
   requestId?: string;
+  /**
+   * El comprobante elegido en la pantalla, antes de cobrar (spec 156 · D1).
+   * Ausente = como siempre: la B automática de la 147 si el negocio la tiene
+   * prendida. En un pago parcial no hace nada: la emisión cuelga del cierre de
+   * la orden, así que la aplica el pago que la salda (D7).
+   */
+  comprobante?: ComprobanteElegido;
 };
 
 /**
@@ -422,7 +446,15 @@ function mapRegistrarPagoError(message: string): string {
 
 export async function registrarPago(
   input: RegistrarPagoInput,
-): Promise<ActionResult<{ payment: Payment; splitDone: boolean; orderClosed: boolean }>> {
+): Promise<
+  ActionResult<{
+    payment: Payment;
+    splitDone: boolean;
+    orderClosed: boolean;
+    /** Qué pasó con el comprobante, para que la pantalla avise si no salió. */
+    comprobante?: AutoEmitResult;
+  }>
+> {
   const business = await getBusiness(input.slug);
   if (!business) return actionError("Negocio no encontrado.");
 
@@ -553,15 +585,32 @@ export async function registrarPago(
   // El cierre de la orden + liberación de mesa se mantienen en TS
   // (closeOrderIfFullyPaid, guardado por lifecycle_status e idempotente): no se
   // duplica esa lógica en SQL. En un retry idempotente la orden ya está cerrada.
+  // Borde: el comprobante viene del navegador. La forma se valida acá; la
+  // coherencia fiscal (que una A tenga CUIT, que la condición case con la
+  // letra) la valida `emitInvoiceCore`, que es donde vive esa regla.
+  const parsed = input.comprobante
+    ? ComprobanteElegidoSchema.safeParse(input.comprobante)
+    : null;
+  if (parsed && !parsed.success) {
+    return actionError("Datos del comprobante inválidos.");
+  }
+
   let orderClosed = false;
+  let comprobante: AutoEmitResult | undefined;
   if (row.fully_paid && !row.idempotent) {
-    const r = await closeOrderIfFullyPaid(service, order.id, input.slug);
+    const r = await closeOrderIfFullyPaid(
+      service,
+      order.id,
+      input.slug,
+      parsed?.data,
+    );
     orderClosed = r.orderClosed;
+    comprobante = r.comprobante;
   }
 
   revalidatePath(`/${input.slug}/mozo`);
   revalidatePath(`/${input.slug}/admin/operacion`);
-  return actionOk({ payment, splitDone, orderClosed });
+  return actionOk({ payment, splitDone, orderClosed, comprobante });
 }
 
 // ── Iniciar pago MP ───────────────────────────────────────────

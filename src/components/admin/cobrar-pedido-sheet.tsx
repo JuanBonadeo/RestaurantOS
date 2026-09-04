@@ -14,7 +14,7 @@ import {
 import { CobroForm } from "@/components/billing/cobro-form";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import type { AdminOrder } from "@/lib/admin/orders-query";
-import { emitInvoice } from "@/lib/afip/emit-invoice";
+import { actionError } from "@/lib/actions";
 import {
   iniciarCobro,
   registrarPago,
@@ -22,6 +22,12 @@ import {
 } from "@/lib/billing/cobro-actions";
 import { useCajaPreferida } from "@/lib/caja/use-caja-preferida";
 import { formatCurrency } from "@/lib/currency";
+
+/** Lo que devuelve un cobro OK — incluye el desenlace del comprobante (spec 156). */
+type CobroData = Extract<
+  Awaited<ReturnType<typeof registrarPago>>,
+  { ok: true }
+>["data"];
 
 /**
  * Cobrar / facturar un pedido para llevar o delivery **sin mesa**, desde el
@@ -87,25 +93,16 @@ export function CobrarPedidoSheet({
     ? Math.max(0, init.order.total_cents - init.order.total_paid_cents)
     : order.total_cents;
 
-  /** El comprobante es best-effort: si falla, el pago ya quedó registrado y se
-   *  puede re-facturar desde Facturación. Nunca bloquea el cobro. */
-  async function facturar() {
-    if (!comprobanteEsValido(comprobante)) {
-      toast.warning(
-        "Pago registrado. Faltaba el CUIT para la Factura A — emitila desde Facturación.",
-      );
-      return;
-    }
-    const factura = await emitInvoice({
-      orderId: order.id,
-      slug,
-      ...comprobanteToInvoiceInput(comprobante),
-    });
-    if (!factura.ok) {
-      toast.warning(
-        `Pago registrado. La factura no se emitió: ${factura.error}. Reintentá desde Facturación.`,
-      );
-    }
+  /** El comprobante lo emite el cobro (spec 156 · D1), así que acá sólo se
+   *  traduce el desenlace: si no salió, el pago igual quedó registrado y se
+   *  reintenta desde Facturación. La plata nunca depende de ARCA. */
+  function avisarComprobante(data: CobroData) {
+    if (data.comprobante?.outcome !== "rechazada") return;
+    toast.warning(
+      `Pago registrado. El comprobante no se emitió: ${
+        data.comprobante.error ?? "error desconocido"
+      }. Reintentá desde Facturación.`,
+    );
   }
 
   return (
@@ -139,7 +136,7 @@ export function CobrarPedidoSheet({
                 </span>
               </div>
 
-              <CobroForm
+              <CobroForm<CobroData>
                 amountDueCents={amountDueCents}
                 cajas={init.cajas}
                 cajaId={cajaId}
@@ -152,8 +149,23 @@ export function CobrarPedidoSheet({
                 // con $11.000, la caja esperaba $10.000 y el arqueo cerraba con
                 // sobrante todos los días.
                 tip={{ mode: "fixed", cents: init.order.tip_cents ?? 0 }}
-                onSubmit={(input) =>
-                  registrarPago({
+                onSubmit={(input) => {
+                  // Tildó Factura A y el CUIT no está completo: se frena ACÁ, no
+                  // después de cobrar. Con la elección antes del cobro (spec
+                  // 156) las dos salidas malas serían emitir una B que no se
+                  // pidió, o no emitir nada — y las dos se arreglan con dos
+                  // taps: completar el CUIT o destildar la A.
+                  if (!comprobanteEsValido(comprobante)) {
+                    return Promise.resolve(
+                      actionError(
+                        "Para la Factura A falta el CUIT del receptor (11 dígitos).",
+                      ),
+                    );
+                  }
+                  return registrarPago({
+                    // spec 156 · D1 — lo elegido viaja CON el cobro. Antes se
+                    // emitía después, y la B automática ya había salido.
+                    comprobante: comprobanteToInvoiceInput(comprobante),
                     orderId: order.id,
                     splitId: null,
                     method: input.method,
@@ -167,11 +179,11 @@ export function CobrarPedidoSheet({
                     adjustment_cents: input.adjustmentCents,
                     slug,
                     requestId: input.requestId,
-                  })
-                }
-                onPaid={async () => {
-                  await facturar();
+                  });
+                }}
+                onPaid={(data) => {
                   toast.success(`Pedido #${order.daily_number} cobrado.`);
+                  avisarComprobante(data);
                   onDone?.();
                   onClose();
                 }}
