@@ -12,10 +12,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import {
-  CobrosPorMetodo,
-  VentasPorOrigen,
-} from "@/components/admin/local/caja-metricas";
+import { VentasPorMetodo } from "@/components/admin/local/caja-metricas";
+import { CobrosPorOrigen } from "@/components/admin/local/cobros-por-origen";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -209,13 +207,16 @@ export function CerrarCajaModal({
 
               {stats.cobros_count > 0 && (
                 <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                  <VentasPorMetodo porMetodo={stats.ventas_por_metodo} />
                   <div>
                     <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
-                      Por método
+                      Por origen
                     </p>
-                    <CobrosPorMetodo porMetodo={stats.ventas_por_metodo} />
+                    <CobrosPorOrigen
+                      porOrigen={stats.ventas_por_origen}
+                      porOrigenYMetodo={stats.ventas_por_origen_y_metodo}
+                    />
                   </div>
-                  <VentasPorOrigen porOrigen={stats.ventas_por_origen} />
                 </div>
               )}
             </section>

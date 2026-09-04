@@ -137,6 +137,14 @@ export type CajaLiveStats = {
   total_propinas_cents: number;
   ventas_por_metodo: Record<PaymentMethod, number>;
   ventas_por_origen: Record<VentaOrigen, number>;
+  /**
+   * Origen × método: cuánto de cada origen entró por cada medio.
+   *
+   * Es lo que permite entender el arqueo: un delivery cobrado con tarjeta no
+   * pone un peso en el cajón, uno en efectivo sí. Los dos desgloses sueltos no
+   * lo decían.
+   */
+  ventas_por_origen_y_metodo: Record<VentaOrigen, Record<PaymentMethod, number>>;
   cobros_count: number;
   /** Cuántos cobros por método — el papel del cierre lleva columna «Cant». */
   cobros_por_metodo: Record<PaymentMethod, number>;

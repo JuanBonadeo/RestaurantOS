@@ -31,6 +31,23 @@ export const METHOD_LABEL: Record<PaymentMethod, string> = {
   other: "Otro",
 };
 
+/**
+ * Un tono por método, **estable en toda la pantalla**: el mismo color significa
+ * el mismo medio en la barra de arriba y en la de cada origen, que es lo que
+ * hace comparable un origen con otro de un vistazo.
+ *
+ * El efectivo va primero y más oscuro a propósito: es el único que se cuenta
+ * al cerrar.
+ */
+export const METHOD_COLOR: Record<PaymentMethod, string> = {
+  cash: "#18181B",
+  mp_qr: "#52525B",
+  mp_link: "#71717A",
+  card_manual: "#A1A1AA",
+  transfer: "#C4C4C8",
+  other: "#D4D4D8",
+};
+
 export function methodIcon(method: PaymentMethod) {
   switch (method) {
     case "cash": return Banknote;
@@ -166,6 +183,85 @@ export function VentasPorOrigen({
           );
         })}
       </ul>
+    </section>
+  );
+}
+
+
+/**
+ * Cobrado por método, como bloque propio (pedido de Juan, 2026-09-03).
+ *
+ * Es el mismo desglose que `CobrosPorMetodo` pero pensado para el lugar donde
+ * antes iba el de origen: primero el total de cada medio, con su barra lateral.
+ * El color de cada método es el mismo que usa el desglose por origen, así las
+ * dos mitades de la pantalla se leen juntas.
+ */
+export function VentasPorMetodo({
+  porMetodo,
+}: {
+  porMetodo: Record<PaymentMethod, number>;
+}) {
+  const metodos = COBRO_METHOD_ORDER.map((key) => ({
+    key,
+    label: METHOD_LABEL[key],
+    Icon: methodIcon(key),
+    amount: porMetodo[key] ?? 0,
+  }));
+  const total = metodos.reduce((s, m) => s + m.amount, 0);
+  const activos = metodos
+    .filter((m) => m.amount > 0)
+    .sort((a, b) => b.amount - a.amount);
+  const vacios = metodos.filter((m) => m.amount === 0);
+
+  return (
+    <section className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200/70">
+      <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+        Cobrado por método
+      </p>
+
+      {activos.length === 0 ? (
+        <p className="mt-3 text-sm text-zinc-500">Todavía no se cobró nada.</p>
+      ) : (
+        <ul className="mt-3 space-y-3">
+          {activos.map(({ key, label, Icon, amount }) => {
+            const pct = total > 0 ? (amount / total) * 100 : 0;
+            return (
+              <li key={key}>
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="inline-flex items-baseline gap-2 text-sm">
+                    <Icon className="size-3.5 shrink-0 translate-y-px text-zinc-400" />
+                    <span className="font-medium text-zinc-700">{label}</span>
+                  </span>
+                  <span className="flex shrink-0 items-baseline gap-2">
+                    <span className="text-base font-bold tracking-tight text-zinc-900 tabular-nums">
+                      {formatCurrency(amount)}
+                    </span>
+                    <span className="text-xs font-medium tabular-nums text-zinc-400">
+                      {pct.toFixed(0)}%
+                    </span>
+                  </span>
+                </div>
+                <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-zinc-100">
+                  <div
+                    className="h-full rounded-full"
+                    style={{
+                      width: `${Math.max(pct, 2)}%`,
+                      background: METHOD_COLOR[key],
+                    }}
+                  />
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {vacios.length > 0 && activos.length > 0 && (
+        <p className="mt-3.5 border-t border-zinc-100 pt-2.5 text-[0.7rem] leading-relaxed text-zinc-400">
+          <span className="font-medium text-zinc-500">Sin movimientos:</span>{" "}
+          {vacios.map((m) => m.label).join(", ")}
+        </p>
+      )}
     </section>
   );
 }

@@ -59,6 +59,12 @@ function data(over: Partial<CierreCajaData> = {}): CierreCajaData {
       total_propinas_cents: 12_000,
       ventas_por_metodo: { ...EMPTY_METODO, cash: 312_400, mp_qr: 187_600 },
       cobros_por_metodo: { ...EMPTY_METODO, cash: 4, mp_qr: 2 },
+      ventas_por_origen_y_metodo: {
+        salon: { ...EMPTY_METODO, cash: 312_400, mp_qr: 187_600 },
+        delivery: { ...EMPTY_METODO },
+        takeaway: { ...EMPTY_METODO },
+        otro: { ...EMPTY_METODO },
+      },
       cobros_por_origen: { salon: 6, delivery: 0, takeaway: 0, otro: 0 },
       ventas_por_origen: {
         salon: 400_000,

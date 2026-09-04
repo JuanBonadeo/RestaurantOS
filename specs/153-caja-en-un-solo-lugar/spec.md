@@ -182,6 +182,35 @@ paso, pero el arreglo es de esa issue, no de ésta.
 10. **Dado** una caja de **otro** negocio, **entonces** no aparece ni se puede
     abrir por URL.
 
+## D10 · Los dos desgloses se cruzan (2026-09-03)
+
+Juan, mirando la caja viva: *"en la parte que dice cobrado por origen que muestre
+cobrado por método […] y abajo donde ahora dice cobros por método que diga cobros
+por origen, y que diferencie de cada origen cuánto debería haber cobrado de cada
+método"*.
+
+**Los dos desgloses que había no se podían leer juntos.** La pantalla decía
+«Salón $ 206.500» y «Efectivo $ 228.500» sin ninguna forma de saber **cuánto del
+salón fue en efectivo** — que es justo lo que explica el arqueo: un delivery
+cobrado con tarjeta no pone un peso en el cajón, uno en efectivo sí.
+
+- Los bloques **se intercambian**: arriba «Cobrado por método» con su barra,
+  abajo «Cobros por origen».
+- El de origen suma el **cruce**: total del origen + barra apilada por método +
+  el monto de cada método escrito. El gráfico da la proporción de un vistazo, el
+  número es el que se usa para cuadrar.
+- Un color por método, **el mismo en las dos mitades** de la pantalla
+  (`METHOD_COLOR`): así un origen se compara con otro sin leer las etiquetas.
+- El cambio aplica a las **tres** superficies que mostraban estos bloques: la
+  caja viva, el modal de cierre y el resumen archivado.
+
+**Dato nuevo:** `ventas_por_origen_y_metodo` en `CajaLiveStats`, de la función
+pura `cruzarOrigenYMetodo`. Sin migración: se calcula de los mismos `payments`.
+
+Sus tests fijan lo que importa: **cada fila cierra con el total de su origen y
+cada columna con el total de su método**. Si el cruce derivara, las dos mitades
+de la pantalla mostrarían plata distinta para los mismos cobros.
+
 ## Verificación
 
 `pnpm typecheck` en 0 errores y **2223 tests unitarios en verde** (los 21

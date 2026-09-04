@@ -8,7 +8,11 @@ import { calculateExpectedCash, separarRetiroDelCierre } from "./expected-cash";
 import { calcularRendicionMozo } from "./liquidacion-mozo";
 import { mozosQueDebenRendir } from "./deben-rendir";
 import { repartirEfectivoEsperado, type RepartoEfectivo } from "./reparto-efectivo";
-import { agruparVentasPorOrigen, origenDeDeliveryType } from "./ventas-por-origen";
+import {
+  agruparVentasPorOrigen,
+  cruzarOrigenYMetodo,
+  origenDeDeliveryType,
+} from "./ventas-por-origen";
 import { encadenarPeriodos, ventanaDelCorte } from "./historial-cortes";
 import type {
   Caja,
@@ -483,6 +487,7 @@ async function getCajaStatsEnVentana(
     total_propinas_cents,
     ventas_por_metodo,
     ventas_por_origen: agruparVentasPorOrigen(payments),
+    ventas_por_origen_y_metodo: cruzarOrigenYMetodo(payments),
     cobros_count: payments.length,
     cobros_por_metodo,
     cobros_por_origen,

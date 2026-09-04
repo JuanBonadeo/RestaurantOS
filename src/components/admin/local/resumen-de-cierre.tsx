@@ -3,10 +3,8 @@ import { ChevronLeft, ScrollText, TriangleAlert } from "lucide-react";
 import { formatInTimeZone } from "date-fns-tz";
 import { es } from "date-fns/locale";
 
-import {
-  CobrosPorMetodo,
-  VentasPorOrigen,
-} from "@/components/admin/local/caja-metricas";
+import { VentasPorMetodo } from "@/components/admin/local/caja-metricas";
+import { CobrosPorOrigen } from "@/components/admin/local/cobros-por-origen";
 import { Diferencia } from "@/components/admin/local/cierres-client";
 import { ReimprimirCierreBoton } from "@/components/admin/local/reimprimir-cierre-boton";
 import { MovimientoRow } from "@/components/admin/local/movimiento-row";
@@ -229,7 +227,7 @@ export function ResumenDeCierre({
             Lo que entró en el turno
           </p>
           <h2 className="mt-1 text-xl font-semibold tracking-tight text-zinc-900">
-            Cobrado por método
+            Cobros por origen
           </h2>
           <div className="mt-4 grid grid-cols-3 gap-3">
             <Mini label="Ventas" value={formatCurrency(stats.total_ventas_cents)} />
@@ -240,11 +238,14 @@ export function ResumenDeCierre({
             />
             <Mini label="Cobros" value={String(stats.cobros_count)} />
           </div>
-          <CobrosPorMetodo porMetodo={stats.ventas_por_metodo} />
+          <CobrosPorOrigen
+            porOrigen={stats.ventas_por_origen}
+            porOrigenYMetodo={stats.ventas_por_origen_y_metodo}
+          />
         </div>
 
         <div className="space-y-4">
-          <VentasPorOrigen porOrigen={stats.ventas_por_origen} />
+          <VentasPorMetodo porMetodo={stats.ventas_por_metodo} />
 
           <div className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200/70">
             <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">

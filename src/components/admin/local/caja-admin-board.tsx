@@ -16,11 +16,11 @@ import { toast } from "sonner";
 import { Surface } from "@/components/admin/shell/page-shell";
 import { CerrarCajaModal } from "@/components/admin/local/cerrar-caja-modal";
 import {
-  CobrosPorMetodo,
   METHOD_LABEL,
-  VentasPorOrigen,
+  VentasPorMetodo,
   methodIcon,
 } from "@/components/admin/local/caja-metricas";
+import { CobrosPorOrigen } from "@/components/admin/local/cobros-por-origen";
 import { SegmentedSelector } from "@/components/admin/local/segmented-selector";
 import { Button } from "@/components/ui/button";
 import {
@@ -317,6 +317,7 @@ function CajaCard({
   const cobros = stats?.cobros_count ?? 0;
   const porMetodo = stats?.ventas_por_metodo;
   const porOrigen = stats?.ventas_por_origen;
+  const porOrigenYMetodo = stats?.ventas_por_origen_y_metodo;
   const periodoDesdeFecha = stats?.periodo_desde ?? caja.periodo_desde;
 
   const periodoLabel = (() => {
@@ -459,15 +460,18 @@ function CajaCard({
         </div>
       </div>
 
-      {porOrigen && cobros > 0 && <VentasPorOrigen porOrigen={porOrigen} />}
+      {porMetodo && cobros > 0 && <VentasPorMetodo porMetodo={porMetodo} />}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <section className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200/70">
           <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
-            Cobros por método
+            Cobros por origen
           </p>
-          {porMetodo && cobros > 0 ? (
-            <CobrosPorMetodo porMetodo={porMetodo} />
+          {porOrigen && porOrigenYMetodo && cobros > 0 ? (
+            <CobrosPorOrigen
+              porOrigen={porOrigen}
+              porOrigenYMetodo={porOrigenYMetodo}
+            />
           ) : (
             <p className="mt-3 text-xs text-zinc-500">Todavía no hubo cobros.</p>
           )}

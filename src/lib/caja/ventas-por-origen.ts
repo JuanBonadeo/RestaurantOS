@@ -1,4 +1,13 @@
-import type { VentaOrigen } from "./types";
+import type { PaymentMethod, VentaOrigen } from "./types";
+
+const EMPTY_BY_METHOD: Record<PaymentMethod, number> = {
+  cash: 0,
+  card_manual: 0,
+  mp_link: 0,
+  mp_qr: 0,
+  transfer: 0,
+  other: 0,
+};
 
 export const EMPTY_BY_ORIGEN: Record<VentaOrigen, number> = {
   salon: 0,
@@ -52,6 +61,49 @@ export function agruparVentasPorOrigen(
   for (const p of payments) {
     const origen = origenDeDeliveryType(p.delivery_type);
     acc[origen] += p.amount_cents - (p.tip_cents ?? 0);
+  }
+  return acc;
+}
+
+
+/** Origen × método: cuánto entró por cada medio, dentro de cada origen. */
+export type VentasPorOrigenYMetodo = Record<
+  VentaOrigen,
+  Record<PaymentMethod, number>
+>;
+
+export const EMPTY_ORIGEN_METODO = (): VentasPorOrigenYMetodo => ({
+  salon: { ...EMPTY_BY_METHOD },
+  delivery: { ...EMPTY_BY_METHOD },
+  takeaway: { ...EMPTY_BY_METHOD },
+  otro: { ...EMPTY_BY_METHOD },
+});
+
+/**
+ * El cruce origen × método (pedido de Juan, 2026-09-03).
+ *
+ * Los dos desgloses que había —por origen y por método— no se podían leer
+ * juntos: la pantalla decía «Salón $206.500» y «Efectivo $228.500» sin ninguna
+ * forma de saber **cuánto del salón fue en efectivo**, que es justo lo que hay
+ * que saber para entender el arqueo. Un delivery cobrado con tarjeta no pone un
+ * peso en el cajón; uno cobrado en efectivo sí.
+ *
+ * Misma regla de plata que el resto: la venta es `amount − tip` (spec 098), así
+ * que cada celda cierra contra `agruparVentasPorOrigen` y contra
+ * `ventas_por_metodo` sumando por la otra dimensión.
+ */
+export function cruzarOrigenYMetodo(
+  payments: Array<{
+    delivery_type: string;
+    method: PaymentMethod;
+    amount_cents: number;
+    tip_cents?: number;
+  }>,
+): VentasPorOrigenYMetodo {
+  const acc = EMPTY_ORIGEN_METODO();
+  for (const p of payments) {
+    const origen = origenDeDeliveryType(p.delivery_type);
+    acc[origen][p.method] += p.amount_cents - (p.tip_cents ?? 0);
   }
   return acc;
 }
