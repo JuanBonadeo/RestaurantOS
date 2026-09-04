@@ -104,9 +104,19 @@ export function FiarAQuien({
   if (creando) {
     return (
       <div className="grid gap-2 rounded-xl bg-zinc-50 p-3 ring-1 ring-zinc-200">
-        <span className="text-xs font-semibold text-zinc-600">
-          Cliente nuevo
-        </span>
+        <div className="grid gap-0.5">
+          <span className="text-xs font-semibold text-zinc-600">
+            Abrir cuenta corriente
+          </span>
+          {/* El teléfono es la clave única de `customers`: si el cliente ya
+              existe en el negocio, esto NO lo duplica — le abre la cuenta al que
+              ya estaba. Decirlo evita que el encargado dude y vaya a buscarlo a
+              Clientes, que es el viaje que esta pantalla vino a sacar. */}
+          <span className="text-[11px] text-zinc-500">
+            Si el teléfono ya está cargado, se le abre la cuenta a ese mismo
+            cliente.
+          </span>
+        </div>
         <input
           value={nuevoNombre}
           onChange={(e) => setNuevoNombre(e.target.value)}
@@ -149,7 +159,7 @@ export function FiarAQuien({
             }
             className="flex-1 rounded-lg bg-zinc-900 py-2 text-sm font-semibold text-white disabled:opacity-50"
           >
-            {guardando ? "Creando…" : "Crear y fiar"}
+            {guardando ? "Abriendo…" : "Abrir cuenta"}
           </button>
         </div>
       </div>
@@ -224,7 +234,7 @@ export function FiarAQuien({
         )}
       >
         <UserPlus className="size-4" />
-        Fiarle a alguien nuevo
+        Abrir cuenta a alguien más
       </button>
     </div>
   );

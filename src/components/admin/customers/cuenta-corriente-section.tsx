@@ -12,9 +12,11 @@ import { cn } from "@/lib/utils";
 /**
  * Cuenta corriente en la ficha del cliente — spec 141 · US1.
  *
- * El switch es la única puerta para habilitar a alguien: el buscador del cobro
- * ofrece exactamente a los que están acá en on (D2), y no hay tope de monto —
- * el control es el gate de rol más el saldo a la vista.
+ * **No es la única puerta** (D2 revisada, 2026-09-03): fiarle a alguien desde el
+ * cobro le abre la cuenta sola, que es como pasa en el mostrador. Este switch
+ * sirve para lo otro — **quitarle** el permiso a un moroso, y ver su saldo y su
+ * libro con la cabeza fría. Sin tope de monto: el control es el gate de rol más
+ * el saldo a la vista.
  */
 export function CuentaCorrienteSection({
   slug,

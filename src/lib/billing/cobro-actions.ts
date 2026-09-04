@@ -549,10 +549,21 @@ export async function registrarPago(input: RegistrarPagoInput): Promise<
     if (!row || row.business_id !== business.id) {
       return actionError("Cliente no encontrado.");
     }
+    // D2 revisada — fiarle a alguien LE ABRE la cuenta. Antes esto rechazaba
+    // con «se habilita desde su ficha», que es justo el viaje que la revisión
+    // vino a sacar: el buscador ya deja elegir a cualquier cliente, así que
+    // rechazar acá dejaba un camino muerto — se lo elige y el cobro falla.
+    //
+    // Habilitar es la misma decisión que fiar (`canFiar` gatea las dos), y el
+    // control sigue siendo el rol más el saldo a la vista.
     if (!row.credit_enabled) {
-      return actionError(
-        "Ese cliente no tiene cuenta corriente habilitada. Se habilita desde su ficha.",
-      );
+      const { error: habErr } = await service
+        .from("customers")
+        .update({ credit_enabled: true })
+        .eq("id", row.id);
+      if (habErr) {
+        return actionError("No pudimos abrirle la cuenta corriente.");
+      }
     }
     creditCustomerId = row.id;
   } else if (input.creditCustomerId) {
