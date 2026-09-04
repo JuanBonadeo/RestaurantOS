@@ -33,6 +33,8 @@ type InvoiceRef = {
   tipo_comprobante: TipoComprobante;
   punto_venta: number;
   numero: number | null;
+  /** `pending` (encolada en el gateway, sin CAE todavía) o `authorized`. */
+  status: string;
 };
 
 const UNIQUE_VIOLATION = "23505";
@@ -150,7 +152,10 @@ export async function emitInvoiceCore(
   const tipo = input.tipoComprobante ?? afipConfig.defaultTipo;
 
   // Factura A requiere CUIT receptor.
-  if ((tipo === "factura_a" || tipo === "nota_credito_a") && !input.cuitReceptor) {
+  if (
+    (tipo === "factura_a" || tipo === "nota_credito_a") &&
+    !input.cuitReceptor
+  ) {
     return actionError("Para factura/NC tipo A se requiere CUIT del receptor.");
   }
 
@@ -212,16 +217,47 @@ export async function emitInvoiceCore(
   //
   // Las NC quedan fuera del filtro a propósito: son comprobantes de la misma
   // orden y `authorized`, pero no son "la factura vigente" de nadie.
+  //
+  // spec 147 — el filtro de estado era `.eq("status", "authorized")`, y eso
+  // alcanzaba mientras TODA emisión naciera de un gesto humano. La emisión
+  // automática rompió el supuesto: con el gateway real, `enqueue` devuelve
+  // `202 {job_id}` y la factura queda **`pending`** un promedio de 28 minutos
+  // (medido en spec 088). En esa ventana la guarda no veía nada y el índice
+  // único tampoco —`invoices_order_tipo_active_uq` es
+  // `(business_id, order_id, tipo_comprobante)`, así que una A `pending` entra
+  // al lado de una B `pending`—, y salían **dos comprobantes con CAE por el
+  // mismo consumo**. Exactamente lo que la D5 de la 147 quería evitar.
+  //
+  // Y no era una carrera improbable: en `cobrar-pedido-sheet` el `onPaid` llama
+  // a `facturar()` justo después de `registrarPago`, que ya disparó la
+  // automática. Con el flag prendido, auto-B (pending) + A manual es la
+  // secuencia normal, no el caso raro.
+  //
+  // No se vio antes porque el sandbox devuelve `authorized` en el propio
+  // `enqueue`: el estado que abre el agujero es inalcanzable fuera de
+  // producción. La guarda del camino automático (`auto-emit.ts`) ya miraba los
+  // dos estados; ésta era la mitad que faltaba.
   const { data: existingAuth } = await service
     .from("invoices")
-    .select("tipo_comprobante, punto_venta, numero")
+    .select("tipo_comprobante, punto_venta, numero, status")
     .eq("order_id", input.orderId)
     .in("tipo_comprobante", ["factura_a", "factura_b"])
-    .eq("status", "authorized")
+    .in("status", ["pending", "authorized"])
     .limit(1);
   const vigente = ((existingAuth ?? []) as InvoiceRef[])[0];
   if (vigente) {
     const mismoTipo = vigente.tipo_comprobante === tipo;
+    // Una `pending` todavía no tiene número: nombrarla por tipo es lo único
+    // honesto. Se bloquea igual —esperar es infinitamente mejor que emitir dos
+    // y resolverlo con una nota de crédito—, y el estado se ve en Facturación,
+    // donde el cron de la spec 088 la va a cerrar en un sentido o en el otro.
+    if (vigente.status === "pending") {
+      return actionError(
+        mismoTipo
+          ? "Esta orden ya tiene una factura en proceso. Esperá a que ARCA la confirme — la vas a ver en Facturación."
+          : `Esta orden ya tiene una ${tipoLabel(vigente.tipo_comprobante)} en proceso. Esperá a que ARCA la confirme antes de emitir otro tipo de comprobante.`,
+      );
+    }
     return actionError(
       mismoTipo
         ? "Esta orden ya tiene una factura autorizada."
@@ -404,7 +440,8 @@ export async function emitInvoiceCore(
         .from("invoices")
         .update({ fiscal_entity_id: creada.id })
         .eq("id", invoice.id);
-      if (linkErr) console.error("emitInvoiceCore: vínculo con la entidad", linkErr);
+      if (linkErr)
+        console.error("emitInvoiceCore: vínculo con la entidad", linkErr);
       else invoice.fiscal_entity_id = creada.id;
     }
   }
@@ -435,7 +472,11 @@ async function resolverEntidadElegida(
   if (cuit.length !== 11) return null;
 
   if (input.fiscalEntityId) {
-    const elegida = await getFiscalEntity(service, businessId, input.fiscalEntityId);
+    const elegida = await getFiscalEntity(
+      service,
+      businessId,
+      input.fiscalEntityId,
+    );
     if (elegida && elegida.cuit === cuit) return elegida;
   }
   return buscarEntidadPorCuit(service, businessId, cuit);
