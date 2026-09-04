@@ -2,7 +2,9 @@
 
 **Issue:** [#213](https://github.com/gachetponzellini/RestaurantOS-app/issues/213) ·
 **Milestone:** Post-demo · Growth & hardening ·
-**Estado:** **propuesta** — approval gate: sin código hasta el OK de Juan. ·
+**Estado:** ✅ **implementada** (2026-09-03) — migración `0065` al cloud, dominio,
+fiar, la tab, la ficha del cliente y el plano de mostrador borrado. Falta el
+verify en vivo con el rol real. ·
 **Diseño:** [canvas de 4 artboards](https://claude.ai/code/artifact/8e0ff51e-3301-4bf9-b5fc-6f467528f6ea)
 (la tab con datos · vacía · fiar desde el cobro · cobrar el saldo).
 
