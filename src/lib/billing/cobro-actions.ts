@@ -4,11 +4,18 @@ import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
-import { getCajasForBusiness, getPaymentMethodConfigs } from "@/lib/caja/queries";
-import type { Caja, PaymentMethod, PaymentMethodConfig } from "@/lib/caja/types";
+import {
+  getCajasForBusiness,
+  getPaymentMethodConfigs,
+} from "@/lib/caja/queries";
+import type {
+  Caja,
+  PaymentMethod,
+  PaymentMethodConfig,
+} from "@/lib/caja/types";
 import { requireMozoActionContext } from "@/lib/mozo/auth";
 import { bloqueoPorPeriodoCerrado } from "@/lib/caja/periodo-cerrado";
-import { canCancelItem } from "@/lib/permissions/can";
+import { canCancelItem, canFiar } from "@/lib/permissions/can";
 import { createPreference } from "@/lib/payments/mercadopago";
 import { formatCurrency } from "@/lib/currency";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
@@ -143,7 +150,8 @@ async function deriveAttributedMozo(
       .select("mozo_id")
       .eq("id", tableId)
       .maybeSingle();
-    mesaMozoId = (tableRow as { mozo_id: string | null } | null)?.mozo_id ?? null;
+    mesaMozoId =
+      (tableRow as { mozo_id: string | null } | null)?.mozo_id ?? null;
   }
 
   // 2. `loaded_by` del último item activo, para lo que no tiene mesa asignada.
@@ -315,7 +323,11 @@ export async function closeOrderIfFullyPaid(
       service,
       businessId: business.id,
       slug: businessSlug,
-      order: { id: order.id, total_cents: order.total_cents, tip_cents: order.tip_cents },
+      order: {
+        id: order.id,
+        total_cents: order.total_cents,
+        tip_cents: order.tip_cents,
+      },
       comprobante,
     });
     if (emision.outcome === "rechazada") {
@@ -376,7 +388,9 @@ export async function iniciarCobro(
     getPaymentMethodConfigs(business.id),
   ]);
   if (cajas.length === 0) {
-    return actionError("No hay caja configurada. Pedile al admin que cree una.");
+    return actionError(
+      "No hay caja configurada. Pedile al admin que cree una.",
+    );
   }
 
   const { data: splitsData } = await service
@@ -418,6 +432,12 @@ export type RegistrarPagoInput = {
   /** Idempotency key por intento de cobro (issue #58). Dedup en la RPC. */
   requestId?: string;
   /**
+   * A quién se le fía (spec 141). Obligatorio sii `method = 'cuenta_corriente'`
+   * — el check de la base lo exige, y la action lo valida antes con un mensaje
+   * que se entiende.
+   */
+  creditCustomerId?: string | null;
+  /**
    * El comprobante elegido en la pantalla, antes de cobrar (spec 156 · D1).
    * Ausente = como siempre: la B automática de la 147 si el negocio la tiene
    * prendida. En un pago parcial no hace nada: la emisión cuelga del cierre de
@@ -431,7 +451,8 @@ export type RegistrarPagoInput = {
  * plpgsql → texto crudo en error.message) a mensajes de usuario.
  */
 function mapRegistrarPagoError(message: string): string {
-  if (message.includes("SPLIT_ALREADY_PAID")) return "Este split ya fue cobrado.";
+  if (message.includes("SPLIT_ALREADY_PAID"))
+    return "Este split ya fue cobrado.";
   if (message.includes("ORDER_ALREADY_PAID")) return "La orden ya fue cobrada.";
   if (message.includes("ORDER_CLOSED")) return "La orden ya está cerrada.";
   if (message.includes("SPLIT_CANCELLED")) return "El split fue cancelado.";
@@ -444,9 +465,7 @@ function mapRegistrarPagoError(message: string): string {
   return `No se pudo registrar el pago: ${message}`;
 }
 
-export async function registrarPago(
-  input: RegistrarPagoInput,
-): Promise<
+export async function registrarPago(input: RegistrarPagoInput): Promise<
   ActionResult<{
     payment: Payment;
     splitDone: boolean;
@@ -462,8 +481,10 @@ export async function registrarPago(
   if (!ctxResult.ok) return ctxResult;
   const ctx = ctxResult.data;
 
-  if (input.amount_cents < 0) return actionError("El monto no puede ser negativo.");
-  if (input.tip_cents < 0) return actionError("La propina no puede ser negativa.");
+  if (input.amount_cents < 0)
+    return actionError("El monto no puede ser negativo.");
+  if (input.tip_cents < 0)
+    return actionError("La propina no puede ser negativa.");
 
   const service = createSupabaseServiceClient() as unknown as GenericClient;
 
@@ -498,6 +519,50 @@ export async function registrarPago(
   const caja = await loadCaja(service, input.caja_id, business.id);
   if (!caja) return actionError("Caja no encontrada.");
   if (!caja.is_active) return actionError("La caja está inactiva.");
+
+  // ── Fiar (spec 141) ───────────────────────────────────────────────────────
+  //
+  // Se valida acá, en el server, y no sólo con el `allowedMethods` que el
+  // `CobroForm` ya tiene: ese array decide qué botones se dibujan (UX), y esto
+  // es plata que queda sin cobrar. Tres cosas, en orden de gravedad:
+  //   1. el rol puede fiar (D6: admin, encargado y terminal; el mozo no);
+  //   2. el cliente existe, es DE ESTE NEGOCIO y está habilitado (D2);
+  //   3. y nadie manda un `credit_customer_id` en un cobro que no es fiado.
+  let creditCustomerId: string | null = null;
+  if (input.method === "cuenta_corriente") {
+    if (!canFiar(ctx.role)) {
+      return actionError("No tenés permiso para fiar.");
+    }
+    if (!input.creditCustomerId) {
+      return actionError("Elegí a quién se le fía.");
+    }
+    const { data: cliente } = await service
+      .from("customers")
+      .select("id, name, credit_enabled, business_id")
+      .eq("id", input.creditCustomerId)
+      .maybeSingle();
+    const row = cliente as {
+      id: string;
+      credit_enabled: boolean;
+      business_id: string;
+    } | null;
+    if (!row || row.business_id !== business.id) {
+      return actionError("Cliente no encontrado.");
+    }
+    if (!row.credit_enabled) {
+      return actionError(
+        "Ese cliente no tiene cuenta corriente habilitada. Se habilita desde su ficha.",
+      );
+    }
+    creditCustomerId = row.id;
+  } else if (input.creditCustomerId) {
+    // Defensa: el check de la base lo rechazaría igual, pero acá el mensaje se
+    // entiende. Un cobro normal con dueño dejaría plata contada dos veces —
+    // cobrada Y en el saldo de alguien.
+    return actionError(
+      "Sólo se le asigna cliente a un cobro en cuenta corriente.",
+    );
+  }
 
   // Validación específica por método.
   if (input.method === "card_manual") {
@@ -570,12 +635,21 @@ export async function registrarPago(
     p_adjustment_percent: input.adjustment_percent ?? 0,
     p_adjustment_cents: input.adjustment_cents ?? 0,
     p_request_id: input.requestId ?? null,
+    // spec 141 — a quién se le fía. La RPC lo exige por check cuando el método
+    // es `cuenta_corriente`, y lo rechaza cuando no lo es: el saldo no puede
+    // quedar colgado de nadie ni pegarse a un cobro normal.
+    p_credit_customer_id: creditCustomerId,
   });
 
   if (error) return actionError(mapRegistrarPagoError(error.message));
 
   const row = (Array.isArray(rpcData) ? rpcData[0] : rpcData) as
-    | { payment: Payment; split_done: boolean; fully_paid: boolean; idempotent: boolean }
+    | {
+        payment: Payment;
+        split_done: boolean;
+        fully_paid: boolean;
+        idempotent: boolean;
+      }
     | undefined;
   if (!row) return actionError("No se pudo registrar el pago.");
 
@@ -627,7 +701,9 @@ export type IniciarPagoMpInput = {
 
 export async function iniciarPagoMp(
   input: IniciarPagoMpInput,
-): Promise<ActionResult<{ paymentId: string; initPoint: string; preferenceId: string }>> {
+): Promise<
+  ActionResult<{ paymentId: string; initPoint: string; preferenceId: string }>
+> {
   const business = await getBusiness(input.slug);
   if (!business) return actionError("Negocio no encontrado.");
 
@@ -635,7 +711,8 @@ export async function iniciarPagoMp(
   if (!ctxResult.ok) return ctxResult;
   const ctx = ctxResult.data;
 
-  if (input.amount_cents <= 0) return actionError("El monto debe ser mayor a 0.");
+  if (input.amount_cents <= 0)
+    return actionError("El monto debe ser mayor a 0.");
 
   const service = createSupabaseServiceClient() as unknown as GenericClient;
 
@@ -666,8 +743,10 @@ export async function iniciarPagoMp(
   if (input.splitId) {
     const split = await loadSplit(service, input.splitId, business.id);
     if (!split) return actionError("Split no encontrado.");
-    if (split.order_id !== order.id) return actionError("El split no corresponde a esta orden.");
-    if (split.status === "cancelled") return actionError("El split fue cancelado.");
+    if (split.order_id !== order.id)
+      return actionError("El split no corresponde a esta orden.");
+    if (split.status === "cancelled")
+      return actionError("El split fue cancelado.");
   }
 
   const cajaForMp = await loadCaja(service, input.caja_id, business.id);
@@ -766,7 +845,10 @@ export async function forzarPago(
     )
     .eq("id", paymentId)
     .maybeSingle();
-  if (!paymentRow || (paymentRow as { business_id: string }).business_id !== business.id) {
+  if (
+    !paymentRow ||
+    (paymentRow as { business_id: string }).business_id !== business.id
+  ) {
     return actionError("Pago no encontrado.");
   }
   const p = paymentRow as {
@@ -1000,11 +1082,13 @@ export async function anularCobro(
   // que la plata desaparecía del arqueo sin que quedara quién la sacó. Es el
   // mismo libro donde ya escriben las correcciones de línea, así que el
   // encargado lo lee en el lugar donde ya mira.
-  const filas = ((refundados ?? []) as Array<{
-    id: string;
-    caja_id: string | null;
-    amount_cents: number;
-  }>).map((p) => ({
+  const filas = (
+    (refundados ?? []) as Array<{
+      id: string;
+      caja_id: string | null;
+      amount_cents: number;
+    }>
+  ).map((p) => ({
     business_id: business.id,
     caja_id: p.caja_id,
     entity_type: "payment",

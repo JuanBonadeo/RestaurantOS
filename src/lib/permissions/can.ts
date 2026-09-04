@@ -116,6 +116,33 @@ export function canHacerCorte(role: BusinessRole): boolean {
 }
 
 /**
+ * Fiar: cerrar un ticket con «Cuenta corriente» y dejarlo como saldo del cliente
+ * (spec 141 · D6).
+ *
+ * Entra `terminal` —decidido con Juan— porque es el puesto compartido del salón,
+ * y es **el que está parado en el mostrador cuando el socio dice «ponelo en mi
+ * cuenta»**. El mozo queda afuera: cobra, no decide a quién se le fía.
+ *
+ * Va acá y no sólo en el `allowedMethods` de `CobroForm`: ese array es UX, y
+ * esto es plata que queda sin cobrar.
+ */
+export function canFiar(role: BusinessRole): boolean {
+  return role === "admin" || role === "encargado" || role === "terminal";
+}
+
+/**
+ * Cobrar el saldo de una cuenta corriente (spec 141 · D7).
+ *
+ * `terminal` fía pero NO cobra: registrar una cobranza mete un `ingreso` en una
+ * caja que ese rol no puede ni mirar (`TABS_POR_ROL.terminal` no tiene «caja»),
+ * y sería plata entrando a un cajón ciego. Lo que sí ve es el saldo del cliente
+ * en el buscador del cobro, que es lo único que necesita para fiar bien.
+ */
+export function canCobrarCuentaCorriente(role: BusinessRole): boolean {
+  return role === "admin" || role === "encargado";
+}
+
+/**
  * Diferencia en centavos. Se evalúa en valor absoluto: una diferencia negativa
  * (faltante) y una positiva (sobrante) se tratan igual para el threshold.
  */

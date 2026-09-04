@@ -6,6 +6,7 @@ import {
   Check,
   CreditCard,
   Link as LinkIcon,
+  BookUser,
   MoreHorizontal,
   QrCode,
   Wallet,
@@ -15,7 +16,11 @@ import { toast } from "sonner";
 import type { ActionResult } from "@/lib/actions";
 import { calculateAdjustment } from "@/lib/billing/adjustment";
 import { cashCharge, isCashShortPayment } from "@/lib/billing/totals";
-import type { Caja, PaymentMethod, PaymentMethodConfig } from "@/lib/caja/types";
+import type {
+  Caja,
+  PaymentMethod,
+  PaymentMethodConfig,
+} from "@/lib/caja/types";
 import { formatCurrency } from "@/lib/currency";
 import { indexFromDigit } from "@/lib/ui/roving";
 import { useRovingList } from "@/lib/ui/use-roving-list";
@@ -49,6 +54,8 @@ export type CobroSubmit = {
   adjustmentCents: number;
   /** Estable entre taps del mismo intento; nuevo después de un cobro OK. */
   requestId: string;
+  /** A quién se le fía (spec 141). Sólo con `method = 'cuenta_corriente'`. */
+  creditCustomerId?: string | null;
 };
 
 /**
@@ -70,6 +77,20 @@ export type CobroFormProps<T = unknown> = {
   methodConfigs: PaymentMethodConfig[];
   /** Mostrador no ofrece MP; el pedido sí. */
   allowedMethods?: PaymentMethod[];
+  /**
+   * Fiar (spec 141). Sin esta prop el método **no se ofrece**: el server igual
+   * lo rechaza (`canFiar`), pero un botón que siempre falla es peor que no
+   * tenerlo. La lista son los clientes con `credit_enabled`; el buscador no
+   * ofrece a nadie más, que es la regla D2.
+   */
+  cuentaCorriente?: {
+    clientes: {
+      id: string;
+      name: string | null;
+      phone: string;
+      saldo_cents: number;
+    }[];
+  };
   tip?: CobroTip;
   /** Ergonomía. `touch` = mozo en el celular; `compact` = paneles del admin. */
   size?: "touch" | "compact";
@@ -106,9 +127,15 @@ const METHODS: Array<{
   { value: "mp_qr", label: "QR Mercado Pago", icon: QrCode },
   { value: "transfer", label: "Transferencia", icon: Wallet },
   { value: "other", label: "Otro", icon: MoreHorizontal },
+  // spec 141 — el fiado. Va último a propósito: cierra el ticket sin que entre
+  // plata, así que no compite con los métodos que sí cobran.
+  { value: "cuenta_corriente", label: "Cuenta corriente", icon: BookUser },
 ];
 
-const CARD_BRANDS: Array<{ value: "visa" | "mastercard" | "amex" | "otro"; label: string }> = [
+const CARD_BRANDS: Array<{
+  value: "visa" | "mastercard" | "amex" | "otro";
+  label: string;
+}> = [
   { value: "visa", label: "Visa" },
   { value: "mastercard", label: "Mastercard" },
   { value: "amex", label: "Amex" },
@@ -126,6 +153,7 @@ export function CobroForm<T = unknown>({
   onCajaChange,
   methodConfigs,
   allowedMethods,
+  cuentaCorriente,
   tip: tipConfig = { mode: "none" },
   size = "compact",
   onSubmit,
@@ -142,6 +170,8 @@ export function CobroForm<T = unknown>({
   const requestIdRef = useRef<string | null>(null);
 
   const [method, setMethod] = useState<PaymentMethod | null>(null);
+  /** A quién se le fía. Se limpia al cambiar de método (efecto más abajo). */
+  const [creditCustomerId, setCreditCustomerId] = useState<string | null>(null);
   const adjustmentPercent =
     methodConfigs.find((c) => c.method === method)?.adjustment_percent ?? 0;
   const { adjustmentCents, finalCents } = calculateAdjustment(
@@ -187,6 +217,8 @@ export function CobroForm<T = unknown>({
   const methods = METHODS.filter((m) => {
     if (allowedMethods && !allowedMethods.includes(m.value)) return false;
     if (isMpMethod(m.value) && !mp) return false;
+    // Sin la prop no hay fiado: el rol no puede, o el negocio no lo usa.
+    if (m.value === "cuenta_corriente" && !cuentaCorriente) return false;
     return true;
   });
 
@@ -235,7 +267,9 @@ export function CobroForm<T = unknown>({
     if (!mpPaymentId || !mp) return;
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`/api/billing/payment-status?id=${mpPaymentId}`);
+        const res = await fetch(
+          `/api/billing/payment-status?id=${mpPaymentId}`,
+        );
         const data = await res.json();
         if (data?.payment_status === "paid") {
           toast.success("Pago MP confirmado");
@@ -268,7 +302,10 @@ export function CobroForm<T = unknown>({
     amount <= 0 ||
     cashShort ||
     (notesRequired && notes.trim() === "") ||
-    (method === "card_manual" && lastFour !== "" && lastFour.length !== 4);
+    (method === "card_manual" && lastFour !== "" && lastFour.length !== 4) ||
+    // spec 141 · US2 — sin cliente no hay botón: un fiado sin dueño es plata
+    // que no está en el saldo de nadie (y el check de la base lo rechaza).
+    (method === "cuenta_corriente" && !creditCustomerId);
 
   const handleConfirm = () => {
     if (!method) return;
@@ -299,12 +336,16 @@ export function CobroForm<T = unknown>({
         tipCents: effectiveTip,
         cajaId,
         lastFour:
-          method === "card_manual" && lastFour.length === 4 ? lastFour : undefined,
+          method === "card_manual" && lastFour.length === 4
+            ? lastFour
+            : undefined,
         cardBrand: method === "card_manual" ? cardBrand : undefined,
         notes: showNotes ? notes : undefined,
         adjustmentPercent,
         adjustmentCents,
         requestId: (requestIdRef.current ??= crypto.randomUUID()),
+        creditCustomerId:
+          method === "cuenta_corriente" ? creditCustomerId : undefined,
       });
       if (!r.ok) {
         toast.error(r.error);
@@ -324,7 +365,7 @@ export function CobroForm<T = unknown>({
     return (
       <div className="space-y-3">
         <div>
-          <p className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+          <p className="text-[0.6rem] font-semibold tracking-[0.18em] text-zinc-500 uppercase">
             {method === "mp_qr" ? "QR Mercado Pago" : "Link Mercado Pago"}
           </p>
           <h3 className="mt-1 text-base font-semibold text-zinc-900">
@@ -421,7 +462,7 @@ export function CobroForm<T = unknown>({
                 data-metodo="true"
                 {...metodoZona.itemProps(i)}
                 className={cn(
-                  "flex flex-col items-start gap-1 rounded-2xl bg-white p-3 text-left outline-none ring-1 ring-zinc-200 transition hover:ring-zinc-300 active:scale-[0.98]",
+                  "flex flex-col items-start gap-1 rounded-2xl bg-white p-3 text-left ring-1 ring-zinc-200 transition outline-none hover:ring-zinc-300 active:scale-[0.98]",
                   "focus-visible:ring-2 focus-visible:ring-zinc-900",
                   touch && "p-4",
                 )}
@@ -513,7 +554,10 @@ export function CobroForm<T = unknown>({
       </div>
 
       <div className="grid gap-1.5">
-        <label htmlFor="cobro-monto" className="text-xs font-semibold text-zinc-600">
+        <label
+          htmlFor="cobro-monto"
+          className="text-xs font-semibold text-zinc-600"
+        >
           Monto
         </label>
         <input
@@ -526,7 +570,7 @@ export function CobroForm<T = unknown>({
             setHasSetAmount(true);
           }}
           className={cn(
-            "h-11 w-full rounded-xl border border-zinc-200 px-3 text-base font-semibold tabular-nums focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100",
+            "h-11 w-full rounded-xl border border-zinc-200 px-3 text-base font-semibold tabular-nums focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none",
             touch && "h-14 text-lg",
           )}
         />
@@ -555,8 +599,8 @@ export function CobroForm<T = unknown>({
         )}
         {cashShort && (
           <p className="text-xs font-semibold text-rose-600">
-            En efectivo no se puede cobrar menos de {formatCurrency(finalCents)}.
-            Si van a pagar en partes, dividí la cuenta por monto.
+            En efectivo no se puede cobrar menos de {formatCurrency(finalCents)}
+            . Si van a pagar en partes, dividí la cuenta por monto.
           </p>
         )}
       </div>
@@ -578,7 +622,7 @@ export function CobroForm<T = unknown>({
               setTip(Math.max(0, Math.round(Number(e.target.value) * 100)))
             }
             className={cn(
-              "h-11 w-full rounded-xl border border-zinc-200 px-3 text-base tabular-nums focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100",
+              "h-11 w-full rounded-xl border border-zinc-200 px-3 text-base tabular-nums focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none",
               touch && "h-14 text-lg",
             )}
           />
@@ -588,6 +632,41 @@ export function CobroForm<T = unknown>({
         <p className="text-xs text-zinc-500">
           Incluye propina de {formatCurrency(tipConfig.cents)}.
         </p>
+      )}
+
+      {method === "cuenta_corriente" && cuentaCorriente && (
+        <div className="grid gap-1.5">
+          <label
+            htmlFor="cobro-credit-customer"
+            className="text-xs font-semibold text-zinc-600"
+          >
+            ¿A quién se le fía?
+          </label>
+          <select
+            id="cobro-credit-customer"
+            value={creditCustomerId ?? ""}
+            onChange={(e) => setCreditCustomerId(e.target.value || null)}
+            className="h-11 w-full rounded-xl border border-zinc-200 bg-white px-3 text-base focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none"
+          >
+            <option value="">Elegí el cliente…</option>
+            {cuentaCorriente.clientes.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name ?? c.phone}
+                {c.saldo_cents > 0
+                  ? ` · debe ${formatCurrency(c.saldo_cents)}`
+                  : ""}
+              </option>
+            ))}
+          </select>
+          {/* El saldo actual antes de confirmar: es lo único que la spec le da
+              a `terminal`, que fía pero no ve la tab de cuentas (D7). */}
+          {cuentaCorriente.clientes.length === 0 && (
+            <p className="text-xs text-zinc-500">
+              Todavía no hay clientes con cuenta corriente. Se habilitan desde
+              su ficha, en Clientes.
+            </p>
+          )}
+        </div>
       )}
 
       {method === "card_manual" && (
@@ -608,7 +687,7 @@ export function CobroForm<T = unknown>({
               onChange={(e) =>
                 setLastFour(e.target.value.replace(/\D/g, "").slice(0, 4))
               }
-              className="h-11 w-full rounded-xl border border-zinc-200 px-3 text-base tabular-nums focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+              className="h-11 w-full rounded-xl border border-zinc-200 px-3 text-base tabular-nums focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none"
             />
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -651,7 +730,7 @@ export function CobroForm<T = unknown>({
                   ? "Cheque #1234, cortesía…"
                   : "Opcional"
             }
-            className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+            className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none"
           />
         </div>
       )}
