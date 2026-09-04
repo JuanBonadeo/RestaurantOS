@@ -14,6 +14,8 @@
  * máximo) y sólo cambia `getGuestPolicy`.
  */
 
+import { businessWhatsappHref } from "./whatsapp-link";
+
 export type GuestPolicy = {
   /** Invitados que puede traer cada socio. */
   maxGuests: number;
@@ -48,9 +50,6 @@ export function guestPolicyAppliesTo(
   return policy.services.some((x) => x.trim().toLowerCase() === s);
 }
 
-/** `wa.me` no acepta "+", espacios ni guiones. */
-const MIN_PHONE_DIGITS = 8;
-
 export type GuestWhatsappLinkParams = {
   /** `businesses.phone`. Sin teléfono no hay botón. */
   phone: string | null | undefined;
@@ -72,9 +71,6 @@ export function buildGuestWhatsappLink({
   dayLabel,
   timeLabel,
 }: GuestWhatsappLinkParams): string | null {
-  const digits = (phone ?? "").replace(/\D/g, "");
-  if (digits.length < MIN_PHONE_DIGITS) return null;
-
   const cuando =
     dayLabel && timeLabel
       ? `mi reserva del ${dayLabel} a las ${timeLabel} hs`
@@ -85,6 +81,8 @@ export function buildGuestWhatsappLink({
     (_, i) => `${i + 1}) DNI – Nombre y apellido`,
   ).join("\n");
 
-  const text = `¡Hola! Te paso los datos de mis invitados para ${cuando}:\n${lineas}`;
-  return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
+  return businessWhatsappHref(
+    phone,
+    `¡Hola! Te paso los datos de mis invitados para ${cuando}:\n${lineas}`,
+  );
 }

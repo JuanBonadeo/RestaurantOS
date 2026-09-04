@@ -13,6 +13,7 @@ import {
   fetchFlexibleAvailability,
 } from "@/lib/reservations/availability-actions";
 import { arrivalSlots } from "@/lib/reservations/flexible-availability";
+import { buildLargeGroupWhatsappLink } from "@/lib/reservations/whatsapp-link";
 import {
   createFlexibleReservation,
   createReservationFromCustomer,
@@ -173,6 +174,13 @@ export function ReservarFlow({
   const [submitting, setSubmitting] = useState(false);
   const detailsRef = useRef<HTMLDivElement | null>(null);
 
+  /**
+   * Grupo grande: pasa el máximo que el negocio cierra solo. El flujo web se
+   * corta acá — ni horarios ni formulario — y la reserva se coordina por
+   * WhatsApp, que es lo que el local hace igual para juntar mesas.
+   */
+  const isLargeGroup = partySize > settings.max_party_size;
+
   const minDate = todayInTz();
   const maxDateStr = useMemo(
     () => maxDate(settings.advance_days_max),
@@ -230,7 +238,7 @@ export function ReservarFlow({
     setSelectedSlot(null);
     // Sin salón elegido en modo multi-salón, no tiene sentido pegarle al
     // server: dejamos slots=null para mostrar el placeholder de "elegí salón".
-    if (multiSalon && !salonId) {
+    if ((multiSalon && !salonId) || isLargeGroup) {
       setSlots(null);
       setLoadingSlots(false);
       return;
@@ -251,7 +259,7 @@ export function ReservarFlow({
       });
     }, 120);
     return () => clearTimeout(t);
-  }, [isFlexible, date, partySize, slug, salonId, multiSalon]);
+  }, [isFlexible, date, partySize, slug, salonId, multiSalon, isLargeGroup]);
 
   // Flexible: elegir el primer servicio disponible cuando cambia la lista.
   useEffect(() => {
@@ -272,8 +280,9 @@ export function ReservarFlow({
       setFlexAvail(null);
       return;
     }
-    if (multiSalon && !salonId) {
+    if ((multiSalon && !salonId) || isLargeGroup) {
       setFlexAvail(null);
+      setLoadingFlex(false);
       return;
     }
     setFlexAvail(null);
@@ -299,7 +308,17 @@ export function ReservarFlow({
       })();
     }, 120);
     return () => clearTimeout(t);
-  }, [isFlexible, service, date, partySize, slug, salonId, multiSalon, availReloadKey]);
+  }, [
+    isFlexible,
+    service,
+    date,
+    partySize,
+    slug,
+    salonId,
+    multiSalon,
+    isLargeGroup,
+    availReloadKey,
+  ]);
 
   useEffect(() => {
     if (!selectedSlot) return;
@@ -310,6 +329,8 @@ export function ReservarFlow({
   }, [selectedSlot]);
 
   function onConfirm() {
+    // Grupo grande: el CTA es un link a WhatsApp, no este submit.
+    if (isLargeGroup) return;
     const done = isFlexible ? service.length > 0 : selectedSlot !== null;
     if (!done) return;
     // Spec 077 — el servicio se llenó (o se llenó mientras miraba la pantalla).
@@ -373,10 +394,17 @@ export function ReservarFlow({
   const grouped = slots ? groupSlotsByService(slots) : null;
   // Spec 077 — servicio sin lugar: ni horarios ni formulario ni CTA.
   const servicioSinLugar = isFlexible && flexAvail !== null && !flexAvail.available;
-  const selectionDone = isFlexible
-    ? service.length > 0 && !servicioSinLugar
-    : !!selectedSlot;
-  const hasFooter = selectionDone;
+  const selectionDone =
+    !isLargeGroup &&
+    (isFlexible ? service.length > 0 && !servicioSinLugar : !!selectedSlot);
+  const largeGroupHref = isLargeGroup
+    ? buildLargeGroupWhatsappLink({
+        phone: businessPhone,
+        maxPartySize: settings.max_party_size,
+        dayLabel: formatLongDate(date),
+      })
+    : null;
+  const hasFooter = selectionDone || !!largeGroupHref;
   const ctaDisabled = submitting || (isFlexible && (!arrivalTime || servicioSinLugar));
   const initials = getInitial(user);
   const firstName = getFirstName(user);
@@ -555,39 +583,35 @@ export function ReservarFlow({
             {businessName}
           </div>
         </div>
-        <div
+        {tagline ? (
+          <div style={{ marginTop: 6, fontSize: 13, color: "var(--ink-2)" }}>{tagline}</div>
+        ) : null}
+        {/* Cruce a la carta. Va como botón y no como link chico: es la otra
+            cosa que el cliente puede venir a hacer, y en el celular un link de
+            13px al lado del tagline no se ve. */}
+        <Link
+          href={`/${slug}/menu`}
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 10,
-            marginTop: 6,
-            flexWrap: "wrap",
+            justifyContent: "center",
+            gap: 8,
+            marginTop: 12,
+            height: 50,
+            borderRadius: 12,
+            border: "1px solid var(--primary)",
+            background: "var(--bg)",
+            fontSize: 16,
+            fontWeight: 600,
+            color: "var(--primary)",
+            textDecoration: "none",
+            letterSpacing: -0.1,
           }}
         >
-          {tagline ? (
-            <>
-              <span style={{ fontSize: 13, color: "var(--ink-2)" }}>{tagline}</span>
-              <span style={{ color: "var(--hairline-2)" }}>·</span>
-            </>
-          ) : null}
-          <Link
-            href={`/${slug}/menu`}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 5,
-              fontSize: 13,
-              fontWeight: 600,
-              color: "var(--primary)",
-              textDecoration: "none",
-              letterSpacing: -0.1,
-            }}
-          >
-            {I.moto("var(--primary)", 14)}
-            Hacer un pedido
-            {I.chevRight("var(--primary)", 12)}
-          </Link>
-        </div>
+          {I.moto("var(--primary)", 18)}
+          Hacer un pedido
+          {I.chevRight("var(--primary)", 14)}
+        </Link>
       </div>
 
       {/* Section: ¿Cuándo? */}
@@ -696,20 +720,34 @@ export function ReservarFlow({
       {/* Section: ¿Cuántos? */}
       <Section label="¿Cuántos son?">
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          {/* Un escalón por encima del máximo para poder decir "somos más":
+              ahí el flujo se corta y pasa a WhatsApp. */}
           <Stepper
             value={partySize}
             min={1}
-            max={settings.max_party_size}
+            max={settings.max_party_size + 1}
+            display={isLargeGroup ? `${settings.max_party_size}+` : undefined}
             onChange={setPartySize}
           />
           <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.4 }}>
-            Hasta {settings.max_party_size} personas. Para más, escribinos.
+            {isLargeGroup
+              ? `Más de ${settings.max_party_size} personas: la mesa la armamos a mano.`
+              : `Hasta ${settings.max_party_size} personas. Para más, escribinos.`}
           </div>
         </div>
+
+        {/* Grupo grande: mismo botón verde que el aviso de invitados. Reemplaza
+            a todo el flujo — no hay horarios que ofrecer para 13 personas. */}
+        {isLargeGroup ? (
+          <LargeGroupNotice
+            maxPartySize={settings.max_party_size}
+            href={largeGroupHref}
+          />
+        ) : null}
       </Section>
 
       {/* Section: Salón (solo si hay más de uno) */}
-      {multiSalon ? (
+      {multiSalon && !isLargeGroup ? (
         <Section label="Salón">
           <div
             style={{
@@ -749,7 +787,7 @@ export function ReservarFlow({
       ) : null}
 
       {/* Section: Servicio (flexible) / Horarios (estricto) */}
-      {isFlexible ? (
+      {isLargeGroup ? null : isFlexible ? (
         <Section label={`Servicio — ${formatLongDate(date)}`}>
           {multiSalon && !salonId ? (
             <PickSalonHint />
@@ -907,7 +945,7 @@ export function ReservarFlow({
       ) : null}
 
       {/* Sticky bottom CTA */}
-      {selectionDone ? (
+      {hasFooter ? (
         <div
           style={{
             position: "fixed",
@@ -939,48 +977,76 @@ export function ReservarFlow({
                   letterSpacing: 0.5,
                 }}
               >
-                {formatLongDate(date)} · {partySize}p
+                {formatLongDate(date)}
+                {isLargeGroup ? "" : ` · ${partySize}p`}
               </div>
               <div
                 className="d-display"
                 style={{ fontSize: 20, lineHeight: 1.1, color: "var(--ink)" }}
               >
-                {isFlexible
-                  ? arrivalTime
-                    ? `${service} · ${arrivalTime} hs`
-                    : service
-                  : `${selectedSlot!.slot} hs`}
+                {isLargeGroup
+                  ? `Más de ${settings.max_party_size}`
+                  : isFlexible
+                    ? arrivalTime
+                      ? `${service} · ${arrivalTime} hs`
+                      : service
+                    : `${selectedSlot!.slot} hs`}
               </div>
             </div>
-            <button
-              type="button"
-              onClick={onConfirm}
-              disabled={ctaDisabled}
-              style={{
-                height: 48,
-                padding: "0 22px",
-                borderRadius: 12,
-                background: "var(--primary)",
-                color: "var(--primary-foreground)",
-                fontSize: 15,
-                fontWeight: 600,
-                letterSpacing: -0.1,
-                border: "none",
-                cursor: ctaDisabled ? "default" : "pointer",
-                opacity: ctaDisabled ? 0.6 : 1,
-                transition: "opacity 200ms",
-                whiteSpace: "nowrap",
-                fontFamily: "inherit",
-              }}
-            >
-              {/* Spec 131 — el cliente pide; confirma el local. El botón no
-                  promete lo que todavía no pasó. */}
-              {user.isLoggedIn
-                ? submitting
-                  ? "Enviando…"
-                  : "Pedir reserva"
-                : "Ingresar y pedir reserva"}
-            </button>
+            {isLargeGroup ? (
+              <a
+                href={largeGroupHref!}
+                target="_blank"
+                rel="noreferrer"
+                style={{
+                  height: 48,
+                  padding: "0 22px",
+                  borderRadius: 12,
+                  background: "var(--primary)",
+                  color: "var(--primary-foreground)",
+                  fontSize: 15,
+                  fontWeight: 600,
+                  letterSpacing: -0.1,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  whiteSpace: "nowrap",
+                  textDecoration: "none",
+                }}
+              >
+                {I.whatsapp("currentColor", 18)} Hablar por WhatsApp
+              </a>
+            ) : (
+              <button
+                type="button"
+                onClick={onConfirm}
+                disabled={ctaDisabled}
+                style={{
+                  height: 48,
+                  padding: "0 22px",
+                  borderRadius: 12,
+                  background: "var(--primary)",
+                  color: "var(--primary-foreground)",
+                  fontSize: 15,
+                  fontWeight: 600,
+                  letterSpacing: -0.1,
+                  border: "none",
+                  cursor: ctaDisabled ? "default" : "pointer",
+                  opacity: ctaDisabled ? 0.6 : 1,
+                  transition: "opacity 200ms",
+                  whiteSpace: "nowrap",
+                  fontFamily: "inherit",
+                }}
+              >
+                {/* Spec 131 — el cliente pide; confirma el local. El botón no
+                    promete lo que todavía no pasó. */}
+                {user.isLoggedIn
+                  ? submitting
+                    ? "Enviando…"
+                    : "Pedir reserva"
+                  : "Ingresar y pedir reserva"}
+              </button>
+            )}
           </div>
         </div>
       ) : null}
@@ -989,6 +1055,73 @@ export function ReservarFlow({
 }
 
 /* ─── primitives ──────────────────────────────────────────────────────── */
+
+/**
+ * Aviso de grupo grande. Mismo formato que el aviso de invitados por socio
+ * (spec 080): explica por qué el flujo se corta y ofrece el botón de WhatsApp.
+ * Sin teléfono cargado se muestra el texto sin botón, nunca un `wa.me` roto.
+ */
+function LargeGroupNotice({
+  maxPartySize,
+  href,
+}: {
+  maxPartySize: number;
+  href: string | null;
+}) {
+  return (
+    <div
+      style={{
+        marginTop: 14,
+        borderRadius: 12,
+        border: "1px solid var(--hairline-2)",
+        padding: 14,
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 600,
+          letterSpacing: 0.5,
+          textTransform: "uppercase",
+          color: "var(--ink-3)",
+        }}
+      >
+        Grupo grande
+      </div>
+      <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: "var(--ink-2)" }}>
+        Para más de <strong style={{ color: "var(--ink)" }}>{maxPartySize} personas</strong>{" "}
+        armamos la mesa a mano. Escribinos y lo coordinamos.
+      </p>
+      {href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          style={{
+            width: "100%",
+            height: 44,
+            borderRadius: 12,
+            background: "#fff",
+            border: "1px solid var(--hairline-2)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+            fontSize: 14,
+            fontWeight: 500,
+            color: "var(--ink)",
+            textDecoration: "none",
+          }}
+        >
+          {I.whatsapp("#1FAF53", 18)} Hablar por WhatsApp
+        </a>
+      ) : null}
+    </div>
+  );
+}
 
 function Section({
   label,
@@ -1028,11 +1161,14 @@ function Stepper({
   value,
   min,
   max,
+  display,
   onChange,
 }: {
   value: number;
   min: number;
   max: number;
+  /** Qué mostrar en vez del número (el último escalón es "12+", no 13). */
+  display?: string;
   onChange: (n: number) => void;
 }) {
   const dec = () => onChange(Math.max(min, value - 1));
@@ -1071,7 +1207,7 @@ function Stepper({
           color: "var(--ink)",
         }}
       >
-        {value}
+        {display ?? value}
       </div>
       <button
         type="button"
