@@ -76,7 +76,11 @@ export type MesaColumnCartItem = {
 export type MesaColumnAcciones = {
   onCobrar?: () => void;
   onCargarCliente?: () => void;
-  onTransferir?: () => void;
+  /** Abre el selector de mozo. La misma puerta que la pastilla del header:
+   *  asigna si la mesa no tiene mozo, transfiere si lo tiene. */
+  onMozo?: () => void;
+  /** Cómo se llama esa entrada acá («Asignar mozo» / «Transferir mozo»). */
+  mozoLabel?: string;
   onTrasladar?: () => void;
   onAnular?: () => void;
 };
@@ -187,10 +191,10 @@ export function MesaColumn({
         label: "Cobrar",
         onClick: menu.onCobrar,
       },
-    menu.onTransferir && {
-      key: "transferir",
-      label: "Transferir mozo",
-      onClick: menu.onTransferir,
+    menu.onMozo && {
+      key: "mozo",
+      label: menu.mozoLabel ?? "Mozo de la mesa",
+      onClick: menu.onMozo,
     },
     menu.onTrasladar && {
       key: "trasladar",
@@ -392,9 +396,16 @@ export function MesaColumn({
               >
                 <MoreVertical className="size-5" strokeWidth={2.5} />
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-52">
+              {/* Más grande que el `text-sm` que trae el componente (pedido de
+                  Juan): este menú se usa de parado y a un brazo de distancia,
+                  no es un dropdown de formulario. */}
+              <DropdownMenuContent align="end" className="w-56">
                 {menuItems.map((it) => (
-                  <DropdownMenuItem key={it.key} onClick={it.onClick}>
+                  <DropdownMenuItem
+                    key={it.key}
+                    onClick={it.onClick}
+                    className="px-2.5 py-2 text-base"
+                  >
                     {it.label}
                   </DropdownMenuItem>
                 ))}
@@ -403,7 +414,7 @@ export function MesaColumn({
                     {menuItems.length > 0 && <DropdownMenuSeparator />}
                     <DropdownMenuItem
                       onClick={menu.onAnular}
-                      className="text-red-600 focus:text-red-600"
+                      className="px-2.5 py-2 text-base text-red-600 focus:text-red-600"
                     >
                       Anular mesa
                     </DropdownMenuItem>

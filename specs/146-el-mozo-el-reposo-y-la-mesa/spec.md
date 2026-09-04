@@ -175,9 +175,12 @@ Sin esto habría que esperar el refetch para ver el nombre debajo de la mesa
 (spec 143).
 
 **D-A6 · «Distribuir mozos» no se toca.** Sigue siendo la herramienta de
-repartir el salón, con su paleta, su contador y su «Limpiar». Desasignar
-(dejar la mesa sin mozo) también sigue viviendo ahí: el modal elige mozo, no lo
-saca.
+repartir el salón, con su paleta, su contador y su «Limpiar».
+
+> **Corregido el mismo día (D-A18):** la segunda mitad de esta decisión —«el
+> modal elige mozo, no lo saca»— duró lo que tardó Juan en probarla. Sacar el
+> mozo de UNA mesa era el único camino que obligaba a abrir Distribuir, que es
+> la herramienta de repartir el salón entero. Ahora está en el modal.
 
 ### Parte B · El reposo del panel es el buscador
 
@@ -483,6 +486,23 @@ corre en el próximo tick, ahora se abstiene si mientras tanto se abrió un
 diálogo: cerrar con `Esc` y tocar otra mesa acto seguido dejaba tecleando en un
 buscador tapado.
 
+**D-A18 · El modal también saca el mozo.** «Sacar el mozo» es
+`assignMozoToTable` con `null`: la misma action, el mismo permiso
+(`canAssignMozo` — el mozo desde su teléfono puede pasarle la mesa a otro, no
+dejarla huérfana) y la misma auditoría que ponerlo. Va discreto y en zinc, no en
+rojo y sin confirmación: no es destructivo, se deshace eligiendo a cualquiera de
+la lista de arriba. Aparece sólo si hay mozo puesto — en una mesa sin mozo no
+hay nada que sacar.
+
+**D-A19 · El mozo también vive en el `⋯`.** La pastilla del header es la puerta
+nueva, pero el `⋯` de la mesa es donde la mano ya va a buscar las acciones, así
+que la entrada está en los dos lados. Con dos diferencias respecto de la que
+había: se le cayó el gate de «mesa abierta» —la mesa libre sin mozo es
+exactamente la que hay que asignar, y desde la 111 sigue `libre` hasta el primer
+envío— y el rótulo dice cuál de las dos cosas es, «Asignar mozo» o «Transferir
+mozo». Y el menú entero pasó a `text-base`: se usa de parado y a un brazo de
+distancia, no es un dropdown de formulario.
+
 ### Lo que se decidió NO hacer
 
 - **Recordar las mesas descartadas.** Se evaluó no volver a preguntar en una
@@ -539,6 +559,14 @@ pregunta el mozo, o `openTable` deja de auto-asignar cuando el actor no es mozo?
 - La barra de `demo` **sí** pregunta: sus BAR1-3 no están marcadas `is_bar`. En
   `golf-jcr`, que sí las marca, no va a preguntar (dato verificado contra el
   cloud).
+
+### Verificado en vivo (2026-09-03, demo, Sofía)
+
+Sobre R23, mesa libre: el `⋯` dice **«Asignar mozo»** y abre el mismo modal;
+«luc» + Enter deja a Lucía, la pastilla pasa a «Mozo: Lucía Moza» y el `⋯` a
+**«Transferir mozo»**. Tocar la pastilla abre el modal con la lista, el motivo y
+**«Sacar el mozo»**: un click y la mesa vuelve a «Sin mozo», sin toast y sin
+recargar. El menú del `⋯` se lee en cuerpo 16.
 
 ### El costo aceptado: las mesas de 10 a 20
 

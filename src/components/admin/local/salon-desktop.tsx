@@ -1810,6 +1810,8 @@ export function SalonDesktop({
               mozos={mozos}
               businessSlug={slug}
               conTeclado
+              // Sacar el mozo es asignar a nadie: mismo permiso que ponerlo.
+              puedeSacar={canAssignMozo(role)}
               overlay="absolute"
               onClose={() => setMozoTableId(null)}
               onSuccess={(toMozoId) => {
@@ -1969,14 +1971,22 @@ export function SalonDesktop({
                   onCargarCliente: canCargarPedido(role)
                     ? () => setClienteTableId(pedirTable.id)
                     : undefined,
-                  // Mismas reglas que tenía el detalle: transferir y trasladar
-                  // sólo con la mesa abierta, anular sólo si el rol puede
-                  // llevarla a `libre`.
-                  onTransferir:
-                    pedirEstado !== "libre" &&
-                    (role !== "mozo" || pedirTable.mozo_id === currentUserId)
-                      ? () => setMozoTableId(pedirTable.id)
-                      : undefined,
+                  // El mozo también vive en el ⋯, no sólo en la pastilla del
+                  // header (pedido de Juan): es donde la mano ya va a buscar
+                  // las acciones de la mesa. **Sin** el gate de «mesa abierta»
+                  // que tenía transferir: la mesa libre sin mozo es justo la
+                  // que hay que asignar, y desde la 111 sigue `libre` hasta el
+                  // primer envío. El rótulo dice cuál de las dos cosas es.
+                  onMozo: (
+                    pedirMozoId
+                      ? role !== "mozo" || pedirMozoId === currentUserId
+                      : canAssignMozo(role)
+                  )
+                    ? () => setMozoTableId(pedirTable.id)
+                    : undefined,
+                  mozoLabel: pedirMozoId ? "Transferir mozo" : "Asignar mozo",
+                  // Trasladar sigue pidiendo la mesa abierta; anular, que el
+                  // rol pueda llevarla a `libre`.
                   onTrasladar:
                     pedirEstado !== "libre" && canMoveTable(role)
                       ? () => setTrasladarTableId(pedirTable.id)

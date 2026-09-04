@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, Search, X } from "lucide-react";
+import { Check, Search, UserMinus, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { assignMozoToTable, transferTable } from "@/lib/mozo/actions";
@@ -45,6 +45,12 @@ type Props = {
   /** La superficie tiene teclado físico (el salón sí, el teléfono no). */
   conTeclado?: boolean;
   /**
+   * Puede **dejar la mesa sin mozo** (`canAssignMozo`). Sacar es asignar a
+   * nadie, así que pasa por el mismo permiso: el mozo desde su teléfono puede
+   * pasarle la mesa a otro, no dejarla huérfana.
+   */
+  puedeSacar?: boolean;
+  /**
    * Dónde se ancla el overlay.
    *
    * - `"absolute"` — **dentro del panel** del salón, que ya scopea sus modales
@@ -56,8 +62,9 @@ type Props = {
    */
   overlay?: "fixed" | "absolute";
   onClose: () => void;
-  /** Recibe el `user_id` elegido, para el overlay optimista del llamador. */
-  onSuccess: (mozoId: string) => void;
+  /** Recibe el `user_id` elegido —o `null` si se sacó el mozo—, para el overlay
+   *  optimista del llamador. */
+  onSuccess: (mozoId: string | null) => void;
 };
 
 export function ElegirMozoModal({
@@ -68,6 +75,7 @@ export function ElegirMozoModal({
   mozos,
   businessSlug,
   conTeclado = false,
+  puedeSacar = false,
   overlay = "fixed",
   onClose,
   onSuccess,
@@ -129,7 +137,7 @@ export function ElegirMozoModal({
     else focusFirst();
   }, [conTeclado, showSearch, focusFirst, tableId]);
 
-  const asignar = async (mozoId: string) => {
+  const asignar = async (mozoId: string | null) => {
     setSubmitting(true);
     const result = await assignMozoToTable(tableId, mozoId, businessSlug);
     setSubmitting(false);
@@ -312,6 +320,24 @@ export function ElegirMozoModal({
               </div>
             )}
           </div>
+
+          {/* Sacar el mozo — spec 146, pedido de Juan. Es `assignMozoToTable`
+              con `null`: la misma action y la misma auditoría que ponerlo. No
+              es destructivo ni pide confirmación —se deshace eligiendo a
+              cualquiera de la lista de arriba— así que va discreto y en zinc,
+              no en rojo. Sólo aparece si hay mozo puesto: en una mesa sin mozo
+              no hay nada que sacar. */}
+          {puedeSacar && currentMozoId && (
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={() => void asignar(null)}
+              className="flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-zinc-100 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-200 active:scale-[0.99] disabled:opacity-50"
+            >
+              <UserMinus className="h-4 w-4" />
+              Sacar el mozo
+            </button>
+          )}
 
           {modo === "transferir" && (
             <div>

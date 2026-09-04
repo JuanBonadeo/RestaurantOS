@@ -157,7 +157,7 @@ describe("MesaColumn (spec 111)", () => {
       cart: sinEnviar,
       cartTotalCents: 200000,
       enviando: true,
-      acciones: { onCobrar: vi.fn(), onTransferir: vi.fn() },
+      acciones: { onCobrar: vi.fn(), onMozo: vi.fn(), mozoLabel: "Asignar mozo" },
     });
 
     expect(screen.getByRole("button", { name: /Enviando/ })).toBeDisabled();

@@ -39,8 +39,9 @@ function renderModal({
   modo = "transferir" as "asignar" | "transferir",
   mozos = equipo,
   currentMozoId = null as string | null,
+  puedeSacar = false,
   onClose = () => {},
-  onSuccess = () => {},
+  onSuccess = (_id: string | null) => {},
 } = {}) {
   return render(
     <ElegirMozoModal
@@ -50,6 +51,7 @@ function renderModal({
       currentMozoId={currentMozoId}
       mozos={mozos}
       businessSlug="golf-jcr"
+      puedeSacar={puedeSacar}
       conTeclado
       onClose={onClose}
       onSuccess={onSuccess}
@@ -220,6 +222,40 @@ describe("elegir mozo · modo transferir (spec 079)", () => {
     expect(cta()).not.toBeDisabled();
     fireEvent.click(cta());
     expect(transferTable).toHaveBeenCalledWith("t1", "u1", "golf-jcr", undefined);
+  });
+
+  it("se puede dejar la mesa sin mozo", async () => {
+    const user = userEvent.setup();
+    const onSuccess = vi.fn();
+    renderModal({
+      modo: "transferir",
+      mozos: equipo.slice(0, 4),
+      currentMozoId: "u1",
+      puedeSacar: true,
+      onSuccess,
+    });
+
+    await user.click(screen.getByRole("button", { name: /sacar el mozo/i }));
+
+    // Sacar es asignar a nadie: la misma action, con `null`.
+    expect(assignMozoToTable).toHaveBeenCalledWith("t1", null, "golf-jcr");
+    expect(transferTable).not.toHaveBeenCalled();
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledWith(null));
+  });
+
+  it("sin mozo puesto no hay nada que sacar", () => {
+    renderModal({ modo: "asignar", mozos: equipo.slice(0, 4), puedeSacar: true });
+    expect(screen.queryByRole("button", { name: /sacar el mozo/i })).toBeNull();
+  });
+
+  it("quien no puede asignar tampoco puede sacar (el teléfono del mozo)", () => {
+    renderModal({
+      modo: "transferir",
+      mozos: equipo.slice(0, 4),
+      currentMozoId: "u1",
+      puedeSacar: false,
+    });
+    expect(screen.queryByRole("button", { name: /sacar el mozo/i })).toBeNull();
   });
 
   it("el mozo que ya tiene la mesa no está entre los candidatos", () => {
