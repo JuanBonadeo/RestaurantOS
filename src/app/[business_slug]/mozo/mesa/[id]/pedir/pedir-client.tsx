@@ -81,7 +81,10 @@ import type {
 } from "@/lib/mozo/catalog-query";
 import type { DailyMenuForMozo } from "@/lib/mozo/daily-menus-query";
 import { filterDailyMenus } from "@/lib/mozo/daily-menu-search";
-import type { DailyMenuSelection } from "@/lib/mozo/daily-menu-steps";
+import {
+  choicesDeltaCents,
+  type DailyMenuSelection,
+} from "@/lib/mozo/daily-menu-steps";
 import { DailyMenuWizard } from "@/components/mozo/daily-menu-wizard";
 import { ComensalesModal } from "@/components/mozo/comensales-modal";
 import {
@@ -1337,27 +1340,34 @@ export function MozoPedirClient({
           setOpenDailyMenu(null);
           focusSearch();
         }}
-        onAdd={(menu, quantity, selectedChoices) => {
+        onAdd={(menu, lineas) => {
+          // Un ítem por menú, cada uno con SUS opciones (spec 155 · D6).
+          // `enviarComanda` ya acepta N entradas `daily_menu` en la misma
+          // tanda: un solo ítem con `quantity: 4` y un único set de opciones
+          // era justamente lo que no alcanzaba para una mesa de cuatro.
           setCart((prev) => [
             ...prev,
-            {
+            ...lineas.map((selectedChoices) => ({
               _key: crypto.randomUUID(),
               kind: "daily_menu" as const,
               daily_menu_id: menu.id,
               product_name: menu.name,
               unit_price_cents: menu.price_cents,
-              quantity,
+              quantity: 1,
               notes: "",
+              // Por `choicesDeltaCents` y no sumando `extra_price_cents` a
+              // mano: los modificadores del producto también suman (spec 083)
+              // y el total que muestra el asistente los cuenta. Si acá se
+              // sumara distinto, el carrito diría otro número que el paso
+              // final.
               line_subtotal_cents:
-                (menu.price_cents +
-                  selectedChoices.reduce(
-                    (acc, sc) => acc + (sc.extra_price_cents ?? 0),
-                    0,
-                  )) *
-                quantity,
+                menu.price_cents +
+                choicesDeltaCents(
+                  new Map(selectedChoices.map((sc) => [sc.choice_group_id, sc])),
+                ),
               seat_number: seatMode ? activeSeat : null,
               selected_choices: selectedChoices,
-            },
+            })),
           ]);
           setOpenDailyMenu(null);
           if (embedded) setSearch("");

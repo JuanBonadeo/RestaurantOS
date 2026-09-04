@@ -6,7 +6,6 @@ import { ArrowLeft, Check, Minus, Plus, X } from "lucide-react";
 import { formatCurrency } from "@/lib/currency";
 import {
   autoResolvedModifierIds,
-  buildMenuSteps,
   choicesDeltaCents,
   initialOptionIndex,
   pruneBlockedSelections,
@@ -14,6 +13,18 @@ import {
   type DailyMenuSelections,
   type MenuStep,
 } from "@/lib/mozo/daily-menu-steps";
+import {
+  deshacerEnPaso,
+  elegirEnPaso,
+  lineasValenIgual,
+  lineasVacias,
+  pasosDelBloque,
+  proximaLineaDe,
+  redimensionar,
+  totalDelBloqueCents,
+  type Linea,
+  type PasoAgrupado,
+} from "@/lib/mozo/daily-menu-lineas";
 import {
   isSingleChoiceGroup,
   missingSelections,
@@ -28,25 +39,48 @@ import { moveSelection } from "@/lib/mozo/product-search";
 import { indexFromDigit } from "@/lib/ui/roving";
 import { useEscapeToClose } from "@/lib/ui/use-escape-to-close";
 
+/** Cuántos menús se ofrecen de un toque en el primer paso. Más que eso, con +. */
+const CANTIDADES = [1, 2, 3, 4, 5, 6, 7, 8];
+
 /**
- * Asistente de carga del menú del día (spec 072).
+ * Asistente de carga del menú del día (specs 072 · 074 · 083 · 118 · 155).
  *
- * Antes esto era una hoja larga con **todos** los grupos de opciones juntos:
- * para un menú de entrada + principal + postre había que scrollear la hoja
- * entera y dar tres toques de mouse. Pero cada `choice_group` es una decisión
- * obligatoria de exactamente una opción (D-MDR-4 / D-MDR-6), así que el menú
- * del día ya era un asistente de N pasos dibujado como formulario plano.
+ * Un paso por decisión: primero la entrada, después el principal… y un paso
+ * final para confirmar. Se entra con la primera opción **enfocada de verdad**
+ * (roving tabindex), ↓/↑ mueven, Enter elige y avanza, `1`–`9` eligen por
+ * posición, ← vuelve. Mismo criterio de teclado que el buscador de productos
+ * (specs 055/066): clamp sin wrap-around, fila seleccionada siempre a la vista.
  *
- * Ahora es un paso por grupo —primero la entrada, después el principal…— y un
- * paso final para confirmar. Se entra con la primera opción **enfocada de
- * verdad** (roving tabindex), ↓/↑ mueven, Enter elige y avanza, `1`–`9` eligen
- * por posición, ← vuelve. Mismo criterio de teclado que el buscador de
- * productos (specs 055/066): clamp sin wrap-around, fila seleccionada siempre
- * a la vista.
+ * ── Varios menús por vuelta de mesa (spec 155) ─────────────────────────────
  *
- * Sigue siendo el mismo componente para el celular del mozo: tocar una opción
- * hace lo mismo que Enter. La pista de atajos se muestra sólo en el panel
- * embebido del salón, que es donde hay teclado.
+ * El estado dejó de ser **una** selección más una cantidad al final: ahora son
+ * **N líneas**, una por menú, y la cantidad abre el asistente (D1). Cada paso
+ * se pregunta para las N líneas de una — la bebida de los cuatro, después el
+ * principal de los cuatro—, que es como se toma el pedido parado en la mesa.
+ * Antes «cantidad 4» eran cuatro menús IDÉNTICOS y había que recorrer el
+ * asistente entero cuatro veces; la encargada de golf lo dijo corto: *«no me
+ * deja poner dos de una»*.
+ *
+ * Con **una** línea el recorrido es el de siempre: un paso está entero o vacío,
+ * así que los contadores no se muestran, elegir avanza y ← vuelve con lo
+ * elegido marcado. Es el caso más frecuente y no se puede regresionar.
+ *
+ * El reparto entre líneas es **arbitrario a propósito** (D3): nadie captura
+ * quién pidió qué, y tanto la comanda como el total son invariantes ante cómo
+ * se reparta. Por eso acá no hay «Comensal 1 / Comensal 2» por ningún lado.
+ *
+ * ── El paso actual se DERIVA, no se guarda ─────────────────────────────────
+ *
+ * No hay `stepIndex`: el paso es el primero que todavía tiene líneas sin
+ * resolver (`pasosDelBloque` + el primero con `faltan > 0`). Elegir puede hacer
+ * aparecer o desaparecer pasos —los ravioles no llevan guarnición—, y un índice
+ * guardado quedaría apuntando a otro lado.
+ *
+ * Sobre ese cursor derivado van dos overrides chicos:
+ *  - `pasoForzado`: el ← y el «cambiar» del resumen abren un paso YA resuelto
+ *    sin borrar nada, para poder pisarlo viendo lo que había.
+ *  - `saltados`: un grupo de modificadores opcional nunca se «resuelve» solo
+ *    —«ninguno» es una respuesta válida—, así que se cierra con «Seguir».
  */
 export function DailyMenuWizard({
   menu,
@@ -56,35 +90,52 @@ export function DailyMenuWizard({
 }: {
   menu: DailyMenuForMozo | null;
   onClose: () => void;
-  onAdd: (
-    menu: DailyMenuForMozo,
-    quantity: number,
-    selectedChoices: DailyMenuSelection[],
-  ) => void;
+  /**
+   * Un array por menú, cada uno con sus `selected_choices` (spec 155 · D6). El
+   * caller pushea N ítems de `quantity: 1`, que es lo que `enviarComanda` ya
+   * espera: un ítem con `quantity: 4` y un solo set de opciones es justamente
+   * lo que no alcanzaba.
+   */
+  onAdd: (menu: DailyMenuForMozo, lineas: DailyMenuSelection[][]) => void;
   /** Embebido en un panel: el overlay se scopea al contenedor (`absolute`) en
    *  vez de cubrir todo el viewport (`fixed`). */
   embedded?: boolean;
 }) {
-  const [stepIndex, setStepIndex] = useState(0);
+  const [lineas, setLineas] = useState<Linea[]>(() => lineasVacias(1));
+  /** ¿Ya pasó el paso de cantidad? Con `false` el asistente lo está mostrando. */
+  const [cantidadLista, setCantidadLista] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
-  const [selections, setSelections] = useState<DailyMenuSelections>(new Map());
-  const [quantity, setQuantity] = useState(1);
-  /** Se editó una elección desde el paso final: al confirmarla hay que volver
-   *  derecho ahí, sin repetir los pasos que ya estaban resueltos (FR-005). */
-  const [returnToConfirm, setReturnToConfirm] = useState(false);
+  /** Paso ya resuelto que se abrió para corregir (← o «cambiar»). */
+  const [pasoForzado, setPasoForzado] = useState<string | null>(null);
+  /** Pasos opcionales que el usuario cerró con «Seguir» sin elegir nada. */
+  const [saltados, setSaltados] = useState<ReadonlySet<string>>(new Set());
 
-  // Los pasos dependen de lo elegido (spec 074): una opción puede sacar un
-  // grupo del medio —«los ravioles no llevan guarnición»— así que la lista se
-  // recalcula en vivo y `Paso N de M` se mueve con ella (FR-003).
-  const steps = useMemo(
-    () => buildMenuSteps(menu?.choice_groups ?? [], selections),
-    [menu, selections],
+  const groups = useMemo(() => menu?.choice_groups ?? [], [menu]);
+
+  // Los pasos dependen de lo elegido en CADA línea (specs 074/083): una opción
+  // puede sacar un grupo del medio —«los ravioles no llevan guarnición»— y con
+  // varias líneas puede aplicar sólo a algunas. Se recalcula en vivo.
+  const pasos = useMemo(
+    () => pasosDelBloque(groups, lineas),
+    [groups, lineas],
   );
-  const confirmIndex = steps.length - 1;
-  // Si la lista se achicó debajo del paso donde estábamos, el índice se clampea
-  // en vez de dejar el asistente apuntando a un paso que ya no existe.
-  const currentIndex = Math.min(stepIndex, confirmIndex);
-  const step = steps[currentIndex];
+  const pendiente = useMemo(
+    () => pasos.find((p) => sigueAbierto(p, saltados)) ?? null,
+    [pasos, saltados],
+  );
+  const forzado = useMemo(
+    () => (pasoForzado ? (pasos.find((p) => p.clave === pasoForzado) ?? null) : null),
+    [pasos, pasoForzado],
+  );
+  const paso = forzado ?? pendiente;
+
+  const vista: "cantidad" | "paso" | "confirm" = !cantidadLista
+    ? "cantidad"
+    : paso
+      ? "paso"
+      : "confirm";
+
+  const esBloque = lineas.length > 1;
 
   const panelRef = useRef<HTMLDivElement>(null);
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -92,71 +143,101 @@ export function DailyMenuWizard({
 
   useEscapeToClose(onClose, !!menu);
 
-  // Cada menú abre limpio, desde el primer paso.
+  // Cada menú abre limpio, desde el paso de cantidad.
   useEffect(() => {
     if (!menu) return;
-    setStepIndex(0);
+    setLineas(lineasVacias(1));
+    setCantidadLista(false);
     setActiveIndex(0);
-    setSelections(new Map());
-    setQuantity(1);
-    setReturnToConfirm(false);
+    setPasoForzado(null);
+    setSaltados(new Set());
   }, [menu?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Foco real al entrar a un paso y al moverse con las flechas (FR-002/003).
   // En el paso final va al botón «Agregar»: Enter agrega.
   useEffect(() => {
-    if (!menu || !step) return;
+    if (!menu) return;
     const t = setTimeout(() => {
-      if (step.kind === "choice" || step.kind === "modifiers") {
-        const el = optionRefs.current[activeIndex];
-        el?.focus({ preventScroll: true });
-        el?.scrollIntoView({ block: "nearest" });
-      } else {
+      if (vista === "confirm") {
         submitRef.current?.focus({ preventScroll: true });
+        return;
       }
+      const el = optionRefs.current[activeIndex];
+      el?.focus({ preventScroll: true });
+      el?.scrollIntoView({ block: "nearest" });
     }, 0);
     return () => clearTimeout(t);
-  }, [menu?.id, currentIndex, activeIndex, step?.kind]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [menu?.id, vista, paso?.clave, activeIndex]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!menu || !step) return null;
+  if (!menu) return null;
 
   const fixedComponents = menu.components.filter((c) => c.kind !== "choice");
-  const delta = choicesDeltaCents(selections);
-  const lineTotal = (menu.price_cents + delta) * quantity;
+  const totalBloque = totalDelBloqueCents(menu.price_cents, lineas);
+
+  /** Los modificadores que una línea eligió para el producto de un grupo. */
+  const modsDeLinea = (i: number, choiceGroupId: string): ComboModifier[] =>
+    lineas[i]?.get(choiceGroupId)?.modifiers ?? [];
 
   /**
-   * Entra al paso `target` dejando el foco donde corresponde.
-   *
-   * `withSteps` existe porque elegir una opción puede cambiar la lista de pasos
-   * (FR-003): hay que navegar sobre la lista NUEVA, no sobre la del render que
-   * todavía está en pantalla.
+   * Entra a un paso dejando el foco donde corresponde: en lo que ya estaba
+   * elegido si volvemos sobre él, si no en la primera opción.
    */
-  const goToStep = (
-    target: number,
-    withSelections: DailyMenuSelections,
-    withSteps: MenuStep[] = steps,
-  ) => {
-    const next = withSteps[target];
-    setStepIndex(target);
-    if (next?.kind === "choice") {
-      setActiveIndex(initialOptionIndex(next.group, withSelections));
+  const enfocarPaso = (destino: PasoAgrupado | null, conLineas: Linea[]) => {
+    if (!destino) {
+      setActiveIndex(0);
       return;
     }
-    if (next?.kind === "modifiers") {
-      // Volver a un paso de modificadores entra en el que ya estaba elegido,
-      // mismo criterio que `initialOptionIndex` con las opciones del menú.
-      const chosen = withSelections.get(next.choiceGroupId)?.modifier_ids ?? [];
-      const i = next.group.modifiers.findIndex((m) => chosen.includes(m.id));
+    // Con varias líneas «lo elegido» no es uno solo, así que se entra por
+    // arriba: el reparto es arbitrario y no hay una fila privilegiada (D3).
+    const referencia = conLineas.length === 1 ? conLineas[0] : null;
+    if (destino.step.kind === "choice") {
+      setActiveIndex(
+        referencia ? initialOptionIndex(destino.step.group, referencia) : 0,
+      );
+      return;
+    }
+    if (destino.step.kind === "modifiers") {
+      const chosen = referencia?.get(destino.step.choiceGroupId)?.modifier_ids ?? [];
+      const i = destino.step.group.modifiers.findIndex((m) => chosen.includes(m.id));
       setActiveIndex(i >= 0 ? i : 0);
       return;
     }
     setActiveIndex(0);
   };
 
+  /**
+   * Aplica lo elegido y suelta el override para que el cursor derivado siga
+   * solo: al siguiente paso pendiente, o al resumen si ya está todo.
+   *
+   * Un paso COMPLETO que se abrió para corregir no puede simplemente sumar
+   * —`elegirEnPaso` no inventa una quinta línea—, así que la elección **pisa**
+   * la última: deshacer y volver a elegir. Con una línea eso es exactamente
+   * «cambiar de opción», que es lo que el asistente hace desde siempre.
+   */
+  const aplicar = (destino: PasoAgrupado, seleccion: DailyMenuSelection) => {
+    const base = destino.faltan === 0 ? deshacerEnPaso(lineas, destino) : lineas;
+    const elegidas = elegirEnPaso(base, destino, seleccion);
+    // `elegirEnPaso` no poda: una guarnición que dejó de aplicar quedaría en la
+    // línea y `choicesDeltaCents` la cobraría (spec 074 · FR-004). Nunca puede
+    // quedar una elección de un grupo inactivo.
+    const next = elegidas.map((l) =>
+      enOrdenDelMenu(groups, pruneBlockedSelections(groups, l) as Linea),
+    );
+    setLineas(next);
+    setPasoForzado(null);
+    // El paso que sigue sale de la lista NUEVA: elegir pudo agregar o sacar
+    // pasos, y el foco tiene que entrar donde corresponde en esa lista.
+    const siguientes = pasosDelBloque(groups, next);
+    const siguiente = siguientes.find((p) => sigueAbierto(p, saltados)) ?? null;
+    // Si seguimos en el MISMO paso —la vuelta de bebidas no terminó— el foco se
+    // queda donde está: volver a la primera opción después de cada elección
+    // obliga a bajar de nuevo para repetir la que se acaba de elegir.
+    if (siguiente?.clave !== destino.clave) enfocarPaso(siguiente, next);
+  };
+
   const choose = (group: DailyMenuChoiceGroup, option: DailyMenuComponent) => {
-    if (!option.product_id) return;
-    const draft = new Map(selections);
-    draft.set(group.choice_group_id, {
+    if (!paso || !option.product_id) return;
+    aplicar(paso, {
       choice_group_id: group.choice_group_id,
       choice_group_label: group.label,
       product_id: option.product_id,
@@ -164,51 +245,43 @@ export function DailyMenuWizard({
       extra_price_cents: option.extra_price_cents ?? 0,
       modifier_ids: [],
     });
-    // FR-004: cambiar el principal por uno que no lleva guarnición descarta la
-    // guarnición que ya estaba elegida. Así en `selections` nunca queda una
-    // elección de un grupo que no aplica, y el total del pie no la cobra.
-    const next = pruneBlockedSelections(menu.choice_groups, draft);
-    setSelections(next);
-
-    const nextSteps = buildMenuSteps(menu.choice_groups, next);
-    const nextConfirmIndex = nextSteps.length - 1;
-    if (returnToConfirm) {
-      setReturnToConfirm(false);
-      goToStep(nextConfirmIndex, next, nextSteps);
-      return;
-    }
-    // Dónde quedó ESTE grupo en la lista nueva: elegir acá sólo puede sacar
-    // grupos posteriores (D-GCM-3), pero buscarlo en vez de asumir `stepIndex`
-    // deja el avance correcto sin depender de esa invariante.
-    const here = nextSteps.findIndex(
-      (s) => s.kind === "choice" && s.group.choice_group_id === group.choice_group_id,
-    );
-    goToStep(
-      Math.min((here >= 0 ? here : currentIndex) + 1, nextConfirmIndex),
-      next,
-      nextSteps,
-    );
   };
-
-  /** Los modificadores elegidos para el producto de un grupo del menú. */
-  const modifiersOf = (choiceGroupId: string) =>
-    selections.get(choiceGroupId)?.modifiers ?? [];
 
   /**
    * Marcar / desmarcar un modificador (spec 083).
    *
-   * Obligatorio de a uno: reemplaza y avanza, igual que un grupo del menú
-   * (FR-002). El resto sólo marca — el paso se cierra con «Seguir» (FR-003).
+   * Obligatorio de a uno: reemplaza y avanza. El resto sólo marca — el paso se
+   * cierra con «Seguir» (FR-003).
+   *
+   * A qué línea le toca: la próxima sin resolver. Si ya resolvieron todas,
+   * la última que eligió, que es corregir y no agregar un menú más.
+   *
+   * ⚠️ Con varias líneas, un grupo de VARIAS opciones da **una por menú**: al
+   * marcar la primera, la línea queda resuelta y el siguiente toque le cae a la
+   * que sigue. Es coherente con el reparto por vuelta (D3) pero no permite dos
+   * salsas en el mismo menú dentro de un bloque; con una sola línea funciona
+   * como siempre.
    */
   const toggleModifier = (
+    destino: PasoAgrupado,
     step: Extract<MenuStep, { kind: "modifiers" }>,
     modifier: ComboModifier,
   ) => {
-    const current = selections.get(step.choiceGroupId);
+    const ownIds = new Set(step.group.modifiers.map((m) => m.id));
+    const tieneDelGrupo = (i: number) =>
+      modsDeLinea(i, step.choiceGroupId).some((m) => ownIds.has(m.id));
+    const pendienteIdx = proximaLineaDe(destino, lineas);
+    const conElección = destino.lineas.filter(tieneDelGrupo);
+    const i =
+      pendienteIdx >= 0
+        ? pendienteIdx
+        : (conElección[conElección.length - 1] ?? destino.lineas[0]);
+    if (i == null) return;
+
+    const current = lineas[i]?.get(step.choiceGroupId);
     if (!current) return;
     const chosen = current.modifiers ?? [];
     const single = isSingleChoiceGroup(step.group);
-    const ownIds = new Set(step.group.modifiers.map((m) => m.id));
     const yaEsta = chosen.some((m) => m.id === modifier.id);
 
     let next: ComboModifier[];
@@ -223,54 +296,150 @@ export function DailyMenuWizard({
       next = [...chosen, modifier];
     }
 
-    const draft = new Map(selections);
-    draft.set(step.choiceGroupId, {
+    const out = lineas.map((l) => new Map(l) as Linea);
+    out[i]!.set(step.choiceGroupId, {
       ...current,
       modifiers: next,
       modifier_ids: next.map((m) => m.id),
     });
-    setSelections(draft);
+    setLineas(out);
+    setPasoForzado(null);
 
     if (single) {
-      const nextSteps = buildMenuSteps(menu.choice_groups, draft);
-      goToStep(Math.min(currentIndex + 1, nextSteps.length - 1), draft, nextSteps);
+      const siguientes = pasosDelBloque(groups, out);
+      const siguiente = siguientes.find((p) => sigueAbierto(p, saltados)) ?? null;
+      if (siguiente?.clave !== destino.clave) enfocarPaso(siguiente, out);
     }
   };
 
-  /** Volver: al paso anterior, o cerrar si ya estamos en el primero. */
+  /** Cerrar un paso opcional sin (o sin más) elecciones: el «Seguir». */
+  const seguir = (destino: PasoAgrupado) => {
+    setSaltados((s) => new Set(s).add(destino.clave));
+    setPasoForzado(null);
+    const resto = pasos.find(
+      (p) => p.clave !== destino.clave && sigueAbierto(p, saltados),
+    );
+    enfocarPaso(resto ?? null, lineas);
+  };
+
+  /** Confirmar la cantidad y arrancar la vuelta de mesa. */
+  const confirmarCantidad = (n: number) => {
+    const next = redimensionar(lineas, n);
+    setLineas(next);
+    setCantidadLista(true);
+    setPasoForzado(null);
+    const siguientes = pasosDelBloque(groups, next);
+    enfocarPaso(siguientes.find((p) => sigueAbierto(p, saltados)) ?? null, next);
+  };
+
+  /**
+   * Volver.
+   *
+   * A mitad de una vuelta —ya marcó dos bebidas de cuatro— el ← deshace la
+   * última, que es el «me equivoqué en la tercera». Si no, abre el paso
+   * resuelto anterior **sin borrar nada**, para poder pisarlo viendo lo que
+   * había. Con una sola línea el primer caso no existe (un paso está entero o
+   * vacío), así que el ← es exactamente el de siempre.
+   */
   const goBack = () => {
-    if (currentIndex === 0) {
+    if (vista === "cantidad") {
       onClose();
       return;
     }
-    setReturnToConfirm(false);
-    goToStep(currentIndex - 1, selections);
+    if (paso && paso.resueltas > 0 && paso.faltan > 0) {
+      setLineas(deshacerEnPaso(lineas, paso));
+      return;
+    }
+    const hasta =
+      vista === "confirm"
+        ? pasos.length
+        : Math.max(0, pasos.findIndex((p) => p.clave === paso?.clave));
+    const previo = pasos
+      .slice(0, hasta)
+      .reverse()
+      .find((p) => p.resueltas > 0 || saltados.has(p.clave));
+    if (previo) {
+      // Volver sobre un paso que se había salteado lo vuelve a poner en juego.
+      setSaltados((s) => {
+        const next = new Set(s);
+        next.delete(previo.clave);
+        return next;
+      });
+      setPasoForzado(previo.clave);
+      enfocarPaso(previo, lineas);
+      return;
+    }
+    setPasoForzado(null);
+    setCantidadLista(false);
+    setActiveIndex(Math.min(lineas.length, CANTIDADES.length) - 1);
   };
 
-  const editGroup = (groupIndex: number) => {
-    setReturnToConfirm(true);
-    goToStep(groupIndex, selections);
+  const editarPaso = (clave: string) => {
+    const destino = pasos.find((p) => p.clave === clave);
+    if (!destino) return;
+    setSaltados((s) => {
+      const next = new Set(s);
+      next.delete(clave);
+      return next;
+    });
+    setPasoForzado(clave);
+    enfocarPaso(destino, lineas);
+  };
+
+  const editarCantidad = () => {
+    setCantidadLista(false);
+    setPasoForzado(null);
+    setActiveIndex(Math.min(lineas.length, CANTIDADES.length) - 1);
   };
 
   const handleAdd = () => {
     // Los grupos obligatorios de una sola opción nunca se mostraron (serían un
     // paso con una sola salida), pero el validador del server los exige igual.
-    const auto = autoResolvedModifierIds(menu.choice_groups, selections);
-    const payload = [...selections.values()].map((sel) => {
-      const extra = auto.get(sel.choice_group_id) ?? [];
-      if (extra.length === 0) return sel;
-      return {
-        ...sel,
-        modifier_ids: [...new Set([...sel.modifier_ids, ...extra])],
-      };
-    });
-    onAdd(menu, quantity, payload);
+    // Van por línea: cada menú manda los suyos.
+    onAdd(
+      menu,
+      lineas.map((linea) => {
+        const auto = autoResolvedModifierIds(groups, linea);
+        return [...linea.values()].map((sel) => {
+          const extra = auto.get(sel.choice_group_id) ?? [];
+          if (extra.length === 0) return sel;
+          return {
+            ...sel,
+            modifier_ids: [...new Set([...sel.modifier_ids, ...extra])],
+          };
+        });
+      }),
+    );
   };
+
+  /** Cuántas líneas del paso quedaron abajo del mínimo del grupo. */
+  const sinMinimo =
+    paso?.step.kind === "modifiers"
+      ? paso.lineas.filter(
+          (i) =>
+            missingSelections(
+              (paso.step as Extract<MenuStep, { kind: "modifiers" }>).group,
+              modsDeLinea(
+                i,
+                (paso.step as Extract<MenuStep, { kind: "modifiers" }>)
+                  .choiceGroupId,
+              ).map((m) => m.id),
+            ) > 0,
+        ).length
+      : 0;
+
+  /** Lo que falta del grupo para la línea que está en juego (texto de a uno). */
+  const faltanMods =
+    paso?.step.kind === "modifiers" && !esBloque
+      ? missingSelections(
+          paso.step.group,
+          modsDeLinea(0, paso.step.choiceGroupId).map((m) => m.id),
+        )
+      : 0;
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
-    const typing =
-      target.tagName === "INPUT" || target.tagName === "TEXTAREA";
+    const typing = target.tagName === "INPUT" || target.tagName === "TEXTAREA";
 
     // Focus-trap: Tab/Shift+Tab ciclan dentro del panel (igual que ProductModal).
     if (e.key === "Tab") {
@@ -302,9 +471,62 @@ export function DailyMenuWizard({
       return;
     }
 
+    // ── Paso de cantidad: los mismos atajos, sobre la grilla de números ──
+    if (vista === "cantidad") {
+      const length = CANTIDADES.length;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setActiveIndex((i) => moveSelection(i, 1, length));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setActiveIndex((i) => moveSelection(i, -1, length));
+        return;
+      }
+      if (e.key === "Home") {
+        e.preventDefault();
+        setActiveIndex(0);
+        return;
+      }
+      if (e.key === "End") {
+        e.preventDefault();
+        setActiveIndex(length - 1);
+        return;
+      }
+      if (e.key === "+" || e.key === "=") {
+        e.preventDefault();
+        setLineas((ls) => redimensionar(ls, Math.min(99, ls.length + 1)));
+        return;
+      }
+      if (e.key === "-") {
+        e.preventDefault();
+        setLineas((ls) => redimensionar(ls, Math.max(1, ls.length - 1)));
+        return;
+      }
+      const byDigit = indexFromDigit(e.key, length);
+      if (byDigit !== null) {
+        e.preventDefault();
+        confirmarCantidad(CANTIDADES[byDigit]!);
+        return;
+      }
+      if (e.key === "Enter" || e.key === " ") {
+        if (target.getAttribute("role") !== "radio") return;
+        e.preventDefault();
+        confirmarCantidad(CANTIDADES[activeIndex] ?? lineas.length);
+      }
+      return;
+    }
+
+    if (!paso) {
+      // Paso final: Enter agrega (lo hace el foco en el botón). Nada más.
+      return;
+    }
+
     // El paso de modificadores se navega igual que uno del menú: las flechas y
     // los dígitos son los mismos, sólo cambia qué hace elegir (FR-002/003).
-    if (step.kind === "modifiers") {
+    if (paso.step.kind === "modifiers") {
+      const step = paso.step;
       const length = step.group.modifiers.length;
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -330,7 +552,7 @@ export function DailyMenuWizard({
       if (byDigit !== null) {
         e.preventDefault();
         const modifier = step.group.modifiers[byDigit];
-        if (modifier) toggleModifier(step, modifier);
+        if (modifier) toggleModifier(paso, step, modifier);
         return;
       }
       if (e.key === "Enter" || e.key === " ") {
@@ -339,26 +561,30 @@ export function DailyMenuWizard({
         e.preventDefault();
         const modifier = step.group.modifiers[activeIndex];
         if (!modifier) return;
-        // Segundo Enter sobre lo que ya elegiste = «Seguir».
+        // Segundo Enter sobre lo que ya elegiste = «Seguir» (spec 118).
         //
         // Los grupos opcionales o de varias no se cierran solos (FR-003), así
         // que después de elegir hay que salir del paso — y el Enter, que es
         // donde la mano ya está, **desmarcaba**: dos Enter seguidos y volvías a
         // cero sin enterarte. Ahora el segundo avanza, que es lo que se espera
         // de un asistente. Para desmarcar quedan el dígito y el click.
-        const yaElegido = modifiersOf(step.choiceGroupId).some(
-          (m) => m.id === modifier.id,
-        );
-        if (yaElegido && faltan === 0) {
-          goToStep(Math.min(currentIndex + 1, steps.length - 1), selections);
+        const yaElegido = modsDeLinea(
+          proximaLineaDe(paso, lineas) >= 0
+            ? proximaLineaDe(paso, lineas)
+            : (paso.lineas[paso.lineas.length - 1] ?? 0),
+          step.choiceGroupId,
+        ).some((m) => m.id === modifier.id);
+        if (yaElegido && sinMinimo === 0) {
+          seguir(paso);
           return;
         }
-        toggleModifier(step, modifier);
+        toggleModifier(paso, step, modifier);
       }
       return;
     }
 
-    if (step.kind === "choice") {
+    if (paso.step.kind === "choice") {
+      const step = paso.step;
       const length = step.group.options.length;
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -397,33 +623,31 @@ export function DailyMenuWizard({
         const option = step.group.options[activeIndex];
         if (option) choose(step.group, option);
       }
-      return;
-    }
-
-    // Paso final: cantidad con + / − (mismo atajo que ProductModal y walk-in).
-    if (e.key === "+" || e.key === "=") {
-      e.preventDefault();
-      setQuantity((q) => Math.min(99, q + 1));
-    } else if (e.key === "-") {
-      e.preventDefault();
-      setQuantity((q) => Math.max(1, q - 1));
     }
   };
 
   const stepLabel =
-    step.kind === "choice"
-      ? step.group.label
-      : step.kind === "modifiers"
-        ? `${step.group.name} · ${step.productName}`
-        : "Confirmá el menú";
+    vista === "cantidad"
+      ? "¿Cuántos menús?"
+      : !paso
+        ? "Confirmá el menú"
+        : paso.step.kind === "choice"
+          ? paso.step.group.label
+          : paso.step.kind === "modifiers"
+            ? `${paso.step.group.name} · ${paso.step.productName}`
+            : "Confirmá el menú";
 
-  const faltan =
-    step.kind === "modifiers"
-      ? missingSelections(
-          step.group,
-          modifiersOf(step.choiceGroupId).map((m) => m.id),
-        )
-      : 0;
+  /** Para cuáles de las N líneas es este paso, cuando no es para todas (D4). */
+  const alcance = paso ? paraQuienes(paso, lineas, groups) : null;
+
+  // Cantidad + los pasos del bloque + confirmar.
+  const totalPasos = pasos.length + 2;
+  const indiceActual =
+    vista === "cantidad"
+      ? 0
+      : vista === "confirm"
+        ? totalPasos - 1
+        : 1 + Math.max(0, pasos.findIndex((p) => p.clave === paso?.clave));
 
   return (
     <div
@@ -446,7 +670,7 @@ export function DailyMenuWizard({
               type="button"
               onClick={goBack}
               className="rounded-full p-2 text-zinc-600 active:bg-zinc-100"
-              aria-label={currentIndex === 0 ? "Cerrar" : "Paso anterior"}
+              aria-label={vista === "cantidad" ? "Cerrar" : "Paso anterior"}
             >
               <ArrowLeft className="h-5 w-5" />
             </button>
@@ -457,6 +681,16 @@ export function DailyMenuWizard({
               <h3 className="truncate font-heading text-lg font-extrabold leading-tight text-zinc-900">
                 {stepLabel}
               </h3>
+              {/* El contador de la vuelta. Sin esta línea el mozo cuenta cuatro
+                  menús, ve un paso que pide dos, y parece un bug (D4). */}
+              {esBloque && vista === "paso" && paso && (
+                <p className="truncate text-[11px] font-semibold text-zinc-500">
+                  {paso.faltan > 0
+                    ? `Faltan ${paso.faltan} de ${paso.lineas.length}`
+                    : `Listos los ${paso.lineas.length}`}
+                  {alcance && ` · ${alcance}`}
+                </p>
+              )}
             </div>
             <button
               type="button"
@@ -468,173 +702,103 @@ export function DailyMenuWizard({
             </button>
           </div>
 
-          {steps.length > 1 && (
-            <div className="mt-2 flex items-center gap-2 pl-1">
-              <div className="flex items-center gap-1">
-                {steps.map((s, i) => (
-                  <span
-                    key={i}
-                    className={`h-1.5 rounded-full transition-all ${
-                      i === currentIndex
-                        ? "w-5 bg-emerald-600"
-                        : i < currentIndex
-                          ? "w-1.5 bg-emerald-300"
-                          : "w-1.5 bg-zinc-200"
-                    }`}
-                  />
-                ))}
-              </div>
-              <span className="text-[11px] font-semibold text-zinc-500">
-                Paso {currentIndex + 1} de {steps.length}
-              </span>
+          <div className="mt-2 flex items-center gap-2 pl-1">
+            <div className="flex items-center gap-1">
+              {Array.from({ length: totalPasos }, (_, i) => (
+                <span
+                  key={i}
+                  className={`h-1.5 rounded-full transition-all ${
+                    i === indiceActual
+                      ? "w-5 bg-emerald-600"
+                      : i < indiceActual
+                        ? "w-1.5 bg-emerald-300"
+                        : "w-1.5 bg-zinc-200"
+                  }`}
+                />
+              ))}
             </div>
-          )}
+            <span className="text-[11px] font-semibold text-zinc-500">
+              Paso {indiceActual + 1} de {totalPasos}
+            </span>
+          </div>
         </div>
 
         {/* ── Cuerpo ── */}
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-          {step.kind === "choice" ? (
-            <ul role="radiogroup" aria-label={step.group.label} className="space-y-1.5">
-              {step.group.options.map((opt, i) => {
-                const isActive = i === activeIndex;
-                const isChosen =
-                  selections.get(step.group.choice_group_id)?.product_id ===
-                  opt.product_id;
-                return (
-                  <li key={opt.id}>
-                    <button
-                      ref={(el) => {
-                        optionRefs.current[i] = el;
-                      }}
-                      type="button"
-                      role="radio"
-                      aria-checked={isChosen}
-                      tabIndex={isActive ? 0 : -1}
-                      onClick={() => choose(step.group, opt)}
-                      onMouseEnter={() => setActiveIndex(i)}
-                      className={`flex min-h-[52px] w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition focus:outline-none active:scale-[0.99] ${
-                        isChosen
-                          ? "bg-emerald-50 ring-2 ring-emerald-500"
-                          : isActive
-                            ? "bg-white ring-2 ring-emerald-400"
-                            : "bg-zinc-50 ring-1 ring-zinc-100"
-                      }`}
-                    >
-                      <span
-                        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold tabular-nums ${
-                          isChosen
-                            ? "bg-emerald-600 text-white"
-                            : "bg-white text-zinc-500 ring-1 ring-zinc-200"
-                        }`}
-                      >
-                        {isChosen ? (
-                          <Check className="h-3.5 w-3.5" strokeWidth={3} />
-                        ) : (
-                          i + 1
-                        )}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[15px] font-semibold text-zinc-900">
-                          {opt.product_name ?? opt.label}
-                        </span>
-                        {opt.description && (
-                          <span className="mt-0.5 block truncate text-xs text-zinc-500">
-                            {opt.description}
-                          </span>
-                        )}
-                      </span>
-                      {opt.extra_price_cents > 0 && (
-                        <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-bold tabular-nums text-amber-800">
-                          +{formatCurrency(opt.extra_price_cents)}
-                        </span>
-                      )}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          ) : step.kind === "modifiers" ? (
-            <ModifierStep
-              step={step}
+          {vista === "cantidad" ? (
+            <CantidadStep
+              cantidad={lineas.length}
               activeIndex={activeIndex}
-              chosen={modifiersOf(step.choiceGroupId)}
               optionRefs={optionRefs}
-              onToggle={(m) => toggleModifier(step, m)}
+              onPick={confirmarCantidad}
+              onHover={setActiveIndex}
+            />
+          ) : paso?.step.kind === "choice" ? (
+            <ChoiceStep
+              step={paso.step}
+              paso={paso}
+              lineas={lineas}
+              esBloque={esBloque}
+              activeIndex={activeIndex}
+              optionRefs={optionRefs}
+              onChoose={(opt) => choose((paso.step as Extract<MenuStep, { kind: "choice" }>).group, opt)}
+              onHover={setActiveIndex}
+            />
+          ) : paso?.step.kind === "modifiers" ? (
+            <ModifierStep
+              step={paso.step}
+              paso={paso}
+              lineas={lineas}
+              esBloque={esBloque}
+              activeIndex={activeIndex}
+              optionRefs={optionRefs}
+              onToggle={(m) =>
+                toggleModifier(
+                  paso,
+                  paso.step as Extract<MenuStep, { kind: "modifiers" }>,
+                  m,
+                )
+              }
               onHover={setActiveIndex}
             />
           ) : (
             <ConfirmStep
-              steps={steps}
+              pasos={pasos}
+              lineas={lineas}
+              esBloque={esBloque}
+              precioMenuCents={menu.price_cents}
               fixedComponents={fixedComponents}
-              selections={selections}
-              onEditGroup={editGroup}
+              onEditPaso={editarPaso}
+              onEditCantidad={editarCantidad}
             />
           )}
         </div>
 
         {/* ── Pie: total + acción del paso ── */}
         <div className="shrink-0 border-t border-zinc-200 bg-white px-3 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
-          {step.kind === "choice" ? (
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-xs text-zinc-500">
-                Elegí una opción para seguir
-              </p>
-              <p className="text-base font-extrabold text-emerald-700 tabular-nums">
-                {formatCurrency(menu.price_cents + delta)}
-              </p>
-            </div>
-          ) : step.kind === "modifiers" ? (
-            isSingleChoiceGroup(step.group) ? (
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-xs text-zinc-500">Elegí una opción para seguir</p>
-                <p className="text-base font-extrabold text-emerald-700 tabular-nums">
-                  {formatCurrency(menu.price_cents + delta)}
-                </p>
-              </div>
-            ) : (
-              // Opcional o de varias: «ninguno» y «dos» son respuestas válidas,
-              // así que el paso lo cierra el usuario (FR-003).
-              <div className="flex items-center gap-3">
-                <p className="min-w-0 flex-1 text-xs text-zinc-500">
-                  {faltan > 0
-                    ? `Elegí ${faltan} para seguir`
-                    : `Total ${formatCurrency(menu.price_cents + delta)}`}
-                </p>
-                <button
-                  ref={submitRef}
-                  type="button"
-                  disabled={faltan > 0}
-                  onClick={() =>
-                    goToStep(
-                      Math.min(currentIndex + 1, steps.length - 1),
-                      selections,
-                    )
-                  }
-                  className="flex h-11 shrink-0 items-center rounded-2xl bg-emerald-600 px-5 text-sm font-semibold text-white transition active:scale-[0.98] disabled:opacity-50"
-                >
-                  Seguir
-                </button>
-              </div>
-            )
-          ) : (
+          {vista === "cantidad" ? (
             <div className="flex items-center gap-3">
               <div className="flex items-center rounded-full ring-1 ring-zinc-200">
                 <button
                   type="button"
                   tabIndex={-1}
-                  onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                  onClick={() =>
+                    setLineas((ls) => redimensionar(ls, Math.max(1, ls.length - 1)))
+                  }
                   className="flex h-11 w-11 items-center justify-center text-zinc-700 active:bg-zinc-50"
                   aria-label="Menos"
                 >
                   <Minus className="h-4 w-4" />
                 </button>
                 <span className="w-6 text-center text-sm font-bold tabular-nums">
-                  {quantity}
+                  {lineas.length}
                 </span>
                 <button
                   type="button"
                   tabIndex={-1}
-                  onClick={() => setQuantity((q) => Math.min(99, q + 1))}
+                  onClick={() =>
+                    setLineas((ls) => redimensionar(ls, Math.min(99, ls.length + 1)))
+                  }
                   className="flex h-11 w-11 items-center justify-center text-zinc-700 active:bg-zinc-50"
                   aria-label="Más"
                 >
@@ -642,29 +806,244 @@ export function DailyMenuWizard({
                 </button>
               </div>
               <button
-                ref={submitRef}
                 type="button"
-                onClick={handleAdd}
-                className="flex h-12 flex-1 items-center justify-between rounded-2xl bg-emerald-600 px-4 text-white transition active:scale-[0.98]"
+                onClick={() => confirmarCantidad(lineas.length)}
+                className="flex h-12 flex-1 items-center justify-center rounded-2xl bg-emerald-600 px-4 text-base font-semibold text-white transition active:scale-[0.98]"
               >
-                <span className="text-base font-semibold">Agregar</span>
-                <span className="text-base font-bold tabular-nums">
-                  {formatCurrency(lineTotal)}
-                </span>
+                Seguir
               </button>
             </div>
+          ) : paso?.step.kind === "choice" ? (
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-zinc-500">
+                {esBloque && paso.faltan > 0
+                  ? `Elegí ${paso.faltan} más`
+                  : "Elegí una opción para seguir"}
+              </p>
+              <p className="text-base font-extrabold text-emerald-700 tabular-nums">
+                {formatCurrency(totalBloque)}
+              </p>
+            </div>
+          ) : paso?.step.kind === "modifiers" ? (
+            isSingleChoiceGroup(paso.step.group) ? (
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs text-zinc-500">
+                  {esBloque && paso.faltan > 0
+                    ? `Elegí ${paso.faltan} más`
+                    : "Elegí una opción para seguir"}
+                </p>
+                <p className="text-base font-extrabold text-emerald-700 tabular-nums">
+                  {formatCurrency(totalBloque)}
+                </p>
+              </div>
+            ) : (
+              // Opcional o de varias: «ninguno» y «dos» son respuestas válidas,
+              // así que el paso lo cierra el usuario (FR-003).
+              <div className="flex items-center gap-3">
+                <p className="min-w-0 flex-1 text-xs text-zinc-500">
+                  {sinMinimo > 0
+                    ? esBloque
+                      ? `Faltan ${sinMinimo} de ${paso.lineas.length}`
+                      : `Elegí ${faltanMods} para seguir`
+                    : `Total ${formatCurrency(totalBloque)}`}
+                </p>
+                <button
+                  ref={submitRef}
+                  type="button"
+                  disabled={sinMinimo > 0}
+                  onClick={() => seguir(paso)}
+                  className="flex h-11 shrink-0 items-center rounded-2xl bg-emerald-600 px-5 text-sm font-semibold text-white transition active:scale-[0.98] disabled:opacity-50"
+                >
+                  Seguir
+                </button>
+              </div>
+            )
+          ) : (
+            <button
+              ref={submitRef}
+              type="button"
+              onClick={handleAdd}
+              className="flex h-12 w-full items-center justify-between rounded-2xl bg-emerald-600 px-4 text-white transition active:scale-[0.98]"
+            >
+              <span className="text-base font-semibold">
+                {esBloque ? `Agregar ${lineas.length} menús` : "Agregar"}
+              </span>
+              <span className="text-base font-bold tabular-nums">
+                {formatCurrency(totalBloque)}
+              </span>
+            </button>
           )}
 
           {embedded && (
             <p className="mt-2 text-[11px] text-zinc-400">
-              {step.kind === "choice"
-                ? "↑↓ moverse · 1-9 elegir directo · Enter confirmar · ← volver"
-                : "+/− cantidad · Enter agregar · ← volver"}
+              {vista === "cantidad"
+                ? "1-8 cuántos · +/− ajustar · Enter seguir"
+                : vista === "paso"
+                  ? "↑↓ moverse · 1-9 elegir directo · Enter confirmar · ← volver"
+                  : "Enter agregar · ← volver"}
             </p>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Primer paso: cuántos menús se cargan de una (spec 155 · D1).
+ *
+ * Antes la cantidad estaba al final, porque una sola línea no necesita saberla
+ * antes. Con N líneas el número define todo lo que viene, así que abre el
+ * asistente. Con **1** —el caso más frecuente— es un toque y el resto del
+ * recorrido queda idéntico al de siempre.
+ */
+function CantidadStep({
+  cantidad,
+  activeIndex,
+  optionRefs,
+  onPick,
+  onHover,
+}: {
+  cantidad: number;
+  activeIndex: number;
+  optionRefs: React.RefObject<(HTMLButtonElement | null)[]>;
+  onPick: (n: number) => void;
+  onHover: (i: number) => void;
+}) {
+  return (
+    <>
+      <p className="mb-2 px-1 text-xs text-zinc-500">
+        Se preguntan las opciones de todos juntos, por vuelta de mesa.
+      </p>
+      <div role="radiogroup" aria-label="Cuántos menús" className="grid grid-cols-4 gap-2">
+        {CANTIDADES.map((n, i) => {
+          const isActive = i === activeIndex;
+          const isChosen = n === cantidad;
+          return (
+            <button
+              key={n}
+              ref={(el) => {
+                optionRefs.current[i] = el;
+              }}
+              type="button"
+              role="radio"
+              aria-checked={isChosen}
+              aria-label={`${n} ${n === 1 ? "menú" : "menús"}`}
+              tabIndex={isActive ? 0 : -1}
+              onClick={() => onPick(n)}
+              onMouseEnter={() => onHover(i)}
+              className={`flex h-16 items-center justify-center rounded-2xl text-xl font-extrabold tabular-nums transition focus:outline-none active:scale-[0.97] ${
+                isChosen
+                  ? "bg-emerald-50 text-emerald-800 ring-2 ring-emerald-500"
+                  : isActive
+                    ? "bg-white text-zinc-900 ring-2 ring-emerald-400"
+                    : "bg-zinc-50 text-zinc-700 ring-1 ring-zinc-100"
+              }`}
+            >
+              {n}
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+/**
+ * Un grupo de opciones del menú, para las N líneas que lo piden.
+ *
+ * Con varias, cada opción muestra **cuántas veces** se eligió: se toca
+ * `Gaseosa` dos veces, `Agua` una, `Vino` una, y el contador queda a la vista
+ * (D2). Con una sola línea es la fila de siempre, con su tilde.
+ */
+function ChoiceStep({
+  step,
+  paso,
+  lineas,
+  esBloque,
+  activeIndex,
+  optionRefs,
+  onChoose,
+  onHover,
+}: {
+  step: Extract<MenuStep, { kind: "choice" }>;
+  paso: PasoAgrupado;
+  lineas: Linea[];
+  esBloque: boolean;
+  activeIndex: number;
+  optionRefs: React.RefObject<(HTMLButtonElement | null)[]>;
+  onChoose: (opt: DailyMenuComponent) => void;
+  onHover: (i: number) => void;
+}) {
+  const veces = new Map<string, number>();
+  for (const i of paso.lineas) {
+    const pid = lineas[i]?.get(step.group.choice_group_id)?.product_id;
+    if (pid) veces.set(pid, (veces.get(pid) ?? 0) + 1);
+  }
+
+  return (
+    <ul role="radiogroup" aria-label={step.group.label} className="space-y-1.5">
+      {step.group.options.map((opt, i) => {
+        const isActive = i === activeIndex;
+        const cuenta = opt.product_id ? (veces.get(opt.product_id) ?? 0) : 0;
+        const isChosen = cuenta > 0;
+        return (
+          <li key={opt.id}>
+            <button
+              ref={(el) => {
+                optionRefs.current[i] = el;
+              }}
+              type="button"
+              role="radio"
+              aria-checked={isChosen}
+              tabIndex={isActive ? 0 : -1}
+              onClick={() => onChoose(opt)}
+              onMouseEnter={() => onHover(i)}
+              className={`flex min-h-[52px] w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition focus:outline-none active:scale-[0.99] ${
+                isChosen
+                  ? "bg-emerald-50 ring-2 ring-emerald-500"
+                  : isActive
+                    ? "bg-white ring-2 ring-emerald-400"
+                    : "bg-zinc-50 ring-1 ring-zinc-100"
+              }`}
+            >
+              <span
+                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold tabular-nums ${
+                  isChosen
+                    ? "bg-emerald-600 text-white"
+                    : "bg-white text-zinc-500 ring-1 ring-zinc-200"
+                }`}
+              >
+                {isChosen ? (
+                  esBloque ? (
+                    cuenta
+                  ) : (
+                    <Check className="h-3.5 w-3.5" strokeWidth={3} />
+                  )
+                ) : (
+                  i + 1
+                )}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[15px] font-semibold text-zinc-900">
+                  {opt.product_name ?? opt.label}
+                </span>
+                {opt.description && (
+                  <span className="mt-0.5 block truncate text-xs text-zinc-500">
+                    {opt.description}
+                  </span>
+                )}
+              </span>
+              {opt.extra_price_cents > 0 && (
+                <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-bold tabular-nums text-amber-800">
+                  +{formatCurrency(opt.extra_price_cents)}
+                </span>
+              )}
+            </button>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -678,24 +1057,37 @@ export function DailyMenuWizard({
  */
 function ModifierStep({
   step,
+  paso,
+  lineas,
+  esBloque,
   activeIndex,
-  chosen,
   optionRefs,
   onToggle,
   onHover,
 }: {
   step: Extract<MenuStep, { kind: "modifiers" }>;
+  paso: PasoAgrupado;
+  lineas: Linea[];
+  esBloque: boolean;
   activeIndex: number;
-  chosen: ComboModifier[];
   optionRefs: React.RefObject<(HTMLButtonElement | null)[]>;
   onToggle: (m: ComboModifier) => void;
   onHover: (i: number) => void;
 }) {
   const single = isSingleChoiceGroup(step.group);
-  const chosenIds = chosen.map((m) => m.id);
-  const enEsteGrupo = step.group.modifiers.filter((m) =>
-    chosenIds.includes(m.id),
-  ).length;
+  const ownIds = new Set(step.group.modifiers.map((m) => m.id));
+
+  // Cuántas veces se eligió cada modificador a lo largo de las líneas del paso.
+  const veces = new Map<string, number>();
+  for (const i of paso.lineas) {
+    for (const id of lineas[i]?.get(step.choiceGroupId)?.modifier_ids ?? []) {
+      if (ownIds.has(id)) veces.set(id, (veces.get(id) ?? 0) + 1);
+    }
+  }
+  // El tope es por línea: con la línea en juego llena, lo no elegido se apaga.
+  const enJuego = esBloque
+    ? 0
+    : step.group.modifiers.filter((m) => (veces.get(m.id) ?? 0) > 0).length;
 
   return (
     <>
@@ -705,6 +1097,7 @@ function ModifierStep({
             ? `Elegí ${step.group.min_selection}`
             : "Opcional"}
           {step.group.max_selection > 1 && ` · hasta ${step.group.max_selection}`}
+          {esBloque && " · uno por menú"}
         </p>
       )}
       <ul
@@ -714,11 +1107,12 @@ function ModifierStep({
       >
         {step.group.modifiers.map((m, i) => {
           const isActive = i === activeIndex;
-          const isChosen = chosenIds.includes(m.id);
+          const cuenta = veces.get(m.id) ?? 0;
+          const isChosen = cuenta > 0;
           // Con el tope cubierto, lo no elegido se apaga: un botón que existe y
           // no hace nada es peor que decir que ya no se puede.
           const topeCubierto =
-            !single && !isChosen && enEsteGrupo >= step.group.max_selection;
+            !single && !isChosen && enJuego >= step.group.max_selection;
           return (
             <li key={m.id}>
               <button
@@ -748,7 +1142,11 @@ function ModifierStep({
                   }`}
                 >
                   {isChosen ? (
-                    <Check className="h-3.5 w-3.5" strokeWidth={3} />
+                    esBloque ? (
+                      cuenta
+                    ) : (
+                      <Check className="h-3.5 w-3.5" strokeWidth={3} />
+                    )
                   ) : (
                     i + 1
                   )}
@@ -773,27 +1171,53 @@ function ModifierStep({
 /**
  * Paso final: qué incluye, qué se eligió (editable) y a cuánto queda.
  *
- * Los grupos salen de `steps` y no del menú entero: así lista exactamente los
+ * Los grupos salen de los pasos y no del menú entero: así lista exactamente los
  * que aplican con lo elegido —un grupo bloqueado no aparece como «Guarnición:
- * ninguna», sencillamente no está (FR-007)— y el índice del paso al que hay que
- * volver para editarlo es el mismo que el del asistente.
+ * ninguna», sencillamente no está (FR-007)— y tocar uno vuelve a ese paso.
+ *
+ * Con varias líneas el resumen es **por vuelta**, no por menú: «Bebida: 2
+ * Gaseosa · 1 Agua». Listar «Menú 1 / Menú 2» sugeriría que la app sabe quién
+ * pidió qué, y no lo sabe ni lo pretende (D3).
  */
 function ConfirmStep({
-  steps,
+  pasos,
+  lineas,
+  esBloque,
+  precioMenuCents,
   fixedComponents,
-  selections,
-  onEditGroup,
+  onEditPaso,
+  onEditCantidad,
 }: {
-  steps: MenuStep[];
+  pasos: PasoAgrupado[];
+  lineas: Linea[];
+  esBloque: boolean;
+  precioMenuCents: number;
   fixedComponents: DailyMenuComponent[];
-  selections: DailyMenuSelections;
-  onEditGroup: (stepIndex: number) => void;
+  onEditPaso: (clave: string) => void;
+  onEditCantidad: () => void;
 }) {
-  const groups = steps.flatMap((s, i) =>
-    s.kind === "choice" ? [{ group: s.group, stepIndex: i }] : [],
+  const grupos = pasos.filter(
+    (p): p is PasoAgrupado & { step: Extract<MenuStep, { kind: "choice" }> } =>
+      p.step.kind === "choice",
   );
+
   return (
     <div className="space-y-4">
+      {esBloque && (
+        <button
+          type="button"
+          onClick={onEditCantidad}
+          className="flex w-full items-center gap-3 rounded-2xl bg-emerald-50 px-3 py-2.5 text-left ring-1 ring-emerald-200 transition active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-emerald-500"
+        >
+          <span className="min-w-0 flex-1 text-[15px] font-semibold text-emerald-900">
+            {lineas.length} menús
+          </span>
+          <span className="shrink-0 text-xs font-semibold text-emerald-700">
+            cambiar
+          </span>
+        </button>
+      )}
+
       {fixedComponents.length > 0 && (
         <section>
           <p className="px-1 text-[11px] font-bold uppercase tracking-wide text-zinc-500">
@@ -820,19 +1244,38 @@ function ConfirmStep({
         </section>
       )}
 
-      {groups.length > 0 && (
+      {grupos.length > 0 && (
         <section>
           <p className="px-1 text-[11px] font-bold uppercase tracking-wide text-emerald-700">
             Elegiste
           </p>
           <ul className="mt-1.5 space-y-1.5">
-            {groups.map(({ group: g, stepIndex }) => {
-              const sel = selections.get(g.choice_group_id);
+            {grupos.map((p) => {
+              const g = p.step.group;
+              const veces = new Map<string, number>();
+              for (const i of p.lineas) {
+                const sel = lineas[i]?.get(g.choice_group_id);
+                if (sel)
+                  veces.set(
+                    sel.product_name,
+                    (veces.get(sel.product_name) ?? 0) + 1,
+                  );
+              }
+              const detalle = esBloque
+                ? [...veces]
+                    .map(([nombre, c]) => `${c} ${nombre}`)
+                    .join(" · ")
+                : ([...veces.keys()][0] ?? "—");
+              const extra = p.lineas.reduce(
+                (acc, i) =>
+                  acc + (lineas[i]?.get(g.choice_group_id)?.extra_price_cents ?? 0),
+                0,
+              );
               return (
-                <li key={g.choice_group_id}>
+                <li key={p.clave}>
                   <button
                     type="button"
-                    onClick={() => onEditGroup(stepIndex)}
+                    onClick={() => onEditPaso(p.clave)}
                     className="flex w-full items-center gap-3 rounded-2xl bg-white px-3 py-2.5 text-left ring-1 ring-zinc-200 transition active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
                     <span className="min-w-0 flex-1">
@@ -840,12 +1283,12 @@ function ConfirmStep({
                         {g.label}
                       </span>
                       <span className="block truncate text-[15px] font-semibold text-zinc-900">
-                        {sel?.product_name ?? "—"}
+                        {detalle || "—"}
                       </span>
                     </span>
-                    {sel && sel.extra_price_cents > 0 && (
+                    {extra > 0 && (
                       <span className="shrink-0 text-xs font-bold tabular-nums text-amber-800">
-                        +{formatCurrency(sel.extra_price_cents)}
+                        +{formatCurrency(extra)}
                       </span>
                     )}
                     <span className="shrink-0 text-xs font-semibold text-emerald-700">
@@ -858,6 +1301,135 @@ function ConfirmStep({
           </ul>
         </section>
       )}
+
+      {/* El desglose sólo cuando las líneas NO valen lo mismo (D5): con
+          adicionales por opción, resumirlo como un precio por N sería mentir
+          sobre plata en la pantalla donde se decide qué se cobra. */}
+      {esBloque && !lineasValenIgual(lineas) && (
+        <section>
+          <p className="px-1 text-[11px] font-bold uppercase tracking-wide text-zinc-500">
+            Cómo suma
+          </p>
+          <ul className="mt-1.5 space-y-1">
+            {agruparPorImporte(precioMenuCents, lineas).map(
+              ({ importe, cuantos }) => (
+                <li
+                  key={importe}
+                  className="flex items-center justify-between rounded-xl bg-zinc-50 px-3 py-2 text-sm ring-1 ring-zinc-100"
+                >
+                  <span className="text-zinc-600 tabular-nums">
+                    {cuantos} × {formatCurrency(importe)}
+                  </span>
+                  <span className="font-semibold text-zinc-900 tabular-nums">
+                    {formatCurrency(importe * cuantos)}
+                  </span>
+                </li>
+              ),
+            )}
+          </ul>
+        </section>
+      )}
     </div>
   );
+}
+
+/** Las líneas juntadas por lo que sale cada una, para el desglose del resumen. */
+function agruparPorImporte(
+  precioMenuCents: number,
+  lineas: Linea[],
+): { importe: number; cuantos: number }[] {
+  const porImporte = new Map<number, number>();
+  for (const linea of lineas) {
+    const importe = precioMenuCents + choicesDeltaCents(linea);
+    porImporte.set(importe, (porImporte.get(importe) ?? 0) + 1);
+  }
+  return [...porImporte]
+    .sort((a, b) => b[0] - a[0])
+    .map(([importe, cuantos]) => ({ importe, cuantos }));
+}
+
+/**
+ * ¿El asistente todavía tiene que mostrar este paso?
+ *
+ * Lo normal es «mientras le falten líneas». La excepción son los grupos de
+ * modificadores opcionales o de varias opciones (spec 083 · FR-003): marcar uno
+ * los deja «resueltos» para el motor, pero «ninguno» y «dos» también son
+ * respuestas válidas, así que el paso lo cierra el usuario con «Seguir» — si
+ * no, marcar la primera salsa saltaría de paso sin dejar elegir la segunda.
+ */
+function sigueAbierto(paso: PasoAgrupado, saltados: ReadonlySet<string>): boolean {
+  if (saltados.has(paso.clave)) return false;
+  if (paso.faltan > 0) return true;
+  return (
+    paso.step.kind === "modifiers" && !isSingleChoiceGroup(paso.step.group)
+  );
+}
+
+/**
+ * Las elecciones de una línea, en el orden en que el encargado definió los
+ * grupos del menú.
+ *
+ * Pisar una elección la borra y la vuelve a poner, y un `Map` manda al final lo
+ * que se re-inserta: sin esto, corregir el principal lo dejaría después del
+ * postre en `selected_choices` y en el resumen. El orden del menú es el que se
+ * lee en la comanda.
+ */
+function enOrdenDelMenu(groups: DailyMenuChoiceGroup[], linea: Linea): Linea {
+  const out = new Map() as Linea;
+  for (const g of groups) {
+    const sel = linea.get(g.choice_group_id);
+    if (sel) out.set(g.choice_group_id, sel);
+  }
+  // Una elección de un grupo que ya no está en el menú no se pierde: va al final.
+  for (const [k, v] of linea) if (!out.has(k)) out.set(k, v);
+  return out;
+}
+
+/**
+ * «para 2 Milanesa»: para cuáles de las N líneas es este paso, cuando no es
+ * para todas (spec 155 · D4).
+ *
+ * Sin la aclaración el mozo cuenta cuatro menús, ve un paso que pide dos, y
+ * parece un bug. `null` cuando el paso aplica a todas, que es lo normal.
+ */
+function paraQuienes(
+  paso: PasoAgrupado,
+  lineas: Linea[],
+  groups: DailyMenuChoiceGroup[],
+): string | null {
+  if (lineas.length < 2 || paso.lineas.length >= lineas.length) return null;
+  // Los modificadores ya saben de qué producto cuelgan.
+  if (paso.step.kind === "modifiers") {
+    return `para ${paso.lineas.length} ${paso.step.productName}`;
+  }
+  if (paso.step.kind !== "choice") return null;
+  const fuente = grupoQueCondiciona(groups, paso.step.group);
+  if (!fuente) return null;
+  const cuenta = new Map<string, number>();
+  for (const i of paso.lineas) {
+    const sel = lineas[i]?.get(fuente);
+    if (sel) cuenta.set(sel.product_name, (cuenta.get(sel.product_name) ?? 0) + 1);
+  }
+  if (cuenta.size === 0) return null;
+  return `para ${[...cuenta].map(([n, c]) => `${c} ${n}`).join(" y ")}`;
+}
+
+/**
+ * De qué grupo depende éste, por cualquiera de los dos mecanismos que conviven:
+ * la condición del grupo (spec 087) o el `blocks_choice_group_ids` de la opción
+ * del grupo fuente (spec 074).
+ */
+function grupoQueCondiciona(
+  groups: DailyMenuChoiceGroup[],
+  group: DailyMenuChoiceGroup,
+): string | null {
+  if (group.applies_when_group_id) return group.applies_when_group_id;
+  const fuente = groups.find(
+    (g) =>
+      g.choice_group_id !== group.choice_group_id &&
+      g.options.some((o) =>
+        (o.blocks_choice_group_ids ?? []).includes(group.choice_group_id),
+      ),
+  );
+  return fuente?.choice_group_id ?? null;
 }

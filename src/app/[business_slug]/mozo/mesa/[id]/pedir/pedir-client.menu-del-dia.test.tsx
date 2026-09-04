@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -188,6 +188,15 @@ describe("panel del salón · el menú del día se busca (spec 146 · D-B2)", ()
     await user.keyboard("{ArrowDown}");
     expect(document.activeElement).toHaveAccessibleName(/menú ejecutivo/i);
     await user.keyboard("{Enter}");
+    // Desde la spec 155 el asistente abre preguntando cuántos menús (D1); con
+    // «1» el recorrido sigue siendo el de siempre.
+    expect(
+      screen.getByRole("radiogroup", { name: "Cuántos menús" }),
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect(document.activeElement).toHaveAccessibleName(/^1 menú$/),
+    );
+    await user.keyboard("1");
     expect(screen.getByRole("radiogroup", { name: "Entrada" })).toBeTruthy();
   });
 });

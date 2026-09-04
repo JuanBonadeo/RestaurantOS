@@ -2,7 +2,7 @@
 
 **Issue:** [#232](https://github.com/gachetponzellini/RestaurantOS-app/issues/232) ·
 **Milestone:** Post-demo · Growth & hardening ·
-**Estado:** 📋 propuesta (2026-09-03) — sin implementar
+**Estado:** ✅ implementada (2026-09-03)
 
 **Input:** Juan, 2026-09-03: *"faltaría para que pueda cargar varios menús al mismo
 tiempo, como que cargue primero todas las bebidas, después todos los platos y así"*.
@@ -123,8 +123,11 @@ las junta. Eso mantiene la spec chica y reversible.
   elegido hasta el momento, devuelve las N líneas en construcción y **qué falta
   del paso actual**. Toda la lógica de reparto y de condicionales vive ahí, fuera
   del JSX, que es lo único que hace testeable el nudo de D4.
-- **Los tres callers del asistente** (mesa, para llevar y venta rápida) reciben un
-  array de líneas en vez de `(menu, quantity, selections)`.
+- **El caller del asistente** recibe un array de líneas en vez de
+  `(menu, quantity, selections)`, y pushea **N ítems** al carrito en vez de uno
+  con `quantity`. Es **uno solo** —`pedir-client.tsx`, que sirve tanto la vista
+  full-screen del mozo como el panel embebido del salón—, no tres: «para
+  llevar» y «venta rápida» no abren este asistente.
 
 ## Qué NO entra
 
@@ -157,15 +160,33 @@ las junta. Eso mantiene la spec chica y reversible.
 
 ## Verificación
 
-Pendiente — sin implementar.
+**Hecha** (2026-09-03).
 
-Al implementar, el grueso va en los tests del helper puro: reparto con opciones
-mixtas, condicional que aplica a un subconjunto, cantidad 1 (que no debe cambiar
-nada), y el total con adicionales distintos por línea. El verify en vivo va en
-`demo` con el Menú Ejecutivo, cargando 4 con platos distintos:
+**Tests.** 16 en `daily-menu-lineas.test.ts` (el motor) + 28 en
+`daily-menu-wizard.test.tsx`, de los cuales 21 son los del recorrido de siempre
+—que corren enteros con cantidad 1 y cubren el criterio 1— y 7 nuevos para el
+bloque: la vuelta con contador, el condicional sobre un subconjunto con su
+aclaración, el ← que deshace la última elección de la vuelta, el total como suma
+de líneas, la salida como N ítems, y `redimensionar` al corregir la cantidad a
+mitad de camino. `pnpm typecheck` limpio y 2271 tests en verde (los
+`*.integration.test.ts` necesitan el stack local).
 
-    node scripts/magic-link.mjs sofia@demo.test "/demo/admin/operacion"
+**En vivo**, como mozo (el rol más bajo que carga un pedido), en `demo`:
 
-Y conviene cerrarlo mostrándoselo a la encargada de Golf: el pedido es suyo, y el
+    node scripts/magic-link.mjs pedro@demo.test "/demo/mozo/mesa/<id>/pedir"
+
+Cargando 4 menús con 2 Milanesa + 2 Asado salieron **4 ítems** de `quantity: 1`,
+cada uno con SUS opciones, por $143.100: uno a $38.100 (el que se llevó los dos
+adicionales) y tres a $35.000. Los dos asados no mandaron guarnición, que es el
+grupo condicional descartado. El paso condicional pidió **2 de 2** y aclaró
+«para 2 Milanesa Napolitana».
+
+> ⚠️ Los dos menús del día de `demo` no tienen grupos de opciones, así que el
+> condicional no se puede ejercitar ahí tal como está. El verify se hizo con un
+> menú sembrado a propósito con la forma del **Menu Ejecutivo de golf-jcr**
+> (Plato Principal + Guarnicion condicional + Bebida), y se borró al terminar.
+> No se tocó `golf-jcr`: es el negocio del cliente y vive en la misma base.
+
+Falta cerrarlo mostrándoselo a la encargada de Golf: el pedido es suyo, y el
 punto 15 quedó abierto justamente porque lo que describía no cerraba con lo que
 el código hacía.
