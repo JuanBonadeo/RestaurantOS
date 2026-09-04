@@ -365,46 +365,40 @@ export function MenuClient({
             </>
           )}
           <StatusDot status={isOpen ? "open" : "closed"} />
-        </div>
-        {/* Cruce a reservas. Va como botón y no como link chico: es la otra
-            cosa que el cliente puede venir a hacer, y en el celular un link de
-            13px pegado al estado del local no se ve. */}
-        <Link
-          href={`/${slug}/reservar`}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 8,
-            marginTop: 12,
-            height: 50,
-            borderRadius: 12,
-            border: "1px solid var(--primary)",
-            background: "var(--bg)",
-            fontSize: 16,
-            fontWeight: 600,
-            color: "var(--primary)",
-            textDecoration: "none",
-            letterSpacing: -0.1,
-          }}
-        >
-          <svg
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden
+          <span style={{ color: "var(--hairline-2)" }}>·</span>
+          {/* Un punto más grande que el tagline: es la otra cosa que el cliente
+              puede venir a hacer, pero sigue en el mismo renglón. */}
+          <Link
+            href={`/${slug}/reservar`}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 15,
+              fontWeight: 600,
+              color: "var(--primary)",
+              textDecoration: "none",
+              letterSpacing: -0.1,
+            }}
           >
-            <rect x="3" y="5" width="18" height="16" rx="2" />
-            <path d="M3 10h18M8 3v4M16 3v4" />
-          </svg>
-          Reservar mesa
-          {I.chevRight("var(--primary)", 14)}
-        </Link>
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <rect x="3" y="5" width="18" height="16" rx="2" />
+              <path d="M3 10h18M8 3v4M16 3v4" />
+            </svg>
+            Reservar mesa
+            {I.chevRight("var(--primary)", 13)}
+          </Link>
+        </div>
         {hasDelivery && (
           <div
             style={{

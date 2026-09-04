@@ -583,35 +583,41 @@ export function ReservarFlow({
             {businessName}
           </div>
         </div>
-        {tagline ? (
-          <div style={{ marginTop: 6, fontSize: 13, color: "var(--ink-2)" }}>{tagline}</div>
-        ) : null}
-        {/* Cruce a la carta. Va como botón y no como link chico: es la otra
-            cosa que el cliente puede venir a hacer, y en el celular un link de
-            13px al lado del tagline no se ve. */}
-        <Link
-          href={`/${slug}/menu`}
+        <div
           style={{
             display: "flex",
             alignItems: "center",
-            justifyContent: "center",
-            gap: 8,
-            marginTop: 12,
-            height: 50,
-            borderRadius: 12,
-            border: "1px solid var(--primary)",
-            background: "var(--bg)",
-            fontSize: 16,
-            fontWeight: 600,
-            color: "var(--primary)",
-            textDecoration: "none",
-            letterSpacing: -0.1,
+            gap: 10,
+            marginTop: 6,
+            flexWrap: "wrap",
           }}
         >
-          {I.moto("var(--primary)", 18)}
-          Hacer un pedido
-          {I.chevRight("var(--primary)", 14)}
-        </Link>
+          {tagline ? (
+            <>
+              <span style={{ fontSize: 13, color: "var(--ink-2)" }}>{tagline}</span>
+              <span style={{ color: "var(--hairline-2)" }}>·</span>
+            </>
+          ) : null}
+          {/* Un punto más grande que el tagline: es la otra cosa que el cliente
+              puede venir a hacer, pero sigue en el mismo renglón. */}
+          <Link
+            href={`/${slug}/menu`}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 15,
+              fontWeight: 600,
+              color: "var(--primary)",
+              textDecoration: "none",
+              letterSpacing: -0.1,
+            }}
+          >
+            {I.moto("var(--primary)", 16)}
+            Hacer un pedido
+            {I.chevRight("var(--primary)", 13)}
+          </Link>
+        </div>
       </div>
 
       {/* Section: ¿Cuándo? */}
