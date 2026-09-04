@@ -10,12 +10,15 @@ import { Input } from "@/components/ui/input";
 import { SupplierDialog } from "./supplier-dialog";
 import { SupplierDetail } from "./supplier-detail";
 import { ImportDialog } from "./import-dialog";
+import type { ConceptOption } from "./invoice-dialog";
 
 type Props = {
   slug: string;
   businessId: string;
   suppliers: SupplierWithStats[];
   ingredientOptions: { id: string; name: string; unit: string }[];
+  concepts: ConceptOption[];
+  cajas: { id: string; name: string }[];
 };
 
 export function SuppliersList({
@@ -23,6 +26,8 @@ export function SuppliersList({
   businessId,
   suppliers,
   ingredientOptions,
+  concepts,
+  cajas,
 }: Props) {
   const [search, setSearch] = useState("");
   const [filterActive, setFilterActive] = useState<"all" | "active" | "inactive">(
@@ -57,6 +62,8 @@ export function SuppliersList({
         businessId={businessId}
         supplier={selected}
         ingredientOptions={ingredientOptions}
+        concepts={concepts}
+        cajas={cajas}
         onBack={() => setSelectedId(null)}
       />
     );
@@ -76,6 +83,7 @@ export function SuppliersList({
           <ImportDialog slug={slug} />
           <SupplierDialog
             slug={slug}
+            concepts={concepts}
             trigger={
               <BrandButton size="md" leadingIcon={<Plus />}>
                 Nuevo proveedor

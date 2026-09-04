@@ -2,12 +2,14 @@
 
 
 import { revalidatePath } from "next/cache";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { requireMozoActionContext } from "@/lib/mozo/auth";
 import { canManageProveedores } from "@/lib/permissions/can";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
+import { calcularVencimiento } from "./cuenta-corriente";
 import { ImportSupplierBatch, SupplierInput, SupplierInvoiceInput } from "./schema";
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -22,8 +24,14 @@ async function getBusinessIdBySlug(slug: string): Promise<string | null> {
   return data?.id ?? null;
 }
 
-function db() {
-  return createSupabaseServiceClient();
+// Las columnas de la spec 158 (`default_expense_concept_id`, `payment_terms_days`,
+// `expense_concept_id`, `document_type`, `due_date`) todavía no están en
+// `database.types.ts`: el `pnpm db:types` del repo necesita el CLI linkeado.
+// Mismo escape hatch que `caja/cuenta-corriente-actions.ts` de la spec 141.
+type GenericClient = SupabaseClient;
+
+function db(): GenericClient {
+  return createSupabaseServiceClient() as unknown as GenericClient;
 }
 
 async function requireProveedorContext(businessId: string) {
@@ -152,6 +160,29 @@ export async function createSupplierInvoice(
   if (!ctxResult.ok) return ctxResult;
 
   const service = db();
+
+  // spec 158 · el proveedor precarga la compra. Sin esto el encargado tipea el
+  // concepto y calcula el vencimiento a mano diez veces por día — que es
+  // exactamente la fricción que el módulo viene a sacar.
+  const { data: supplier } = await service
+    .from("suppliers")
+    .select("id, default_expense_concept_id, payment_terms_days")
+    .eq("id", parsed.data.supplier_id)
+    .eq("business_id", businessId)
+    .maybeSingle();
+
+  if (!supplier) return actionError("Proveedor no encontrado.");
+  const prov = supplier as unknown as {
+    default_expense_concept_id: string | null;
+    payment_terms_days: number | null;
+  };
+
+  const conceptId =
+    parsed.data.expense_concept_id ?? prov.default_expense_concept_id ?? null;
+  const dueDate =
+    parsed.data.due_date ??
+    calcularVencimiento(parsed.data.invoice_date, prov.payment_terms_days ?? 0);
+
   const { data, error } = await service
     .from("supplier_invoices")
     .insert({
@@ -163,6 +194,9 @@ export async function createSupplierInvoice(
       photo_url: parsed.data.photo_url ?? null,
       notes: parsed.data.notes ?? null,
       created_by: ctxResult.data.userId,
+      document_type: parsed.data.document_type,
+      expense_concept_id: conceptId,
+      due_date: dueDate,
     })
     .select("id")
     .single();

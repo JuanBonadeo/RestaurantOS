@@ -37,10 +37,12 @@ import type { Supplier } from "@/lib/proveedores/types";
 type Props = {
   slug: string;
   supplier?: Supplier;
+  /** Conceptos de gasto del negocio, para elegir el que precarga sus compras. */
+  concepts?: { id: string; name: string; rubro: string }[];
   trigger: React.ReactElement;
 };
 
-export function SupplierDialog({ slug, supplier, trigger }: Props) {
+export function SupplierDialog({ slug, supplier, concepts = [], trigger }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -57,6 +59,8 @@ export function SupplierDialog({ slug, supplier, trigger }: Props) {
           email: supplier.email ?? "",
           notes: supplier.notes ?? "",
           is_active: supplier.isActive,
+          default_expense_concept_id: supplier.defaultExpenseConceptId ?? null,
+          payment_terms_days: supplier.paymentTermsDays ?? 0,
         }
       : {
           name: "",
@@ -66,6 +70,8 @@ export function SupplierDialog({ slug, supplier, trigger }: Props) {
           email: "",
           notes: "",
           is_active: true,
+          default_expense_concept_id: null,
+          payment_terms_days: 0,
         },
   });
 
@@ -201,6 +207,56 @@ export function SupplierDialog({ slug, supplier, trigger }: Props) {
                       />
                     </FormControl>
                     <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            {/* spec 158 · lo que precarga cada compra de este proveedor. */}
+            <div className="grid grid-cols-2 gap-3">
+              <FormField
+                control={form.control}
+                name="default_expense_concept_id"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Concepto habitual</FormLabel>
+                    <FormControl>
+                      <select
+                        className="h-9 w-full rounded-md border border-zinc-200 bg-white px-2 text-sm"
+                        value={field.value ?? ""}
+                        onChange={(e) => field.onChange(e.target.value || null)}
+                      >
+                        <option value="">Ninguno</option>
+                        {concepts.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="payment_terms_days"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Días de crédito</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={365}
+                        value={field.value ?? 0}
+                        onChange={(e) => field.onChange(parseInt(e.target.value, 10) || 0)}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                    <p className="text-xs text-zinc-500">
+                      0 = contado. Calcula el vencimiento de cada compra.
+                    </p>
                   </FormItem>
                 )}
               />

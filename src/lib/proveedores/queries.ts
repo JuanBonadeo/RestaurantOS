@@ -15,6 +15,25 @@ function db() {
   return createSupabaseServiceClient();
 }
 
+/**
+ * Las columnas de la spec 158 llegan en el `select("*")` pero todavía no están
+ * en `database.types.ts` (el `pnpm db:types` del repo necesita el CLI linkeado).
+ * Estos accesos las leen sin apagar el tipado del resto de la fila.
+ */
+type ColumnasSpec158 = {
+  default_expense_concept_id?: string | null;
+  payment_terms_days?: number | null;
+  document_type?: string | null;
+  expense_concept_id?: string | null;
+  due_date?: string | null;
+  cancelled_at?: string | null;
+  cancelled_reason?: string | null;
+};
+
+function extra(row: unknown): ColumnasSpec158 {
+  return row as ColumnasSpec158;
+}
+
 // ── Suppliers list (with aggregated stats) ──────────────────────
 
 export async function getSuppliers(
@@ -71,6 +90,8 @@ export async function getSuppliers(
       isActive: row.is_active,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      defaultExpenseConceptId: extra(row).default_expense_concept_id ?? null,
+      paymentTermsDays: extra(row).payment_terms_days ?? 0,
       totalSpentCents: stats?.total ?? 0,
       invoiceCount: stats?.count ?? 0,
       lastInvoiceDate: stats?.last ?? null,
@@ -117,6 +138,11 @@ export async function getSupplierInvoices(
       notes: row.notes,
       createdBy: row.created_by,
       createdAt: row.created_at,
+      documentType: extra(row).document_type ?? "interno",
+      expenseConceptId: extra(row).expense_concept_id ?? null,
+      dueDate: extra(row).due_date ?? null,
+      cancelledAt: extra(row).cancelled_at ?? null,
+      cancelledReason: extra(row).cancelled_reason ?? null,
     });
   }
 

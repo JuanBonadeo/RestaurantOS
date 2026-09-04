@@ -10,6 +10,9 @@ export type Supplier = {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  /** spec 158 · lo que precarga la compra. */
+  defaultExpenseConceptId: string | null;
+  paymentTermsDays: number;
 };
 
 export type SupplierWithStats = Supplier & {
@@ -30,6 +33,12 @@ export type SupplierInvoice = {
   notes: string | null;
   createdBy: string | null;
   createdAt: string;
+  /** spec 158 */
+  documentType: string;
+  expenseConceptId: string | null;
+  dueDate: string | null;
+  cancelledAt: string | null;
+  cancelledReason: string | null;
 };
 
 export type SupplierIngredientLink = {

@@ -6,21 +6,27 @@ import { cn } from "@/lib/utils";
 import type { SupplierWithStats } from "@/lib/proveedores/types";
 import { SuppliersList } from "./suppliers-list";
 import { SupplierStatsView } from "./supplier-stats";
+import { VencimientosView } from "./vencimientos-view";
+import type { ConceptOption } from "./invoice-dialog";
 
 type Props = {
   slug: string;
   businessId: string;
   suppliers: SupplierWithStats[];
   ingredientOptions: { id: string; name: string; unit: string }[];
+  concepts: ConceptOption[];
+  cajas: { id: string; name: string }[];
 };
 
-type Tab = "lista" | "estadistica";
+type Tab = "lista" | "vencimientos" | "estadistica";
 
 export function SuppliersShell({
   slug,
   businessId,
   suppliers,
   ingredientOptions,
+  concepts,
+  cajas,
 }: Props) {
   const [tab, setTab] = useState<Tab>("lista");
 
@@ -32,7 +38,7 @@ export function SuppliersShell({
           <AyudaChip slug={slug} tema="proveedores" />
         </div>
         <div className="inline-flex rounded-lg bg-zinc-100 p-0.5 text-xs font-semibold">
-          {(["lista", "estadistica"] as const).map((t) => (
+          {(["lista", "vencimientos", "estadistica"] as const).map((t) => (
             <button
               key={t}
               type="button"
@@ -44,7 +50,7 @@ export function SuppliersShell({
                   : "text-zinc-500 hover:text-zinc-900",
               )}
             >
-              {t === "lista" ? "Lista" : "Estadística"}
+              {t === "lista" ? "Lista" : t === "vencimientos" ? "Vencimientos" : "Estadística"}
             </button>
           ))}
         </div>
@@ -56,7 +62,11 @@ export function SuppliersShell({
           businessId={businessId}
           suppliers={suppliers}
           ingredientOptions={ingredientOptions}
+          concepts={concepts}
+          cajas={cajas}
         />
+      ) : tab === "vencimientos" ? (
+        <VencimientosView businessId={businessId} />
       ) : (
         <SupplierStatsView slug={slug} businessId={businessId} />
       )}
