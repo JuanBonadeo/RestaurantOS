@@ -36,6 +36,11 @@ const ComandasKanban = dynamic(() =>
 const FichajeTab = dynamic(() =>
   import("@/components/admin/local/fichaje-tab").then((m) => m.FichajeTab),
 );
+const CuentasPanel = dynamic(() =>
+  import("@/components/admin/local/cuentas-corrientes-tab").then(
+    (m) => m.CuentasPanel,
+  ),
+);
 const RendicionMozosTab = dynamic(() =>
   import("@/components/admin/local/rendicion-mozos-tab").then(
     (m) => m.RendicionMozosTab,
@@ -72,9 +77,11 @@ import {
   countReservasPorSentar,
   countSalonOcupadas,
 } from "@/app/[business_slug]/admin/(authed)/operacion/counts";
+import { canCobrarCuentaCorriente } from "@/lib/permissions/can";
 import type {
   CajaData,
   ComandasData,
+  CuentasData,
   FichajeData,
   PedidosData,
   RendicionData,
@@ -100,6 +107,10 @@ const TABS = [
   "comandas",
   "pedidos",
   "caja",
+  // spec 141 — «Cuentas corrientes», no «Cuentas»: en la casa «la cuenta» es la
+  // factura de la mesa, y confundirlas en la barra de operación sería caro. Va
+  // después de Caja porque es la familia de la plata.
+  "cuentas",
   "rendicion",
   "fichaje",
 ] as const;
@@ -144,6 +155,7 @@ const TEMA_POR_TAB: Record<Tab, string> = {
   comandas: "comandas",
   pedidos: "pedidos",
   caja: "caja",
+  cuentas: "cuentas-corrientes",
   rendicion: "rendicion",
   fichaje: "fichaje",
 };
@@ -162,6 +174,7 @@ type ShellProps = {
   comandas: Promise<ComandasData>;
   pedidos: Promise<PedidosData>;
   caja: Promise<CajaData>;
+  cuentas: Promise<CuentasData>;
   rendicion: Promise<RendicionData>;
   fichaje: Promise<FichajeData>;
   reservas: Promise<ReservasData>;
@@ -709,6 +722,7 @@ function TabsInner({
   comandas,
   pedidos,
   caja,
+  cuentas,
   rendicion,
   fichaje,
   reservas,
@@ -770,6 +784,7 @@ function TabsInner({
   // que ninguna tab re-corre la ruta ya no se revalida nunca.
   const [salonData, setSalonData] = useState<SalonData | null>(null);
   const [cajaData, setCajaData] = useState<CajaData | null>(null);
+  const [cuentasData] = useState<CuentasData | null>(null);
   const [rendicionData, setRendicionData] = useState<RendicionData | null>(
     null,
   );
@@ -863,6 +878,23 @@ function TabsInner({
           }
         >
           Caja
+        </TabButton>
+      )}
+      {ve("cuentas") && (
+        <TabButton
+          active={active === "cuentas"}
+          onClick={() => setTab("cuentas")}
+          count={
+            <Pill
+              promise={cuentas}
+              override={cuentasData}
+              /* Cuántos DEBEN, no cuánto: el pill es un contador en las otras
+                 siete tabs, y romper eso haría leer «8» como ocho pesos. */
+              compute={(d) => d.cuantos_deben}
+            />
+          }
+        >
+          Cuentas corrientes
         </TabButton>
       )}
       {ve("rendicion") && (
@@ -1013,6 +1045,19 @@ function TabsInner({
                   active={active === "caja"}
                   refetchAlMontar={tabInicial !== "caja"}
                   onServerData={setCajaData}
+                />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
+        )}
+        {ve("cuentas") && mounted("cuentas") && (
+          <div className={paneClass("cuentas")}>
+            <ErrorBoundary fallback={<TabLoadError money />}>
+              <Suspense fallback={<TabContentSkeleton />}>
+                <CuentasPanel
+                  promise={cuentas}
+                  slug={slug}
+                  puedeCobrar={canCobrarCuentaCorriente(role)}
                 />
               </Suspense>
             </ErrorBoundary>

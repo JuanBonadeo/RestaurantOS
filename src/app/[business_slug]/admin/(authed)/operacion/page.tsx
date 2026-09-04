@@ -15,6 +15,7 @@ import {
   loadComandas,
   loadFichaje,
   loadPedidos,
+  loadCuentas,
   loadRendicion,
   loadReservas,
   loadSalon,
@@ -40,7 +41,9 @@ export default async function LocalEnVivoPage({
   // Spec 140: el gate sale de la matriz de secciones. Entran admin,
   // encargado y `terminal` (el puesto compartido del salón); el mozo no,
   // su superficie es /mozo.
-  if (!canSee("operacion", ctx.role, { isPlatformAdmin: ctx.isPlatformAdmin })) {
+  if (
+    !canSee("operacion", ctx.role, { isPlatformAdmin: ctx.isPlatformAdmin })
+  ) {
     redirect(`/${business_slug}/mozo`);
   }
 
@@ -81,6 +84,7 @@ export default async function LocalEnVivoPage({
     kitchenMin: business.scheduled_march_lead_kitchen_min,
   });
   const caja = loadCaja(business.id);
+  const cuentas = loadCuentas(business.id);
   const rendicion = loadRendicion(business.id, service);
   const fichaje = loadFichaje(business.id, business_slug);
   const reservas = loadReservas(business.id, service, {
@@ -105,6 +109,7 @@ export default async function LocalEnVivoPage({
       comandas={comandas}
       pedidos={pedidos}
       caja={caja}
+      cuentas={cuentas}
       rendicion={rendicion}
       fichaje={fichaje}
       reservas={reservas}

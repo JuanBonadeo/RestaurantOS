@@ -17,10 +17,14 @@ import { getTodayOrders } from "@/lib/admin/orders-query";
 import type { AdminOrder } from "@/lib/admin/orders-query";
 import {
   getCajasConEstado,
+  getCajasForBusiness,
   getCajaUserAssignments,
   getRendicionesHistorial,
   getRendicionesPendientesTodosLosMozos,
 } from "@/lib/caja/queries";
+import { getCuentasCorrientes } from "@/lib/caja/cuenta-corriente-queries";
+import type { CuentasCorrientesData } from "@/lib/caja/cuenta-corriente-queries";
+import type { Caja } from "@/lib/caja/types";
 import type {
   CajaConEstado,
   CajaUserAssignment,
@@ -105,6 +109,11 @@ export type RendicionData = {
     caja_name: string;
   })[];
   businessMembers: { user_id: string; full_name: string | null }[];
+};
+
+/** spec 141 — la tab «Cuentas corrientes». */
+export type CuentasData = CuentasCorrientesData & {
+  cajas: Caja[];
 };
 
 export type FichajeData = {
@@ -263,9 +272,7 @@ export async function loadSalon(
 // Resto de las tabs.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function loadComandas(
-  businessId: string,
-): Promise<ComandasData> {
+export async function loadComandas(businessId: string): Promise<ComandasData> {
   const [initialComandas, stations, mozos, printAgentHealth] =
     await Promise.all([
       getActiveComandas(businessId),
@@ -299,25 +306,31 @@ export async function loadCaja(businessId: string): Promise<CajaData> {
   return { cajas: await getCajasConEstado(businessId) };
 }
 
+export async function loadCuentas(businessId: string): Promise<CuentasData> {
+  const [cuentas, cajas] = await Promise.all([
+    getCuentasCorrientes(businessId),
+    getCajasForBusiness(businessId),
+  ]);
+  // Las cajas viajan con la tab porque cobrar un saldo en efectivo entra al
+  // cajón (D5) y hay que elegir cuál sin pedir otro viaje.
+  return { ...cuentas, cajas };
+}
+
 export async function loadRendicion(
   businessId: string,
   service: SupabaseClient,
 ): Promise<RendicionData> {
-  const [
-    rendicionPendientes,
-    rendicionHistorial,
-    cajaAssignments,
-    membersRes,
-  ] = await Promise.all([
-    getRendicionesPendientesTodosLosMozos(businessId),
-    getRendicionesHistorial(businessId),
-    getCajaUserAssignments(businessId),
-    service
-      .from("business_users")
-      .select("user_id, full_name")
-      .eq("business_id", businessId)
-      .is("disabled_at", null),
-  ]);
+  const [rendicionPendientes, rendicionHistorial, cajaAssignments, membersRes] =
+    await Promise.all([
+      getRendicionesPendientesTodosLosMozos(businessId),
+      getRendicionesHistorial(businessId),
+      getCajaUserAssignments(businessId),
+      service
+        .from("business_users")
+        .select("user_id, full_name")
+        .eq("business_id", businessId)
+        .is("disabled_at", null),
+    ]);
   return {
     rendicionPendientes,
     rendicionHistorial,
