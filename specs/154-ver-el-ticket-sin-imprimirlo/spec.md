@@ -1,142 +1,178 @@
-# 154 · Ver el ticket en pantalla, sin gastar papel
+# 154 · Ver el ticket como sale impreso, sin print agent
 
 **Issue:** [#231](https://github.com/gachetponzellini/RestaurantOS-app/issues/231) ·
 **Milestone:** Post-demo · Growth & hardening ·
 **Estado:** 📋 propuesta (2026-09-03) — sin implementar
 
-**Input:** Juan, 2026-09-03, cerrando una jornada de nueve specs: *"habría que
-hacer algo con la impresión de las comandas para que en la demo se pueda probar
-igualmente"*.
+**Input:** Juan, 2026-09-03: *"habría que hacer algo con la impresión de las
+comandas para que en la demo se pueda probar igualmente"* → *"a lo que voy es que
+salga **como impresa**, pero sin tener ningún print agent conectado, que eso es lo
+difícil de testear"*.
 
 **Depende de**: [`051`](../051-print-agent-render-server/spec.md) (el render vive
-en el server y ya produce `content_plain` — esta spec no lo inventa, lo muestra),
-[`035`](../035-reimpresion-y-fallos-de-impresion/spec.md) (el tab Comandas y su
-botón Reimprimir, donde entra el nuevo).
+en el server: sin eso no habría bytes que interpretar),
+[`084`](../084-factura-impresa-comandera-fiscal/spec.md) (el QR de ARCA, el único
+comando no textual del stream),
+[`035`](../035-reimpresion-y-fallos-de-impresion/spec.md) (el tab Comandas, donde
+entra el botón).
 
 ---
 
 ## Por qué
 
 **Las comanderas están en Golf.** En `demo` no hay agente ni impresora, así que
-todo lo que toca papel se verifica a ciegas — y el 2026-09-03 se tocó mucho: la
-spec 145 le agregó el nombre del menú a la comanda, la 139-B estrenó el papel del
-cierre, y el fix de los tickets del cliente cambió qué se imprime y con qué
-interlineado. Los tres sobre el mismo `ticket.ts`.
+todo lo que toca papel se verifica a ciegas — y el 2026-09-03 se tocaron **tres**
+specs sobre el mismo renderer: la 145 (el menú en la comanda), la 139-B (el papel
+del cierre) y el fix de los tickets del cliente.
 
-De los **cuatro** papeles que produce el sistema —comanda de cocina, cuenta de
-mesa, control de delivery, cierre de caja— **sólo la comanda tiene tests de
-paridad byte-a-byte** contra fixtures congelados. Los otros tres salieron sin que
-nadie viera cómo quedan.
+De los **cinco** papeles que salen de `renderEscPos`, **uno solo tiene tests de
+paridad byte-a-byte**: la comanda. Los otros cuatro —cuenta, control, cierre y
+factura— salieron sin que nadie viera cómo quedan.
 
-Y el costo de esa ceguera ya se pagó el mismo día: el primer intento de achicar
-el control de pedido bajó la lista de ítems de `tall` a `sm` y anunció «−26 % de
-papel». Era falso —el avance lo fija `ESC 3`, que se emite una vez por documento—
-y **una preview lo habría mostrado en dos segundos**: mismo largo, letra más
-chica.
+### El caso que prueba que esto hace falta
 
-### Lo que ya está y nadie usa
+Ese mismo día, el primer intento de achicar el control de pedido bajó la lista de
+ítems de `tall` a `sm` y anunció **«−26 % de papel»**. Era **falso**: el avance lo
+fija `ESC 3`, que se emite una vez por documento, así que el ticket medía
+exactamente lo mismo con la letra más chica. Lo cazó una auditoría cuatro horas
+después.
 
-Desde la spec 051 el server pre-renderiza el ticket entero. `GET /api/print-agent`
-devuelve, por cada trabajo:
+**Un visor lo habría mostrado en dos segundos — pero sólo si lee los bytes.**
+Medido sobre el control con 12 ítems, comparando la versión rota contra la
+arreglada:
 
-    content_escpos_b64   los bytes que la térmica imprime
-    content_plain        el MISMO ticket, en texto
+| Cómo mide el visor | Ticket roto | Ticket sano | ¿Ve la diferencia? |
+|---|---|---|---|
+| **Parseando los bytes** | 3392 pt | 2624 pt | **sí — 23 %** |
+| Dibujando las `Line[]` | 1656 pt | 1656 pt | **no — 0 %** |
 
-`content_plain` existe hace meses y **sólo aparece en tests**. No hay una sola
-pantalla que lo muestre. La feature no es renderizar: es enseñar lo que ya se
-renderiza.
-
-### Lo que habilita el diseño barato
-
-El `GET` es **de sólo lectura**. Verificado: no hay un `update`, `insert` ni
-`upsert` en todo el handler — el heartbeat y el acuse son el `POST`, separados.
-Llamarlo para mirar no toca el estado de las comandas ni le roba trabajo al
-agente real.
+Un visor que dibuje `Line[]` pasa el escenario «los `tall` se ven más grandes» y
+es **ciego al 100 % de los bugs de interlineado**. Sería peor que no tenerlo: da
+confianza sobre un papel que nadie está mirando.
 
 ## Las decisiones
 
-**D1 · La preview sale del MISMO camino que el papel, o no sirve.** Una preview
-que arma su propio payload es una segunda implementación que va a divergir, y el
-día que diverja va a mentir justo cuando más se la necesita. Se consume el
-`content_plain` que produce el endpoint del agente, no una copia.
+**D1 · Se parsean los BYTES.** No las `Line[]`. Además del interlineado, hay dos
+razones estructurales: **el perfil tipográfico no está en `Line[]`** —
+`renderEscPos(lines, "cierre")` emite `ESC M 1` y `ESC SP 0` por su *segundo
+argumento*, y el papel pasa de 24 a 42 columnas sin que una sola línea cambie —, y
+**el diffing de estado** (`if (s !== size)`, `if (sp !== spacing)`) es código que
+puede tener bugs de sincronización que sólo los bytes delatan. Dibujar `Line[]`
+sería una segunda implementación de `renderEscPos`, que es exactamente lo que hay
+que verificar.
 
-**D2 · Fase 1: la action llama al endpoint; el refactor queda para después.** El
-armado del payload vive inline en `route.ts`, un archivo de 1322 líneas. Extraerlo
-a un módulo compartido es lo correcto a largo plazo y es lo que haría la fase 2 —
-pero hoy ese archivo lo están tocando varias specs a la vez, y un refactor grande
-ahí es pedir un conflicto. La fase 1 es una server action que hace un `fetch`
-interno al propio `GET` con la credencial del negocio (que ya vive en
-`print_agent_credentials`, server-side) y devuelve el `content_plain`. Feo por
-dentro, fiel por construcción, y reversible.
+**D2 · El visor NO se cuelga del `GET /api/print-agent`.** *(Anula la D2 de la
+versión anterior de esta spec.)* Tres razones verificadas: el GET exige Bearer de
+`print_agent_credentials` y **`demo` no tiene agente ⇒ 401** — o sea que fallaría
+justo en el negocio para el que se pide; sólo devuelve lo que está en la **cola de
+despacho** (`pendiente` o con reimpresión pedida), nunca un ticket viejo; y filtra
+por alcance de comandera. En cambio se extrae de `route.ts` el **armado del
+payload** a un módulo por familia (`loadXPayload(service, businessId, id)`: una
+pieza por su id, sin filtros de cola ni de impresora). El GET pasa a ser
+*seleccionar qué imprimir* + llamar al mismo loader. **Eso es lo que hace fiel al
+visor por construcción** — llamar sólo a los `build*Lines` no alcanza, porque el
+armado del payload es justamente donde vive la mitad de la verdad.
 
-**D3 · Se dibuja el papel, no el texto.** Monoespaciada, ancho fijo de 24
-columnas (`COLS.sm`), fondo claro y borde de ticket. Los renglones `tall`/`xl` se
-muestran más grandes, porque **la mitad de los bugs de esta jornada fueron de
-tamaño y de interlineado** — un `<pre>` plano los hace invisibles. El
-`content_plain` no trae el tamaño por línea, así que la action devuelve también
-las `Line[]` (que ya son datos estructurados) y la UI las dibuja.
+**D3 · Son CINCO papeles, no cuatro.** El inventario estaba incompleto: el mismo
+endpoint sirve también la **factura** (`buildFacturaTicketContent`), y es **la
+única con QR**. Así que soportar `GS ( k` no es «para después»: entra el día uno.
 
-**D4 · Entra por el tab Comandas, al lado de «Reimprimir».** Es donde el
-encargado ya va cuando algo con el papel salió mal, y donde la spec 035 puso
-Reimprimir y el estado del agente. No es una pantalla nueva.
+**D4 · El QR rompe la cuenta del papel, y hay que resolverlo.** Un QR **no avanza
+con un LF**: avanza `(17 + 4·versión) × moduleSize` puntos. Con la URL real de
+ARCA (313 caracteres → QR v13, 69 módulos, `moduleSize` 6) son **414 puntos ≈ 5,2
+cm** que un modelo ingenuo cuenta como un renglón de 8 mm. Medido: la factura da
+**16,0 cm calculados contra ~21,2 cm reales — 25-30 % de error, justo en el
+comprobante fiscal**. El parser intercepta `GS ( k` función 180 y suma módulos ×
+`moduleSize`; si no se implementa la tabla de versiones, el chip dice «19,2 cm +
+QR» y **no un número redondo que miente**.
 
-**D5 · Sirve en producción, no sólo en el demo.** El pedido nace de no poder
-probar en `demo`, pero el mismo botón en Golf contesta *«¿por qué salió así?»* sin
-caminar hasta la comandera ni gastar un ticket — y deja ver el papel de una
-comanda vieja, que la impresora ya no tiene.
+**D5 · Primero el intérprete, después la pantalla.** El corazón es
+`src/lib/print/escpos-paper.ts`: puro, `parseEscPos(bytes) → Renglon[]`, sin DB y
+sin React. No puede vivir en `scripts/`: el `tsconfig` **excluye ese directorio**,
+así que `pnpm typecheck` lo ignoraría entero y vitest no podría testearlo. Con el
+módulo puro, la UI es la parte fácil.
 
-**D6 · Los cuatro papeles, no sólo la comanda.** El pedido dice «comandas», pero
-los tres que no tienen paridad byte-a-byte son justamente los otros: cuenta,
-control y cierre. Cubrirlos es donde está el valor; la comanda es la que menos lo
-necesita.
+**D6 · Se decodifica en latin1, jamás en utf-8.** El `pL` del `GS ( k` es
+`len & 0xff` y **puede pasar de 0x7f**: probado con URLs de QR de 153/193/233
+caracteres, el round-trip por utf-8 **falla** y por latin1 anda siempre. Es la
+misma codificación con la que se generan los bytes.
 
-**D7 · No se simula la impresora.** Nada de emular ESC/POS a imagen, ni un agente
-virtual que «imprima» a un archivo. Eso es un proyecto y lo que hace falta es
-mirar el papel antes de gastarlo.
+**D7 · Un byte desconocido se dibuja como ruido VISIBLE, nunca se saltea en
+silencio.** Un parser que ignora lo que no entiende produce un papel plausible y
+falso. Va con un test de cobertura: los opcodes que el sistema emite están
+enumerados, y si aparece uno nuevo el test lo caza.
+
+**D8 · SVG, con una `x` explícita por carácter y el tamaño por `scale()`.** No
+`font-size`: la relación entre normal y doble alto tiene que ser **exactamente
+2×**, no «más grande a ojo». La fuente monoespaciada no garantiza el ancho de
+celda — **la grilla sí**; la fuente sólo se calibra para que entre. Y el
+`charSpacing` **se duplica en doble ancho**: el avance es
+`(cellW + charSpacing) × wMul`, no `cellW × wMul + charSpacing`. Si no, el wrap
+del visor deja de coincidir con el del papel.
+
+**D9 · El largo del papel, en centímetros y arriba de todo.** Es el número que
+habría desmentido el «−26 %» al instante. Separado en **impreso** y **cortado**,
+porque son dos cosas distintas.
+
+**D10 · En `demo` se ejercita por script, sin credencial nueva.** Un script que
+arma los cinco papeles con datos de ejemplo y escribe un HTML. No hace falta
+inventarle un print agent a `demo` — que era el otro camino, y crea una credencial
+de producción para una necesidad de desarrollo.
 
 ## Alcance
 
-- **`src/lib/print/preview-actions.ts` (nuevo)** — server action
-  `previewTicket(kind, id, slug)`, gateada por el mismo permiso que Reimprimir.
-  Resuelve la credencial del negocio y trae el trabajo del `GET`.
-- **`src/components/admin/local/ticket-preview-modal.tsx` (nuevo)** — el papel
-  dibujado (D3), con botón para copiar el texto.
-- **`comandas-kanban.tsx` / el tab Comandas** — el botón «Ver ticket» (D4).
-- **Sin migración.** Todo el dato existe.
+- **`src/lib/print/escpos-paper.ts` (nuevo)** — el parser puro (D5, D6, D7).
+- **`src/lib/print/escpos-paper.test.ts`** — anclado a los fixtures congelados
+  **y** a los builders puros, que son importables y no tocan DB. Ojo: los cinco
+  fixtures actuales **sólo cubren la comanda** — no traen `ESC M` ni `GS ( k`, y
+  tienen un solo `ESC 3`. El corpus se arma por **papel**, no por caso de comanda.
+- **`src/lib/print/*-payload.ts`** — el armado extraído de `route.ts` (D2), una
+  familia por módulo. Arrastra mover `sanitizeTicketText` a `ticket.ts` y
+  exportarla: hoy es privada del route y se usa 11 veces adentro.
+- **El visor SVG** + el botón en el tab Comandas, con el mismo permiso que
+  Reimprimir (no se inventa un `canVerTicket`).
+- **`scripts/preview-tickets.ts`** — los cinco papeles a un HTML (D10).
+- **Sin migración.**
 
 ## Qué NO entra
 
-- **El refactor del armado del payload** (D2) — fase 2, cuando `route.ts` se
-  calme.
-- **Emular la impresora** (D7).
-- **Imprimir desde la preview.** Reimprimir ya existe y es otro gesto, con otro
-  permiso.
-- **Previsualizar antes de enviar la comanda.** Interesante, pero el ticket sólo
-  existe cuando la comanda existe; adelantarlo es armar un payload falso, que es
-  exactamente lo que D1 prohíbe.
+- **Emular una impresora genérica.** Se interpretan los **nueve** comandos que
+  este renderer emite, no el estándar ESC/POS.
+- **Imprimir desde el visor.** Reimprimir ya existe y es otro gesto.
+- **Previsualizar antes de enviar la comanda** — el ticket existe cuando la
+  comanda existe; adelantarlo es armar un payload falso.
 
 ## Escenarios de aceptación
 
-1. **Dado** el tab Comandas con una comanda emitida, **cuando** se toca «Ver
-   ticket», **entonces** aparece el papel como va a salir, al ancho real.
-2. **Dado** un ticket con renglones de doble alto, **entonces** se ven más
-   grandes que los normales — el tamaño y el interlineado son visibles.
-3. **Dado** un menú del día en la comanda, **entonces** la preview muestra
-   «MENU EJECUTIVO» arriba del plato, igual que el papel (spec 145).
-4. **Dado** un negocio **sin** agente configurado (el caso de `demo`),
-   **entonces** la preview funciona igual: no depende de que haya una impresora.
-5. **Dado** el papel del cierre, **entonces** se ve en su ancho condensado (42
-   col), distinto del de la comanda.
-6. **Dado** que alguien mira una preview, **entonces** el agente real no pierde
-   ese trabajo ni cambia de estado (el `GET` es de sólo lectura).
+1. **Dado** un ticket cualquiera, **cuando** se lo mira en el visor, **entonces**
+   se ve el papel a escala: tamaños, negrita, alineación y **el largo en cm**.
+2. **Dado** el control de pedido **sin** `COMPACT_SPACING` (la versión rota),
+   **entonces** el visor muestra un papel **23 % más largo** que la sana. Es el
+   test de que el visor sirve para algo.
+3. **Dado** el papel del cierre, **entonces** se ve en Font B a 42 columnas,
+   distinto de los otros cuatro.
+4. **Dado** la factura con el QR de ARCA, **entonces** el QR se dibuja con su
+   tamaño real y el largo del papel lo incluye (D4).
+5. **Dado** `demo`, que **no tiene print agent**, **entonces** el visor funciona
+   igual.
+6. **Dado** un byte que el parser no conoce, **entonces** se ve como ruido en el
+   papel y el test de cobertura falla.
 
 ## Verificación
 
 Pendiente — sin implementar.
 
-Al implementar, la prueba de fuego es el escenario 4: `demo` no tiene agente, y es
-el negocio donde esto tiene que servir. Después, comparar la preview de una
-comanda de Golf contra el papel real que sale de su comandera — si difieren, D1 se
-rompió en algún lado.
+Cuatro capas, cada una con su evidencia:
 
-    node scripts/magic-link.mjs sofia@demo.test "/demo/admin/operacion?tab=comandas"
+1. **Decode** — round-trip `parse(renderEscPos(lines))` contra las `lines`
+   normalizadas **más el epílogo**: `renderEscPos` emite tres avances en blanco
+   antes del `GS V 0`, así que 22 renglones de contenido dan 25 campos. Una línea
+   con `qr` es **lossy a propósito**: se recupera el payload, no el texto.
+2. **Corpus** — los cinco papeles, no cinco casos de comanda.
+3. **Geometría** — función pura calibrable, con el test que resume todo: *«bajar
+   el `size` no acorta el papel»*.
+4. **Calibración contra Golf** — **dos** tiras, porque el perfil es por documento:
+   una en Font A (`"comanda"`, con `ESC SP 4` y el QR) y otra en Font B
+   (`"cierre"`, la única que ejercita `ESC M 1`). Se imprimen seguidas, se
+   fotografían **con una regla al lado**, y se guardan los tres artefactos juntos:
+   bytes, captura del visor y foto del papel. Una visita, una foto.
