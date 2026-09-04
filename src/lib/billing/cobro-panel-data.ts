@@ -1,6 +1,8 @@
 "use server";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
+import { canFiar } from "@/lib/permissions/can";
+import { getClientesParaFiar } from "@/lib/caja/cuenta-corriente-queries";
 import { getInvoiceForOrder } from "@/lib/afip/queries";
 import type { Invoice } from "@/lib/afip/types";
 import type { BusinessRole } from "@/lib/admin/context";
@@ -55,6 +57,17 @@ export type CobroPanelData =
        *  por TIPO (`invoices_order_tipo_active_uq`): dejaría pasar una A
        *  sobre una B existente. Sólo se consulta si el negocio factura. */
       existingInvoice: Invoice | null;
+      /**
+       * Clientes a los que se les puede fiar, con su saldo (spec 141 · D2/D7).
+       * Vacío ⇒ el método «Cuenta corriente» no se ofrece: o el rol no puede
+       * fiar, o el negocio todavía no habilitó a nadie.
+       */
+      clientesParaFiar: {
+        id: string;
+        name: string | null;
+        phone: string;
+        saldo_cents: number;
+      }[];
     }
   | { kind: "no_cuenta"; tableLabel: string }
   | { kind: "no_caja"; error: string; tableLabel: string };
@@ -128,9 +141,10 @@ export async function loadCobroForTable(
   const isPlatformAdmin =
     (profileRes.data as { is_platform_admin: boolean } | null)
       ?.is_platform_admin ?? false;
-  const membership = membershipRes.data as
-    | { role: BusinessRole; disabled_at: string | null }
-    | null;
+  const membership = membershipRes.data as {
+    role: BusinessRole;
+    disabled_at: string | null;
+  } | null;
   const role = membership?.role ?? null;
   const disabled = !!membership?.disabled_at;
   const authorized =
@@ -186,6 +200,11 @@ export async function loadCobroForTable(
     ? await getInvoiceForOrder(business.id, cuenta.order.id)
     : null;
 
+  // spec 141 — sólo si el rol puede fiar. Un negocio que no usa cuentas
+  // corrientes tampoco paga este viaje: la query corta con la lista vacía.
+  const clientesParaFiar =
+    role && canFiar(role) ? await getClientesParaFiar(business.id) : [];
+
   return actionOk({
     kind: "ok",
     cuenta,
@@ -193,6 +212,7 @@ export async function loadCobroForTable(
     tableLabel,
     afipConfigured,
     existingInvoice,
+    clientesParaFiar,
   });
 }
 
@@ -232,9 +252,10 @@ export async function loadCuentaForTable(
   const isPlatformAdmin =
     (profileRes.data as { is_platform_admin: boolean } | null)
       ?.is_platform_admin ?? false;
-  const membership = membershipRes.data as
-    | { role: BusinessRole; disabled_at: string | null }
-    | null;
+  const membership = membershipRes.data as {
+    role: BusinessRole;
+    disabled_at: string | null;
+  } | null;
   const role = membership?.role ?? null;
   const disabled = !!membership?.disabled_at;
   const authorized =

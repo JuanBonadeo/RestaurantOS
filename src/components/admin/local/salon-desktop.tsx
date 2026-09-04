@@ -1526,7 +1526,13 @@ export function SalonDesktop({
       if (e.key === "Backspace" && escribiendo) return;
       if (cerrarModoActual()) e.preventDefault();
     },
-    [cerrarModoActual, atajosOpen, mozoTableId, trasladarTableId, clienteTableId],
+    [
+      cerrarModoActual,
+      atajosOpen,
+      mozoTableId,
+      trasladarTableId,
+      clienteTableId,
+    ],
   );
 
   // Extras para el FloorPlanViewer.
@@ -1861,6 +1867,7 @@ export function SalonDesktop({
                 cuenta={cobroData.cuenta}
                 init={cobroData.init}
                 afipConfigured={cobroData.afipConfigured}
+                clientesParaFiar={cobroData.clientesParaFiar}
                 existingInvoice={cobroData.existingInvoice}
                 embedded
                 onClose={closeCobro}
@@ -3114,7 +3121,10 @@ function TableDetail({
                   <span className={cn(base, p?.bg, p?.text, p?.ring)}>
                     <span
                       aria-hidden
-                      className={cn("h-1.5 w-1.5 shrink-0 rounded-full", p?.dot)}
+                      className={cn(
+                        "h-1.5 w-1.5 shrink-0 rounded-full",
+                        p?.dot,
+                      )}
                     />
                     <span className="truncate">{texto}</span>
                   </span>

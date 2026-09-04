@@ -147,7 +147,7 @@ export async function listCustomers(
     .filter((v) => v > 0)
     .sort((a, b) => a - b);
   const topSpenderThresholdCents =
-    totals.length > 0 ? totals[Math.floor(totals.length * 0.9)] ?? 0 : 0;
+    totals.length > 0 ? (totals[Math.floor(totals.length * 0.9)] ?? 0) : 0;
 
   // 5. Build enriched items with segments.
   const now = new Date();
@@ -286,6 +286,8 @@ export type CustomerDetail = {
   addresses: CustomerAddress[];
   orders: CustomerOrderRow[];
   top_products: CustomerTopProduct[];
+  /** spec 141 · US1 — habilitado para fiar. */
+  credit_enabled: boolean;
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -299,7 +301,7 @@ export async function getCustomerDetail(
   // 1. Customer row (scoped by business_id for safety).
   const { data: customer } = await supabase
     .from("customers")
-    .select("id, name, phone, email, created_at")
+    .select("id, name, phone, email, created_at, credit_enabled")
     .eq("business_id", businessId)
     .eq("id", customerId)
     .maybeSingle();
@@ -345,8 +347,7 @@ export async function getCustomerDetail(
   );
   const avg_ticket_cents =
     order_count > 0 ? Math.round(total_spent_cents / order_count) : 0;
-  const last_order_at =
-    nonCancelled[0]?.created_at ?? null; // ordered DESC already
+  const last_order_at = nonCancelled[0]?.created_at ?? null; // ordered DESC already
   const now = new Date();
   const days_since_last_order = last_order_at
     ? Math.floor((now.getTime() - new Date(last_order_at).getTime()) / DAY_MS)
@@ -394,7 +395,7 @@ export async function getCustomerDetail(
   );
   const topSpenderThresholdCents =
     sortedTotals.length > 0
-      ? sortedTotals[Math.floor(sortedTotals.length * 0.9)] ?? 0
+      ? (sortedTotals[Math.floor(sortedTotals.length * 0.9)] ?? 0)
       : 0;
 
   const segments = computeSegments(
@@ -425,6 +426,7 @@ export async function getCustomerDetail(
     phone: customer.phone,
     email: customer.email,
     created_at: customer.created_at,
+    credit_enabled: customer.credit_enabled ?? false,
     order_count,
     total_spent_cents,
     avg_ticket_cents,
@@ -533,7 +535,8 @@ export async function getCustomerChatbotConversation(
 export async function getSampleCustomerForChatbotDemo(
   businessId: string,
 ): Promise<{ id: string; hasConversation: boolean } | null> {
-  const { createSupabaseServiceClient } = await import("@/lib/supabase/service");
+  const { createSupabaseServiceClient } =
+    await import("@/lib/supabase/service");
   const service = createSupabaseServiceClient();
 
   const { data: convs } = await service
@@ -588,4 +591,3 @@ export async function getSampleCustomerForChatbotDemo(
     .maybeSingle();
   return fallback ? { id: fallback.id, hasConversation: false } : null;
 }
-

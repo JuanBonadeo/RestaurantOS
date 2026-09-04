@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 
 import { CustomerChatbotSection } from "@/components/admin/customers/customer-chatbot-modal";
+import { CuentaCorrienteSection } from "@/components/admin/customers/cuenta-corriente-section";
+import type { CuentaDeCliente } from "@/lib/caja/cuenta-corriente-queries";
 import { SegmentChip } from "@/components/admin/customers/customers-list-client";
 import type {
   CustomerChatbotConversation,
@@ -32,6 +34,7 @@ export function CustomerDetailView({
   businessName,
   businessLogoUrl,
   chatbotConversation,
+  cuenta,
 }: {
   slug: string;
   timezone: string;
@@ -39,6 +42,8 @@ export function CustomerDetailView({
   businessName: string;
   businessLogoUrl: string | null;
   chatbotConversation: CustomerChatbotConversation | null;
+  /** spec 141 · US1 — saldo y libro de su cuenta corriente. */
+  cuenta: CuentaDeCliente;
 }) {
   const initials = getInitials(customer.name ?? customer.phone);
   const createdLabel = formatInTimeZone(
@@ -122,7 +127,6 @@ export function CustomerDetailView({
             )}
           </div>
         </div>
-
       </header>
 
       {/* ── Stat tiles ─────────────────────────────────────────────────── */}
@@ -169,7 +173,7 @@ export function CustomerDetailView({
       <section className="grid gap-4 lg:grid-cols-2">
         {/* Top products */}
         <div className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200/70">
-          <h2 className="mb-3 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+          <h2 className="mb-3 text-[0.65rem] font-semibold tracking-[0.14em] text-zinc-500 uppercase">
             Lo que más pide
           </h2>
           {customer.top_products.length === 0 ? (
@@ -198,7 +202,7 @@ export function CustomerDetailView({
 
         {/* Addresses */}
         <div className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200/70">
-          <h2 className="mb-3 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+          <h2 className="mb-3 text-[0.65rem] font-semibold tracking-[0.14em] text-zinc-500 uppercase">
             Direcciones guardadas
           </h2>
           {customer.addresses.length === 0 ? (
@@ -223,7 +227,7 @@ export function CustomerDetailView({
                     <MapPin className="mt-0.5 size-3.5 shrink-0 text-zinc-400" />
                     <div className="min-w-0">
                       {a.label && (
-                        <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-zinc-500">
+                        <p className="text-[0.65rem] font-semibold tracking-wider text-zinc-500 uppercase">
                           {a.label}
                         </p>
                       )}
@@ -236,6 +240,16 @@ export function CustomerDetailView({
           )}
         </div>
       </section>
+
+      {/* ── Cuenta corriente (spec 141) ──────────────────────────────────── */}
+      <CuentaCorrienteSection
+        slug={slug}
+        customerId={customer.id}
+        habilitadaInicial={customer.credit_enabled}
+        saldoCents={cuenta.saldo_cents}
+        diasSinPagar={cuenta.dias_sin_pagar}
+        libro={cuenta.libro}
+      />
 
       {/* ── Chatbot ─────────────────────────────────────────────────────── */}
       <CustomerChatbotSection
@@ -252,7 +266,7 @@ export function CustomerDetailView({
       {/* ── Orders ──────────────────────────────────────────────────────── */}
       <section className="rounded-2xl bg-white ring-1 ring-zinc-200/70">
         <header className="flex items-center justify-between border-b border-zinc-100 px-5 py-3">
-          <h2 className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+          <h2 className="text-[0.65rem] font-semibold tracking-[0.14em] text-zinc-500 uppercase">
             Historial de pedidos
           </h2>
           <span className="text-xs text-zinc-500">
@@ -290,7 +304,10 @@ export function CustomerDetailView({
                     #{o.order_number}
                   </span>
                   {o.delivery_type === "delivery" ? (
-                    <Bike className="size-3.5 text-zinc-400" strokeWidth={1.75} />
+                    <Bike
+                      className="size-3.5 text-zinc-400"
+                      strokeWidth={1.75}
+                    />
                   ) : (
                     <ShoppingBag
                       className="size-3.5 text-zinc-400"
@@ -353,12 +370,15 @@ function StatTile({
       )}
       style={
         accent
-          ? { background: "color-mix(in oklch, var(--brand, #2563eb) 8%, white)" }
+          ? {
+              background:
+                "color-mix(in oklch, var(--brand, #2563eb) 8%, white)",
+            }
           : undefined
       }
     >
       <div className="flex items-center justify-between gap-2">
-        <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+        <p className="text-[0.65rem] font-semibold tracking-[0.14em] text-zinc-500 uppercase">
           {label}
         </p>
         <span className="text-zinc-400">{icon}</span>

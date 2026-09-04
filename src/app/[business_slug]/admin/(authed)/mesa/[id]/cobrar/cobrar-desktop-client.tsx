@@ -90,6 +90,13 @@ type Props = {
    *  se cierra sola: era el único de los cuatro puntos de cobro que no
    *  facturaba, y el encargado no llega a la sección Facturación (#137). */
   afipConfigured?: boolean;
+  /** spec 141 — con quién se puede fiar. Vacío ⇒ el método no se ofrece. */
+  clientesParaFiar?: {
+    id: string;
+    name: string | null;
+    phone: string;
+    saldo_cents: number;
+  }[];
 };
 
 /** Lo que devuelve un cobro OK — incluye el desenlace del comprobante (spec 156). */
@@ -111,6 +118,7 @@ export function CobrarDesktopClient({
   onReload,
   existingInvoice = null,
   afipConfigured = false,
+  clientesParaFiar = [],
 }: Props) {
   void _tableId;
   const router = useRouter();
@@ -142,9 +150,8 @@ export function CobrarDesktopClient({
   const [cajaId, setCajaId] = useCajaPreferida(slug, init.cajas);
   // spec 156 · D1 — qué comprobante sale, elegido antes de cobrar. Es de la
   // orden entera: si la cuenta se divide, la elección no se reinicia por split.
-  const [comprobante, setComprobante] = useState<ComprobanteState>(
-    comprobanteInicial(),
-  );
+  const [comprobante, setComprobante] =
+    useState<ComprobanteState>(comprobanteInicial());
   const activeSplit = splits.find((s) => s.id === activeSplitId) ?? null;
 
   const total = cuenta.totals.total_cents;
@@ -172,7 +179,8 @@ export function CobrarDesktopClient({
     ? total
     : splitsActivos.reduce((acc, s) => acc + s.paid_amount_cents, 0);
   const totalPending = Math.max(0, total - totalPaid);
-  const progressPct = total === 0 ? 0 : Math.min(100, (totalPaid / total) * 100);
+  const progressPct =
+    total === 0 ? 0 : Math.min(100, (totalPaid / total) * 100);
   // Para el cartel y la barra alcanza con que no quede saldo (comportamiento
   // previo). Para FACTURAR se exige `orderClosed`.
   const allPaid = totalPending === 0 || orderClosed;
@@ -190,187 +198,185 @@ export function CobrarDesktopClient({
     >
       {/* ── Columna izquierda: KPI + caja + splits + anular ── */}
       <div className="space-y-4">
-          {/* KPI principal */}
-          <section
-            className="rounded-2xl p-5"
-            style={{ background: "var(--brand-soft, #F4F4F5)" }}
-          >
-            <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-600">
-              {allPaid ? "Cobrado" : "Falta cobrar"}
-            </p>
-            <p className="mt-1 text-4xl font-bold tracking-tight text-zinc-900 tabular-nums">
-              {formatCurrency(allPaid ? total : totalPending)}
-            </p>
-            <p className="mt-1 text-xs text-zinc-600">
-              de {formatCurrency(total)} total
-              {totalPaid > 0 && !allPaid && (
-                <> · ya cobrado {formatCurrency(totalPaid)}</>
-              )}
-            </p>
-            <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/80">
-              <div
-                className="h-full rounded-full transition-all"
-                style={{
-                  width: `${progressPct}%`,
-                  background: allPaid
-                    ? "rgb(16 185 129)"
-                    : "var(--brand, #18181B)",
-                }}
-              />
-            </div>
-          </section>
+        {/* KPI principal */}
+        <section
+          className="rounded-2xl p-5"
+          style={{ background: "var(--brand-soft, #F4F4F5)" }}
+        >
+          <p className="text-[0.65rem] font-semibold tracking-[0.14em] text-zinc-600 uppercase">
+            {allPaid ? "Cobrado" : "Falta cobrar"}
+          </p>
+          <p className="mt-1 text-4xl font-bold tracking-tight text-zinc-900 tabular-nums">
+            {formatCurrency(allPaid ? total : totalPending)}
+          </p>
+          <p className="mt-1 text-xs text-zinc-600">
+            de {formatCurrency(total)} total
+            {totalPaid > 0 && !allPaid && (
+              <> · ya cobrado {formatCurrency(totalPaid)}</>
+            )}
+          </p>
+          <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/80">
+            <div
+              className="h-full rounded-full transition-all"
+              style={{
+                width: `${progressPct}%`,
+                background: allPaid
+                  ? "rgb(16 185 129)"
+                  : "var(--brand, #18181B)",
+              }}
+            />
+          </div>
+        </section>
 
-          {/* Selector de caja si hay >1 */}
-          {init.cajas.length > 1 && (
-            <Surface padding="compact">
-              <Label className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                Caja para registrar el cobro
-              </Label>
-              <Select
-                value={cajaId}
-                onValueChange={(v) => v && setCajaId(v)}
-              >
-                <SelectTrigger className="mt-1.5 @xl:max-w-xs">
-                  <SelectValue placeholder="Seleccionar caja">
-                    {init.cajas.find((c) => c.id === cajaId)?.name ?? "Caja"}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {init.cajas.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name || `Caja #${c.sort_order + 1}`}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Surface>
-          )}
+        {/* Selector de caja si hay >1 */}
+        {init.cajas.length > 1 && (
+          <Surface padding="compact">
+            <Label className="text-[0.6rem] font-semibold tracking-[0.18em] text-zinc-500 uppercase">
+              Caja para registrar el cobro
+            </Label>
+            <Select value={cajaId} onValueChange={(v) => v && setCajaId(v)}>
+              <SelectTrigger className="mt-1.5 @xl:max-w-xs">
+                <SelectValue placeholder="Seleccionar caja">
+                  {init.cajas.find((c) => c.id === cajaId)?.name ?? "Caja"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {init.cajas.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.name || `Caja #${c.sort_order + 1}`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Surface>
+        )}
 
-          {/* Splits. Con la orden cerrada no se listan: los de `init` quedaron
+        {/* Splits. Con la orden cerrada no se listan: los de `init` quedaron
               viejos (sin refetch) y mostrarían "Cobrar" habilitado sobre una
               mesa ya cobrada — el server rechazaría el pago, pero la pantalla
               estaría invitando a un callejón. */}
-          {!orderClosed && (
-            <section className="space-y-2.5">
-              <p className="px-1 text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                {splitsActivos.length === 1
-                  ? "Pago único"
-                  : `${splitsActivos.length} sub-cuentas`}
-              </p>
-              {/* Las canceladas no se listan: no se pueden cobrar y ocupaban el
+        {!orderClosed && (
+          <section className="space-y-2.5">
+            <p className="px-1 text-[0.6rem] font-semibold tracking-[0.18em] text-zinc-500 uppercase">
+              {splitsActivos.length === 1
+                ? "Pago único"
+                : `${splitsActivos.length} sub-cuentas`}
+            </p>
+            {/* Las canceladas no se listan: no se pueden cobrar y ocupaban el
                   lugar de la fila que sí (issue #189). Siguen en la DB. */}
-              <ul className="space-y-2.5">
-                {splitsActivos.map((s) => (
-                  <li key={s.id}>
-                    <SplitRow
-                      split={s}
-                      isActive={activeSplitId === s.id}
-                      onSelect={() => setActiveSplitId(s.id)}
-                    />
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
+            <ul className="space-y-2.5">
+              {splitsActivos.map((s) => (
+                <li key={s.id}>
+                  <SplitRow
+                    split={s}
+                    isActive={activeSplitId === s.id}
+                    onSelect={() => setActiveSplitId(s.id)}
+                  />
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
-          {/* Anular cobro (admin / encargado) */}
-          {(role === "admin" || role === "encargado") && totalPaid > 0 && (
-            <AnularCobroSection
-              orderId={cuenta.order.id}
-              slug={slug}
-              onDone={goHome}
-              existingInvoice={existingInvoice}
-            />
-          )}
+        {/* Anular cobro (admin / encargado) */}
+        {(role === "admin" || role === "encargado") && totalPaid > 0 && (
+          <AnularCobroSection
+            orderId={cuenta.order.id}
+            slug={slug}
+            onDone={goHome}
+            existingInvoice={existingInvoice}
+          />
+        )}
 
-          {allPaid && (
-            <section className="flex items-center gap-3 rounded-2xl bg-emerald-50 p-4 ring-1 ring-emerald-200">
-              <div className="flex size-10 items-center justify-center rounded-full bg-emerald-500 text-white">
-                <CheckCircle2 className="size-5" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-emerald-900">
-                  Mesa cobrada
-                </p>
-                <p className="text-xs text-emerald-700">
-                  {afipConfigured
-                    ? "Emití el comprobante o volvé al salón."
-                    : "La mesa se va a marcar para limpiar."}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={goHome}
-                className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700"
-              >
-                Volver al salón
-                <ArrowRight className="size-3.5" />
-              </button>
-            </section>
-          )}
+        {allPaid && (
+          <section className="flex items-center gap-3 rounded-2xl bg-emerald-50 p-4 ring-1 ring-emerald-200">
+            <div className="flex size-10 items-center justify-center rounded-full bg-emerald-500 text-white">
+              <CheckCircle2 className="size-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-emerald-900">
+                Mesa cobrada
+              </p>
+              <p className="text-xs text-emerald-700">
+                {afipConfigured
+                  ? "Emití el comprobante o volvé al salón."
+                  : "La mesa se va a marcar para limpiar."}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={goHome}
+              className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700"
+            >
+              Volver al salón
+              <ArrowRight className="size-3.5" />
+            </button>
+          </section>
+        )}
 
-          {/* Emitir el comprobante sin salir del cobro (#137). Mismo componente
+        {/* Emitir el comprobante sin salir del cobro (#137). Mismo componente
               que usa el mozo: el encargado pide los mismos datos de la misma
               forma. Sin AFIP configurado no se muestra nada. Se exige
               `orderClosed` (server), no `allPaid`: ver arriba. */}
-          {orderClosed && afipConfigured && (
-            <FacturacionSection
-              orderId={cuenta.order.id}
-              totalCents={total}
-              slug={slug}
-              existingInvoice={existingInvoice}
-            />
-          )}
-        </div>
+        {orderClosed && afipConfigured && (
+          <FacturacionSection
+            orderId={cuenta.order.id}
+            totalCents={total}
+            slug={slug}
+            existingInvoice={existingInvoice}
+          />
+        )}
+      </div>
 
-        {/* ── Columna derecha (página) / debajo (embebido): form de cobro ── */}
-        <aside className={cn(!embedded && "lg:sticky lg:top-4 lg:self-start")}>
-          {activeSplit && !orderClosed ? (
-            <CobrarSplitPanel
-              key={activeSplit.id}
-              split={activeSplit}
-              orderId={cuenta.order.id}
-              cajaId={cajaId}
-              slug={slug}
-              isImplicit={init.hasImplicitSplit}
-              methodConfigs={init.methodConfigs}
-              orderTipCents={cuenta.order.tip_cents}
-              // El comprobante es de la ORDEN, no del split: vive en el padre
-              // para que dividir la cuenta no lo reinicie.
-              comprobante={comprobante}
-              onComprobanteChange={setComprobante}
-              onPaid={({ orderClosed, comprobante: emision }) => {
-                if (emision?.outcome === "rechazada") {
-                  toast.warning(
-                    `Mesa cobrada. El comprobante no se emitió: ${
-                      emision.error ?? "error desconocido"
-                    }. Reintentá desde Facturación.`,
-                  );
-                }
-                if (orderClosed) {
-                  toast.success("Mesa cobrada");
-                  // Con AFIP configurado NO nos vamos ni recargamos: la
-                  // sección de facturación se monta recién ahora, y tanto
-                  // salir como refetchear la haría inalcanzable (la orden
-                  // cerrada ya no vuelve a este panel). La salida es
-                  // explícita: el botón "Volver al salón".
-                  if (!afipConfigured) {
-                    goHome();
-                    return;
-                  }
-                  setClosedLocal(true);
-                  setActiveSplitId(null);
+      {/* ── Columna derecha (página) / debajo (embebido): form de cobro ── */}
+      <aside className={cn(!embedded && "lg:sticky lg:top-4 lg:self-start")}>
+        {activeSplit && !orderClosed ? (
+          <CobrarSplitPanel
+            key={activeSplit.id}
+            split={activeSplit}
+            orderId={cuenta.order.id}
+            cajaId={cajaId}
+            slug={slug}
+            isImplicit={init.hasImplicitSplit}
+            methodConfigs={init.methodConfigs}
+            orderTipCents={cuenta.order.tip_cents}
+            clientesParaFiar={clientesParaFiar}
+            // El comprobante es de la ORDEN, no del split: vive en el padre
+            // para que dividir la cuenta no lo reinicie.
+            comprobante={comprobante}
+            onComprobanteChange={setComprobante}
+            onPaid={({ orderClosed, comprobante: emision }) => {
+              if (emision?.outcome === "rechazada") {
+                toast.warning(
+                  `Mesa cobrada. El comprobante no se emitió: ${
+                    emision.error ?? "error desconocido"
+                  }. Reintentá desde Facturación.`,
+                );
+              }
+              if (orderClosed) {
+                toast.success("Mesa cobrada");
+                // Con AFIP configurado NO nos vamos ni recargamos: la
+                // sección de facturación se monta recién ahora, y tanto
+                // salir como refetchear la haría inalcanzable (la orden
+                // cerrada ya no vuelve a este panel). La salida es
+                // explícita: el botón "Volver al salón".
+                if (!afipConfigured) {
+                  goHome();
                   return;
                 }
+                setClosedLocal(true);
                 setActiveSplitId(null);
-                reloadData();
-              }}
-              onClear={() => setActiveSplitId(null)}
-            />
-          ) : (
-            <EmptyPanel allPaid={allPaid} />
-          )}
-        </aside>
+                return;
+              }
+              setActiveSplitId(null);
+              reloadData();
+            }}
+            onClear={() => setActiveSplitId(null)}
+          />
+        ) : (
+          <EmptyPanel allPaid={allPaid} />
+        )}
+      </aside>
     </div>
   );
 
@@ -380,10 +386,10 @@ export function CobrarDesktopClient({
       <div className="flex h-full min-h-0 flex-col">
         <header className="border-border/60 flex items-center gap-3 border-b px-4 py-3">
           <div className="min-w-0 flex-1">
-            <h3 className="text-foreground text-2xl font-extrabold leading-none tracking-tight">
+            <h3 className="text-foreground text-2xl leading-none font-extrabold tracking-tight">
               {tableLabel}
             </h3>
-            <p className="text-muted-foreground mt-1 text-[11px] font-semibold uppercase tracking-wider">
+            <p className="text-muted-foreground mt-1 text-[11px] font-semibold tracking-wider uppercase">
               Cobrar mesa
             </p>
           </div>
@@ -468,7 +474,7 @@ function SplitRow({
         cancelled
           ? "cursor-not-allowed opacity-50 ring-zinc-200/70"
           : done
-            ? "cursor-default ring-emerald-200 bg-emerald-50/40"
+            ? "cursor-default bg-emerald-50/40 ring-emerald-200"
             : isActive
               ? "ring-2 ring-zinc-900"
               : "ring-zinc-200/70 hover:ring-zinc-300",
@@ -520,17 +526,13 @@ function SplitRow({
         {done && (
           <p className="mt-0.5 text-xs font-medium text-emerald-700">Cobrado</p>
         )}
-        {cancelled && (
-          <p className="mt-0.5 text-xs text-zinc-500">Cancelado</p>
-        )}
+        {cancelled && <p className="mt-0.5 text-xs text-zinc-500">Cancelado</p>}
       </div>
       {!done && !cancelled && (
         <span
           className={cn(
             "inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold",
-            isActive
-              ? "bg-zinc-900 text-white"
-              : "bg-zinc-100 text-zinc-700",
+            isActive ? "bg-zinc-900 text-white" : "bg-zinc-100 text-zinc-700",
           )}
         >
           {isActive ? "Cobrando" : "Cobrar"}
@@ -550,6 +552,7 @@ function CobrarSplitPanel({
   isImplicit,
   methodConfigs,
   orderTipCents,
+  clientesParaFiar,
   comprobante,
   onComprobanteChange,
   onPaid,
@@ -562,10 +565,20 @@ function CobrarSplitPanel({
   isImplicit: boolean;
   methodConfigs: PaymentMethodConfig[];
   orderTipCents: number;
+  /** spec 141 — con quién se puede fiar; vacío ⇒ el método no se ofrece. */
+  clientesParaFiar: {
+    id: string;
+    name: string | null;
+    phone: string;
+    saldo_cents: number;
+  }[];
   /** spec 156 · D1 — el comprobante se elige ANTES de cobrar, acá mismo. */
   comprobante: ComprobanteState;
   onComprobanteChange: (next: ComprobanteState) => void;
-  onPaid: (result: { orderClosed: boolean; comprobante?: CobroData["comprobante"] }) => void;
+  onPaid: (result: {
+    orderClosed: boolean;
+    comprobante?: CobroData["comprobante"];
+  }) => void;
   onClear: () => void;
 }) {
   const remaining = split.expected_amount_cents - split.paid_amount_cents;
@@ -574,12 +587,12 @@ function CobrarSplitPanel({
     <Surface padding="compact" className="space-y-4">
       <header className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+          <p className="text-[0.6rem] font-semibold tracking-[0.18em] text-zinc-500 uppercase">
             {split.split_index === 0
               ? "Pago único"
               : `Sub-cuenta ${split.split_index}`}
           </p>
-          <h2 className="mt-1 text-2xl font-bold tabular-nums tracking-tight text-zinc-900">
+          <h2 className="mt-1 text-2xl font-bold tracking-tight text-zinc-900 tabular-nums">
             {formatCurrency(remaining)}
           </h2>
         </div>
@@ -614,6 +627,11 @@ function CobrarSplitPanel({
         // apretaba el botón**. Es el mismo `mode: "fixed"` que usa la pantalla
         // del mozo.
         tip={{ mode: "fixed", cents: orderTipCents }}
+        cuentaCorriente={
+          clientesParaFiar.length > 0
+            ? { clientes: clientesParaFiar }
+            : undefined
+        }
         onSubmit={(input) => {
           // Tildó Factura A sin CUIT completo: se frena acá. Emitir una B que no
           // se pidió obliga después a una nota de crédito, que es un
@@ -643,7 +661,10 @@ function CobrarSplitPanel({
           });
         }}
         onPaid={(data) =>
-          onPaid({ orderClosed: data.orderClosed, comprobante: data.comprobante })
+          onPaid({
+            orderClosed: data.orderClosed,
+            comprobante: data.comprobante,
+          })
         }
         mp={{
           start: (input) =>
@@ -659,7 +680,10 @@ function CobrarSplitPanel({
               r.ok
                 ? {
                     ok: true as const,
-                    data: { paymentId: r.data.paymentId, initPoint: r.data.initPoint },
+                    data: {
+                      paymentId: r.data.paymentId,
+                      initPoint: r.data.initPoint,
+                    },
                   }
                 : r,
             ),

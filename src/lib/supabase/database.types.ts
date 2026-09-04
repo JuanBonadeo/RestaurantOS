@@ -1328,41 +1328,98 @@ export type Database = {
           },
         ];
       };
+      customer_credit_settlements: {
+        Row: {
+          amount_cents: number;
+          business_id: string;
+          caja_id: string | null;
+          caja_movimiento_id: string | null;
+          cancelled_at: string | null;
+          cancelled_by: string | null;
+          cancelled_reason: string | null;
+          created_at: string;
+          created_by: string | null;
+          customer_id: string;
+          id: string;
+          method: string;
+          notes: string | null;
+        };
+        Insert: {
+          amount_cents: number;
+          business_id: string;
+          caja_id?: string | null;
+          caja_movimiento_id?: string | null;
+          cancelled_at?: string | null;
+          cancelled_by?: string | null;
+          cancelled_reason?: string | null;
+          created_at?: string;
+          created_by?: string | null;
+          customer_id: string;
+          id?: string;
+          method: string;
+          notes?: string | null;
+        };
+        Update: {
+          amount_cents?: number;
+          business_id?: string;
+          caja_id?: string | null;
+          caja_movimiento_id?: string | null;
+          cancelled_at?: string | null;
+          cancelled_by?: string | null;
+          cancelled_reason?: string | null;
+          created_at?: string;
+          created_by?: string | null;
+          customer_id?: string;
+          id?: string;
+          method?: string;
+          notes?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "customer_credit_settlements_business_id_fkey";
+            columns: ["business_id"];
+            isOneToOne: false;
+            referencedRelation: "businesses";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "customer_credit_settlements_customer_id_fkey";
+            columns: ["customer_id"];
+            isOneToOne: false;
+            referencedRelation: "customers";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       customers: {
         Row: {
           business_id: string;
-          condicion_iva: number | null;
           created_at: string;
-          cuit: string | null;
+          credit_enabled: boolean;
           email: string | null;
           id: string;
           name: string | null;
           phone: string;
-          razon_social: string | null;
           user_id: string | null;
         };
         Insert: {
           business_id: string;
-          condicion_iva?: number | null;
           created_at?: string;
-          cuit?: string | null;
+          credit_enabled?: boolean;
           email?: string | null;
           id?: string;
           name?: string | null;
           phone: string;
-          razon_social?: string | null;
           user_id?: string | null;
         };
         Update: {
           business_id?: string;
-          condicion_iva?: number | null;
           created_at?: string;
-          cuit?: string | null;
+          credit_enabled?: boolean;
           email?: string | null;
           id?: string;
           name?: string | null;
           phone?: string;
-          razon_social?: string | null;
           user_id?: string | null;
         };
         Relationships: [
@@ -2830,6 +2887,7 @@ export type Database = {
           caja_id: string;
           card_brand: string | null;
           created_at: string;
+          credit_customer_id: string | null;
           id: string;
           last_four: string | null;
           method: string;
@@ -2854,6 +2912,7 @@ export type Database = {
           caja_id: string;
           card_brand?: string | null;
           created_at?: string;
+          credit_customer_id?: string | null;
           id?: string;
           last_four?: string | null;
           method: string;
@@ -2878,6 +2937,7 @@ export type Database = {
           caja_id?: string;
           card_brand?: string | null;
           created_at?: string;
+          credit_customer_id?: string | null;
           id?: string;
           last_four?: string | null;
           method?: string;

@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { CustomerDetailView } from "@/components/admin/customers/customer-detail";
+import { getCuentaDeCliente } from "@/lib/caja/cuenta-corriente-queries";
 import { PageShell } from "@/components/admin/shell/page-shell";
 import { ensureAdminAccess } from "@/lib/admin/context";
 import {
@@ -24,10 +25,10 @@ export default async function CustomerDetailPage({
   const customer = await getCustomerDetail(business.id, id);
   if (!customer) notFound();
 
-  const chatbotConversation = await getCustomerChatbotConversation(
-    business.id,
-    customer.phone,
-  );
+  const [chatbotConversation, cuenta] = await Promise.all([
+    getCustomerChatbotConversation(business.id, customer.phone),
+    getCuentaDeCliente(business.id, customer.id),
+  ]);
 
   return (
     <PageShell width="wide" className="space-y-6">
@@ -38,6 +39,7 @@ export default async function CustomerDetailPage({
         businessName={business.name}
         businessLogoUrl={business.logo_url ?? null}
         chatbotConversation={chatbotConversation}
+        cuenta={cuenta}
       />
     </PageShell>
   );

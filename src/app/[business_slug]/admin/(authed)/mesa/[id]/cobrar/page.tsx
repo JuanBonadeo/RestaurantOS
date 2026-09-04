@@ -10,6 +10,8 @@ import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { canSee } from "@/lib/permissions/sections";
 import { getBusiness } from "@/lib/tenant";
 
+import { canFiar } from "@/lib/permissions/can";
+import { getClientesParaFiar } from "@/lib/caja/cuenta-corriente-queries";
 import { CobrarDesktopClient } from "./cobrar-desktop-client";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +28,9 @@ export default async function AdminCobrarPage({
   const ctx = await ensureAdminAccess(business.id, business_slug);
   // Spec 140: el gate sale de la matriz. La `terminal` opera desde el panel y
   // rebotarla a la UI móvil del mozo la sacaría del flujo a mitad de la carga.
-  if (!canSee("operacion", ctx.role, { isPlatformAdmin: ctx.isPlatformAdmin })) {
+  if (
+    !canSee("operacion", ctx.role, { isPlatformAdmin: ctx.isPlatformAdmin })
+  ) {
     redirect(`/${business_slug}/mozo/mesa/${tableId}/cobrar`);
   }
 
@@ -38,7 +42,10 @@ export default async function AdminCobrarPage({
           eyebrow="Cobro"
           title="No hay cuenta para cobrar"
           description="Esta mesa no tiene un pedido activo. Cargá items primero desde la pantalla de pedido."
-          back={{ href: `/${business_slug}/admin/operacion`, label: "Volver al salón" }}
+          back={{
+            href: `/${business_slug}/admin/operacion`,
+            label: "Volver al salón",
+          }}
         />
         <Link
           href={`/${business_slug}/admin/operacion`}
@@ -58,7 +65,10 @@ export default async function AdminCobrarPage({
           eyebrow="Cobro"
           title="No se puede cobrar"
           description={init.error}
-          back={{ href: `/${business_slug}/admin/operacion`, label: "Volver al salón" }}
+          back={{
+            href: `/${business_slug}/admin/operacion`,
+            label: "Volver al salón",
+          }}
         />
         <Link
           href={`/${business_slug}/admin/operacion?tab=caja`}
@@ -81,6 +91,14 @@ export default async function AdminCobrarPage({
   const biz = business as Record<string, unknown>;
   const afipConfigured = !!(biz.afip_cuit && biz.afip_punto_venta);
 
+  // spec 141 — esta ruta arma sus datos por su cuenta (no pasa por
+  // `loadCobroForTable`), así que la lista de a quién fiarle se pide acá, con el
+  // mismo gate de rol.
+  const rolEfectivo = ctx.isPlatformAdmin ? "admin" : (ctx.role ?? "admin");
+  const clientesParaFiar = canFiar(rolEfectivo)
+    ? await getClientesParaFiar(business.id)
+    : [];
+
   return (
     <CobrarDesktopClient
       slug={business_slug}
@@ -91,6 +109,7 @@ export default async function AdminCobrarPage({
       init={init.data}
       existingInvoice={existingInvoice}
       afipConfigured={afipConfigured}
+      clientesParaFiar={clientesParaFiar}
     />
   );
 }
