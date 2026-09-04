@@ -1,4 +1,4 @@
-# 156 · La Factura A y la B automática
+# 156 · Se elige el comprobante antes de cobrar
 
 **Issue:** [#233](https://github.com/gachetponzellini/RestaurantOS-app/issues/233) ·
 **Milestone:** Post-demo · Growth & hardening ·
@@ -10,13 +10,12 @@
 > la nota de crédito) antes de emitir otro tipo de comprobante.*
 >
 > *"sale cuando quiero emitir una factura A a un cliente después de cobrar, creo
-> que pasa pq se emite la factura B automáticamente. Entonces capaz deberíamos
-> que diga la verdad: factura B emitida. Pero si quiere emitir A, la B tendría
-> que cancelarla para luego emitir la A, no?"*
+> que pasa pq se emite la factura B automáticamente"* … *"capaz habría que
+> cambiar el orden, y que la elección del tipo de factura le salga antes de
+> cobrar. Tendría más sentido."*
 
-El diagnóstico es correcto. Es el hallazgo que quedó anotado al cerrar la
-[spec 150](../150-factura-a-un-cliente/spec.md) y que ahora apareció en la cara
-de alguien.
+Tiene más sentido, y además es lo que arregla el caso que hoy no tiene arreglo:
+**el cobro de mesa**, donde el operador nunca llega a pedir una A a tiempo.
 
 **Depende de**: [`147`](../147-cobrar-una-mesa-emite-el-comprobante/spec.md) (la
 B automática), [`150`](../150-factura-a-un-cliente/spec.md) (la A a un receptor
@@ -41,146 +40,174 @@ En el cobro de un pedido (`cobrar-pedido-sheet.tsx`):
 La orden queda con una Factura B que el operador **no pidió**, y con un error que
 lo manda a anular algo que no debería existir.
 
-### La corrección al planteo
+### El mesón está peor: ahí no se puede elegir
 
-Son **dos casos distintos**, y sólo uno necesita anular nada:
+En el **cobro de mesa** (mozo y encargado) no es un problema de orden sino de
+diseño: `FacturacionSection` se monta **sólo con la orden cerrada**
+(`cobrar-desktop-client.tsx`, `mozo/…/cobrar-client.tsx`), que es exactamente
+cuando la B automática ya salió. El operador de mesa **nunca tiene la chance** de
+pedir una A antes — y las mesas son el volumen del local.
 
-| | Qué pasó | Qué corresponde |
-|---|---|---|
-| **A · Lo eligió antes** | Tildó «Factura A» y aun así salió la B | **La B no tenía que salir.** No hay nada que anular: el sistema tenía el dato y lo ignoró |
-| **B · Lo pide después** | La B ya salió, y el cliente **después** pide la A | Sí: anular la B con su nota de crédito y emitir la A |
+Y hoy, en un negocio con la auto-emisión **apagada** (golf-jcr), esa sección
+después del cobro es la única forma de emitir: se cobra, y después alguien tiene
+que acordarse de facturar. Es exactamente lo que la spec 147 fue a arreglar para
+la B, y sigue pasando para la A.
 
-El caso A es un bug, no un flujo. Resolverlo con «anulá y volvé a emitir» le
-cobra al operador una nota de crédito —un comprobante fiscal real, con número y
-CAE— por un dato que había cargado bien desde el principio.
+### La conclusión
 
-El caso B es legítimo y hoy es **prácticamente un callejón sin salida**: el
-mensaje dice qué hacer, pero para hacerlo hay que salir del cobro, ir a
-Facturación, encontrar el comprobante, abrirlo, tipear un motivo, anular… y
-después no hay dónde emitir la A, porque la orden ya está cerrada y el sheet de
-cobro no vuelve.
-
-### Y el mesón no puede elegir antes
-
-En el **cobro de mesa** (mozo y encargado) el problema es estructural, no de
-orden: `FacturacionSection` se monta sólo con la orden **cerrada**
-([cobrar-desktop-client.tsx](../../src/app/[business_slug]/admin/\(authed\)/mesa/[id]/cobrar/cobrar-desktop-client.tsx)),
-que es exactamente cuando la B automática ya salió. Ahí el operador **nunca
-tiene la chance** de pedir una A antes. Todas las mesas caen en el caso B.
+El dato —a quién y con qué letra se le factura— se sabe **antes** de cobrar, en
+los tres puntos. Pedirlo después es lo que crea el problema: obliga a emitir a
+ciegas primero y a corregir con una nota de crédito después. Una nota de crédito
+es un comprobante fiscal real, con número y CAE: no es un undo.
 
 ## Las decisiones
 
-**D1 · La emisión automática emite lo que el operador eligió, no siempre B.**
-El arreglo del caso A. `registrarPago` recibe el comprobante elegido y se lo pasa
-a `autoEmitInvoiceForOrder`, que se lo pasa al motor —`emitInvoiceCore` ya acepta
-tipo, CUIT, razón social, condición y `fiscal_entity_id` desde la spec 150.
+**D1 · El comprobante se elige antes de cobrar, en los tres puntos que cobran.**
+`ComprobanteFields` (con el buscador de receptores de la spec 150) sube al
+formulario de cobro del **pedido**, de la **mesa del mozo** y de la **mesa del
+encargado**. Lo elegido viaja en `registrarPago` y es lo que se emite al cerrar
+la orden: **una sola emisión, del tipo correcto**.
 
-Es una sola emisión, no dos: no hay carrera que perder, no hay B que anular y se
-conserva la propiedad que la 147 fue a buscar («toda mesa cobrada termina en
-comprobante»). El `facturar()` posterior de la pantalla desaparece.
+Los tres ya controlan su propio `onSubmit` → `registrarPago`, así que
+`CobroForm` no se toca: cada pantalla monta el campo y manda el estado.
 
-**D2 · Si la A elegida se rechaza, NO se cae a Factura B.** Es la tentación
+**D2 · Por defecto no se elige nada, y no cambia nada.** El control arranca
+colapsado en «Factura B (consumidor final)», que es el 95 % de los cobros: **cero
+taps de más** en el camino caliente. La spec 111 sacó el formulario de encima de
+sentar a alguien (FR-015) y ese criterio vale igual acá — si esto costara un paso
+en cada mesa, estaría mal aunque arregle la A.
+
+Sin elección explícita, todo sigue como hoy: la auto-emisión de la 147 si el
+negocio la tiene prendida, y la sección de después si no.
+
+**D3 · Una elección explícita emite aunque `afip_auto_emit` esté apagado.** Sin
+esto, mover la elección hacia arriba no le sirve a **golf-jcr**, que tiene el
+flag en `false` — que es el único negocio real que hoy factura A.
+
+No contradice el D3 de la spec 147 («apagado por defecto: un negocio que factura
+a mano no se despierta emitiendo por un deploy»). Lo que ese flag protege es la
+emisión **que nadie pidió**. Acá alguien la pidió, en la misma pantalla, tocando
+un control: emitirla es obedecer, no despertarse solo.
+
+**D4 · Si la A elegida se rechaza, NO se cae a Factura B.** Es la tentación
 obvia —«que al menos salga algo»— y está mal: emitir una B a consumidor final
 cuando el operador pidió una A a un CUIT es declarar ante ARCA una operación que
-no ocurrió, y encima se descubre tarde. Si la A se rechaza, la factura queda
-`failed` con su aviso (spec 147 · D6) y se reintenta desde Facturación, que es lo
-que ya pasa hoy con cualquier emisión rechazada.
+no ocurrió, y encima se descubre tarde. La factura queda `failed` con su aviso
+(spec 147 · D6) y se reintenta desde Facturación, como cualquier rechazo.
 
-**D3 · «Cambiar a Factura A» es una acción, no un instructivo.** El arreglo del
-caso B. Un solo botón que hace las tres cosas en orden y las revierte si alguna
-falla: emite la nota de crédito de la B, la marca anulada, y emite la A con los
-datos del receptor. Vive donde el operador se entera del problema — el detalle
-del comprobante en Facturación — y pide los mismos campos que el cobro (buscador
-de entidades incluido, spec 150).
+**D5 · «Cambiar a Factura A» sigue haciendo falta, pero deja de ser el arreglo.**
+Con el D1, el caso «lo eligió y salió otra cosa» desaparece. Queda el caso real y
+distinto: **el cliente pide la A después**, mirando el ticket que ya se le dio.
+Ahí sí corresponde anular con nota de crédito y emitir la A, y hoy es
+prácticamente un callejón sin salida —el mensaje dice qué hacer, pero después no
+hay dónde emitir la A porque la orden ya cerró.
 
-El motivo de la anulación no se le pregunta: lo sabemos. Es «se reemplaza por
-Factura A a <CUIT>», y escribirlo nosotros es más fiel que un campo libre que
-alguien va a llenar con «cambio».
+Un botón que hace las tres cosas en orden: emite la NC de la B, la marca anulada,
+emite la A. El motivo no se pregunta: es «se reemplaza por Factura A a <CUIT>», y
+escribirlo nosotros es más fiel que un campo libre que alguien llena con «cambio».
 
-**D4 · El mensaje dice qué pasó y ofrece la salida.** Hoy dice «anulala antes de
-emitir otro tipo de comprobante», que es un instructivo para un viaje de cinco
-pantallas. Con el D3 pasa a decir que la orden ya tiene la Factura B tal, y a
-ofrecer el botón. El texto del guard en `emit-core` no cambia —es la última línea
-de defensa del servidor y está bien como está—; lo que cambia es que la pantalla
-lo intercepte en vez de mostrarlo crudo.
+**D6 · No se toca cuándo dispara la auto-emisión.** La tentación es apagarla
+mientras haya una A a medio cargar. No: existe porque en golf-jcr hubo **11 mesas
+cobradas y 1 con intento de comprobante** (spec 147), y cualquier condición que
+la apague reabre esa puerta. Sigue saliendo un comprobante por cobro; lo único
+que cambia es que sea del tipo que se pidió.
 
-**D5 · No se toca cuándo dispara la auto-emisión.** La tentación es apagarla
-mientras haya una A a medio cargar. No: `afip_auto_emit` existe porque en
-golf-jcr hubo **11 mesas cobradas y 1 con intento de comprobante** (spec 147), y
-cualquier condición que la apague reabre esa puerta. La 147 se cumple igual —
-sigue saliendo un comprobante por cobro—, sólo que del tipo correcto.
+**D7 · En un pago parcial la elección espera.** El comprobante se emite cuando la
+orden queda saldada, no en cada pago. Pasar el dato en un pago parcial no hace
+nada —`autoEmitInvoiceForOrder` corre después de cerrar la orden— y el pago que
+la cierra es el que lo aplica. Si la mesa se cobra en dos sesiones distintas y la
+segunda no eligió, cae al comportamiento de siempre.
 
 ## Alcance
 
 - **`registrarPago` acepta el comprobante elegido** (`cobro-actions.ts`) y lo
-  pasa a `autoEmitInvoiceForOrder` → `emitInvoiceCore`. Validación en el borde:
-  el input viene del cliente.
-- **`cobrar-pedido-sheet.tsx`** manda el `ComprobanteState` en el cobro y deja de
-  llamar a `emitInvoice` por separado.
-- **`cambiarTipoDeComprobante` (nuevo action)** — el D3: NC de la vigente + A
-  nueva, con gate `canAnularFactura` (encargado/admin: ya es quien anula).
-- **UI del cambio** en `invoice-detail-sheet.tsx`, reusando `ComprobanteFields`.
-- **El mesón**: `FacturacionSection` en el cobro de mesa ofrece «cambiar a
-  Factura A» cuando ya hay una B autorizada, en vez del formulario muerto que
-  muestra hoy.
+  pasa a `autoEmitInvoiceForOrder` → `emitInvoiceCore`, que desde la spec 150 ya
+  toma tipo, CUIT, razón social, condición y `fiscal_entity_id`. Validación Zod
+  en el borde: el input viene del cliente.
+- **`autoEmitInvoiceForOrder`** emite el tipo elegido y, con elección explícita,
+  no mira `afip_auto_emit` (D3).
+- **Las tres pantallas de cobro** montan `ComprobanteFields` y mandan el estado:
+  `cobrar-pedido-sheet.tsx` (que deja de llamar a `emitInvoice` aparte),
+  `mozo/…/cobrar-client.tsx` y `admin/…/cobrar-desktop-client.tsx`.
+- **`FacturacionSection` después del cobro se queda**, con menos trabajo: emitir
+  cuando no se eligió nada y el flag está apagado, reintentar una fallida, y ser
+  la puerta del «cambiar a Factura A» (D5).
+- **`cambiarTipoDeComprobante` (nuevo action)** — el D5: NC de la vigente + A
+  nueva, con gate `canAnularFactura` (encargado/admin, el mismo que ya anula).
 - **Tests**: que el tipo elegido llegue al motor; que una A rechazada **no**
-  emita una B; que el cambio deje exactamente una NC + una A y la B `cancelled`.
+  emita una B (D4); que sin elección todo siga igual (147 intacta); que el
+  cambio deje exactamente una NC + una A y la B `cancelled`.
 
 ## Qué NO entra
 
-- **Apagar o condicionar la auto-emisión** (D5).
-- **Elegir el comprobante antes de cobrar en la mesa.** Sería lo ideal para que
-  el mesón también caiga en el caso A, pero toca el camino más caliente de la
-  operación ([spec 111](../111-sidebar-operacion-rediseno/spec.md) · FR-015: sentar a
-  alguien dejó de costar un formulario, y agregarle uno al cobro va en contra) y merece
-  su propia discusión. Con el D3 el mesón queda resuelto, aunque con una NC de
-  por medio.
+- **Apagar o condicionar la auto-emisión** (D6).
 - **Cambiar A → B.** El caso real es al revés: el cliente pide la A porque la
   necesita para descargar. Bajar de A a B no lo pidió nadie.
 - **Reusar el número de la B anulada.** No se puede: cada comprobante consume su
   numeración en ARCA.
+- **Elegir el comprobante al abrir la mesa** (y no al cobrarla). Suena tentador
+  —«el cliente avisa cuando se sienta»— pero mueve el dato fiscal a un momento
+  donde todavía no se sabe quién paga ni cuánto, y ensucia el camino de sentar
+  que la 111 acaba de limpiar.
 
 ## Escenarios de aceptación
 
-1. **Dado** el cobro de un pedido con **Factura A tildada y CUIT válido**,
+1. **Dado** el cobro de un pedido con **Factura A elegida y CUIT válido**,
    **cuando** se cobra, **entonces** sale **una** Factura A y **ninguna** B.
-2. **Dado** ese mismo cobro, **entonces** el error «esta orden ya tiene la
-   Factura B» **no aparece nunca**.
-3. **Dado** un cobro sin tocar nada, **entonces** sale la Factura B automática
-   exactamente como hoy (spec 147 intacta).
-4. **Dado** un cobro con Factura A elegida cuyo CUIT ARCA rechaza, **entonces**
-   la factura queda `failed` con su aviso y **no se emite una B** (D2).
-5. **Dado** una orden con Factura B autorizada, **cuando** se usa «cambiar a
+2. **Dado** el cobro de una **mesa** (mozo o encargado) con Factura A elegida,
+   **entonces** pasa lo mismo: una A, ninguna B, y sin pantalla intermedia.
+3. **Dado** cualquiera de esos cobros, **entonces** el error «esta orden ya tiene
+   la Factura B» **no aparece nunca**.
+4. **Dado** un cobro **sin tocar el control**, **entonces** sale la Factura B
+   automática exactamente como hoy (spec 147 intacta).
+5. **Dado** un negocio con `afip_auto_emit` **apagado** y una Factura A elegida
+   en el cobro, **entonces** la A se emite igual (D3).
+6. **Dado** ese mismo negocio **sin elegir nada**, **entonces** NO se emite nada
+   automáticamente y la sección de después sigue siendo la puerta (D3 no se
+   desborda).
+7. **Dado** un cobro con Factura A elegida cuyo CUIT ARCA rechaza, **entonces**
+   la factura queda `failed` con su aviso y **no se emite una B** (D4).
+8. **Dado** un **pago parcial** con Factura A elegida, **entonces** no se emite
+   nada; el pago que salda la orden es el que emite la A (D7).
+9. **Dado** una orden con Factura B autorizada, **cuando** se usa «cambiar a
    Factura A», **entonces** queda: la B `cancelled`, su nota de crédito
    `authorized` y una Factura A `authorized` al CUIT indicado.
-6. **Dado** ese cambio, **cuando** la nota de crédito falla, **entonces** la B
-   **sigue autorizada** y no se emite ninguna A — no se rompe a mitad de camino.
-7. **Dado** ese cambio, **cuando** la A falla después de anular la B,
-   **entonces** se avisa con claridad que la B quedó anulada y que hay que
-   reintentar la A: la NC ya tiene CAE y no se puede deshacer.
-8. **Dado** un mozo, **entonces** no puede cambiar el tipo de comprobante
-   (`canAnularFactura` ya lo deja afuera).
-9. **Dado** el cobro de mesa con una B ya emitida, **entonces** la pantalla
-   ofrece el cambio en vez del formulario de emisión que hoy no sirve.
+10. **Dado** ese cambio, **cuando** la nota de crédito falla, **entonces** la B
+    **sigue autorizada** y no se emite ninguna A — no se rompe a mitad de camino.
+11. **Dado** ese cambio, **cuando** la A falla después de anular la B,
+    **entonces** se avisa que la B quedó anulada y que hay que reintentar la A:
+    la NC ya tiene CAE y no se puede deshacer.
+12. **Dado** un mozo, **entonces** puede elegir Factura A al cobrar su mesa
+    (es parte de cobrar) pero **no** puede cambiar el tipo de un comprobante ya
+    emitido (`canAnularFactura` lo deja afuera).
 
 ## Verificación
 
 Pendiente — spec propuesta, sin código.
 
-El verify va en `demo`, que es el negocio que **tiene `afip_auto_emit` prendido**
-y donde el bug se reproduce de una: cobrar un pedido con Factura A tildada. Con
-el gateway en sandbox el CAE vuelve al instante y se ve la A completa. Con Sofía
-(encargada), que es quien cobra y quien anula.
+El verify va en `demo`, que es el negocio con `afip_auto_emit` **prendido** y
+donde el bug se reproduce de una. Con el gateway en sandbox el CAE vuelve al
+instante y se ve la A completa. Con **Sofía (encargada)** para el cobro de mesa y
+el cambio de tipo, y con **Pedro (mozo)** para el escenario 12 — el mozo elige,
+pero no cambia.
 
-Ojo con el escenario 5: deja **tres** comprobantes en la orden (B anulada, NC, A)
+El escenario 5 (flag apagado + elección explícita) es el que **no** se puede
+probar en `demo` sin tocarle la config: se prueba con un negocio de prueba
+propio, o se deja anotado como verificado sólo por test.
+
+Ojo con el escenario 9: deja **tres** comprobantes en la orden (B anulada, NC, A)
 y hay que mirar los tres, no sólo que la A tenga CAE.
 
 ## Preguntas abiertas
 
-1. **¿El cambio a A debería poder hacerse desde el ticket ya impreso?** El
-   cliente pide la A mirando el ticket que le dieron. Hoy el operador tiene que
-   encontrar la orden en Facturación. Si el papel llevara el número de pedido
-   —lo lleva— alcanzaría con buscarlo, pero conviene confirmarlo con el local.
-2. **¿Cuánto tiempo después se puede pedir la A?** ARCA acepta notas de crédito
+1. **¿El control va colapsado o visible?** El D2 dice colapsado por defecto.
+   Para el mozo en el teléfono eso es un tap extra cuando **sí** hay que hacer
+   una A. Conviene mirarlo con alguien del local: si el A/B es frecuente en una
+   barra o un salón puntual, quizás convenga visible ahí.
+2. **¿El cambio a A debería poder hacerse desde el ticket ya impreso?** El
+   cliente pide la A mirando el papel que le dieron. Hoy hay que encontrar la
+   orden en Facturación; el ticket lleva el número de pedido, así que alcanzaría
+   con buscarlo — pero conviene confirmarlo con el local.
+3. **¿Cuánto tiempo después se puede pedir la A?** ARCA acepta notas de crédito
    sin límite práctico, pero un cambio sobre una factura de otro mes mueve la
-   liquidación del período. Puede requerir un tope (ej. mismo mes fiscal).
+   liquidación del período. Puede querer un tope (ej. mismo mes fiscal).
