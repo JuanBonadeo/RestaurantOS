@@ -7,6 +7,7 @@ const EMPTY_BY_METHOD: Record<PaymentMethod, number> = {
   mp_qr: 0,
   transfer: 0,
   other: 0,
+  cuenta_corriente: 0,
 };
 
 export const EMPTY_BY_ORIGEN: Record<VentaOrigen, number> = {

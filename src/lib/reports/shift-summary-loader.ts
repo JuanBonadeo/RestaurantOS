@@ -29,6 +29,7 @@ const EMPTY_METODO: Record<PaymentMethod, number> = {
   mp_qr: 0,
   transfer: 0,
   other: 0,
+  cuenta_corriente: 0,
 };
 
 /** Inicio del día (en `timezone`) traducido a instante UTC. Igual que reports. */

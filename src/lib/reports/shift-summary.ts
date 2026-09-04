@@ -21,6 +21,7 @@ export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   mp_qr: "Mercado Pago (QR)",
   transfer: "Transferencia",
   other: "Otro",
+  cuenta_corriente: "Cuenta corriente",
 };
 
 const METHOD_ORDER: PaymentMethod[] = [

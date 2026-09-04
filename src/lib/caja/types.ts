@@ -122,7 +122,18 @@ export type PaymentMethod =
   | "mp_link"
   | "mp_qr"
   | "transfer"
-  | "other";
+  | "other"
+  /**
+   * Fiado (spec 141). Cierra el ticket como cualquier otro método —la mesa se
+   * libera, la factura sale— pero **no es plata cobrada**: queda como saldo del
+   * cliente (`payments.credit_customer_id`, obligatorio por check).
+   *
+   * Ojo al sumarlo: entra en la venta, NO en «Cobrado» ni en el arqueo. El
+   * arqueo ya está a salvo solo (`expected-cash.ts` filtra `cash`), pero
+   * `getCajaLiveStats` suma todos los métodos — ahí hay que excluirlo, o el
+   * encargado lee «Cobrado $180.000» con $150.000 en el cajón (D3).
+   */
+  | "cuenta_corriente";
 
 /**
  * De dónde vino la plata, derivado de `orders.delivery_type`.
@@ -134,6 +145,12 @@ export type VentaOrigen = "salon" | "delivery" | "takeaway" | "otro";
 export type CajaLiveStats = {
   caja_id: string;
   total_ventas_cents: number;
+  /**
+   * Fiado del período (spec 141 · D3). Va SEPARADO de `total_ventas_cents`
+   * porque el panel muestra ése como «Cobrado», y el fiado es venta pero no es
+   * plata: sumarlo haría cerrar el turno con una diferencia inexplicable.
+   */
+  total_fiado_cents: number;
   total_propinas_cents: number;
   ventas_por_metodo: Record<PaymentMethod, number>;
   ventas_por_origen: Record<VentaOrigen, number>;
@@ -144,7 +161,10 @@ export type CajaLiveStats = {
    * pone un peso en el cajón, uno en efectivo sí. Los dos desgloses sueltos no
    * lo decían.
    */
-  ventas_por_origen_y_metodo: Record<VentaOrigen, Record<PaymentMethod, number>>;
+  ventas_por_origen_y_metodo: Record<
+    VentaOrigen,
+    Record<PaymentMethod, number>
+  >;
   cobros_count: number;
   /** Cuántos cobros por método — el papel del cierre lleva columna «Cant». */
   cobros_por_metodo: Record<PaymentMethod, number>;
@@ -203,8 +223,16 @@ export type CierreResumenSnapshot = {
     ingresos: { detalle: string; total_cents: number }[];
     egresos: { detalle: string; total_cents: number }[];
   };
-  ventas_por_origen_lineas: { detalle: string; total_cents: number; cant: number }[];
-  ventas_por_metodo_lineas: { detalle: string; total_cents: number; cant: number }[];
+  ventas_por_origen_lineas: {
+    detalle: string;
+    total_cents: number;
+    cant: number;
+  }[];
+  ventas_por_metodo_lineas: {
+    detalle: string;
+    total_cents: number;
+    cant: number;
+  }[];
 };
 
 // ── El cierre archivado (spec 149) ──────────────────────────────

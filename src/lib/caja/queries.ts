@@ -7,7 +7,10 @@ import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { calculateExpectedCash, separarRetiroDelCierre } from "./expected-cash";
 import { calcularRendicionMozo } from "./liquidacion-mozo";
 import { mozosQueDebenRendir } from "./deben-rendir";
-import { repartirEfectivoEsperado, type RepartoEfectivo } from "./reparto-efectivo";
+import {
+  repartirEfectivoEsperado,
+  type RepartoEfectivo,
+} from "./reparto-efectivo";
 import {
   agruparVentasPorOrigen,
   cruzarOrigenYMetodo,
@@ -49,11 +52,10 @@ const EMPTY_BY_METHOD: Record<PaymentMethod, number> = {
   mp_qr: 0,
   transfer: 0,
   other: 0,
+  cuenta_corriente: 0,
 };
 
-export async function getCajasForBusiness(
-  businessId: string,
-): Promise<Caja[]> {
+export async function getCajasForBusiness(businessId: string): Promise<Caja[]> {
   const service = db();
   const { data } = await service
     .from("cajas")
@@ -87,9 +89,7 @@ export async function getAllCajasForBusiness(
  * `sort_order`. El fallback importa: `payments.caja_id` es NOT NULL, así que
  * sin él un negocio que nunca entró a la config perdería el pago.
  */
-export async function getDefaultCaja(
-  businessId: string,
-): Promise<Caja | null> {
+export async function getDefaultCaja(businessId: string): Promise<Caja | null> {
   const cajas = await getCajasForBusiness(businessId);
   if (cajas.length === 0) return null;
   return cajas.find((c) => c.is_default) ?? cajas[0];
@@ -236,26 +236,31 @@ export async function getPaymentsPeriodoActual(
     created_at: string;
     attributed_mozo_id: string | null;
     order_id: string;
-    orders: {
-      order_number: number;
-      delivery_type: string;
-      customer_name: string | null;
-      table_id: string | null;
-      tables: { label: string } | { label: string }[] | null;
-    } | {
-      order_number: number;
-      delivery_type: string;
-      customer_name: string | null;
-      table_id: string | null;
-      tables: { label: string } | { label: string }[] | null;
-    }[] | null;
+    orders:
+      | {
+          order_number: number;
+          delivery_type: string;
+          customer_name: string | null;
+          table_id: string | null;
+          tables: { label: string } | { label: string }[] | null;
+        }
+      | {
+          order_number: number;
+          delivery_type: string;
+          customer_name: string | null;
+          table_id: string | null;
+          tables: { label: string } | { label: string }[] | null;
+        }[]
+      | null;
   };
 
   const { data } = await query;
   const rows = (data ?? []) as unknown as Row[];
 
   const mozoIds = Array.from(
-    new Set(rows.map((r) => r.attributed_mozo_id).filter((x): x is string => !!x)),
+    new Set(
+      rows.map((r) => r.attributed_mozo_id).filter((x): x is string => !!x),
+    ),
   );
   const mozoNameById = new Map<string, string>();
   if (mozoIds.length > 0) {
@@ -264,7 +269,10 @@ export async function getPaymentsPeriodoActual(
       .select("user_id, full_name")
       .eq("business_id", businessId)
       .in("user_id", mozoIds);
-    for (const m of (bu ?? []) as { user_id: string; full_name: string | null }[]) {
+    for (const m of (bu ?? []) as {
+      user_id: string;
+      full_name: string | null;
+    }[]) {
       if (m.full_name) mozoNameById.set(m.user_id, m.full_name);
     }
   }
@@ -272,7 +280,9 @@ export async function getPaymentsPeriodoActual(
   // spec 147 — comprobantes de las órdenes del período, en una sola query.
   // "Fallido" es la orden que tiene una factura `failed` y **ninguna viva**:
   // si el reintento salió con CAE, el cobro ya no tiene nada raro que mostrar.
-  const orderIds = Array.from(new Set(rows.map((r) => r.order_id).filter(Boolean)));
+  const orderIds = Array.from(
+    new Set(rows.map((r) => r.order_id).filter(Boolean)),
+  );
   const conFallo = new Set<string>();
   if (orderIds.length > 0) {
     const { data: invRows } = await service
@@ -297,7 +307,9 @@ export async function getPaymentsPeriodoActual(
   return rows.map((r) => {
     const ord = Array.isArray(r.orders) ? r.orders[0] : r.orders;
     const tbl = ord?.tables
-      ? Array.isArray(ord.tables) ? ord.tables[0] : ord.tables
+      ? Array.isArray(ord.tables)
+        ? ord.tables[0]
+        : ord.tables
       : null;
     return {
       id: r.id,
@@ -311,7 +323,7 @@ export async function getPaymentsPeriodoActual(
       table_label: tbl?.label ?? null,
       customer_name: ord?.customer_name ?? null,
       attributed_mozo_name: r.attributed_mozo_id
-        ? mozoNameById.get(r.attributed_mozo_id) ?? null
+        ? (mozoNameById.get(r.attributed_mozo_id) ?? null)
         : null,
       comprobante_fallido: conFallo.has(r.order_id),
     };
@@ -330,10 +342,12 @@ export async function getCajaLiveStats(
     .eq("id", cajaId)
     .maybeSingle();
   if (!cajaRow) return null;
-  if ((cajaRow as { business_id: string }).business_id !== businessId) return null;
+  if ((cajaRow as { business_id: string }).business_id !== businessId)
+    return null;
 
   const ultimoCorte = await getUltimoCorte(cajaId, businessId);
-  const periodoDesdeFecha = ultimoCorte?.created_at ?? (cajaRow as { created_at: string }).created_at;
+  const periodoDesdeFecha =
+    ultimoCorte?.created_at ?? (cajaRow as { created_at: string }).created_at;
 
   return getCajaStatsEnVentana(cajaId, {
     desde: periodoDesdeFecha,
@@ -400,10 +414,7 @@ async function getCajaStatsEnVentana(
     method: PaymentMethod;
     amount_cents: number;
     tip_cents: number;
-    orders:
-      | { delivery_type: string }
-      | { delivery_type: string }[]
-      | null;
+    orders: { delivery_type: string } | { delivery_type: string }[] | null;
   }>;
   const payments = paymentRows.map((r) => {
     const ord = Array.isArray(r.orders) ? r.orders[0] : r.orders;
@@ -433,8 +444,12 @@ async function getCajaStatsEnVentana(
     del_turno: movimientos,
   } = separarRetiroDelCierre(arrastreBrutoCents, movimientosDelPeriodo);
 
-  const ventas_por_metodo: Record<PaymentMethod, number> = { ...EMPTY_BY_METHOD };
-  const cobros_por_metodo: Record<PaymentMethod, number> = { ...EMPTY_BY_METHOD };
+  const ventas_por_metodo: Record<PaymentMethod, number> = {
+    ...EMPTY_BY_METHOD,
+  };
+  const cobros_por_metodo: Record<PaymentMethod, number> = {
+    ...EMPTY_BY_METHOD,
+  };
   const cobros_por_origen: Record<VentaOrigen, number> = {
     salon: 0,
     delivery: 0,
@@ -442,6 +457,8 @@ async function getCajaStatsEnVentana(
     otro: 0,
   };
   let total_ventas_cents = 0;
+  /** spec 141 · D3 — fiado del período: es venta, no es plata cobrada. */
+  let total_fiado_cents = 0;
   let total_propinas_cents = 0;
   for (const p of payments) {
     cobros_por_metodo[p.method] = (cobros_por_metodo[p.method] ?? 0) + 1;
@@ -453,7 +470,19 @@ async function getCajaStatsEnVentana(
     // «Ventas» y otra en «Propinas», como si fueran conceptos independientes.
     const venta = p.amount_cents - p.tip_cents;
     ventas_por_metodo[p.method] = (ventas_por_metodo[p.method] ?? 0) + venta;
-    total_ventas_cents += venta;
+    // spec 141 · D3 — el fiado es VENTA pero NO es plata cobrada, y este total se
+    // muestra en el panel del arqueo como «Cobrado». Si entrara acá, el encargado
+    // leería «Cobrado $180.000» con $150.000 en el cajón y cerraría el turno con
+    // una diferencia que nadie puede explicar: el mismo bug que la propina tuvo
+    // hasta la spec 098, dos renglones más arriba. Va aparte, en `total_fiado`.
+    //
+    // El arqueo (`calculateExpectedCash`) no necesita esta guarda: ya suma sólo
+    // `cash`. El que sumaba todo era este.
+    if (p.method === "cuenta_corriente") {
+      total_fiado_cents += venta;
+    } else {
+      total_ventas_cents += venta;
+    }
     total_propinas_cents += p.tip_cents;
   }
 
@@ -484,6 +513,7 @@ async function getCajaStatsEnVentana(
   return {
     caja_id: cajaId,
     total_ventas_cents,
+    total_fiado_cents,
     total_propinas_cents,
     ventas_por_metodo,
     ventas_por_origen: agruparVentasPorOrigen(payments),
@@ -503,7 +533,9 @@ export async function getPaymentMethodConfigs(
   const service = db();
   const { data } = await service
     .from("payment_method_configs")
-    .select("id, business_id, method, adjustment_percent, label, is_active, sort_order")
+    .select(
+      "id, business_id, method, adjustment_percent, label, is_active, sort_order",
+    )
     .eq("business_id", businessId)
     .eq("is_active", true)
     .order("sort_order", { ascending: true });
@@ -519,7 +551,9 @@ export async function getAllPaymentMethodConfigs(
   const service = db();
   const { data } = await service
     .from("payment_method_configs")
-    .select("id, business_id, method, adjustment_percent, label, is_active, sort_order")
+    .select(
+      "id, business_id, method, adjustment_percent, label, is_active, sort_order",
+    )
     .eq("business_id", businessId)
     .order("sort_order", { ascending: true });
   return ((data ?? []) as unknown as PaymentMethodConfig[]).map((r) => ({
@@ -594,7 +628,11 @@ export async function getCortesDelRango(
 
   const { data } = await query;
   const rows = (data ?? []) as unknown as Array<
-    CajaCorte & { cajas: { name: string; created_at: string } | { name: string; created_at: string }[] }
+    CajaCorte & {
+      cajas:
+        | { name: string; created_at: string }
+        | { name: string; created_at: string }[];
+    }
   >;
   if (rows.length === 0) return [];
 
@@ -868,7 +906,9 @@ export async function getRendicionesPendientesTodosLosMozos(
 export async function getRendicionesHistorial(
   businessId: string,
   limit = 20,
-): Promise<(MozoRendicion & { mozo_name: string; registered_by_name: string | null })[]> {
+): Promise<
+  (MozoRendicion & { mozo_name: string; registered_by_name: string | null })[]
+> {
   const service = db();
   const { data } = await service
     .from("mozo_rendiciones")
@@ -881,7 +921,10 @@ export async function getRendicionesHistorial(
 
   const rows = data as MozoRendicion[];
   const userIds = Array.from(
-    new Set([...rows.map((r) => r.mozo_id), ...rows.map((r) => r.registered_by)]),
+    new Set([
+      ...rows.map((r) => r.mozo_id),
+      ...rows.map((r) => r.registered_by),
+    ]),
   );
   const { data: users } = await service
     .from("business_users")
@@ -906,7 +949,9 @@ export async function getRendicionesHistorial(
 
 export async function getCajaUserAssignments(
   businessId: string,
-): Promise<(CajaUserAssignment & { user_name: string | null; caja_name: string })[]> {
+): Promise<
+  (CajaUserAssignment & { user_name: string | null; caja_name: string })[]
+> {
   const service = db();
   const { data } = await service
     .from("caja_user_assignments")
@@ -962,7 +1007,8 @@ function descripcionDeOrden(o: {
   order_number: number;
   table_label: string | null;
 }): string {
-  if (o.delivery_type === "dine_in" && o.table_label) return `Mesa ${o.table_label}`;
+  if (o.delivery_type === "dine_in" && o.table_label)
+    return `Mesa ${o.table_label}`;
   const nombre = o.customer_name?.trim();
   if (nombre) return nombre;
   return o.order_number > 0 ? `#${o.order_number}` : "Orden";
@@ -979,7 +1025,11 @@ function descripcionDeOrden(o: {
 export async function getLibroDeMovimientos(
   businessId: string,
   filtros: LibroFiltros,
-): Promise<{ entries: LibroEntry[]; totales: LibroTotales; truncado: boolean }> {
+): Promise<{
+  entries: LibroEntry[];
+  totales: LibroTotales;
+  truncado: boolean;
+}> {
   const service = db();
   const cajas = await getCajasConEstado(businessId);
   const cajaById = new Map(cajas.map((c) => [c.id, c]));
@@ -1000,7 +1050,8 @@ export async function getLibroDeMovimientos(
     .limit(LIBRO_MAX_FILAS);
   if (filtros.cajaId) pagosQuery = pagosQuery.eq("caja_id", filtros.cajaId);
   if (filtros.method) pagosQuery = pagosQuery.eq("method", filtros.method);
-  if (filtros.mozoId) pagosQuery = pagosQuery.eq("attributed_mozo_id", filtros.mozoId);
+  if (filtros.mozoId)
+    pagosQuery = pagosQuery.eq("attributed_mozo_id", filtros.mozoId);
 
   let movsQuery = service
     .from("caja_movimientos")
@@ -1071,48 +1122,57 @@ export async function getLibroDeMovimientos(
 
   // Datos de apoyo: nombres, correcciones previas, facturas y rendiciones.
   const mozoIds = Array.from(
-    new Set(pagos.map((p) => p.attributed_mozo_id).filter((x): x is string => !!x)),
+    new Set(
+      pagos.map((p) => p.attributed_mozo_id).filter((x): x is string => !!x),
+    ),
   );
   const orderIds = Array.from(new Set(pagos.map((p) => p.order_id)));
   const entityIds = [...pagos.map((p) => p.id), ...movs.map((m) => m.id)];
 
-  const [nombresRes, auditRes, facturasRes, rendicionesRes] = await Promise.all([
-    mozoIds.length > 0
-      ? service
-          .from("business_users")
-          .select("user_id, full_name")
-          .eq("business_id", businessId)
-          .in("user_id", mozoIds)
-      : Promise.resolve({ data: [] }),
-    entityIds.length > 0
-      ? service
-          .from("caja_audit_log")
-          .select("entity_id")
-          .eq("business_id", businessId)
-          .in("entity_id", entityIds)
-      : Promise.resolve({ data: [] }),
-    orderIds.length > 0
-      ? service
-          .from("invoices")
-          .select("id, order_id, tipo_comprobante, punto_venta, numero")
-          .eq("business_id", businessId)
-          .eq("status", "authorized")
-          .in("order_id", orderIds)
-      : Promise.resolve({ data: [] }),
-    service
-      .from("mozo_rendiciones")
-      .select("mozo_id, created_at")
-      .eq("business_id", businessId)
-      .gte("created_at", filtros.from),
-  ]);
+  const [nombresRes, auditRes, facturasRes, rendicionesRes] = await Promise.all(
+    [
+      mozoIds.length > 0
+        ? service
+            .from("business_users")
+            .select("user_id, full_name")
+            .eq("business_id", businessId)
+            .in("user_id", mozoIds)
+        : Promise.resolve({ data: [] }),
+      entityIds.length > 0
+        ? service
+            .from("caja_audit_log")
+            .select("entity_id")
+            .eq("business_id", businessId)
+            .in("entity_id", entityIds)
+        : Promise.resolve({ data: [] }),
+      orderIds.length > 0
+        ? service
+            .from("invoices")
+            .select("id, order_id, tipo_comprobante, punto_venta, numero")
+            .eq("business_id", businessId)
+            .eq("status", "authorized")
+            .in("order_id", orderIds)
+        : Promise.resolve({ data: [] }),
+      service
+        .from("mozo_rendiciones")
+        .select("mozo_id, created_at")
+        .eq("business_id", businessId)
+        .gte("created_at", filtros.from),
+    ],
+  );
 
   const nombreById = new Map(
-    ((nombresRes.data ?? []) as Array<{ user_id: string; full_name: string | null }>).map(
-      (u) => [u.user_id, u.full_name],
-    ),
+    (
+      (nombresRes.data ?? []) as Array<{
+        user_id: string;
+        full_name: string | null;
+      }>
+    ).map((u) => [u.user_id, u.full_name]),
   );
   const corregidos = new Set(
-    ((auditRes.data ?? []) as Array<{ entity_id: string }>).map((r) => r.entity_id),
+    ((auditRes.data ?? []) as Array<{ entity_id: string }>).map(
+      (r) => r.entity_id,
+    ),
   );
   // El comprobante NO limita la corrección del cobro (se emite sobre la cuenta,
   // no sobre el pago): viaja para poder saltar a él desde la línea cuando lo
@@ -1145,17 +1205,26 @@ export async function getLibroDeMovimientos(
 
   for (const p of pagos) {
     const ord = Array.isArray(p.orders) ? p.orders[0] : p.orders;
-    const tbl = ord?.tables ? (Array.isArray(ord.tables) ? ord.tables[0] : ord.tables) : null;
+    const tbl = ord?.tables
+      ? Array.isArray(ord.tables)
+        ? ord.tables[0]
+        : ord.tables
+      : null;
     const caja = cajaById.get(p.caja_id);
     const anulado = p.payment_status === "refunded";
-    const esMp = p.mp_payment_id !== null || p.method === "mp_link" || p.method === "mp_qr";
+    const esMp =
+      p.mp_payment_id !== null ||
+      p.method === "mp_link" ||
+      p.method === "mp_qr";
     const arqueado = caja
-      ? new Date(p.created_at).getTime() <= new Date(caja.periodo_desde).getTime()
+      ? new Date(p.created_at).getTime() <=
+        new Date(caja.periodo_desde).getTime()
       : false;
 
     let bloqueo: string | null = null;
     if (anulado) bloqueo = "El cobro está anulado.";
-    else if (esMp) bloqueo = "Es un cobro de Mercado Pago: la acreditación la confirmó MP.";
+    else if (esMp)
+      bloqueo = "Es un cobro de Mercado Pago: la acreditación la confirmó MP.";
     else if (arqueado) bloqueo = "Ya entró en un arqueo cerrado.";
 
     const advertencias: string[] = [];
@@ -1167,9 +1236,11 @@ export async function getLibroDeMovimientos(
       );
       if (yaRindio) {
         const nombre = p.attributed_mozo_id
-          ? nombreById.get(p.attributed_mozo_id) ?? "ese mozo"
+          ? (nombreById.get(p.attributed_mozo_id) ?? "ese mozo")
           : "ese mozo";
-        advertencias.push(`${nombre} ya rindió este cobro: no se puede cambiar el mozo.`);
+        advertencias.push(
+          `${nombre} ya rindió este cobro: no se puede cambiar el mozo.`,
+        );
       }
     }
 
@@ -1184,7 +1255,7 @@ export async function getLibroDeMovimientos(
       method: p.method,
       attributed_mozo_id: p.attributed_mozo_id,
       attributed_mozo_name: p.attributed_mozo_id
-        ? nombreById.get(p.attributed_mozo_id) ?? null
+        ? (nombreById.get(p.attributed_mozo_id) ?? null)
         : null,
       descripcion: ord
         ? descripcionDeOrden({
@@ -1208,7 +1279,8 @@ export async function getLibroDeMovimientos(
   for (const m of movs) {
     const caja = cajaById.get(m.caja_id);
     const arqueado = caja
-      ? new Date(m.created_at).getTime() <= new Date(caja.periodo_desde).getTime()
+      ? new Date(m.created_at).getTime() <=
+        new Date(caja.periodo_desde).getTime()
       : false;
     let bloqueo: string | null = null;
     if (m.cancelled_at) bloqueo = "El movimiento está anulado.";
@@ -1225,7 +1297,8 @@ export async function getLibroDeMovimientos(
       method: null,
       attributed_mozo_id: null,
       attributed_mozo_name: null,
-      descripcion: m.reason?.trim() || (m.kind === "sangria" ? "Sangría" : "Ingreso"),
+      descripcion:
+        m.reason?.trim() || (m.kind === "sangria" ? "Sangría" : "Ingreso"),
       order_id: null,
       order_number: null,
       anulado: m.cancelled_at !== null,
@@ -1248,7 +1321,8 @@ export async function getLibroDeMovimientos(
     : entries;
 
   filtradas.sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    (a, b) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   );
 
   const totales: LibroTotales = {
@@ -1268,7 +1342,8 @@ export async function getLibroDeMovimientos(
       totales.propinas_cents += e.tip_cents;
       totales.cobros_count += 1;
       if (e.method) {
-        totales.por_metodo[e.method] = (totales.por_metodo[e.method] ?? 0) + e.amount_cents;
+        totales.por_metodo[e.method] =
+          (totales.por_metodo[e.method] ?? 0) + e.amount_cents;
       }
     } else if (e.tipo === "ingreso") {
       totales.ingresos_cents += e.amount_cents;
@@ -1319,10 +1394,9 @@ export async function getCorreccionesDeLinea(
     .eq("business_id", businessId)
     .in("user_id", userIds);
   const nombreById = new Map(
-    ((users ?? []) as Array<{ user_id: string; full_name: string | null }>).map((u) => [
-      u.user_id,
-      u.full_name,
-    ]),
+    ((users ?? []) as Array<{ user_id: string; full_name: string | null }>).map(
+      (u) => [u.user_id, u.full_name],
+    ),
   );
 
   return rows.map((r) => ({
@@ -1332,7 +1406,7 @@ export async function getCorreccionesDeLinea(
     to_value: r.to_value,
     reason: r.reason,
     created_at: r.created_at,
-    by_name: r.by_user_id ? nombreById.get(r.by_user_id) ?? null : null,
+    by_name: r.by_user_id ? (nombreById.get(r.by_user_id) ?? null) : null,
   }));
 }
 
@@ -1362,12 +1436,22 @@ export async function resolverNombresDeCorreccion(
       .select("user_id, full_name")
       .eq("business_id", businessId)
       .in("user_id", lista),
-    service.from("cajas").select("id, name").eq("business_id", businessId).in("id", lista),
+    service
+      .from("cajas")
+      .select("id, name")
+      .eq("business_id", businessId)
+      .in("id", lista),
   ]);
-  for (const u of (usersRes.data ?? []) as Array<{ user_id: string; full_name: string | null }>) {
+  for (const u of (usersRes.data ?? []) as Array<{
+    user_id: string;
+    full_name: string | null;
+  }>) {
     if (u.full_name) out.set(u.user_id, u.full_name);
   }
-  for (const c of (cajasRes.data ?? []) as Array<{ id: string; name: string }>) {
+  for (const c of (cajasRes.data ?? []) as Array<{
+    id: string;
+    name: string;
+  }>) {
     out.set(c.id, c.name);
   }
   return out;
@@ -1479,13 +1563,15 @@ export async function getPedidosAbiertosSinMesa(
     .is("table_id", null)
     .order("order_number", { ascending: true });
 
-  return ((data ?? []) as Array<{
-    id: string;
-    order_number: number | null;
-    total_cents: number;
-    customer_name: string | null;
-    delivery_type: string;
-  }>).map((r) => {
+  return (
+    (data ?? []) as Array<{
+      id: string;
+      order_number: number | null;
+      total_cents: number;
+      customer_name: string | null;
+      delivery_type: string;
+    }>
+  ).map((r) => {
     const origen = origenDeDeliveryType(r.delivery_type);
     return {
       order_id: r.id,
@@ -1645,7 +1731,8 @@ async function contarSalonPorLiberar(
     mozo_id: string | null;
   }>;
   return {
-    mesas_a_liberar: rows.filter((t) => t.operational_status !== "libre").length,
+    mesas_a_liberar: rows.filter((t) => t.operational_status !== "libre")
+      .length,
     mozos_asignados: rows.filter((t) => t.mozo_id !== null).length,
   };
 }

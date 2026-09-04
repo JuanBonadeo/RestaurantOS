@@ -58,6 +58,7 @@ const METHOD_LABEL: Record<PaymentMethod, string> = {
   card_manual: "Tarjeta",
   transfer: "Transferencia",
   other: "Otro",
+  cuenta_corriente: "Cuenta corriente",
 };
 
 const METODOS: { value: PaymentMethod; label: string }[] = [

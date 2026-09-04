@@ -49,13 +49,15 @@ const EMPTY_METODO = {
   mp_qr: 0,
   transfer: 0,
   other: 0,
+  cuenta_corriente: 0,
 };
 
 function data(over: Partial<CierreCajaData> = {}): CierreCajaData {
   return {
     stats: {
       caja_id: "c1",
-      total_ventas_cents: 500_000,
+      total_fiado_cents: 0,
+    total_ventas_cents: 500_000,
       total_propinas_cents: 12_000,
       ventas_por_metodo: { ...EMPTY_METODO, cash: 312_400, mp_qr: 187_600 },
       cobros_por_metodo: { ...EMPTY_METODO, cash: 4, mp_qr: 2 },

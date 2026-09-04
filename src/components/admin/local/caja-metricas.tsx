@@ -29,6 +29,7 @@ export const METHOD_LABEL: Record<PaymentMethod, string> = {
   card_manual: "Tarjeta",
   transfer: "Transferencia",
   other: "Otro",
+  cuenta_corriente: "Cuenta corriente",
 };
 
 /**
@@ -46,6 +47,7 @@ export const METHOD_COLOR: Record<PaymentMethod, string> = {
   card_manual: "#A1A1AA",
   transfer: "#C4C4C8",
   other: "#D4D4D8",
+  cuenta_corriente: "Cuenta corriente",
 };
 
 export function methodIcon(method: PaymentMethod) {
