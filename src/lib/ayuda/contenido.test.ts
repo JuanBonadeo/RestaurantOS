@@ -27,10 +27,11 @@ const RESERVAS = temaPorSlug("reservas")!;
 // puede pudrir sin que nadie se entere.
 
 describe("contenido de la guía · estructura", () => {
-  it("los diecinueve temas, en orden y agrupados", () => {
+  it("los veinte temas, en orden y agrupados", () => {
     expect(TEMAS.map((t) => t.slug)).toEqual([
-      // Operación — las siete pestañas del turno
-      "caja", "mesas", "cobrar", "comandas", "pedidos", "reservas", "rendicion", "fichaje",
+      // Operación — las ocho pestañas del turno
+      "caja", "mesas", "cobrar", "comandas", "pedidos", "reservas",
+      "cuentas-corrientes", "rendicion", "fichaje",
       // Catálogo — lo que se vende y lo que hay
       "carta", "menu-del-dia", "stock", "costeo",
       // Lo demás del panel
@@ -60,6 +61,41 @@ describe("contenido de la guía · estructura", () => {
     const ids = new Set(GRUPOS.map((g) => g.id));
     for (const tema of TEMAS) {
       expect(ids, `${tema.slug} tiene un grupo que no existe`).toContain(tema.grupo);
+    }
+  });
+
+  /**
+   * El «?» de cada pestaña de Operación linkea a `/admin/ayuda/<slug>` con el
+   * valor que `TEMA_POR_TAB` tiene para esa tab, y la página hace `notFound()`
+   * con un slug que no existe. `Record<Tab, string>` obliga a poner una entrada
+   * por tab, pero **no** obliga a que apunte a un tema escrito: la spec 141 sumó
+   * «Cuentas corrientes» al mapa sin el tema, y el «?» de esa tab fue un 404 en
+   * producción hasta la issue #236.
+   *
+   * Se lee del fuente en vez de importar el módulo a propósito: `local-shell`
+   * es un componente cliente enorme y traerlo entero a un test de contenido
+   * costaría más que el chequeo.
+   */
+  it("el «?» de cada pestaña apunta a un tema que existe", () => {
+    const fuente = readFileSync(
+      join(process.cwd(), "src/components/admin/local/local-shell.tsx"),
+      "utf8",
+    );
+    const bloque = fuente.match(
+      /const TEMA_POR_TAB: Record<Tab, string> = \{([^}]*)\}/,
+    );
+    expect(bloque, "no se encontró TEMA_POR_TAB en local-shell.tsx").not.toBeNull();
+
+    const slugs = [...bloque![1].matchAll(/^\s*(\w+):\s*"([^"]+)"/gm)].map(
+      ([, tab, slug]) => ({ tab, slug }),
+    );
+    expect(slugs.length, "TEMA_POR_TAB quedó vacío o cambió de forma").toBeGreaterThan(0);
+
+    for (const { tab, slug } of slugs) {
+      expect(
+        temaPorSlug(slug),
+        `la tab «${tab}» manda a «${slug}», que no es un tema de la guía`,
+      ).toBeDefined();
     }
   });
 

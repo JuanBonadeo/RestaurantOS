@@ -53,7 +53,7 @@ async function cargarMovimientos(businessId: string) {
     service
       .from("payments")
       .select(
-        "id, amount_cents, created_at, cancelled_at, credit_customer_id, orders(order_number)",
+        "id, amount_cents, created_at, refunded_at, credit_customer_id, orders(order_number)",
       )
       .eq("business_id", businessId)
       .eq("method", "cuenta_corriente")
@@ -67,11 +67,16 @@ async function cargarMovimientos(businessId: string) {
   const cargosPorCliente = new Map<string, CargoCuentaCorriente[]>();
   // PostgREST tipa el embed como array aunque la relación sea a-uno; el cast va
   // por `unknown` porque los dos tipos no se solapan lo suficiente para TS.
+  if (cargosRes.error) throw cargosRes.error;
+  if (cobranzasRes.error) throw cobranzasRes.error;
+
   for (const row of (cargosRes.data ?? []) as unknown as Array<{
     id: string;
     amount_cents: number;
     created_at: string;
-    cancelled_at: string | null;
+    /** En `payments` la anulación es `refunded_at` (spec 100), no
+     *  `cancelled_at` — ésa es la columna de las cobranzas. */
+    refunded_at: string | null;
     credit_customer_id: string;
     orders: { order_number: number } | null;
   }>) {
@@ -80,7 +85,7 @@ async function cargarMovimientos(businessId: string) {
       id: row.id,
       amount_cents: row.amount_cents,
       created_at: row.created_at,
-      cancelled_at: row.cancelled_at,
+      cancelled_at: row.refunded_at,
       order_number: row.orders?.order_number ?? null,
     });
     cargosPorCliente.set(row.credit_customer_id, lista);

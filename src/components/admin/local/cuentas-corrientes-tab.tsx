@@ -60,17 +60,21 @@ export function CuentasCorrientesTab({ slug, data, puedeCobrar }: Props) {
             <h3 className="text-xl font-semibold tracking-tight text-zinc-900">
               Nadie debe nada
             </h3>
+            {/* El texto decía «habilitale la cuenta corriente en su ficha»,
+                que es el viaje que la D2 revisada sacó: fiarle a alguien le
+                abre la cuenta, desde el cobro y sin salir de ahí. Mandar al
+                encargado a Clientes primero es exactamente lo que hacía que en
+                hora pico el fiado quedara sin registrar. */}
             <p className="mt-1 text-sm text-zinc-600">
-              Acá aparece quién se llevó algo sin pagar. Para poder fiarle a
-              alguien, habilitale la cuenta corriente en su ficha —
-              {data.habilitados > 0 ? (
+              Acá aparece quién se llevó algo sin pagar. Se fía desde el cobro,
+              eligiendo «Cuenta corriente»: no hace falta habilitar a nadie
+              antes.
+              {data.habilitados > 0 && (
                 <>
                   {" "}
-                  ya hay <strong>{data.habilitados}</strong> habilitado
-                  {data.habilitados === 1 ? "" : "s"}.
+                  Ya hay <strong>{data.habilitados}</strong> cliente
+                  {data.habilitados === 1 ? "" : "s"} con cuenta.
                 </>
-              ) : (
-                " todavía no hay ninguno."
               )}
             </p>
           </div>

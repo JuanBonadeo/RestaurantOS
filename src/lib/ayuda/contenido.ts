@@ -1,5 +1,6 @@
 import {
   Wallet,
+  BookUser,
   LayoutGrid,
   Receipt,
   ChefHat,
@@ -142,7 +143,7 @@ export const GRUPOS: { id: Grupo; titulo: string; bajada: string }[] = [
   {
     id: "operacion",
     titulo: "Operación",
-    bajada: "El turno completo: las siete pestañas de la pantalla donde pasás el día.",
+    bajada: "El turno completo: las ocho pestañas de la pantalla donde pasás el día.",
   },
   {
     id: "catalogo",
@@ -248,7 +249,11 @@ export const TEMAS: Tema[] = [
       {
         titulo: "Elegí tu caja y mirá los dos números",
         texto:
-          'Arriba están las cajas del local; tocá la que tenés adelante y el sistema se la acuerda. «En la caja deberías tener» es la plata que tendría que haber en el cajón ahora. «Cobrado en el período» es la venta del turno con todos los métodos juntos: es otra cosa y casi nunca coincide.',
+          'Arriba están las cajas del local; tocá la que tenés adelante y el sistema se la acuerda. «En la caja deberías tener» es la plata que tendría que haber en el cajón ahora. «Cobrado en el período» es la venta del turno con todos los métodos juntos: es otra cosa y casi nunca coincide. Lo fiado no está en ninguno de los dos — es venta, pero no entró al cajón.',
+        verTambien: {
+          tema: "cuentas-corrientes",
+          texto: "Por qué el fiado no cuenta acá",
+        },
         imagen: "/ayuda/op-caja.png",
         alt: "La pantalla de Caja, con «En la caja deberías tener» a la izquierda y «Cobrado en el período» a la derecha.",
         // % del ancho y del alto de la captura (1160 × 860): van sobre el
@@ -257,6 +262,11 @@ export const TEMAS: Tema[] = [
           { n: 1, x: 9.5, y: 27.5 },
           { n: 2, x: 56, y: 27.5 },
         ],
+      },
+      {
+        titulo: "Esta pestaña es la caja de HOY. Lo demás está en «Caja»",
+        texto:
+          "La pestaña de Operación es la caja abierta: lo que está pasando ahora, para cobrar y para cerrar. Todo el resto —las cajas del local, los cierres viejos y el libro de movimientos— vive en «Caja», en el menú de la izquierda. Desde ahí, el botón «Ver ahora» de cualquier caja te trae de vuelta acá, parado en esa.",
       },
       {
         titulo: "Sacar y meter plata",
@@ -300,6 +310,16 @@ export const TEMAS: Tema[] = [
           tono: "peligro",
           texto:
             `Arriba de ${TOPE_DIFERENCIA_CAJA} de diferencia el sistema te frena: "La diferencia excede tu autorización. Pedile al admin que cierre la caja.". No cambies el conteo para que entre — convertís un faltante explicable en uno escondido.`,
+        },
+      },
+      {
+        titulo: "Un cierre se puede volver a mirar",
+        texto:
+          "El resumen que ves al cerrar no se pierde: queda guardado y se abre de nuevo desde «Caja» → «Cierres». Ahí está todo lo del turno —lo esperado, lo contado, la diferencia con su nota, cómo se contó, si se retiró la plata y las rendiciones que se tomaron—. Es dónde mirar al día siguiente cuando alguien pregunta cuánto faltó o si un mozo rindió.",
+        aviso: {
+          tono: "ojo",
+          texto:
+            "El arqueo —esperado, contado y diferencia— queda congelado, pero el resto se vuelve a calcular. Si después se corrige un cobro de ese turno, el resumen del cierre viejo cambia. Es a propósito: sirve para auditar, no como foto.",
         },
       },
       {
@@ -352,9 +372,19 @@ export const TEMAS: Tema[] = [
         verTambien: { tema: "reservas", texto: "Confirmar una reserva" },
       },
       {
-        titulo: "Mover: de mozo o de mesa",
+        titulo: "Ponerle el mozo a UNA mesa",
         texto:
-          '«Transferir mozo» pasa la mesa a otro. «Trasladar mesa» mueve el consumo a otra mesa, que tiene que estar libre — si no, "La mesa está ocupada. Cobrala o liberala antes de mover.". El modo «Distribuir mozos» reparte varias mesas de una antes del servicio.',
+          'El header de la mesa dice quién la atiende, y cuando no tiene a nadie dice «Sin mozo». Esa pastilla es el botón: la tocás y elegís. Si la mesa no tenía mozo, el modal dice «Asignar mozo» y lo pone en un paso; si ya tenía, dice «Transferir mozo» y le saca la mesa al anterior, con motivo. Se puede desde que la mesa está libre: no hace falta esperar a que tenga pedido.',
+        aviso: {
+          tono: "ojo",
+          texto:
+            "Para uno solo NO uses «Distribuir mozos» ni «Transferir»: la primera es para repartir el salón entero antes del servicio, y la segunda es para sacarle una mesa a alguien.",
+        },
+      },
+      {
+        titulo: "Mover: repartir el salón, o cambiar de mesa",
+        texto:
+          '«Distribuir mozos» reparte varias mesas de una antes del servicio: es el modo para armar las secciones, no para poner un mozo suelto. «Trasladar mesa» mueve el consumo a otra mesa, que tiene que estar libre — si no, "La mesa está ocupada. Cobrala o liberala antes de mover.".',
       },
       {
         titulo: "Anular una mesa",
@@ -376,26 +406,27 @@ export const TEMAS: Tema[] = [
     grupo: "operacion",
     claves: [
       `Tu tope de descuento es ${TOPE_DESCUENTO}. Partirlo en dos cobros no lo saltea.`,
-      "Si «Cobrar» se queda pensando, NO lo toques de nuevo: refrescá y mirá cómo quedó.",
       "Mirá en qué caja va a quedar el cobro antes de confirmar. Es el error más fácil de evitar.",
+      "Si la factura es A, pedí el CUIT ANTES de cobrar. Después ya no se cambia sin nota de crédito.",
     ],
     pasos: [
       {
         titulo: "Abrí el cobro y mirá la caja",
         texto:
-          "Desde la mesa, «Cobrar mesa» o «Pasar a cobro». A la izquierda, «Falta cobrar» con lo que queda; abajo, «Caja para registrar el cobro» — si estás en el bar, que diga la del bar, porque ahí es donde va a aparecer al cierre.",
+          "Desde la mesa, «Cobrar mesa» o «Pasar a cobro». A la izquierda, «Falta cobrar» con lo que queda; abajo, «Caja para registrar el cobro» — si estás en el bar, que diga la del bar, porque ahí es donde va a aparecer al cierre. Es la misma pantalla cobrando una mesa, un pedido de la web o una venta de mostrador: lo que aprendés en una sirve en las tres.",
         imagen: "/ayuda/op-cobrar.png",
-        alt: "La pantalla de cobro: falta cobrar, la caja donde se registra, y los métodos de pago numerados.",
+        alt: "La pantalla de cobro: falta cobrar, la caja donde se registra, el control de Factura A y los siete métodos de pago numerados.",
+        // % del ancho y del alto de la captura (1160 × 860).
         marcas: [
-          { n: 1, x: 15, y: 27 },
-          { n: 2, x: 16, y: 44 },
-          { n: 3, x: 84, y: 36 },
+          { n: 1, x: 13, y: 24.8 },
+          { n: 2, x: 19, y: 42.7 },
+          { n: 3, x: 87, y: 45 },
         ],
       },
       {
         titulo: "El método, y el recargo que trae",
         texto:
-          "Los métodos están numerados para elegirlos con el teclado: Efectivo, Tarjeta, Link de Mercado Pago, QR de Mercado Pago, Transferencia y Otro. Los que tienen recargo lo muestran ahí mismo y ya calculado — «Tarjeta +10% · $26.400» sobre una cuenta de $24.000. Decile al cliente el número final antes de confirmar, no después.",
+          "Los métodos están numerados para elegirlos con el teclado: Efectivo, Tarjeta, Link de Mercado Pago, QR de Mercado Pago, Transferencia, Otro y «Cuenta corriente», que es fiar. Los que tienen recargo lo muestran ahí mismo y ya calculado — «Tarjeta +10% · $26.400» sobre una cuenta de $24.000. Decile al cliente el número final antes de confirmar, no después.",
         aviso: {
           tono: "ojo",
           texto:
@@ -408,6 +439,34 @@ export const TEMAS: Tema[] = [
           "Por defecto se cobra «Mesa completa». Si se divide, aparecen las sub-cuentas: se cobra una por una y lo que queda se ve en «Falta cobrar».",
       },
       {
+        titulo: "Fiar es un método más",
+        texto:
+          "«Cuenta corriente» cierra la cuenta igual que cualquier otro método —la mesa se libera y la factura sale— pero no entra plata: queda como saldo del cliente. Te pide elegir a quién y te muestra lo que ya debe antes de confirmar.",
+        verTambien: {
+          tema: "cuentas-corrientes",
+          texto: "Cómo se fía y cómo se cobra el saldo",
+        },
+      },
+      {
+        titulo: "La factura se elige ANTES de cobrar",
+        texto:
+          'Arriba del cobro está «Factura A (empresa con CUIT)». Sin tocarlo dice "Por defecto: Factura B (consumidor final)." y no tenés que hacer nada — es el 95% de las veces. Tildado, se despliegan los datos del receptor. Se elige acá y no después porque el comprobante sale junto con el cobro: pedir la A cuando la mesa ya se cobró llega tarde.',
+        aviso: {
+          tono: "peligro",
+          texto:
+            'Sin el CUIT el sistema te frena antes de cobrar: "Para la Factura A falta el CUIT del receptor (11 dígitos).". Está bien que frene — cobrada la mesa, cambiarle la letra a la factura obliga a anularla con nota de crédito.',
+        },
+      },
+      {
+        titulo: "La empresa se busca por nombre, no se tipea",
+        texto:
+          'En «Buscar receptor guardado» escribís la razón social o el CUIT —«Razón social o CUIT…»— y elegís de la lista: el CUIT, el nombre y la condición de IVA se completan solos. Están cargados los clientes que ya facturaban en el sistema viejo, así que al de siempre lo encontrás escribiendo tres letras. Si es uno nuevo, cargás el CUIT a mano una vez y queda guardado para la próxima.',
+        verTambien: {
+          tema: "facturacion",
+          texto: "La lista de entidades fiscales",
+        },
+      },
+      {
         titulo: "Propina y descuento",
         texto:
           `La propina se elige por porcentaje o monto, y «Sin propina» es una opción válida. En el descuento el sistema te dice «Tu rol permite hasta ${TOPE_DESCUENTO}»; si te pasás se pone en rojo con «Excede tu autorización · pedile al dueño» y no te deja cobrar. El descuento siempre pide motivo, con «Cortesía de la casa» entre las opciones.`,
@@ -415,7 +474,7 @@ export const TEMAS: Tema[] = [
       {
         titulo: "Cobrar",
         texto:
-          'Elegís método, confirmás, y el pago queda asentado en la caja. Cuando no falta nada dice «Mesa cobrada». Si el negocio factura, el comprobante sale desde ahí mismo.',
+          'Elegís método, confirmás, y el pago queda asentado en la caja. Cuando no falta nada dice «Mesa cobrada». Si el local tiene prendida la emisión automática, la Factura B a consumidor final sale sola al saldarse la cuenta, sin que nadie apriete nada; si no, se emite después desde el mismo cobro. Que salga sola es una configuración del dueño: si en tu local no sale, no está roto, está apagada — casi siempre porque el punto de venta todavía no está habilitado en ARCA. En los dos casos el cobro se cierra igual aunque ARCA no conteste: la plata no espera al papel.',
         aviso: {
           tono: "peligro",
           texto:
@@ -453,6 +512,12 @@ export const TEMAS: Tema[] = [
           { n: 2, x: 11, y: 31.5 },
           { n: 3, x: 20, y: 46 },
         ],
+      },
+      {
+        titulo: "Los platos de un menú del día vienen marcados",
+        texto:
+          "Cuando un plato sale de un menú del día, la comanda lo dice arriba del nombre —«MENÚ EJECUTIVO» y abajo la milanesa—, y las tarjetas de esta pantalla también. Importa cuando el mismo plato se sirve distinto según de dónde venga: sin la marca, la cocina lee un plato suelto. Si el menú se parte en dos sectores, los dos papeles la llevan, y en el «COMBINA CON» del otro sector el acompañamiento sale con el nombre del menú entre paréntesis.",
+        verTambien: { tema: "menu-del-dia", texto: "Armar un menú del día" },
       },
       {
         titulo: "La que no se imprimió",
@@ -531,6 +596,16 @@ export const TEMAS: Tema[] = [
         texto:
           'Tocando la tarjeta se abre el detalle: ahí se saca lo que no hay, se cambian cantidades y se deja «Nota para cocina (sale en la comanda)». Un pedido de la web nace impago; los que pagan al recibir dicen «Efectivo · A cobrar» y se cobran desde ahí. Cancelar pide un motivo con ejemplos como «Sin stock, zona fuera de cobertura».',
       },
+      {
+        titulo: "Lo que escribís para la cocina no lo lee el cliente",
+        texto:
+          "«Nota para cocina» sale en la comanda y sólo ahí: el control que se le manda con el pedido ya no las lleva, igual que la cuenta que se le da en la mesa. Escribilas como lo que son —notas internas— sin cuidar cómo suenan afuera. Lo que sí sigue saliendo es lo que escribió el cliente al pedir, del tipo «tocar timbre»: eso es de él.",
+        aviso: {
+          tono: "ojo",
+          texto:
+            "El control también se achicó: entra en menos papel, con las mismas líneas. Si te acordás de uno más largo, no falta nada — está más compacto.",
+        },
+      },
     ],
   },
   {
@@ -608,13 +683,100 @@ export const TEMAS: Tema[] = [
     },
   },
   {
+    slug: "cuentas-corrientes",
+    titulo: "Cuentas corrientes",
+    resumen: "Fiarle a alguien, ver quién debe y cobrarle el saldo cuando viene a pagar.",
+    icono: BookUser,
+    grupo: "operacion",
+    claves: [
+      "Fiar CIERRA la mesa: se salda, se libera y la factura sale igual. Lo que queda abierto es el saldo del cliente.",
+      "El fiado no es plata cobrada: no entra al arqueo. Al cerrar la caja no lo vas a tener en el cajón.",
+      "Cobrar un saldo en efectivo sí entra a la caja. Por transferencia o tarjeta, no.",
+    ],
+    pasos: [
+      {
+        titulo: "Quién debe cuánto",
+        texto:
+          "La pestaña lista a los que deben, del que más debe para abajo, con hace cuánto que no paga, y tiene buscador por nombre o teléfono. A la derecha, «Total fiado», cuántos clientes son, y el corte por antigüedad —«Al día», «+30 días», «+60 días»—: los +60 se marcan en rojo y son la lista de a quién llamar. Si no debe nadie, dice «Nadie debe nada».",
+        imagen: "/ayuda/op-cuentas-corrientes.png",
+        alt: "La pestaña Cuentas corrientes: la lista de deudores a la izquierda y el total fiado con el corte por antigüedad a la derecha.",
+        // % del ancho y del alto de la captura (1160 × 790).
+        marcas: [
+          { n: 1, x: 8, y: 22 },
+          { n: 2, x: 63, y: 23.5 },
+          { n: 3, x: 73, y: 27.5 },
+        ],
+      },
+      {
+        titulo: "Qué es fiar acá",
+        texto:
+          "Es una forma de cobro más, al lado de Efectivo y Tarjeta: «Cuenta corriente». Elegirla cierra la cuenta en el momento —la mesa se libera, la comanda ya salió, la factura se emite igual— y lo único que queda vivo es la deuda de ese cliente, que se paga otro día. No es una mesa que se deja abierta: una mesa abierta te frena el cierre de caja, y un fiado no.",
+        aviso: {
+          tono: "ojo",
+          texto:
+            "Es el reemplazo del plano «Pedidos de Mostrador», que ya no existe. Si estabas usando esas mesas para anotar a los que pagan después, esto es lo que va en su lugar.",
+        },
+        verTambien: { tema: "caja", texto: "Qué sí frena el cierre de caja" },
+      },
+      {
+        titulo: "Fiar, desde el cobro",
+        texto:
+          'En la pantalla de cobro elegís el método «Cuenta corriente» y abajo aparece «¿A quién se le fía?». Buscás por nombre o teléfono y elegís: la ficha te muestra el saldo que ya tiene —«ya debe $12.400»— antes de confirmar. Sin cliente elegido no se puede cobrar. Funciona igual en la mesa, en un pedido de la web y en la venta de mostrador.',
+        verTambien: { tema: "cobrar", texto: "La pantalla de cobro, paso a paso" },
+      },
+      {
+        titulo: "El que no está en la lista",
+        texto:
+          '«Abrir cuenta a alguien más» lo da de alta ahí mismo, con nombre y teléfono, sin salir del cobro. No hace falta habilitarlo antes desde su ficha: fiarle a alguien le abre la cuenta. Y si el teléfono ya estaba cargado, "Si el teléfono ya está cargado, se le abre la cuenta a ese mismo cliente." — no se duplica, se le abre la cuenta al que ya estaba.',
+      },
+      {
+        titulo: "Se fía entero, y no todos pueden",
+        texto:
+          "El fiado cubre todo lo que falta: no se fía la mitad y se cobra la otra mitad en efectivo, y no lleva propina. Si son dos cosas distintas, se divide la cuenta y se cobra cada parte por su lado. Fían el dueño, vos y la compu del salón —que es la que está en el mostrador cuando el socio pide que se lo anoten—. El mozo no: cobra, pero no decide a quién se le fía.",
+        verTambien: { tema: "cobrar", texto: "Dividir una cuenta" },
+      },
+      {
+        titulo: "Ojo con el número de la caja",
+        texto:
+          'Un fiado es venta, pero NO es plata que entró. Por eso queda afuera de «Cobrado en el período» y no toca «En la caja deberías tener»: si fiaste $30.000, esos $30.000 no están en el cajón y el arqueo no los espera. El cobro igual te pide elegir la caja —es un movimiento y tiene que quedar en algún lado—, pero al arqueo no suma.',
+        aviso: {
+          tono: "peligro",
+          texto:
+            "No cuentes el fiado como plata del turno. Es exactamente el error que hace cerrar una caja con una diferencia que después nadie puede explicar.",
+        },
+        verTambien: { tema: "caja", texto: "Los dos números de la caja" },
+      },
+      {
+        titulo: "Cuando vienen a pagar",
+        texto:
+          '«Registrar pago» abre el cobro del saldo: «Cuánto paga» viene con la deuda entera puesta y se puede bajar si paga una parte, «Cómo paga» (Efectivo, Transferencia, Tarjeta, Otro) y «Entra en», que es la caja. Al confirmar dice «Pago registrado. Cuenta saldada» si no quedó nada.',
+        aviso: {
+          tono: "ojo",
+          texto:
+            "Si paga en efectivo, la plata entra a la caja como un ingreso y el arqueo la espera. Si paga por transferencia o tarjeta, queda sólo en el libro del cliente: al cajón no entró nada.",
+        },
+      },
+      {
+        titulo: "Un saldo «a favor»",
+        texto:
+          "A veces un cliente aparece con saldo a favor y en verde. No es un error: pasa cuando se anula un consumo que ya estaba fiado, o cuando pagó de más. Es plata que el local le debe a él, y por eso se muestra en vez de esconderse.",
+      },
+      {
+        titulo: "Sacarle la cuenta a un moroso",
+        texto:
+          'Se hace desde la ficha del cliente, en «Cuenta corriente»: el interruptor de la derecha. Apagado dice "Ya no puede fiar. La deuda sigue registrada." — deja de poder llevarse cosas, pero lo que ya debe no se borra ni se esconde. En la misma ficha están el saldo, hace cuánto que no paga y el libro con todos los movimientos.',
+        verTambien: { tema: "clientes", texto: "La ficha del cliente" },
+      },
+    ],
+  },
+  {
     slug: "rendicion",
     titulo: "La rendición de los mozos",
     resumen: "La plata que los mozos tienen encima y cómo pasa al cajón antes de cerrar.",
     icono: HandCoins,
     grupo: "operacion",
     claves: [
-      "Rendir no cambia el total del turno: pasa la plata de la columna del mozo a la del cajón.",
+      "Acá se rinde SÓLO efectivo. Lo cobrado con tarjeta, QR o transferencia ya entró a la caja solo.",
       "Sin todas las rendiciones, la caja no cierra.",
       "El que no entrega queda registrado como deuda, a la vista en el cierre y avisada al dueño.",
     ],
@@ -622,18 +784,29 @@ export const TEMAS: Tema[] = [
       {
         titulo: "Quién debe cuánto",
         texto:
-          'La pantalla lista los mozos con pagos pendientes del turno y, en cada uno, «Efectivo que debería entregar» con el detalle por método. Si no hay nadie, dice "No hay mozos/encargados con pagos pendientes de rendir.".',
+          'La pantalla lista los mozos con pagos pendientes del turno y, en cada uno, «Efectivo a entregar» y cuántos cobros hizo. Es sólo el efectivo: lo que cobró con tarjeta, QR o transferencia no aparece acá, porque esa plata ya entró a la caja sola y el mozo no la tiene encima. Si no hay nadie, dice "No hay mozos/encargados con pagos pendientes de rendir.".',
+        aviso: {
+          tono: "ojo",
+          texto:
+            "Si querés ver todo lo que cobró un mozo, con tarjetas incluidas, eso está en la caja y en el resumen del cierre. Acá se le pide plata a una persona: sólo puede figurar lo que tiene en el bolsillo.",
+        },
         imagen: "/ayuda/op-rendicion.png",
-        alt: "La pestaña Rendición, con los mozos del turno y la tabla de últimas rendiciones.",
+        alt: "La pestaña Rendición, con una tarjeta por mozo mostrando el efectivo a entregar, y abajo la tabla de últimas rendiciones.",
+        // % del ancho y del alto de la captura (1160 × 860).
         marcas: [
-          { n: 1, x: 12, y: 20.5 },
-          { n: 2, x: 55, y: 33.5 },
+          { n: 1, x: 13.5, y: 28.4 },
+          { n: 2, x: 12.6, y: 50 },
         ],
       },
       {
         titulo: "Tomar la entrega",
         texto:
           "Escribís en «Efectivo que entrega» lo que te dio y confirmás. Si coincide, listo. Esa plata deja de estar a nombre del mozo y pasa al cajón.",
+      },
+      {
+        titulo: "El que cobró todo con tarjeta",
+        texto:
+          'Un mozo puede aparecer con $0 para entregar. Su rendición dice «No tiene efectivo para entregar» — "Cobró todo con tarjeta, QR o transferencia — esa plata ya entró a la caja. Sólo queda cerrarle el período del turno." — y el botón es «Cerrar período». No tenés que elegir entre «Rindió» y «No entregó»: no hay nada que entregar, y marcarlo como que no entregó le dejaría una deuda de $0 avisada al dueño.',
       },
       {
         titulo: "Las que ya se tomaron",
@@ -762,6 +935,22 @@ export const TEMAS: Tema[] = [
         titulo: "El precio",
         texto:
           'Es uno solo para todo el combo: "Precio único del combo. No se suman adicionales.". Aunque el cliente elija la guarnición más cara, paga lo mismo — eso es lo que lo hace un menú y no una lista de platos.',
+      },
+      {
+        titulo: "Lo que cada producto se trae puesto",
+        texto:
+          'Debajo de cada producto que elegís, el editor te lista los modificadores que ese producto ya tiene en la carta: "Al elegir esta opción, el asistente va a preguntar además:" y abajo los grupos, con si son obligatorios. Es lo que antes no se veía: elegías «Milanesa» sin manera de saber que arrastraba su propia «Guarnición».',
+        verTambien: { tema: "carta", texto: "Los modificadores de un producto" },
+      },
+      {
+        titulo: 'El aviso "se pregunta dos veces"',
+        texto:
+          'Si el menú ya pregunta algo con ese mismo nombre, el aviso se pone en ámbar: "El combo ya pregunta «Guarnición»; este producto la va a preguntar de nuevo. Se puede guardar igual: revisá si es lo que querés." Se puede guardar —a veces querés las dos— pero el cliente va a elegir guarnición dos veces, y eso se descubre en el salón, en hora pico.',
+        aviso: {
+          tono: "ojo",
+          texto:
+            "Un producto puesto como componente FIJO del menú no pregunta nada: sus modificadores se listan igual, aclarando que el asistente no los va a preguntar.",
+        },
       },
       {
         titulo: "Los días que corre",
@@ -935,13 +1124,29 @@ export const TEMAS: Tema[] = [
     claves: [
       "Una factura no se corrige: se anula con nota de crédito y se emite de nuevo.",
       "Un rechazo de datos de ARCA no se arregla reintentando. Un error de conexión sí.",
-      "El motivo de anulación es obligatorio y queda en el comprobante.",
+      "A quién se le factura se guarda una vez en «Entidades fiscales» y después se busca por nombre.",
     ],
     pasos: [
       {
         titulo: "Dónde aparecen",
         texto:
           'Los comprobantes se emiten desde el cobro y se ven acá — "Los comprobantes aparecen acá al facturar desde el cobro.". Se busca por número o CUIT. Si el negocio todavía no tiene los datos fiscales cargados vas a ver "AFIP no configurado", y eso lo resuelve el dueño.',
+        verTambien: { tema: "cobrar", texto: "Elegir la factura al cobrar" },
+      },
+      {
+        titulo: "«Entidades fiscales»: a quién se le factura",
+        texto:
+          "Es la libreta de los que reciben Factura A: razón social, CUIT y condición de IVA, guardados una sola vez. Se busca con «Buscar por razón social o CUIT…», se entra a cada uno para corregirle un dato y ver sus facturas, y los que ya facturaban en el sistema viejo están cargados. Sirve para eso: para no tipear once dígitos en el mostrador cada vez que viene la misma empresa.",
+        aviso: {
+          tono: "ojo",
+          texto:
+            "Un CUIT no se carga dos veces: si ya estaba, el sistema te avisa y deja la ficha como estaba en vez de pisarla con lo que acabás de escribir.",
+        },
+      },
+      {
+        titulo: "«Facturar un monto»: una factura sin pedido",
+        texto:
+          "Es para lo que se factura fuera del salón: un evento, un abono mensual, un acuerdo con una empresa. Le ponés «Concepto» —«Ej: Almuerzos médicos - agosto»— y el «Monto total (ARS)», y sale el comprobante. No es un pedido ni pasa por cocina: es sólo el papel.",
       },
       {
         titulo: "Cuando una falla",
@@ -970,12 +1175,22 @@ export const TEMAS: Tema[] = [
     claves: [
       "«Días desde el último» es el dato que dice a quién hay que llamar.",
       "Un cliente sin direcciones guardadas puede ser de retiro, no un error.",
+      "El interruptor de «Cuenta corriente» sirve para QUITARLE el permiso a un moroso: para dárselo alcanza con fiarle.",
     ],
     pasos: [
       {
         titulo: "La ficha",
         texto:
           "Cada cliente tiene su historial de pedidos, «Lo que más pide» y «Días desde el último». Con eso sabés qué ofrecerle antes de que pregunte y quién dejó de venir sin avisar.",
+      },
+      {
+        titulo: "Su cuenta corriente",
+        texto:
+          'El bloque «Cuenta corriente» —"Puede llevarse cosas y pagarlas después."— muestra cuánto «Debe», hace cuántos días que no paga, y el libro con todo: los consumos con «+» y las cobranzas con «−», y lo anulado tachado. El interruptor de la derecha es para SACARLE el permiso: apagado dice "Ya no puede fiar. La deuda sigue registrada." No hace falta prenderlo para fiarle a alguien — se le abre la cuenta al fiarle desde el cobro.',
+        verTambien: {
+          tema: "cuentas-corrientes",
+          texto: "Fiar y cobrar el saldo",
+        },
       },
       {
         titulo: "Escribirle",
@@ -1202,9 +1417,38 @@ export const TEMAS: Tema[] = [
           "No se puede cobrar porque el negocio no tiene ninguna caja creada. Es configuración del dueño y sin eso no hay cobro posible.",
       },
       {
-        titulo: '"Pago registrado. Faltaba el CUIT para la Factura A — emitila desde Facturación."',
+        titulo: '"Para la Factura A falta el CUIT del receptor (11 dígitos)."',
         texto:
-          "El cobro entró bien, pero la factura A no salió porque falta el CUIT del cliente. Pedile el CUIT y emitila desde la sección Facturación: el pago ya está, lo que falta es el papel.",
+          "Tildaste «Factura A» y no cargaste el CUIT. El sistema te frena ANTES de cobrar, a propósito: pedile el CUIT al cliente o buscalo en «Buscar receptor guardado», que si ya facturó alguna vez está ahí. Si preferís cobrar y facturar después, destildá la A — sale la B de siempre.",
+        verTambien: { tema: "cobrar", texto: "Elegir la factura antes de cobrar" },
+      },
+      {
+        titulo: '"Esta orden ya tiene la Factura B 0001-00000007 autorizada. Anulala (se emite la nota de crédito) antes de emitir otro tipo de comprobante."',
+        texto:
+          "Se cobró con Factura B y ahora se está pidiendo una A sobre la misma venta. Un comprobante autorizado no se cambia de letra: hay que anular el que salió —con su nota de crédito— y recién ahí emitir el otro. Por eso la letra se elige antes de cobrar y no después.",
+        aviso: {
+          tono: "peligro",
+          texto:
+            "Una nota de crédito es un comprobante fiscal de verdad, con número y CAE. No es un «deshacer»: preguntá si es Factura A antes de apretar cobrar.",
+        },
+        verTambien: { tema: "cobrar", texto: "La factura se elige antes de cobrar" },
+      },
+      {
+        titulo: '"Esta orden ya tiene una factura en proceso. Esperá a que ARCA la confirme — la vas a ver en Facturación."',
+        texto:
+          "La emisión salió y todavía no volvió. No es un error y no hay que hacer nada: esperá y fijate en Facturación. Insistir es lo que termina en dos comprobantes por la misma venta.",
+      },
+      {
+        titulo: '"No tenés permiso para fiar."',
+        texto:
+          "Le aparece al mozo. Fiar es del dueño, del encargado y de la compu del salón: el mozo cobra, pero no decide a quién se le anota. Si el cliente quiere que se lo pongan en la cuenta, que lo cobre uno de ellos.",
+        verTambien: { tema: "cuentas-corrientes", texto: "Cómo se fía" },
+      },
+      {
+        titulo: '"Elegí en qué caja entra el efectivo."',
+        texto:
+          "Estás registrando el pago de una cuenta corriente en efectivo y no dijiste a qué cajón entra. Elegí la caja que tenés adelante: esa plata es real y el arqueo la va a esperar ahí.",
+        verTambien: { tema: "cuentas-corrientes", texto: "Cobrar un saldo" },
       },
       {
         titulo: '"Agente de impresión sin conexión (sin señal)"',
