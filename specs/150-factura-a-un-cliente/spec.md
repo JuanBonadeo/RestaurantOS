@@ -276,6 +276,12 @@ afecta a golf-house**: `golf-jcr` tiene el flag en `false`. Es `demo` el que lo
 tiene prendido. Merece spec propia: hoy, en un negocio con auto-emisión, pedir
 una A obliga a anular la B con su nota de crédito.
 
+→ escrito como [spec 156](../156-la-factura-a-y-la-b-automatica/spec.md)
+([#233](https://github.com/gachetponzellini/RestaurantOS-app/issues/233)),
+2026-09-03, después de que le saliera a Juan cobrando. Ahí se corrige el planteo:
+cuando la A **se eligió antes de cobrar** no hay que anular nada — la B no tenía
+que salir.
+
 Por eso los escenarios 4 y 6 quedaron sin verificar de punta a punta en el
 navegador: hacerlo pedía apagar `afip_auto_emit` en `demo`, y el cambio de config
 quedó bloqueado. El vínculo en sí está cubierto por los tests del dominio y por
