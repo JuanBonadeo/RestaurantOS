@@ -629,7 +629,7 @@ function CobrarSplitPanel({
         tip={{ mode: "fixed", cents: orderTipCents }}
         cuentaCorriente={
           clientesParaFiar.length > 0
-            ? { clientes: clientesParaFiar }
+            ? { slug, clientes: clientesParaFiar }
             : undefined
         }
         onSubmit={(input) => {

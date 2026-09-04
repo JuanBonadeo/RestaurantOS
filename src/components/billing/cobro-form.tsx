@@ -22,6 +22,10 @@ import type {
   PaymentMethodConfig,
 } from "@/lib/caja/types";
 import { formatCurrency } from "@/lib/currency";
+import {
+  FiarAQuien,
+  type ClienteParaFiar,
+} from "@/components/billing/fiar-a-quien";
 import { indexFromDigit } from "@/lib/ui/roving";
 import { useRovingList } from "@/lib/ui/use-roving-list";
 import { cn } from "@/lib/utils";
@@ -84,12 +88,10 @@ export type CobroFormProps<T = unknown> = {
    * ofrece a nadie más, que es la regla D2.
    */
   cuentaCorriente?: {
-    clientes: {
-      id: string;
-      name: string | null;
-      phone: string;
-      saldo_cents: number;
-    }[];
+    /** Para buscar y dar de alta desde el propio cobro (D2 revisada). */
+    slug: string;
+    /** Los que ya tienen cuenta: la lista de apertura, sin tipear nada. */
+    clientes: ClienteParaFiar[];
   };
   tip?: CobroTip;
   /** Ergonomía. `touch` = mozo en el celular; `compact` = paneles del admin. */
@@ -172,6 +174,7 @@ export function CobroForm<T = unknown>({
   const [method, setMethod] = useState<PaymentMethod | null>(null);
   /** A quién se le fía. Se limpia al cambiar de método (efecto más abajo). */
   const [creditCustomerId, setCreditCustomerId] = useState<string | null>(null);
+  const [cliente, setCliente] = useState<ClienteParaFiar | null>(null);
   const adjustmentPercent =
     methodConfigs.find((c) => c.method === method)?.adjustment_percent ?? 0;
   const { adjustmentCents, finalCents } = calculateAdjustment(
@@ -635,38 +638,15 @@ export function CobroForm<T = unknown>({
       )}
 
       {method === "cuenta_corriente" && cuentaCorriente && (
-        <div className="grid gap-1.5">
-          <label
-            htmlFor="cobro-credit-customer"
-            className="text-xs font-semibold text-zinc-600"
-          >
-            ¿A quién se le fía?
-          </label>
-          <select
-            id="cobro-credit-customer"
-            value={creditCustomerId ?? ""}
-            onChange={(e) => setCreditCustomerId(e.target.value || null)}
-            className="h-11 w-full rounded-xl border border-zinc-200 bg-white px-3 text-base focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none"
-          >
-            <option value="">Elegí el cliente…</option>
-            {cuentaCorriente.clientes.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name ?? c.phone}
-                {c.saldo_cents > 0
-                  ? ` · debe ${formatCurrency(c.saldo_cents)}`
-                  : ""}
-              </option>
-            ))}
-          </select>
-          {/* El saldo actual antes de confirmar: es lo único que la spec le da
-              a `terminal`, que fía pero no ve la tab de cuentas (D7). */}
-          {cuentaCorriente.clientes.length === 0 && (
-            <p className="text-xs text-zinc-500">
-              Todavía no hay clientes con cuenta corriente. Se habilitan desde
-              su ficha, en Clientes.
-            </p>
-          )}
-        </div>
+        <FiarAQuien
+          slug={cuentaCorriente.slug}
+          iniciales={cuentaCorriente.clientes}
+          value={cliente}
+          onChange={(c) => {
+            setCliente(c);
+            setCreditCustomerId(c?.id ?? null);
+          }}
+        />
       )}
 
       {method === "card_manual" && (

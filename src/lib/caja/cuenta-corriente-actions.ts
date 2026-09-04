@@ -9,7 +9,10 @@ import { canCobrarCuentaCorriente, canFiar } from "@/lib/permissions/can";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
-import { getCuentaDeCliente } from "./cuenta-corriente-queries";
+import {
+  getCuentaDeCliente,
+  getSaldosDeClientes,
+} from "./cuenta-corriente-queries";
 
 type GenericClient = SupabaseClient;
 const db = () => createSupabaseServiceClient() as unknown as GenericClient;
@@ -267,4 +270,150 @@ export async function anularCobranza(
 
   revalidatePath(`/${slug}/admin/operacion`);
   return actionOk(undefined);
+}
+
+/**
+ * Buscar a quién fiarle, desde el cobro — spec 141 · D2 (revisada 2026-09-03).
+ *
+ * Busca sobre **todos** los clientes del negocio, no sólo los habilitados. La
+ * versión original de la D2 exigía habilitar al cliente desde su ficha antes de
+ * poder fiarle, y eso hacía el flujo impracticable: el socio dice «ponelo en mi
+ * cuenta» y el encargado tenía que abandonar el cobro, ir a Clientes, buscarlo,
+ * prender el switch y volver. En hora pico eso no pasa — se cobra en efectivo y
+ * el fiado queda sin registrar, que es exactamente lo que esto viene a evitar.
+ *
+ * El control no se pierde: nunca estuvo en la lista blanca sino en `canFiar` (el
+ * rol) y en el saldo a la vista antes de confirmar. Los que ya tienen cuenta van
+ * primero, porque son el caso repetido.
+ */
+export async function buscarParaFiar(
+  slug: string,
+  query: string,
+): Promise<
+  ActionResult<
+    {
+      id: string;
+      name: string | null;
+      phone: string;
+      saldo_cents: number;
+      habilitado: boolean;
+    }[]
+  >
+> {
+  const term = query.replace(/[,*()%_]/g, " ").trim();
+  const business = await getBusiness(slug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  if (!canFiar(ctxResult.data.role)) {
+    return actionError("No tenés permiso para fiar.");
+  }
+
+  const service = db();
+  let q = service
+    .from("customers")
+    .select("id, name, phone, credit_enabled")
+    .eq("business_id", business.id);
+
+  // Sin término se muestran los que ya tienen cuenta: es el caso de todos los
+  // días, y abrir el buscador con una lista útil evita tipear lo mismo siempre.
+  if (term.length >= 2) {
+    q = q.or(`name.ilike.*${term}*,phone.ilike.*${term}*`);
+  } else {
+    q = q.eq("credit_enabled", true);
+  }
+
+  const { data, error } = await q.order("name", { ascending: true }).limit(12);
+  if (error) {
+    console.error("buscarParaFiar", error);
+    return actionError("No pudimos buscar clientes.");
+  }
+
+  const clientes = (data ?? []) as Array<{
+    id: string;
+    name: string | null;
+    phone: string;
+    credit_enabled: boolean;
+  }>;
+  if (clientes.length === 0) return actionOk([]);
+
+  const saldos = await getSaldosDeClientes(
+    business.id,
+    clientes.map((c) => c.id),
+  );
+
+  return actionOk(
+    clientes
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        phone: c.phone,
+        saldo_cents: saldos.get(c.id) ?? 0,
+        habilitado: c.credit_enabled,
+      }))
+      // Los que ya tienen cuenta primero: es el caso repetido.
+      .sort((a, b) => Number(b.habilitado) - Number(a.habilitado)),
+  );
+}
+
+/**
+ * Dar de alta a alguien y fiarle en el mismo gesto — spec 141 · D2 revisada.
+ *
+ * El teléfono es la clave natural de `customers` (UNIQUE `business_id, phone`),
+ * así que un alta con un número que ya existe **no duplica**: devuelve el que
+ * había y lo habilita. Es lo que quiere el mostrador — «Pérez, 341…» y listo.
+ */
+export async function crearClienteParaFiar(input: {
+  name: string;
+  phone: string;
+  slug: string;
+}): Promise<ActionResult<{ id: string; name: string | null; phone: string }>> {
+  const business = await getBusiness(input.slug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  if (!canFiar(ctxResult.data.role)) {
+    return actionError("No tenés permiso para fiar.");
+  }
+
+  const name = input.name.trim();
+  const phone = input.phone.replace(/\D/g, "");
+  if (!name) return actionError("Poné el nombre.");
+  // Sin teléfono no hay cliente: es la identidad de la tabla, y el nombre solo
+  // llenaría el padrón de «Juan» sueltos (misma regla que `upsertCustomerByPhone`).
+  if (phone.length < 6)
+    return actionError("Poné un teléfono, aunque sea corto.");
+
+  const service = db();
+  const { data: existente } = await service
+    .from("customers")
+    .select("id, name, phone")
+    .eq("business_id", business.id)
+    .eq("phone", phone)
+    .maybeSingle();
+
+  if (existente) {
+    const row = existente as { id: string; name: string | null; phone: string };
+    await service
+      .from("customers")
+      .update({ credit_enabled: true })
+      .eq("id", row.id);
+    return actionOk(row);
+  }
+
+  const { data, error } = await service
+    .from("customers")
+    .insert({
+      business_id: business.id,
+      name,
+      phone,
+      credit_enabled: true,
+    })
+    .select("id, name, phone")
+    .single();
+  if (error || !data) return actionError("No pudimos crear el cliente.");
+
+  return actionOk(data as { id: string; name: string | null; phone: string });
 }

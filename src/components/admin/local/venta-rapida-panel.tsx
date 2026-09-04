@@ -37,6 +37,10 @@ import type {
 } from "@/lib/caja/types";
 import { useCajaPreferida } from "@/lib/caja/use-caja-preferida";
 import { formatCurrency } from "@/lib/currency";
+import {
+  FiarAQuien,
+  type ClienteParaFiar,
+} from "@/components/billing/fiar-a-quien";
 import type { CatalogForMozo, CatalogProduct } from "@/lib/mozo/catalog-query";
 import { loadPedirCatalog } from "@/lib/mozo/pedir-panel-data";
 import {
@@ -51,6 +55,8 @@ const METODOS: { value: PaymentMethod; label: string }[] = [
   { value: "cash", label: "Efectivo" },
   { value: "card_manual", label: "Tarjeta" },
   { value: "transfer", label: "Transfer." },
+  // spec 141 — el mostrador es justo donde el socio dice «ponelo en mi cuenta».
+  { value: "cuenta_corriente", label: "Cuenta cte." },
 ];
 
 /** Última venta cobrada, para ofrecer la factura sin frenar la siguiente. */
@@ -89,6 +95,10 @@ export function VentaRapidaPanel({
 
   const [cajaId, setCajaId] = useCajaPreferida(slug, cajas);
   const [method, setMethod] = useState<PaymentMethod>("cash");
+  /** A quién se le fía (spec 141). Sólo con `cuenta_corriente`. */
+  const [clienteFiado, setClienteFiado] = useState<ClienteParaFiar | null>(
+    null,
+  );
   const [ultima, setUltima] = useState<UltimaVenta | null>(null);
 
   const [pending, startTransition] = useTransition();
@@ -266,7 +276,14 @@ export function VentaRapidaPanel({
     onType: escribirEnBuscador,
   });
 
-  const canCobrar = cart.length > 0 && !!cajaId && !pending && !initError;
+  const canCobrar =
+    cart.length > 0 &&
+    !!cajaId &&
+    !pending &&
+    !initError &&
+    // spec 141 — un fiado sin dueño no está en el saldo de nadie (y el check de
+    // la base lo rechaza igual).
+    (method !== "cuenta_corriente" || !!clienteFiado);
 
   function cobrar() {
     if (cart.length === 0) {
@@ -290,6 +307,8 @@ export function VentaRapidaPanel({
           modifier_ids: c.modifiers.map((m) => m.id),
         })),
         request_id: (requestIdRef.current ??= crypto.randomUUID()),
+        credit_customer_id:
+          method === "cuenta_corriente" ? clienteFiado?.id : undefined,
       });
       if (!r.ok) {
         toast.error(r.error);
@@ -560,6 +579,17 @@ export function VentaRapidaPanel({
                 );
               })}
             </div>
+
+            {method === "cuenta_corriente" && (
+              <div className="border-t border-zinc-100 px-3 py-2.5">
+                <FiarAQuien
+                  slug={slug}
+                  iniciales={[]}
+                  value={clienteFiado}
+                  onChange={setClienteFiado}
+                />
+              </div>
+            )}
 
             <div className="flex items-center gap-2 border-t border-zinc-100 px-3 py-2.5">
               <div className="min-w-0 flex-1">

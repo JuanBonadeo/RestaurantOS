@@ -63,11 +63,7 @@ export const CreateOrderInput = z
     delivery_type: z.enum(["delivery", "pickup"]),
     customer_name: z.string().min(1).max(100),
     customer_phone: z.string().min(6).max(20),
-    customer_email: z
-      .string()
-      .email("Email inválido.")
-      .max(200)
-      .optional(),
+    customer_email: z.string().email("Email inválido.").max(200).optional(),
     delivery_address: z.string().max(200).optional(),
     delivery_notes: z.string().max(500).optional(),
     /**
@@ -204,7 +200,15 @@ export type PersistableOrderInput = Omit<CreateOrderInput, "delivery_type"> & {
 export const VentaMostradorInput = z.object({
   business_slug: z.string().min(1),
   items: z.array(OrderItemInput).min(1, "Agregá al menos un producto."),
-  method: z.enum(["cash", "card_manual", "transfer", "other"]),
+  method: z.enum([
+    "cash",
+    "card_manual",
+    "transfer",
+    "other",
+    // spec 141 — el mostrador también fía: es justo donde el socio dice
+    // «ponelo en mi cuenta», sin mesa de por medio.
+    "cuenta_corriente",
+  ]),
   caja_id: z.string().uuid(),
   tip_cents: z.number().int().min(0).default(0),
   last_four: z.string().length(4).optional(),
@@ -212,6 +216,8 @@ export const VentaMostradorInput = z.object({
   notes: z.string().max(500).optional(),
   /** Clave de idempotencia del intento de cobro (dedup en la RPC, issue #58). */
   request_id: z.string().uuid().optional(),
+  /** A quién se le fía. Obligatorio sii `method = 'cuenta_corriente'`. */
+  credit_customer_id: z.string().uuid().nullish(),
 });
 
 export type VentaMostradorInput = z.infer<typeof VentaMostradorInput>;

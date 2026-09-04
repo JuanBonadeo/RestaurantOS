@@ -244,3 +244,29 @@ export async function getClientesParaFiar(
     ),
   }));
 }
+
+/**
+ * El saldo de varios clientes de una, para el buscador del cobro.
+ *
+ * Reusa el mismo `cargarMovimientos` que la tab: un solo lugar donde se lee la
+ * plata, así el número del buscador y el de la tab no pueden divergir.
+ */
+export async function getSaldosDeClientes(
+  businessId: string,
+  customerIds: string[],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (customerIds.length === 0) return out;
+  const { cargosPorCliente, cobranzasPorCliente } =
+    await cargarMovimientos(businessId);
+  for (const id of customerIds) {
+    out.set(
+      id,
+      calcularSaldo(
+        cargosPorCliente.get(id) ?? [],
+        cobranzasPorCliente.get(id) ?? [],
+      ),
+    );
+  }
+  return out;
+}

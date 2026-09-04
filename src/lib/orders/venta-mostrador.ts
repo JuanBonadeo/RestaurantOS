@@ -5,7 +5,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { calculateAdjustment } from "@/lib/billing/adjustment";
 import { registrarPago } from "@/lib/billing/cobro-actions";
-import { getCajasForBusiness, getPaymentMethodConfigs } from "@/lib/caja/queries";
+import {
+  getCajasForBusiness,
+  getPaymentMethodConfigs,
+} from "@/lib/caja/queries";
 import type { Caja, PaymentMethodConfig } from "@/lib/caja/types";
 import { requireMozoActionContext } from "@/lib/mozo/auth";
 import { canCargarPedido } from "@/lib/permissions/can";
@@ -183,6 +186,7 @@ export async function venderMostrador(
     adjustment_cents: ajusteCents,
     slug: data.business_slug,
     requestId: data.request_id,
+    creditCustomerId: data.credit_customer_id ?? null,
   });
 
   if (!pago.ok) {
