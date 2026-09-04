@@ -211,6 +211,30 @@ Sus tests fijan lo que importa: **cada fila cierra con el total de su origen y
 cada columna con el total de su método**. Si el cruce derivara, las dos mitades
 de la pantalla mostrarían plata distinta para los mismos cobros.
 
+## D11 · Cobrado por empleado (2026-09-03)
+
+Juan: *"la rendición por empleado podría ser más estético ese componente"*. Era
+una tabla de cuatro columnas con el nombre repetido en blanco y el total del
+mozo **entre paréntesis, pegado al último monto** — dos números en una celda,
+sin rótulo. Ahora es una tarjeta por persona: nombre, total, y los métodos con
+el **mismo punto de color** que las barras de arriba.
+
+Arreglando lo estético aparecieron dos cosas que no eran estéticas:
+
+**Sumaba con propina.** Usaba `amount_cents` pelado, así que este bloque mostraba
+más plata que el desglose por método de la misma pantalla, para los mismos
+cobros. Va neto, como todo el resto (spec 098).
+
+**Se llamaba «Rendición» y listaba tarjeta** — justo lo que la spec 151 sacó de
+la rendición. Acá se sigue mostrando (es la caja, y ver lo que cobró cada uno es
+el punto) pero el bloque pasa a llamarse **«Cobrado por empleado»**, y una línea
+«Efectivo a rendir» dice cuál de esos números se le va a pedir. Sin mozo no lleva
+esa línea: no hay a quién pedírselo.
+
+La agregación se mudó a `agruparCobrosPorMozo` en `liquidacion-mozo.ts`, con
+tests: neto de propina, «a rendir» sólo efectivo, el cobro sin mozo que no se
+pierde, y el orden por lo cobrado.
+
 ## Verificación
 
 `pnpm typecheck` en 0 errores y **2223 tests unitarios en verde** (los 21

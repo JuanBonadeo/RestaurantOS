@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { Surface } from "@/components/admin/shell/page-shell";
 import { CerrarCajaModal } from "@/components/admin/local/cerrar-caja-modal";
 import {
+  METHOD_COLOR,
   METHOD_LABEL,
   VentasPorMetodo,
   methodIcon,
@@ -34,12 +35,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { registrarIngreso, registrarSangria } from "@/lib/caja/actions";
+import { agruparCobrosPorMozo } from "@/lib/caja/liquidacion-mozo";
 import type { CajaPayment } from "@/lib/caja/queries";
 import type {
   CajaConEstado,
   CajaLiveStats,
   CajaMovimiento,
-  PaymentMethod,
 } from "@/lib/caja/types";
 import {
   resolverCajaActiva,
@@ -516,7 +517,7 @@ function CajaCard({
         </section>
       </div>
 
-      {payments.length > 0 && <RendicionSection payments={payments} />}
+      {payments.length > 0 && <CobradoPorEmpleado payments={payments} />}
 
       <MovimientoModal
         open={sangriaOpen}
@@ -771,73 +772,126 @@ function MovimientoModal({
 }
 
 
-// ── Rendición por empleado ───────────────────────────────────────
+// ── Cobrado por empleado ─────────────────────────────────────────
 
-type RendicionRow = {
-  mozo_name: string;
-  method: PaymentMethod;
-  count: number;
-  total_cents: number;
-};
-
-function buildRendicion(payments: CajaPayment[]): RendicionRow[] {
-  const map = new Map<string, RendicionRow>();
-  for (const p of payments) {
-    const name = p.attributed_mozo_name ?? "Sin mozo";
-    const key = `${name}|${p.method}`;
-    const existing = map.get(key);
-    if (existing) {
-      existing.count += 1;
-      existing.total_cents += p.amount_cents;
-    } else {
-      map.set(key, { mozo_name: name, method: p.method, count: 1, total_cents: p.amount_cents });
-    }
-  }
-  return Array.from(map.values()).sort((a, b) =>
-    a.mozo_name === b.mozo_name ? a.method.localeCompare(b.method) : a.mozo_name.localeCompare(b.mozo_name),
-  );
+/** Iniciales para el avatar. «Sin mozo» no lleva. */
+function iniciales(nombre: string): string {
+  return nombre
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() ?? "")
+    .join("");
 }
 
-function RendicionSection({ payments }: { payments: CajaPayment[] }) {
-  const rows = buildRendicion(payments);
-  const mozos = Array.from(new Set(rows.map((r) => r.mozo_name)));
+/**
+ * Qué cobró cada empleado en el período (pedido de Juan, 2026-09-03: *"la
+ * rendición por empleado podría ser más estético ese componente"*).
+ *
+ * Era una tabla de cuatro columnas con el nombre repetido en blanco y el total
+ * del mozo metido entre paréntesis pegado al último monto — dos números en una
+ * celda, sin rótulo. Ahora es una tarjeta por persona: el nombre y su total
+ * arriba, los métodos abajo con el **mismo punto de color** que las barras de
+ * más arriba, y el efectivo señalado como lo que va a tener que entregar.
+ *
+ * Se llamaba «Rendición por empleado» y listaba tarjeta, que es justo lo que la
+ * spec 151 sacó de la rendición. Acá **sí** se muestra —es la caja, y ver lo que
+ * cobró cada uno es el punto— pero el bloque pasa a llamarse por lo que es, y la
+ * línea «a rendir» dice cuál de esos números es el que se le va a pedir.
+ */
+function CobradoPorEmpleado({ payments }: { payments: CajaPayment[] }) {
+  const mozos = agruparCobrosPorMozo(payments);
 
   return (
     <section className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200/70">
       <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
-        Rendición por empleado
+        Cobrado por empleado
       </p>
-      <div className="mt-3 overflow-hidden rounded-lg ring-1 ring-zinc-200/70">
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-zinc-100 bg-zinc-50/60">
-              <th className="px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">Mozo</th>
-              <th className="px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">Método</th>
-              <th className="px-3 py-2 text-right text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">Cant.</th>
-              <th className="px-3 py-2 text-right text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">Total</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-zinc-100">
-            {mozos.map((mozo) => {
-              const mozoRows = rows.filter((r) => r.mozo_name === mozo);
-              const mozoTotal = mozoRows.reduce((acc, r) => acc + r.total_cents, 0);
-              return mozoRows.map((r, i) => (
-                <tr key={`${mozo}-${r.method}`} className={i === mozoRows.length - 1 && mozo !== mozos[mozos.length - 1] ? "border-b-2 border-zinc-200" : ""}>
-                  <td className="px-3 py-2 font-medium text-zinc-900">{i === 0 ? mozo : ""}</td>
-                  <td className="px-3 py-2 text-zinc-600">{METHOD_LABEL[r.method]}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-zinc-600">{r.count}</td>
-                  <td className="px-3 py-2 text-right font-medium tabular-nums text-zinc-900">
-                    {formatCurrency(r.total_cents)}
-                    {i === mozoRows.length - 1 && mozoRows.length > 1 && (
-                      <span className="ml-1 text-xs text-zinc-500">({formatCurrency(mozoTotal)})</span>
-                    )}
-                  </td>
-                </tr>
-              ));
-            })}
-          </tbody>
-        </table>
-      </div>
+
+      {mozos.length === 0 ? (
+        <p className="mt-3 text-sm text-zinc-500">Todavía no hubo cobros.</p>
+      ) : (
+        <ul className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
+          {mozos.map((m) => {
+            const sinMozo = m.mozo_name === "Sin mozo";
+            return (
+              <li
+                key={m.mozo_name}
+                className="rounded-xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <span
+                      className={cn(
+                        "inline-flex size-8 shrink-0 items-center justify-center rounded-full text-[0.7rem] font-semibold",
+                        sinMozo
+                          ? "bg-white text-zinc-400 ring-1 ring-zinc-200"
+                          : "bg-zinc-200 text-zinc-700",
+                      )}
+                    >
+                      {sinMozo ? "—" : iniciales(m.mozo_name)}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-zinc-900">
+                        {m.mozo_name}
+                      </p>
+                      <p className="text-xs text-zinc-500 tabular-nums">
+                        {m.cobros_count} cobro{m.cobros_count === 1 ? "" : "s"}
+                        {m.propinas_cents > 0 && (
+                          <>
+                            <span className="mx-1 text-zinc-300">·</span>
+                            <span className="text-emerald-700">
+                              {formatCurrency(m.propinas_cents)} de propina
+                            </span>
+                          </>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  <p className="shrink-0 text-base font-bold tracking-tight text-zinc-900 tabular-nums">
+                    {formatCurrency(m.total_cents)}
+                  </p>
+                </div>
+
+                <ul className="mt-3 space-y-1.5">
+                  {m.por_metodo.map((f) => (
+                    <li
+                      key={f.method}
+                      className="flex items-baseline justify-between gap-2 text-xs"
+                    >
+                      <span className="inline-flex items-baseline gap-1.5 text-zinc-600">
+                        <span
+                          className="inline-block size-2 shrink-0 translate-y-px rounded-full"
+                          style={{ background: METHOD_COLOR[f.method] }}
+                        />
+                        {METHOD_LABEL[f.method]}
+                        <span className="text-zinc-400 tabular-nums">
+                          ×{f.count}
+                        </span>
+                      </span>
+                      <span className="font-semibold tabular-nums text-zinc-800">
+                        {formatCurrency(f.total_cents)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+
+                {/* Sólo el efectivo se rinde (spec 151). Sin mozo no hay a
+                    quién pedírselo: esa plata la cobró la caja. */}
+                {!sinMozo && m.a_rendir_cents > 0 && (
+                  <p className="mt-3 flex items-baseline justify-between gap-2 border-t border-zinc-200/70 pt-2.5 text-xs">
+                    <span className="font-medium text-zinc-600">
+                      Efectivo a rendir
+                    </span>
+                    <span className="font-semibold tabular-nums text-zinc-900">
+                      {formatCurrency(m.a_rendir_cents)}
+                    </span>
+                  </p>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </section>
   );
 }

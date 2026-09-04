@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { calcularRendicionMozo } from "./liquidacion-mozo";
+import { agruparCobrosPorMozo, calcularRendicionMozo } from "./liquidacion-mozo";
 
 describe("calcularRendicionMozo", () => {
   it("efectivo + tickets, sin contar propina", () => {
@@ -65,5 +65,66 @@ describe("calcularRendicionMozo", () => {
     expect(result.efectivo_cents).toBe(1_000_000);
     expect(result.tickets_cents).toBe(0);
     expect(result.total_propinas_cents).toBe(0);
+  });
+});
+
+describe("agruparCobrosPorMozo", () => {
+  const pago = (
+    mozo: string | null,
+    method: "cash" | "card_manual",
+    amount: number,
+    tip = 0,
+  ) => ({
+    attributed_mozo_name: mozo,
+    method,
+    amount_cents: amount,
+    tip_cents: tip,
+  });
+
+  it("suma NETO de propina, como el resto de la pantalla (spec 098)", () => {
+    // Antes sumaba `amount_cents` pelado y este bloque mostraba más plata que
+    // el desglose por método de arriba, para los mismos cobros.
+    const [m] = agruparCobrosPorMozo([pago("Lucía", "cash", 11_000, 1_000)]);
+    expect(m.total_cents).toBe(10_000);
+    expect(m.propinas_cents).toBe(1_000);
+  });
+
+  it("«a rendir» es sólo el efectivo (spec 151)", () => {
+    const [m] = agruparCobrosPorMozo([
+      pago("Lucía", "cash", 18_500),
+      pago("Lucía", "card_manual", 38_500),
+    ]);
+    expect(m.total_cents).toBe(57_000);
+    expect(m.a_rendir_cents).toBe(18_500);
+  });
+
+  it("parte los cobros de cada mozo por método, con su cantidad", () => {
+    const [m] = agruparCobrosPorMozo([
+      pago("Lucía", "cash", 10_000),
+      pago("Lucía", "cash", 8_500),
+      pago("Lucía", "card_manual", 38_500),
+    ]);
+    expect(m.cobros_count).toBe(3);
+    expect(m.por_metodo).toEqual([
+      { method: "card_manual", count: 1, total_cents: 38_500 },
+      { method: "cash", count: 2, total_cents: 18_500 },
+    ]);
+  });
+
+  it("el cobro sin mozo no se pierde: va a «Sin mozo»", () => {
+    const [m] = agruparCobrosPorMozo([pago(null, "cash", 5_000)]);
+    expect(m.mozo_name).toBe("Sin mozo");
+  });
+
+  it("ordena por lo cobrado: primero a quien más hay que pedirle", () => {
+    const ms = agruparCobrosPorMozo([
+      pago("Pedro", "cash", 10_000),
+      pago("Lucía", "cash", 90_000),
+    ]);
+    expect(ms.map((m) => m.mozo_name)).toEqual(["Lucía", "Pedro"]);
+  });
+
+  it("sin cobros no devuelve nada", () => {
+    expect(agruparCobrosPorMozo([])).toEqual([]);
   });
 });
