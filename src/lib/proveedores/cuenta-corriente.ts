@@ -270,3 +270,123 @@ export function totalizarPorClave<T extends { total_cents: number; cancelled_at?
     .map(([k, v]) => ({ clave: k, ...v }))
     .sort((a, b) => b.total_cents - a.total_cents);
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// spec 159 · lo que hace falta para leer la cuenta como en MaxiRest
+// ═══════════════════════════════════════════════════════════════════
+
+/** Un pago, con cuánto de él fue a parar a un comprobante puntual. */
+export type PagoImputado = PagoProveedor & { imputado_cents: number };
+
+/**
+ * Los pagos que cancelaron un comprobante — el panel derecho del master-detail.
+ *
+ * Devuelve **cuánto de cada pago** fue a ese comprobante, no el importe total del
+ * pago: un pago de $100.000 repartido entre tres facturas tiene que mostrar lo
+ * que le tocó a la que estás mirando, o los números de la fila no cierran con los
+ * de la grilla de al lado.
+ *
+ * Los pagos anulados no figuran: su imputación ya no cancela nada.
+ */
+export function pagosDeComprobante(
+  invoiceId: string,
+  imputaciones: ImputacionPago[],
+  pagos: PagoProveedor[],
+): PagoImputado[] {
+  const porId = new Map(pagos.filter(vivo).map((p) => [p.id, p]));
+
+  return imputaciones
+    .filter((im) => im.invoice_id === invoiceId && porId.has(im.payment_id))
+    .map((im) => ({ ...porId.get(im.payment_id)!, imputado_cents: im.amount_cents }))
+    .sort((a, b) => b.paid_at.localeCompare(a.paid_at));
+}
+
+/** Las compras de un rango. Los bordes entran (`desde` y `hasta` inclusive). */
+export function filtrarPorPeriodo<T extends { invoice_date: string }>(
+  comprobantes: T[],
+  desde?: string | null,
+  hasta?: string | null,
+): T[] {
+  return comprobantes.filter(
+    (c) =>
+      (!desde || c.invoice_date >= desde) && (!hasta || c.invoice_date <= hasta),
+  );
+}
+
+export type TotalesPeriodo = {
+  total_cents: number;
+  saldo_cents: number;
+  pago_a_cuenta_cents: number;
+};
+
+/**
+ * El pie de la grilla: total comprado en el período, cuánto de eso sigue impago,
+ * y el pago a cuenta **aparte**.
+ *
+ * El pago a cuenta va separado a propósito: no cancela ningún comprobante, así
+ * que sumarlo con el resto esconde por qué el saldo del proveedor no cierra
+ * contra la lista que estás mirando.
+ */
+export function totalesDelPeriodo(
+  comprobantes: ComprobanteCompra[],
+  imputaciones: ImputacionPago[],
+  pagos: PagoProveedor[],
+): TotalesPeriodo {
+  const conSaldo = comprobantesConSaldo(comprobantes, imputaciones, pagos);
+  const vivos = conSaldo.filter(vivo);
+
+  const imputado = new Set(imputaciones.map((im) => im.payment_id));
+  const aCuenta = pagos
+    .filter(vivo)
+    .filter((p) => !imputado.has(p.id))
+    .reduce((n, p) => n + p.amount_cents, 0);
+
+  return {
+    total_cents: vivos.reduce((n, c) => n + c.total_cents, 0),
+    saldo_cents: vivos.reduce((n, c) => n + c.saldo_cents, 0),
+    pago_a_cuenta_cents: aCuenta,
+  };
+}
+
+export type DiaDeProyeccion = {
+  /** `YYYY-MM-DD`. */
+  fecha: string;
+  total_cents: number;
+  items: Array<ComprobanteConSaldo & { supplier_id?: string; atrasado: boolean }>;
+};
+
+/**
+ * El calendario del mes: cuánta plata hay que pagar cada día.
+ *
+ * **Lo vencido se acumula en el día de hoy** y se marca como atrasado. Una
+ * factura que venció el 28 y sigue impaga es plata que hace falta igual, y en el
+ * calendario del mes que viene no caería en ninguna casilla: la proyección
+ * mentiría hacia abajo justo en los meses en que uno se atrasó.
+ *
+ * `mes` es `YYYY-MM`. Sólo se devuelven los días que tienen algo.
+ */
+export function proyeccionPorDia(
+  impagos: Array<ComprobanteConSaldo & { supplier_id?: string }>,
+  mes: string,
+  hoy: string,
+): DiaDeProyeccion[] {
+  const porDia = new Map<string, DiaDeProyeccion>();
+  const hoyEnElMes = hoy.slice(0, 7) === mes;
+
+  for (const c of impagos) {
+    const vence = c.due_date ?? c.invoice_date;
+    const atrasado = vence < hoy;
+
+    // Lo atrasado se muestra en hoy, y sólo si hoy cae en el mes que se mira.
+    const fecha = atrasado ? hoy : vence;
+    if (atrasado && !hoyEnElMes) continue;
+    if (!atrasado && fecha.slice(0, 7) !== mes) continue;
+
+    const entry = porDia.get(fecha) ?? { fecha, total_cents: 0, items: [] };
+    entry.total_cents += c.saldo_cents;
+    entry.items.push({ ...c, atrasado });
+    porDia.set(fecha, entry);
+  }
+
+  return Array.from(porDia.values()).sort((a, b) => a.fecha.localeCompare(b.fecha));
+}

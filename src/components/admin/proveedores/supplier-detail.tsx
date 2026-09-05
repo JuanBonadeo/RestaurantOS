@@ -2,10 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Ban, FileText, Link2, Pencil, Plus, Wallet } from "lucide-react";
+import { ArrowLeft, Ban, Link2, Pencil, Plus, Wallet } from "lucide-react";
 import { formatCurrency } from "@/lib/currency";
 import { cn } from "@/lib/utils";
-import { etiquetaTipo, type DocumentType } from "@/lib/proveedores/cuenta-corriente";
 import type { SupplierWithStats } from "@/lib/proveedores/types";
 import type { SupplierInvoice, SupplierIngredientLink } from "@/lib/proveedores/types";
 import {
@@ -24,6 +23,7 @@ import { SupplierDialog } from "./supplier-dialog";
 import { InvoiceDialog } from "./invoice-dialog";
 import { IngredientLinkDialog } from "./ingredient-link-dialog";
 import { PagoDialog } from "./pago-dialog";
+import { CuentaCorrientePanel } from "./cuenta-corriente-panel";
 import type { ConceptOption } from "./invoice-dialog";
 
 type Props = {
@@ -124,6 +124,21 @@ export function SupplierDetail({
               .join(" · ") || "Sin datos de contacto"}
           </p>
         </div>
+        <InvoiceDialog
+          slug={slug}
+          supplierId={supplier.id}
+          businessId={businessId}
+          concepts={concepts}
+          defaultConceptId={supplier.defaultExpenseConceptId}
+          paymentTermsDays={supplier.paymentTermsDays}
+          onSuccess={refreshData}
+          trigger={
+            <Button variant="outline" size="sm">
+              <Plus className="size-3.5 mr-1.5" />
+              Cargar compra
+            </Button>
+          }
+        />
         <PagoDialog
           slug={slug}
           supplierId={supplier.id}
@@ -193,134 +208,20 @@ export function SupplierDetail({
         </div>
       </div>
 
-      {/* Qué vence: la lista con la que se decide a quién pagarle hoy. */}
-      {impagos.length > 0 && (
-        <div className="space-y-2">
-          <h3 className="flex items-center gap-2 text-sm font-bold text-zinc-900">
-            <Wallet className="size-4 text-zinc-500" />
-            Comprobantes impagos
-          </h3>
-          <ul className="divide-y rounded-xl border bg-white">
-            {impagos.map((c) => (
-              <li key={c.id} className="flex items-center gap-4 p-3">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-zinc-900">
-                    {c.invoice_number?.trim()
-                      ? `#${c.invoice_number.trim()}`
-                      : etiquetaTipo(c.document_type ?? "interno")}
-                  </p>
-                  <p className="text-xs text-zinc-500">
-                    Vence {c.due_date ?? c.invoice_date}
-                  </p>
-                </div>
-                <p className="text-sm font-semibold tabular-nums text-zinc-900">
-                  {formatCurrency(c.saldo_cents)}
-                </p>
-              </li>
-            ))}
-          </ul>
-        </div>
+      {/* spec 159 · la Cta. Cte. como el «Manejo Integral» de MaxiRest: período,
+          compras con su saldo, y los pagos de la que se selecciona. */}
+      {loading ? (
+        <p className="py-6 text-center text-sm text-zinc-400">Cargando…</p>
+      ) : (
+        <CuentaCorrientePanel
+          saldoCents={saldo}
+          compras={cuenta?.compras ?? []}
+          pagos={cuenta?.pagos ?? []}
+          imputaciones={cuenta?.imputaciones ?? []}
+          fotos={Object.fromEntries(invoices.map((i) => [i.id, i.photoSignedUrl]))}
+          onAnularComprobante={(id) => anular("comprobante", id)}
+        />
       )}
-
-      {/* Invoices */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="flex items-center gap-2 text-sm font-bold text-zinc-900">
-            <FileText className="size-4 text-zinc-500" />
-            Compras
-          </h3>
-          <InvoiceDialog
-            slug={slug}
-            supplierId={supplier.id}
-            businessId={businessId}
-            concepts={concepts}
-            defaultConceptId={supplier.defaultExpenseConceptId}
-            paymentTermsDays={supplier.paymentTermsDays}
-            onSuccess={refreshData}
-            trigger={
-              <Button variant="outline" size="sm">
-                <Plus className="size-3.5 mr-1.5" />
-                Cargar compra
-              </Button>
-            }
-          />
-        </div>
-
-        {loading ? (
-          <p className="py-6 text-center text-sm text-zinc-400">Cargando…</p>
-        ) : invoices.length === 0 ? (
-          <p className="py-6 text-center text-sm text-zinc-400">
-            Sin compras cargadas.
-          </p>
-        ) : (
-          <div className="divide-y rounded-xl border bg-white">
-            {invoices.map((inv) => (
-              <div
-                key={inv.id}
-                className={cn(
-                  "flex items-center gap-4 p-3",
-                  inv.cancelledAt && "bg-zinc-50",
-                )}
-              >
-                {inv.photoSignedUrl ? (
-                  <a
-                    href={inv.photoSignedUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block size-12 shrink-0 overflow-hidden rounded-lg border"
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={inv.photoSignedUrl}
-                      alt="Foto factura"
-                      className="size-full object-cover"
-                    />
-                  </a>
-                ) : (
-                  <div className="flex size-12 shrink-0 items-center justify-center rounded-lg border bg-zinc-50">
-                    <FileText className="size-5 text-zinc-400" />
-                  </div>
-                )}
-                <div className="min-w-0 flex-1">
-                  <p
-                    className={cn(
-                      "text-sm font-medium text-zinc-900",
-                      inv.cancelledAt && "line-through text-zinc-400",
-                    )}
-                  >
-                    {inv.invoiceNumber?.trim()
-                      ? `#${inv.invoiceNumber.trim()}`
-                      : etiquetaTipo(inv.documentType as DocumentType)}
-                  </p>
-                  <p className="text-xs text-zinc-500">
-                    {inv.cancelledAt
-                      ? `Anulado · ${inv.cancelledReason ?? "sin motivo"}`
-                      : `${inv.invoiceDate}${inv.dueDate ? ` · vence ${inv.dueDate}` : ""}`}
-                  </p>
-                </div>
-                <p
-                  className={cn(
-                    "text-sm font-semibold tabular-nums text-zinc-900",
-                    inv.cancelledAt && "line-through text-zinc-400",
-                  )}
-                >
-                  {formatCurrency(inv.totalCents)}
-                </p>
-                {!inv.cancelledAt && (
-                  <button
-                    type="button"
-                    onClick={() => anular("comprobante", inv.id)}
-                    className="shrink-0 rounded-md p-1.5 text-zinc-400 transition hover:bg-red-50 hover:text-red-600"
-                    aria-label="Anular comprobante"
-                  >
-                    <Ban className="size-4" />
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
 
       {/* Pagos: el otro lado del libro. Lo anulado queda a la vista, tachado. */}
       {pagos.length > 0 && (

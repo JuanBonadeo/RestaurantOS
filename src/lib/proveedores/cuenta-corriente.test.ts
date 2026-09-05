@@ -7,7 +7,11 @@ import {
   comprobantesConSaldo,
   comprobantesImpagos,
   diasVencido,
+  filtrarPorPeriodo,
+  pagosDeComprobante,
+  proyeccionPorDia,
   repartirPago,
+  totalesDelPeriodo,
   totalizarPorClave,
   type ComprobanteCompra,
   type ImputacionPago,
@@ -330,5 +334,199 @@ describe("totalizarPorClave", () => {
     expect(totales).toEqual([
       { clave: "mercaderias", total_cents: 10_000_00, comprobantes: 1 },
     ]);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// spec 159 · leer la cuenta como en MaxiRest
+// ═══════════════════════════════════════════════════════════════════
+
+describe("pagosDeComprobante", () => {
+  it("trae los pagos que cancelaron ese comprobante", () => {
+    const r = pagosDeComprobante(
+      "c1",
+      [
+        imputacion({ payment_id: "p1", invoice_id: "c1", amount_cents: 30_000_00 }),
+        imputacion({ payment_id: "p2", invoice_id: "otro", amount_cents: 10_000_00 }),
+      ],
+      [pago({ id: "p1" }), pago({ id: "p2" })],
+    );
+    expect(r.map((p) => p.id)).toEqual(["p1"]);
+  });
+
+  it("muestra lo IMPUTADO a ese comprobante, no el total del pago", () => {
+    // Un pago de $100.000 repartido: acá le tocaron $30.000.
+    const r = pagosDeComprobante(
+      "c1",
+      [imputacion({ payment_id: "p1", invoice_id: "c1", amount_cents: 30_000_00 })],
+      [pago({ id: "p1", amount_cents: 100_000_00 })],
+    );
+    expect(r[0].imputado_cents).toBe(30_000_00);
+    expect(r[0].amount_cents).toBe(100_000_00);
+  });
+
+  it("un pago anulado no figura: su imputación ya no cancela nada", () => {
+    const r = pagosDeComprobante(
+      "c1",
+      [imputacion({ payment_id: "p1", invoice_id: "c1" })],
+      [pago({ id: "p1", cancelled_at: "2026-09-06T10:00:00Z" })],
+    );
+    expect(r).toEqual([]);
+  });
+
+  it("ordena del pago más nuevo al más viejo", () => {
+    const r = pagosDeComprobante(
+      "c1",
+      [
+        imputacion({ payment_id: "viejo", invoice_id: "c1" }),
+        imputacion({ payment_id: "nuevo", invoice_id: "c1" }),
+      ],
+      [
+        pago({ id: "viejo", paid_at: "2026-09-01" }),
+        pago({ id: "nuevo", paid_at: "2026-09-08" }),
+      ],
+    );
+    expect(r.map((p) => p.id)).toEqual(["nuevo", "viejo"]);
+  });
+});
+
+describe("filtrarPorPeriodo", () => {
+  const compras = [
+    comprobante({ id: "a", invoice_date: "2026-08-31" }),
+    comprobante({ id: "b", invoice_date: "2026-09-01" }),
+    comprobante({ id: "c", invoice_date: "2026-09-30" }),
+    comprobante({ id: "d", invoice_date: "2026-10-01" }),
+  ];
+
+  it("los bordes entran", () => {
+    const r = filtrarPorPeriodo(compras, "2026-09-01", "2026-09-30");
+    expect(r.map((c) => c.id)).toEqual(["b", "c"]);
+  });
+
+  it("sin fechas devuelve todo", () => {
+    expect(filtrarPorPeriodo(compras).map((c) => c.id)).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("acepta un borde solo", () => {
+    expect(filtrarPorPeriodo(compras, "2026-09-30").map((c) => c.id)).toEqual(["c", "d"]);
+  });
+});
+
+describe("totalesDelPeriodo", () => {
+  it("total, saldo y pago a cuenta por separado", () => {
+    const t = totalesDelPeriodo(
+      [
+        comprobante({ id: "a", total_cents: 100_000_00 }),
+        comprobante({ id: "b", total_cents: 50_000_00 }),
+      ],
+      [imputacion({ payment_id: "p1", invoice_id: "a", amount_cents: 40_000_00 })],
+      [pago({ id: "p1", amount_cents: 40_000_00 }), pago({ id: "p2", amount_cents: 25_000_00 })],
+    );
+    expect(t.total_cents).toBe(150_000_00);
+    expect(t.saldo_cents).toBe(110_000_00);
+    // p2 no está imputado a nada: es pago a cuenta y va aparte.
+    expect(t.pago_a_cuenta_cents).toBe(25_000_00);
+  });
+
+  it("lo anulado no suma ni al total ni al saldo", () => {
+    const t = totalesDelPeriodo(
+      [
+        comprobante({ id: "a", total_cents: 100_000_00 }),
+        comprobante({ id: "x", total_cents: 90_000_00, cancelled_at: "2026-09-03T10:00:00Z" }),
+      ],
+      [],
+      [],
+    );
+    expect(t.total_cents).toBe(100_000_00);
+    expect(t.saldo_cents).toBe(100_000_00);
+  });
+
+  it("un pago a cuenta anulado no cuenta", () => {
+    const t = totalesDelPeriodo(
+      [],
+      [],
+      [pago({ id: "p1", amount_cents: 25_000_00, cancelled_at: "2026-09-06T10:00:00Z" })],
+    );
+    expect(t.pago_a_cuenta_cents).toBe(0);
+  });
+});
+
+describe("proyeccionPorDia", () => {
+  const impagos = (xs: Array<Partial<ComprobanteCompra> & { saldo?: number }>) =>
+    xs.map((x, i) => ({
+      ...comprobante({ id: `c${i}`, ...x }),
+      pagado_cents: 0,
+      saldo_cents: x.saldo ?? x.total_cents ?? 10_000_00,
+    }));
+
+  it("agrupa la plata por día de vencimiento", () => {
+    const r = proyeccionPorDia(
+      impagos([
+        { due_date: "2026-09-11", total_cents: 10_000_00 },
+        { due_date: "2026-09-11", total_cents: 5_000_00 },
+        { due_date: "2026-09-18", total_cents: 7_000_00 },
+      ]),
+      "2026-09",
+      "2026-09-04",
+    );
+    expect(r.map((d) => [d.fecha, d.total_cents])).toEqual([
+      ["2026-09-11", 15_000_00],
+      ["2026-09-18", 7_000_00],
+    ]);
+  });
+
+  it("lo vencido se acumula en HOY y queda marcado", () => {
+    const r = proyeccionPorDia(
+      impagos([
+        { due_date: "2026-08-28", total_cents: 20_000_00 },
+        { due_date: "2026-09-11", total_cents: 5_000_00 },
+      ]),
+      "2026-09",
+      "2026-09-04",
+    );
+    expect(r[0].fecha).toBe("2026-09-04");
+    expect(r[0].total_cents).toBe(20_000_00);
+    expect(r[0].items[0].atrasado).toBe(true);
+    expect(r[1].items[0].atrasado).toBe(false);
+  });
+
+  it("mirando otro mes, lo atrasado no se cuela en un día que no es hoy", () => {
+    const r = proyeccionPorDia(
+      impagos([{ due_date: "2026-08-28", total_cents: 20_000_00 }]),
+      "2026-10",
+      "2026-09-04",
+    );
+    expect(r).toEqual([]);
+  });
+
+  it("deja afuera los vencimientos de otros meses", () => {
+    const r = proyeccionPorDia(
+      impagos([
+        { due_date: "2026-09-11", total_cents: 5_000_00 },
+        { due_date: "2026-10-11", total_cents: 9_000_00 },
+      ]),
+      "2026-09",
+      "2026-09-04",
+    );
+    expect(r).toHaveLength(1);
+    expect(r[0].fecha).toBe("2026-09-11");
+  });
+
+  it("el que vence hoy no es atraso", () => {
+    const r = proyeccionPorDia(
+      impagos([{ due_date: "2026-09-04", total_cents: 5_000_00 }]),
+      "2026-09",
+      "2026-09-04",
+    );
+    expect(r[0].items[0].atrasado).toBe(false);
+  });
+
+  it("suma el SALDO, no el total del comprobante", () => {
+    const r = proyeccionPorDia(
+      impagos([{ due_date: "2026-09-11", total_cents: 100_000_00, saldo: 30_000_00 }]),
+      "2026-09",
+      "2026-09-04",
+    );
+    expect(r[0].total_cents).toBe(30_000_00);
   });
 });

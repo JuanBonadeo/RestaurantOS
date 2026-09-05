@@ -7,6 +7,7 @@ import {
   getCuentaDeProveedor as _getCuenta,
   getVencimientos as _getVencimientos,
   getGastoPorConcepto as _getGasto,
+  getProyeccionPagos as _getProyeccion,
 } from "./cuenta-corriente-queries";
 import {
   getSupplierInvoices as _getInvoices,
@@ -65,4 +66,9 @@ export async function getGastoPorConcepto(
 ) {
   await assertCanReadProveedores(businessId);
   return _getGasto(businessId, desde, hasta, agrupacion);
+}
+
+export async function getProyeccionPagos(businessId: string, mes: string) {
+  await assertCanReadProveedores(businessId);
+  return _getProyeccion(businessId, mes);
 }

@@ -7,11 +7,14 @@ import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import {
   armarLibroProveedor,
   calcularSaldoProveedor,
+  comprobantesConSaldo,
   comprobantesImpagos,
   diasVencido,
+  proyeccionPorDia,
   totalizarPorClave,
   type ComprobanteCompra,
   type ComprobanteConSaldo,
+  type DiaDeProyeccion,
   type ImputacionPago,
   type MovimientoProveedor,
   type PagoProveedor,
@@ -43,9 +46,14 @@ export type SaldoProveedor = {
 export type CuentaDeProveedor = {
   supplierId: string;
   supplierName: string;
+  /** El saldo es SIEMPRE el total, no el del período que se esté mirando (159 · D3). */
   saldo_cents: number;
   impagos: ComprobanteConSaldo[];
   libro: MovimientoProveedor[];
+  /** spec 159 · lo que necesita el master-detail, sin un fetch por fila (D2). */
+  compras: ComprobanteConSaldo[];
+  pagos: PagoProveedor[];
+  imputaciones: ImputacionPago[];
 };
 
 export async function getExpenseConcepts(
@@ -168,6 +176,11 @@ export async function getCuentaDeProveedor(
     saldo_cents: calcularSaldoProveedor(invoices, payments),
     impagos: comprobantesImpagos(invoices, allocs, payments),
     libro: armarLibroProveedor(invoices, payments),
+    compras: comprobantesConSaldo(invoices, allocs, payments).sort((a, b) =>
+      b.invoice_date.localeCompare(a.invoice_date),
+    ),
+    pagos: payments,
+    imputaciones: allocs,
   };
 }
 
@@ -294,4 +307,72 @@ export async function getGastoPorConcepto(
         : (conceptos.get(t.clave)?.name ?? "—");
     return { ...t, etiqueta };
   });
+}
+
+// ── spec 159 · proyección de pagos ─────────────────────────────────
+
+export type ItemDeProyeccion = DiaDeProyeccion["items"][number] & {
+  supplierName: string;
+};
+
+export type ProyeccionDelMes = {
+  mes: string;
+  total_cents: number;
+  dias: Array<{ fecha: string; total_cents: number; items: ItemDeProyeccion[] }>;
+};
+
+/**
+ * El calendario del mes: cuánta plata hay que pagar cada día — spec 159 · D4.
+ *
+ * Responde "¿cuánta plata necesito el jueves?", que es con lo que se decide si se
+ * paga hoy o el lunes. La lista de vencimientos, ordenada por atraso, responde
+ * otra cosa: "¿a quién le debo?".
+ */
+export async function getProyeccionPagos(
+  businessId: string,
+  mes: string,
+): Promise<ProyeccionDelMes> {
+  const service = db();
+  const hoy = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Argentina/Buenos_Aires",
+  }).format(new Date());
+
+  const [suppliersRes, invoicesRes, paymentsRes, allocsRes] = await Promise.all([
+    service.from("suppliers").select("id, name").eq("business_id", businessId),
+    service.from("supplier_invoices").select(INVOICE_COLS).eq("business_id", businessId),
+    service.from("supplier_payments").select(PAYMENT_COLS).eq("business_id", businessId),
+    service
+      .from("supplier_payment_allocations")
+      .select("payment_id, invoice_id, amount_cents")
+      .eq("business_id", businessId),
+  ]);
+
+  const nombres = new Map(
+    ((suppliersRes.data ?? []) as unknown as Array<{ id: string; name: string }>).map((s) => [
+      s.id,
+      s.name,
+    ]),
+  );
+  const invoices = (invoicesRes.data ?? []) as unknown as Array<
+    ComprobanteCompra & { supplier_id: string }
+  >;
+  const payments = (paymentsRes.data ?? []) as unknown as PagoProveedor[];
+  const allocs = (allocsRes.data ?? []) as unknown as ImputacionPago[];
+
+  const deQuien = new Map(invoices.map((i) => [i.id, i.supplier_id]));
+  const impagos = comprobantesImpagos(invoices, allocs, payments);
+
+  const dias = proyeccionPorDia(impagos, mes, hoy).map((d) => ({
+    ...d,
+    items: d.items.map((it) => ({
+      ...it,
+      supplierName: nombres.get(deQuien.get(it.id) ?? "") ?? "—",
+    })),
+  }));
+
+  return {
+    mes,
+    total_cents: dias.reduce((n, d) => n + d.total_cents, 0),
+    dias,
+  };
 }
