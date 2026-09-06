@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 
 import {
@@ -13,17 +13,30 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import {
+  SelectorDeMetodo,
+  metodosOfrecidos,
+} from "@/components/billing/selector-de-metodo";
 import { registrarCobranza } from "@/lib/caja/cuenta-corriente-actions";
 import type { DeudorRow } from "@/lib/caja/cuenta-corriente-queries";
 import type { Caja } from "@/lib/caja/types";
 import { formatCurrency } from "@/lib/currency";
+import { useRovingList } from "@/lib/ui/use-roving-list";
 
-const METODOS = [
-  { value: "cash", label: "Efectivo" },
-  { value: "transfer", label: "Transferencia" },
-  { value: "card_manual", label: "Tarjeta" },
-  { value: "other", label: "Otro" },
+/**
+ * Los métodos que `registrarCobranza` sabe registrar. Se listan explícitos —y
+ * no se deja pasar la lista entera— porque el límite acá lo pone el server: un
+ * método que la action no acepta sería un botón que siempre falla. Mercado Pago
+ * y «Cuenta corriente» quedan afuera solos (no se paga una deuda con otra).
+ */
+const METODOS_DE_COBRANZA = [
+  "cash",
+  "card_manual",
+  "transfer",
+  "other",
 ] as const;
+
+type MetodoDeCobranza = (typeof METODOS_DE_COBRANZA)[number];
 
 /**
  * Cobrar el saldo de una cuenta corriente — spec 141 · US4.
@@ -45,8 +58,31 @@ export function CobrarSaldoModal({
 }) {
   const [pending, startTransition] = useTransition();
   const [monto, setMonto] = useState(String(deudor.saldo_cents / 100));
-  const [metodo, setMetodo] =
-    useState<(typeof METODOS)[number]["value"]>("cash");
+  const [metodo, setMetodo] = useState<MetodoDeCobranza>("cash");
+
+  // El mismo selector de la mesa, el pedido y el mostrador (spec 157 · D1): la
+  // grilla propia que vivía acá era la cuarta copia. Con él vienen los dígitos
+  // 1-4 y las flechas de la spec 075, que esta pantalla no tenía.
+  //
+  // Lo que NO viene es el resto de `CobroForm`, y es a propósito: una cobranza
+  // no lleva propina, ni split, ni fiado, no se puede facturar —la venta ya se
+  // facturó al fiar (spec 141 · D1), emitir acá sería declararla dos veces— y
+  // **sí admite pagar de menos**, que es justo lo que la guarda de efectivo del
+  // formulario impide. Un saldo se paga de a poco: eso es lo que lo hace una
+  // cuenta corriente y no un ticket.
+  const metodos = useMemo(
+    () =>
+      metodosOfrecidos({
+        allowedMethods: [...METODOS_DE_COBRANZA],
+        mp: false,
+        cuentaCorriente: false,
+      }),
+    [],
+  );
+  const zonaMetodos = useRovingList<HTMLButtonElement>({
+    length: metodos.length,
+    columns: 2,
+  });
   const [cajaId, setCajaId] = useState(cajas[0]?.id ?? "");
   const [notas, setNotas] = useState("");
 
@@ -88,22 +124,17 @@ export function CobrarSaldoModal({
 
         <div className="mt-3 grid gap-1.5">
           <Label>Cómo paga</Label>
-          <div className="flex flex-wrap gap-1.5">
-            {METODOS.map((m) => (
-              <button
-                key={m.value}
-                type="button"
-                onClick={() => setMetodo(m.value)}
-                className={
-                  metodo === m.value
-                    ? "rounded-full bg-zinc-900 px-3 py-1.5 text-sm font-semibold text-white"
-                    : "rounded-full bg-white px-3 py-1.5 text-sm text-zinc-700 ring-1 ring-zinc-200"
-                }
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
+          <SelectorDeMetodo
+            metodos={metodos}
+            // Sin ajuste por método: lo que entra es lo que se debe. Recargarle
+            // un 10 % al que viene a saldar cambiaría la deuda al cobrarla, y el
+            // server rechaza cobrar más que el saldo.
+            methodConfigs={[]}
+            baseCents={deudor.saldo_cents}
+            value={metodo}
+            onChange={(m) => setMetodo(m as MetodoDeCobranza)}
+            zona={zonaMetodos}
+          />
         </div>
 
         {/* Sólo el efectivo pide caja: lo demás no toca el cajón, y preguntarlo

@@ -188,4 +188,6 @@ export function useRovingList<T extends HTMLElement = HTMLElement>({
   };
 }
 
-export type RovingListApi = ReturnType<typeof useRovingList>;
+export type RovingListApi<T extends HTMLElement = HTMLElement> = ReturnType<
+  typeof useRovingList<T>
+>;
