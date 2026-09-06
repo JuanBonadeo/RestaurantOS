@@ -271,7 +271,7 @@ export const TEMAS: Tema[] = [
       {
         titulo: "Sacar y meter plata",
         texto:
-          '«Sangría» saca efectivo —depósito, pago a proveedor— y el motivo tiene asterisco rojo: es obligatorio, y sin él no te deja registrar. «Ingreso» es el mismo formulario al revés, para el cambio que se repone. Escribí motivos que se entiendan dentro de un mes: «pago proveedor verdulería», no «varios».',
+          '«Sangría» saca efectivo —un depósito en el banco, el cambio que se lleva alguien— y el motivo tiene asterisco rojo: es obligatorio, y sin él no te deja registrar. «Ingreso» es el mismo formulario al revés, para el cambio que se repone. Escribí motivos que se entiendan dentro de un mes: «depósito banco viernes», no «varios». Ojo: el pago a un proveedor no es una sangría — sale de la Caja Mayor, desde Proveedores, y por eso no descuadra el arqueo del turno.',
         imagen: "/ayuda/det-caja-sangria.png",
         alt: "El formulario de sangría: monto, y motivo marcado como obligatorio con un asterisco rojo.",
       },
@@ -1321,7 +1321,7 @@ export const TEMAS: Tema[] = [
       {
         titulo: '"La sangría requiere un motivo."',
         texto:
-          "Estás sacando plata de la caja sin decir para qué. Escribí el motivo — «pago proveedor», «depósito banco» — con suficiente detalle como para entenderlo dentro de un mes.",
+          "Estás sacando plata de la caja sin decir para qué. Escribí el motivo — «depósito banco», «cambio para el bar» — con suficiente detalle como para entenderlo dentro de un mes. Si es un pago a un proveedor, no va por acá: se registra en Proveedores y sale de la Caja Mayor.",
       },
       {
         titulo: `"Tu rol permite hasta ${TOPE_DESCUENTO}" / "Excede tu autorización · pedile al dueño"`,

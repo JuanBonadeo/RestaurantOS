@@ -523,7 +523,7 @@ function CajaCard({
         open={sangriaOpen}
         onOpenChange={setSangriaOpen}
         title="Registrar sangría"
-        description="Sacar efectivo de la caja (depósito en banco, pago a proveedor, etc.)."
+        description="Sacar efectivo de la caja (depósito en banco, cambio que se lleva alguien, etc.). Los pagos a proveedor no van acá: salen de la Caja Mayor, desde Proveedores."
         requiereMotivo
         ctaLabel="Registrar sangría"
         disponibleCents={expected}

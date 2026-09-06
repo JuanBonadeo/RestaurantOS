@@ -32,7 +32,8 @@ type Props = {
   supplierName: string;
   saldoCents: number;
   impagos: ComprobanteConSaldo[];
-  cajas: { id: string; name: string }[];
+  /** spec 160 · sólo el nombre, para decir de dónde sale la plata. La caja la resuelve el server. */
+  cajaAdministrativa: { name: string } | null;
   onSuccess?: () => void;
   trigger: React.ReactElement;
 };
@@ -43,7 +44,7 @@ export function PagoDialog({
   supplierName,
   saldoCents,
   impagos,
-  cajas,
+  cajaAdministrativa,
   onSuccess,
   trigger,
 }: Props) {
@@ -53,7 +54,6 @@ export function PagoDialog({
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
   const [method, setMethod] =
     useState<(typeof SUPPLIER_PAYMENT_METHODS)[number]>("cash");
-  const [cajaId, setCajaId] = useState<string>(cajas[0]?.id ?? "");
   const [montoPesos, setMontoPesos] = useState<string>("");
   const [montoTocado, setMontoTocado] = useState(false);
 
@@ -94,7 +94,6 @@ export function PagoDialog({
         supplier_id: supplierId,
         amount_cents: amountCents,
         method,
-        caja_id: method === "cash" ? cajaId || null : null,
         invoice_ids: Array.from(seleccion),
       });
       if (!result.ok) {
@@ -226,23 +225,17 @@ export function PagoDialog({
             </div>
           </div>
 
+          {/* spec 160 · no hay nada que elegir: el efectivo sale siempre de la caja
+              administrativa. En el cajón del turno una orden de pago descuadra el
+              arqueo por su monto entero y el encargado no puede cerrar. */}
           {method === "cash" && (
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Caja *</label>
-              <select
-                className="h-9 w-full rounded-md border border-zinc-200 bg-white px-2 text-sm"
-                value={cajaId}
-                onChange={(e) => setCajaId(e.target.value)}
-              >
-                <option value="">Elegí la caja</option>
-                {cajas.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs text-zinc-500">
-                Sale como egreso de esta caja y el arqueo del turno lo descuenta.
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+              <p className="text-sm text-zinc-700">
+                Sale de{" "}
+                <strong>{cajaAdministrativa?.name ?? "la Caja Mayor"}</strong>
+              </p>
+              <p className="mt-0.5 text-xs text-zinc-500">
+                Es la caja administrativa: no entra al arqueo del turno.
               </p>
             </div>
           )}
@@ -252,7 +245,11 @@ export function PagoDialog({
           <Button
             type="button"
             onClick={submit}
-            disabled={submitting || amountCents <= 0 || (method === "cash" && !cajaId)}
+            disabled={
+              submitting ||
+              amountCents <= 0 ||
+              (method === "cash" && !cajaAdministrativa)
+            }
           >
             {submitting ? "Registrando…" : `Pagar ${formatCurrency(amountCents)}`}
           </Button>

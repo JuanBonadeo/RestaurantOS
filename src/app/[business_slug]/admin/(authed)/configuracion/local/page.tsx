@@ -82,6 +82,10 @@ export default async function ConfiguracionLocalPage({
         )
         .eq("business_id", business.id)
         .eq("is_active", true)
+        // spec 160 · esta pantalla configura la comandera fiscal de cada caja, y
+        // por la Caja Mayor no sale ninguna factura: no se cobra ahí.
+        // El cast: `is_administrative` (0067) todavía no está en `database.types.ts`.
+        .eq("is_administrative" as "is_default", false as unknown as boolean)
         .order("sort_order"),
       listPrintAgents(business_slug),
     ]);

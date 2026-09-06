@@ -56,7 +56,8 @@ export default async function MovimientosPage({
   const { from, to } = rangoDe(gran, ancla, tz);
 
   const [cajas, mozos, libro] = await Promise.all([
-    getCajasConEstado(business.id),
+    // spec 160 · el filtro del libro tiene que poder aislar la caja administrativa.
+    getCajasConEstado(business.id, true),
     getMozosByBusiness(business.id),
     getLibroDeMovimientos(business.id, {
       from,

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { ensureMozoAccess } from "@/lib/mozo/auth";
+import { canManageProveedores } from "@/lib/permissions/can";
 import {
   getCajaLiveStats,
   getMovimientosPeriodoActual,
@@ -18,13 +19,16 @@ export async function GET(req: Request) {
   const service = createSupabaseServiceClient();
   const { data: cajaRow } = await service
     .from("cajas")
-    .select("id, business_id")
+    .select("id, business_id, is_administrative")
     .eq("id", cajaId)
     .maybeSingle();
   if (!cajaRow) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
-  const businessId = (cajaRow as { business_id: string }).business_id;
+  // `is_administrative` (0067) todavía no está en `database.types.ts` — el
+  // `pnpm db:types` del repo necesita el CLI linkeado.
+  const { business_id: businessId, is_administrative: esAdministrativa } =
+    cajaRow as unknown as { business_id: string; is_administrative: boolean };
 
   const { data: bizRow } = await service
     .from("businesses")
@@ -35,10 +39,19 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
+  let ctx;
   try {
-    await ensureMozoAccess(businessId, bizRow.slug as string);
+    ctx = await ensureMozoAccess(businessId, bizRow.slug as string);
   } catch {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  // spec 160 · la caja administrativa tiene la plata de la oficina, y este
+  // endpoint toma el id del querystring: sin esto cualquier mozo la lee.
+  // (El leak general —cualquier mozo lee cualquier caja del negocio— es
+  // preexistente y tiene issue propia.)
+  if (esAdministrativa && !canManageProveedores(ctx.role)) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
   const [stats, movimientos, payments] = await Promise.all([

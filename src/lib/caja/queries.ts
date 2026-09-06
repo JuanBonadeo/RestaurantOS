@@ -55,11 +55,36 @@ const EMPTY_BY_METHOD: Record<PaymentMethod, number> = {
   cuenta_corriente: 0,
 };
 
+/**
+ * Las cajas donde se **cobra**. Es la puerta de todos los pickers: mesa, pedido,
+ * venta rápida y cobranza de cuenta corriente cuelgan de acá.
+ *
+ * spec 160 · deja afuera la caja administrativa. El filtro va en el server y no en
+ * cada `<select>` porque hay cuatro caminos que reciben un `caja_id` del cliente;
+ * esconderla en la pantalla no cierra ninguno.
+ */
 export async function getCajasForBusiness(businessId: string): Promise<Caja[]> {
   const service = db();
   const { data } = await service
     .from("cajas")
-    .select("id, business_id, name, is_active, sort_order, is_default")
+    .select("id, business_id, name, is_active, sort_order, is_default, is_administrative")
+    .eq("business_id", businessId)
+    .eq("is_active", true)
+    .eq("is_administrative", false)
+    .order("sort_order", { ascending: true })
+    .order("name", { ascending: true });
+  return (data ?? []) as Caja[];
+}
+
+/**
+ * Todas las cajas activas del negocio, administrativa incluida — sólo para el
+ * libro de movimientos y su filtro (spec 160). No usar para cobrar.
+ */
+export async function getCajasParaLibro(businessId: string): Promise<Caja[]> {
+  const service = db();
+  const { data } = await service
+    .from("cajas")
+    .select("id, business_id, name, is_active, sort_order, is_default, is_administrative")
     .eq("business_id", businessId)
     .eq("is_active", true)
     .order("sort_order", { ascending: true })
@@ -67,14 +92,37 @@ export async function getCajasForBusiness(businessId: string): Promise<Caja[]> {
   return (data ?? []) as Caja[];
 }
 
+/**
+ * La caja administrativa del negocio (spec 160), o `null` si todavía no existe.
+ * Es de donde sale el pago a proveedor — y el único lugar que la resuelve.
+ */
+export async function getCajaAdministrativa(
+  businessId: string,
+): Promise<Caja | null> {
+  const service = db();
+  const { data } = await service
+    .from("cajas")
+    .select("id, business_id, name, is_active, sort_order, is_default, is_administrative")
+    .eq("business_id", businessId)
+    .eq("is_administrative", true)
+    .maybeSingle();
+  return (data as Caja) ?? null;
+}
+
+/**
+ * Todas las cajas de turno, incluidas las pausadas — alimenta el filtro del
+ * historial de cierres. spec 160: la administrativa no corta nunca, así que
+ * filtrarla por ahí daría siempre vacío.
+ */
 export async function getAllCajasForBusiness(
   businessId: string,
 ): Promise<Caja[]> {
   const service = db();
   const { data } = await service
     .from("cajas")
-    .select("id, business_id, name, is_active, sort_order, is_default")
+    .select("id, business_id, name, is_active, sort_order, is_default, is_administrative")
     .eq("business_id", businessId)
+    .eq("is_administrative", false)
     .order("is_active", { ascending: false })
     .order("sort_order", { ascending: true })
     .order("name", { ascending: true });
@@ -111,10 +159,25 @@ async function getUltimoCorte(
   return data as CajaCorte | null;
 }
 
+/**
+ * Las cajas con su período y su último corte.
+ *
+ * spec 160 · por defecto **sin la administrativa**: alimenta el board de operación
+ * y `/admin/caja`, que son pantallas de arqueo, y esa caja no se arquea.
+ *
+ * El **libro de movimientos** pasa `incluirAdministrativa` porque es al revés: si
+ * la caja se cae del mapa, la orden de pago sale con `caja_name: "—"` y
+ * `arqueado: false` —o sea corregible y anulable para siempre— y el desplegable de
+ * filtro tampoco la lista, así que no hay forma de aislarla. El libro es el único
+ * lugar donde una OP se audita.
+ */
 export async function getCajasConEstado(
   businessId: string,
+  incluirAdministrativa = false,
 ): Promise<CajaConEstado[]> {
-  const cajas = await getCajasForBusiness(businessId);
+  const cajas = incluirAdministrativa
+    ? await getCajasParaLibro(businessId)
+    : await getCajasForBusiness(businessId);
   if (cajas.length === 0) return [];
   const service = db();
 
@@ -1031,7 +1094,9 @@ export async function getLibroDeMovimientos(
   truncado: boolean;
 }> {
   const service = db();
-  const cajas = await getCajasConEstado(businessId);
+  // spec 160 · con `true`: si la administrativa se cae del Map, la orden de pago
+  // sale con `caja_name: "—"` y `arqueado: false`, y queda corregible para siempre.
+  const cajas = await getCajasConEstado(businessId, true);
   const cajaById = new Map(cajas.map((c) => [c.id, c]));
 
   const quiereCobros = !filtros.tipo || filtros.tipo === "cobro";
@@ -1626,15 +1691,19 @@ export async function getCierreCajaData(
   const service = db();
   const { data: cajaRow } = await service
     .from("cajas")
-    .select("id, business_id, is_default")
+    .select("id, business_id, is_default, is_administrative")
     .eq("id", cajaId)
     .maybeSingle();
   if (!cajaRow) return null;
   const caja = cajaRow as {
     business_id: string;
     is_default: boolean;
+    is_administrative: boolean;
   };
   if (caja.business_id !== businessId) return null;
+  // spec 160 · sin esto la pantalla arma un arqueo para una caja que no se
+  // arquea, y recién falla al confirmar contra `cerrar_caja_tx`.
+  if (caja.is_administrative) return null;
 
   const stats = await getCajaLiveStats(cajaId, businessId);
   if (!stats) return null;

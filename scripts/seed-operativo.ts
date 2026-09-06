@@ -395,6 +395,10 @@ async function main() {
     .select("id, name")
     .eq("business_id", BIZ)
     .eq("is_active", true)
+    // spec 160 · el fallback de abajo es `cajas[0]`, y la administrativa no cobra
+    // ni se arquea: sin este filtro, un negocio sin "Caja Principal" recibiría
+    // cortes y cobros sobre la caja que por definición no los tiene.
+    .eq("is_administrative", false)
     .order("sort_order", { ascending: true });
   let cajaId = cajas?.find((c) => c.name === "Caja Principal")?.id ?? cajas?.[0]?.id;
   if (!cajaId) {

@@ -6,6 +6,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { requireMozoActionContext } from "@/lib/mozo/auth";
 import { canMakeSangria, canManageProveedores } from "@/lib/permissions/can";
+import { getCajaAdministrativa } from "@/lib/caja/queries";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
@@ -287,27 +288,33 @@ export async function registrarPagoProveedor(
   }
 
   // ── el egreso de caja, si sale efectivo ──
+  //
+  // spec 160 · la caja la resuelve el SERVER, no la elige el usuario. El egreso va
+  // siempre a la caja administrativa: en el cajón del turno una orden de pago
+  // descuadra el arqueo por su monto entero y el encargado no puede cerrar. En
+  // MaxiRest ese escape existe y se usó 2 veces en 8 años; acá se cierra.
   let cajaMovimientoId: string | null = null;
+  let cajaAdminId: string | null = null;
 
-  if (data.method === "cash" && data.caja_id) {
-    const { data: caja } = await service
-      .from("cajas")
-      .select("id, business_id, is_active")
-      .eq("id", data.caja_id)
-      .maybeSingle();
-
-    const cajaRow = caja as { id: string; business_id: string; is_active: boolean } | null;
-    if (!cajaRow || cajaRow.business_id !== business.id) {
-      return actionError("Caja no encontrada.");
+  if (data.method === "cash") {
+    const cajaAdmin = await getCajaAdministrativa(business.id);
+    if (!cajaAdmin) {
+      return actionError(
+        "Este negocio todavía no tiene Caja Mayor. Avisale al equipo para que la cree.",
+      );
     }
-    if (!cajaRow.is_active) return actionError("La caja está inactiva.");
+    if (!cajaAdmin.is_active) {
+      return actionError("La Caja Mayor está inactiva.");
+    }
+    cajaAdminId = cajaAdmin.id;
 
     const { data: mov, error: movErr } = await service
       .from("caja_movimientos")
       .insert({
-        caja_id: data.caja_id,
+        caja_id: cajaAdmin.id,
         business_id: business.id,
-        // `sangria` y no un kind propio: el arqueo resta filtrando este valor.
+        // `sangria` y no un kind propio: el arqueo resta filtrando este valor
+        // literal (158 · D5). Lo que cambia en la 160 no es el kind, es la caja.
         kind: "sangria",
         amount_cents: data.amount_cents,
         reason: `Pago a proveedor · ${(supplier as { name: string }).name}`,
@@ -328,7 +335,7 @@ export async function registrarPagoProveedor(
       supplier_id: data.supplier_id,
       amount_cents: data.amount_cents,
       method: data.method,
-      caja_id: data.caja_id ?? null,
+      caja_id: cajaAdminId,
       caja_movimiento_id: cajaMovimientoId,
       paid_at: data.paid_at ?? hoyAR(),
       notes: data.notes ?? null,
@@ -373,7 +380,9 @@ export async function registrarPagoProveedor(
   }
 
   revalidatePath(`/${slug}/admin/proveedores`);
-  revalidatePath(`/${slug}/admin/operacion`);
+  // spec 160 · el egreso ya no toca el board del turno; el lugar donde se audita
+  // es el libro, que es justamente adonde manda el error de `anularPagoProveedor`.
+  revalidatePath(`/${slug}/admin/caja/movimientos`);
   return actionOk({
     id: paymentId,
     imputado_cents: data.amount_cents - aCuenta,
@@ -460,6 +469,6 @@ export async function anularPagoProveedor(
   }
 
   revalidatePath(`/${slug}/admin/proveedores`);
-  revalidatePath(`/${slug}/admin/operacion`);
+  revalidatePath(`/${slug}/admin/caja/movimientos`);
   return actionOk(undefined);
 }

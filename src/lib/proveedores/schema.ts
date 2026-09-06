@@ -87,24 +87,20 @@ export const SUPPLIER_PAYMENT_METHODS = [
   "other",
 ] as const;
 
-export const SupplierPaymentInput = z
-  .object({
-    supplier_id: z.string().uuid("Proveedor inválido."),
-    amount_cents: z.number().int().positive("El monto debe ser mayor a 0."),
-    method: z.enum(SUPPLIER_PAYMENT_METHODS),
-    /** Obligatoria si el medio es efectivo: de ahí sale la plata. */
-    caja_id: z.string().uuid().nullable().optional(),
-    paid_at: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida.").optional(),
-    notes: z.string().max(500).nullable().optional(),
-    /** Comprobantes a cancelar. Vacío = pago a cuenta. */
-    invoice_ids: z.array(z.string().uuid()).max(200).default([]),
-  })
-  // El mismo invariante que el CHECK de la base: un pago en efectivo sin caja no
-  // se puede arquear, y uno que no es en efectivo no tiene por qué tener caja.
-  .refine((v) => (v.method === "cash") === Boolean(v.caja_id), {
-    message: "El pago en efectivo necesita una caja; los otros medios, no.",
-    path: ["caja_id"],
-  });
+export const SupplierPaymentInput = z.object({
+  supplier_id: z.string().uuid("Proveedor inválido."),
+  amount_cents: z.number().int().positive("El monto debe ser mayor a 0."),
+  method: z.enum(SUPPLIER_PAYMENT_METHODS),
+  paid_at: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida.").optional(),
+  notes: z.string().max(500).nullable().optional(),
+  /** Comprobantes a cancelar. Vacío = pago a cuenta. */
+  invoice_ids: z.array(z.string().uuid()).max(200).default([]),
+});
+// spec 160 · `caja_id` ya NO viaja en el input: el efectivo sale siempre de la
+// caja administrativa y el server la resuelve. Dejarlo acá sería volver a
+// ofrecerle al cliente la decisión que la spec vino a sacarle — el CHECK
+// `supplier_payments_caja_coherente` de la base sigue exigiendo que la fila la
+// tenga, y la tiene: la que puso el server.
 export type SupplierPaymentInput = z.infer<typeof SupplierPaymentInput>;
 
 export const AnularInput = z.object({

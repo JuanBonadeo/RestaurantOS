@@ -4,7 +4,7 @@ import { PageShell } from "@/components/admin/shell/page-shell";
 import { SuppliersShell } from "@/components/admin/proveedores/suppliers-shell";
 import { getSuppliers, getIngredientsForLinking } from "@/lib/proveedores/queries";
 import { getExpenseConcepts } from "@/lib/proveedores/cuenta-corriente-queries";
-import { getCajasForBusiness } from "@/lib/caja/queries";
+import { getCajaAdministrativa } from "@/lib/caja/queries";
 import { getBusiness } from "@/lib/tenant";
 
 export default async function ProveedoresPage({
@@ -16,11 +16,11 @@ export default async function ProveedoresPage({
   const business = await getBusiness(business_slug);
   if (!business) notFound();
 
-  const [suppliers, ingredientOptions, concepts, cajas] = await Promise.all([
+  const [suppliers, ingredientOptions, concepts, cajaAdministrativa] = await Promise.all([
     getSuppliers(business.id),
     getIngredientsForLinking(business.id),
     getExpenseConcepts(business.id, true),
-    getCajasForBusiness(business.id),
+    getCajaAdministrativa(business.id),
   ]);
 
   return (
@@ -31,7 +31,7 @@ export default async function ProveedoresPage({
         suppliers={suppliers}
         ingredientOptions={ingredientOptions}
         concepts={concepts}
-        cajas={cajas.map((c) => ({ id: c.id, name: c.name }))}
+        cajaAdministrativa={cajaAdministrativa && { name: cajaAdministrativa.name }}
       />
     </PageShell>
   );

@@ -51,10 +51,11 @@ async function loadCajaForBusiness(
   name: string;
   is_active: boolean;
   is_default: boolean;
+  is_administrative: boolean;
 } | null> {
   const { data } = await service
     .from("cajas")
-    .select("id, business_id, name, is_active, is_default")
+    .select("id, business_id, name, is_active, is_default, is_administrative")
     .eq("id", cajaId)
     .maybeSingle();
   if (!data) return null;
@@ -64,6 +65,7 @@ async function loadCajaForBusiness(
     name: string;
     is_active: boolean;
     is_default: boolean;
+    is_administrative: boolean;
   };
   if (row.business_id !== businessId) return null;
   return {
@@ -71,8 +73,16 @@ async function loadCajaForBusiness(
     name: row.name,
     is_active: row.is_active,
     is_default: row.is_default,
+    is_administrative: row.is_administrative,
   };
 }
+
+/**
+ * spec 160 · el mensaje único para cuando alguien apunta a la caja mayor desde una
+ * pantalla de turno. Se comparte para que diga lo mismo en los cuatro caminos.
+ */
+const NO_ES_CAJA_DE_TURNO =
+  "La Caja Mayor no es una caja de turno: no cobra ni se arquea. Los pagos a proveedor salen de ahí desde Proveedores.";
 
 // ── CRUD de cajas físicas ──────────────────────────────────────
 
@@ -186,6 +196,8 @@ export async function setCajaActive(
 
   const caja = await loadCajaForBusiness(service, cajaId, business.id);
   if (!caja) return actionError("Caja no encontrada.");
+  // spec 160 · desactivarla dejaría al pago a proveedor sin destino.
+  if (caja.is_administrative) return actionError(NO_ES_CAJA_DE_TURNO);
 
   const { error } = await service
     .from("cajas")
@@ -226,6 +238,9 @@ export async function setCajaDefault(
 
   const caja = await loadCajaForBusiness(service, cajaId, business.id);
   if (!caja) return actionError("Caja no encontrada.");
+  // spec 160 · la default recibe los cobros online, y además el CHECK de la base
+  // lo prohíbe: sin eso, las facturas fiscales saldrían por su impresora.
+  if (caja.is_administrative) return actionError(NO_ES_CAJA_DE_TURNO);
   if (!caja.is_active) {
     return actionError("Una caja inactiva no puede ser la caja por defecto.");
   }
@@ -304,6 +319,10 @@ export async function cerrarCaja(input: {
 
   const caja = await loadCajaForBusiness(service, input.cajaId, business.id);
   if (!caja) return actionError("Caja no encontrada.");
+  // spec 160 · la caja administrativa no se arquea. `cerrar_caja_tx` también lo
+  // rechaza (es la que imprime el ticket y barre el salón); acá se corta antes
+  // para no calcular un arqueo que no existe.
+  if (caja.is_administrative) return actionError(NO_ES_CAJA_DE_TURNO);
   if (!caja.is_active) return actionError("Caja inactiva.");
 
   const stats = await getCajaLiveStats(input.cajaId, business.id);
@@ -441,6 +460,12 @@ export async function cerrarCaja(input: {
       return actionError(
         "Se abrió una cuenta mientras cerrabas. Revisá el salón y volvé a intentar.",
       );
+    }
+    // spec 160 · la RPC es la última línea: la UI ya no ofrece cerrar la caja
+    // administrativa, pero `resolveCierrePrinter` no mira `cajas`, así que un
+    // cierre que llegara por otro camino imprimiría el ticket igual.
+    if (error.message.includes("CAJA_ADMINISTRATIVA_NO_SE_ARQUEA")) {
+      return actionError(NO_ES_CAJA_DE_TURNO);
     }
     if (error.message.includes("UNRENDERED_MOZOS")) {
       return actionError(
@@ -762,6 +787,8 @@ export async function asignarCajaUsuario(
 
   const caja = await loadCajaForBusiness(service, cajaId, business.id);
   if (!caja) return actionError("Caja no encontrada en este negocio.");
+  // spec 160 · a una caja que no cobra no se le asignan mozos.
+  if (caja.is_administrative) return actionError(NO_ES_CAJA_DE_TURNO);
 
   const { data: bu } = await service
     .from("business_users")

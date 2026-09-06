@@ -18,7 +18,7 @@ type Props = {
   suppliers: SupplierWithStats[];
   ingredientOptions: { id: string; name: string; unit: string }[];
   concepts: ConceptOption[];
-  cajas: { id: string; name: string }[];
+  cajaAdministrativa: { name: string } | null;
 };
 
 export function SuppliersList({
@@ -27,7 +27,7 @@ export function SuppliersList({
   suppliers,
   ingredientOptions,
   concepts,
-  cajas,
+  cajaAdministrativa,
 }: Props) {
   const [search, setSearch] = useState("");
   const [filterActive, setFilterActive] = useState<"all" | "active" | "inactive">(
@@ -63,7 +63,7 @@ export function SuppliersList({
         supplier={selected}
         ingredientOptions={ingredientOptions}
         concepts={concepts}
-        cajas={cajas}
+        cajaAdministrativa={cajaAdministrativa}
         onBack={() => setSelectedId(null)}
       />
     );

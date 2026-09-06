@@ -116,6 +116,11 @@ async function loadSplit(
   return row;
 }
 
+/**
+ * spec 160 · la guarda va acá y no en el `<select>`: este camino recibe el
+ * `caja_id` del cliente, así que esconder la caja administrativa en la pantalla
+ * no impide cobrarle por POST directo. En la caja mayor no se cobra.
+ */
 async function loadCaja(
   service: GenericClient,
   cajaId: string,
@@ -123,12 +128,18 @@ async function loadCaja(
 ): Promise<{ id: string; is_active: boolean } | null> {
   const { data } = await service
     .from("cajas")
-    .select("id, business_id, is_active")
+    .select("id, business_id, is_active, is_administrative")
     .eq("id", cajaId)
     .maybeSingle();
   if (!data) return null;
-  const row = data as { id: string; business_id: string; is_active: boolean };
+  const row = data as {
+    id: string;
+    business_id: string;
+    is_active: boolean;
+    is_administrative: boolean;
+  };
   if (row.business_id !== businessId) return null;
+  if (row.is_administrative) return null;
   return { id: row.id, is_active: row.is_active };
 }
 

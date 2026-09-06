@@ -143,18 +143,25 @@ export async function registrarCobranza(input: {
     }
     const { data: caja } = await service
       .from("cajas")
-      .select("id, business_id, is_active")
+      .select("id, business_id, is_active, is_administrative")
       .eq("id", input.cajaId)
       .maybeSingle();
     const cajaRow = caja as {
       id: string;
       business_id: string;
       is_active: boolean;
+      is_administrative: boolean;
     } | null;
     if (!cajaRow || cajaRow.business_id !== business.id) {
       return actionError("Caja no encontrada.");
     }
     if (!cajaRow.is_active) return actionError("La caja está inactiva.");
+    // spec 160 · el cliente paga en el mostrador: esta plata entra al cajón del
+    // turno, no a la caja administrativa. La guarda va acá porque el `cajaId`
+    // viene del cliente.
+    if (cajaRow.is_administrative) {
+      return actionError("La cobranza entra a una caja de turno, no a la Caja Mayor.");
+    }
 
     const { data: mov, error: movErr } = await service
       .from("caja_movimientos")

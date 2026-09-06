@@ -138,10 +138,13 @@ export async function ensureQaBusiness(supabase: Client): Promise<QaFixture> {
     fp = created;
   }
 
+  // spec 160 · `.limit(1)` sin `.order()` puede devolver la caja administrativa,
+  // que no cobra: los tests de cobro fallarían con un rechazo del server.
   let { data: caja } = await supabase
     .from("cajas")
     .select("id")
     .eq("business_id", businessId)
+    .eq("is_administrative", false)
     .limit(1)
     .maybeSingle();
   if (!caja) {

@@ -102,6 +102,7 @@ function init(cuenta: CuentaState): IniciarCobroResult {
         is_active: true,
         sort_order: 0,
         is_default: true,
+        is_administrative: false,
       },
     ],
     methodConfigs: [],

@@ -204,6 +204,21 @@ export async function corregirCobro(
   // Los hechos se buscan acá; la decisión la toma `evaluarGuardas` (puro).
   const cambiaCaja =
     patch.caja_id !== undefined && patch.caja_id !== pago.caja_id;
+
+  // spec 160 · mover un cobro a la caja administrativa lo saca del arqueo del
+  // turno sin dejar rastro en ninguna pantalla de caja. Es el cuarto camino que
+  // recibe un `caja_id` del cliente, y el menos evidente.
+  if (cambiaCaja) {
+    const { data: destino } = await service
+      .from("cajas")
+      .select("is_administrative")
+      .eq("id", patch.caja_id as string)
+      .eq("business_id", business.id)
+      .maybeSingle();
+    if ((destino as { is_administrative: boolean } | null)?.is_administrative) {
+      return actionError("La Caja Mayor no cobra: no se puede mover un cobro ahí.");
+    }
+  }
   const cambiaMozo =
     patch.attributed_mozo_id !== undefined &&
     patch.attributed_mozo_id !== pago.attributed_mozo_id;

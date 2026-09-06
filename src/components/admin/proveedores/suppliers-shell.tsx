@@ -16,7 +16,7 @@ type Props = {
   suppliers: SupplierWithStats[];
   ingredientOptions: { id: string; name: string; unit: string }[];
   concepts: ConceptOption[];
-  cajas: { id: string; name: string }[];
+  cajaAdministrativa: { name: string } | null;
 };
 
 type Tab = "lista" | "vencimientos" | "proyeccion" | "estadistica";
@@ -27,7 +27,7 @@ export function SuppliersShell({
   suppliers,
   ingredientOptions,
   concepts,
-  cajas,
+  cajaAdministrativa,
 }: Props) {
   const [tab, setTab] = useState<Tab>("lista");
 
@@ -70,7 +70,7 @@ export function SuppliersShell({
           suppliers={suppliers}
           ingredientOptions={ingredientOptions}
           concepts={concepts}
-          cajas={cajas}
+          cajaAdministrativa={cajaAdministrativa}
         />
       ) : tab === "vencimientos" ? (
         <VencimientosView businessId={businessId} />

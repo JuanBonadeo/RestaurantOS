@@ -6,6 +6,12 @@ export type Caja = {
   sort_order: number;
   /** Dónde caen los cobros sin cajero (pago online). Máx 1 por negocio. */
   is_default: boolean;
+  /**
+   * Caja mayor (spec 160): **no se arquea y no cobra**. De acá salen los pagos a
+   * proveedor, para que una orden de pago no descuadre el cajón del turno.
+   * Máx 1 por negocio, y nunca puede ser la default.
+   */
+  is_administrative: boolean;
 };
 
 export type CajaCorte = {

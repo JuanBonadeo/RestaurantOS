@@ -32,7 +32,7 @@ type Props = {
   supplier: SupplierWithStats;
   ingredientOptions: { id: string; name: string; unit: string }[];
   concepts: ConceptOption[];
-  cajas: { id: string; name: string }[];
+  cajaAdministrativa: { name: string } | null;
   onBack: () => void;
 };
 
@@ -42,7 +42,7 @@ export function SupplierDetail({
   supplier,
   ingredientOptions,
   concepts,
-  cajas,
+  cajaAdministrativa,
   onBack,
 }: Props) {
   const router = useRouter();
@@ -145,7 +145,7 @@ export function SupplierDetail({
           supplierName={supplier.name}
           saldoCents={saldo}
           impagos={impagos}
-          cajas={cajas}
+          cajaAdministrativa={cajaAdministrativa}
           onSuccess={refreshData}
           trigger={
             <Button size="sm">

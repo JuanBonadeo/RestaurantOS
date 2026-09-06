@@ -1066,16 +1066,27 @@ async function fase11_daily_menus(businessId: string) {
 async function fase12_cajas(businessId: string) {
   header("FASE 12 — Cajas");
 
+  // spec 160 · la Caja Mayor va acá y no sólo en el trigger de la 0067: este
+  // script hace `del("cajas")` antes de correr, y el trigger es `after insert on
+  // businesses` — con el negocio ya creado no vuelve a dispararse. Sin esta fila,
+  // después del primer reseed el pago a proveedor se queda sin caja de dónde salir.
   const cajas = [
-    { name: "Caja Principal", sort_order: 0 },
-    { name: "Caja Bar", sort_order: 1 },
+    { name: "Caja Principal", sort_order: 0, is_administrative: false },
+    { name: "Caja Bar", sort_order: 1, is_administrative: false },
+    { name: "Caja Mayor", sort_order: 1000, is_administrative: true },
   ];
 
   for (const c of cajas) {
     await rpc(
       () =>
         sb.from("cajas").upsert(
-          { business_id: businessId, name: c.name, sort_order: c.sort_order, is_active: true },
+          {
+            business_id: businessId,
+            name: c.name,
+            sort_order: c.sort_order,
+            is_active: true,
+            is_administrative: c.is_administrative,
+          },
           { onConflict: "business_id,name" },
         ),
       `upsert caja ${c.name}`,

@@ -103,7 +103,10 @@ async function main() {
   const { data: cajas } = await sb
     .from("cajas")
     .select("id, name, is_default")
-    .eq("business_id", BIZ);
+    .eq("business_id", BIZ)
+    .eq("is_active", true)
+    // spec 160 · idem seed-operativo: el fallback es `cajas[0]`.
+    .eq("is_administrative", false);
   const cajaPrincipal = (cajas ?? []).find((c) => c.is_default) ?? cajas?.[0];
 
   const nuevoPedido = async (def: {
