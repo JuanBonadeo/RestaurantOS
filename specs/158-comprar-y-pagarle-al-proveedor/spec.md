@@ -178,11 +178,26 @@ entrar por otra pantalla.
 - **Órdenes de compra, listas de precios por proveedor, centros de gasto.** Las
   tres tablas están **en 0** en el Golf después de 8 años. Construirlas sería
   copiar el menú de MaxiRest, no su uso.
-- **Detalle por insumo que mueva stock y actualice el precio del insumo.** Es el
-  64% de los comprobantes del Golf y es la pieza más valiosa que queda afuera —
-  pero engancha con el costeo de recetas de la
-  [**spec 10**](../../openspec/changes/10-stock-y-costeo/), que todavía no cerró.
-  El `expense_concept_id` de esta spec es el gancho por el que va a entrar.
+- **Detalle por insumo que mueva stock y actualice el precio del insumo.** Es la
+  pieza más valiosa que queda afuera. El `expense_concept_id` de esta spec es el
+  gancho por el que va a entrar.
+
+  > **Corregido 2026-09-05 (relevamiento del gap):** acá decía «es el 64% de los
+  > comprobantes del Golf» y **el número estaba mal** — ese 64% (en rigor 80,8%)
+  > son comprobantes con *cualquier* línea, y la mayoría son líneas de concepto de
+  > gasto, que es justo lo que esta spec implementó. Con detalle **por insumo real**
+  > (`mxitc.cod_ins > 0`) son **366 comprobantes**: 242/3.677 en 2025 (6,6%) y
+  > 124/1.502 en 2026 (8,3%).
+  >
+  > Lo que el número corregido **no** dice es que sea marginal: **no hay una sola
+  > línea con insumo antes del 2025-09-10**, y desde ahí corren 25-45 comprobantes
+  > por mes sin parar hasta el último día del backup, sobre 247 insumos. El Golf
+  > empezó a itemizar hace un año, justo lo que va a receta. Es una práctica que
+  > arranca, no un resto legacy.
+  >
+  > También cayó la dependencia declarada: **la spec 10 cerró** (issue #10, commit
+  > `8548e46`, 2026-06-14) y `getCosteoOverview` ya está cableado. Esto quedó
+  > colgado por inercia, no por bloqueo.
 - **Neto / IVA por tasa / percepciones / impuestos internos.** Es el subdiario IVA
   compras: contabilidad, no operación, y nadie lo pidió. Con el 75% de los
   comprobantes sin IVA discriminado, agregarlo ahora sería seis columnas vacías.
