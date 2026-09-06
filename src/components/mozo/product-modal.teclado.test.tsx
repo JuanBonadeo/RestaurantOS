@@ -34,9 +34,30 @@ const producto = {
       max_selection: 1,
       sort_order: 0,
       modifiers: [
-        { id: "m1", group_id: "g1", name: "Jugoso", price_delta_cents: 0, is_available: true, sort_order: 0 },
-        { id: "m2", group_id: "g1", name: "A punto", price_delta_cents: 0, is_available: true, sort_order: 1 },
-        { id: "m3", group_id: "g1", name: "Cocido", price_delta_cents: 0, is_available: true, sort_order: 2 },
+        {
+          id: "m1",
+          group_id: "g1",
+          name: "Jugoso",
+          price_delta_cents: 0,
+          is_available: true,
+          sort_order: 0,
+        },
+        {
+          id: "m2",
+          group_id: "g1",
+          name: "A punto",
+          price_delta_cents: 0,
+          is_available: true,
+          sort_order: 1,
+        },
+        {
+          id: "m3",
+          group_id: "g1",
+          name: "Cocido",
+          price_delta_cents: 0,
+          is_available: true,
+          sort_order: 2,
+        },
       ],
     },
     {
@@ -47,8 +68,22 @@ const producto = {
       max_selection: 2,
       sort_order: 1,
       modifiers: [
-        { id: "m4", group_id: "g2", name: "Papas", price_delta_cents: 500, is_available: true, sort_order: 0 },
-        { id: "m5", group_id: "g2", name: "Ensalada", price_delta_cents: 500, is_available: true, sort_order: 1 },
+        {
+          id: "m4",
+          group_id: "g2",
+          name: "Papas",
+          price_delta_cents: 500,
+          is_available: true,
+          sort_order: 0,
+        },
+        {
+          id: "m5",
+          group_id: "g2",
+          name: "Ensalada",
+          price_delta_cents: 500,
+          is_available: true,
+          sort_order: 1,
+        },
       ],
     },
   ],
@@ -103,7 +138,9 @@ describe("ProductModal · teclado de los modificadores (spec 113)", () => {
     abrir();
     await new Promise((r) => setTimeout(r, 0));
 
-    await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}");
+    await user.keyboard(
+      "{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}",
+    );
     expect(screen.getByRole("button", { name: /Agregar/i })).toHaveFocus();
   });
 
@@ -132,5 +169,90 @@ describe("ProductModal · teclado de los modificadores (spec 113)", () => {
     abrir();
     expect(opcion("Jugoso")).toHaveAttribute("role", "radio");
     expect(opcion("Papas")).toHaveAttribute("role", "checkbox");
+  });
+});
+
+/**
+ * El segundo Enter sigue — la misma regla que el asistente del menú del día
+ * (spec 118), que acá faltaba.
+ *
+ * Y acá pesaba más que allá, por un detalle que hacía el bug invisible: los
+ * grupos obligatorios de una sola opción abren con la primera **preelegida**
+ * (`initialSelection`). O sea que el modal ponía el foco sobre algo ya marcado,
+ * y el primer Enter —el que el que carga cree que elige— lo **desmarcaba**. El
+ * segundo lo volvía a marcar. Con el teclado nunca se llegaba a «Agregar», y en
+ * el camino quedaba una comanda sin punto de cocción.
+ */
+describe("ProductModal · el segundo Enter sigue, no desmarca (spec 118)", () => {
+  it("abre con la primera opción del grupo obligatorio ya elegida", async () => {
+    abrir();
+    await new Promise((r) => setTimeout(r, 0));
+    // El detalle que hacía invisible el bug: el foco arranca sobre algo marcado.
+    expect(opcion("Jugoso")).toHaveAttribute("aria-checked", "true");
+    expect(opcion("Jugoso")).toHaveFocus();
+  });
+
+  it("Enter sobre lo ya elegido pasa al grupo siguiente sin desmarcarlo", async () => {
+    const user = userEvent.setup();
+    abrir();
+    await new Promise((r) => setTimeout(r, 0));
+
+    await user.keyboard("{Enter}");
+    expect(opcion("Jugoso")).toHaveAttribute("aria-checked", "true");
+    expect(opcion("Papas")).toHaveFocus();
+  });
+
+  it("la cadena entera: un Enter por decisión, y el último agrega", async () => {
+    const user = userEvent.setup();
+    const onAdd = abrir();
+    await new Promise((r) => setTimeout(r, 0));
+
+    // El punto ya viene elegido → seguir. La guarnición no → elegir, y seguir.
+    await user.keyboard("{Enter}{Enter}{Enter}");
+    expect(screen.getByRole("button", { name: /Agregar/i })).toHaveFocus();
+    // Seguir nunca da de alta por su cuenta: eso lo hace el Enter de «Agregar».
+    expect(onAdd).not.toHaveBeenCalled();
+
+    await user.keyboard("{Enter}");
+    expect(onAdd).toHaveBeenCalledTimes(1);
+    expect(
+      onAdd.mock.calls[0][0].modifiers.map((m: { id: string }) => m.id),
+    ).toEqual(["m1", "m4"]);
+  });
+
+  it("en un grupo de varias, ↓ y Enter suman la segunda sin salirse", async () => {
+    const user = userEvent.setup();
+    abrir();
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Seguir del punto, elegir «Papas».
+    await user.keyboard("{Enter}{Enter}");
+    expect(opcion("Papas")).toHaveAttribute("aria-checked", "true");
+
+    // Bajar a «Ensalada» y elegirla: sigue siendo elegir, no seguir.
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(opcion("Ensalada")).toHaveAttribute("aria-checked", "true");
+    expect(opcion("Papas")).toHaveAttribute("aria-checked", "true");
+    expect(opcion("Ensalada")).toHaveFocus();
+  });
+
+  it("elegir otra del mismo grupo la marca y NO avanza: seguir es el Enter siguiente", async () => {
+    const user = userEvent.setup();
+    abrir();
+    await new Promise((r) => setTimeout(r, 0));
+
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(opcion("A punto")).toHaveAttribute("aria-checked", "true");
+    expect(opcion("Jugoso")).toHaveAttribute("aria-checked", "false");
+    expect(opcion("A punto")).toHaveFocus();
+  });
+
+  it("para desmarcar quedan el dígito y el click, como en el asistente", async () => {
+    const user = userEvent.setup();
+    abrir();
+    await new Promise((r) => setTimeout(r, 0));
+
+    await user.keyboard("1");
+    expect(opcion("Jugoso")).toHaveAttribute("aria-checked", "false");
   });
 });
