@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 import { PageHeader, PageShell } from "@/components/admin/shell/page-shell";
 import { ensureAdminAccess, canManageBusiness } from "@/lib/admin/context";
@@ -19,7 +19,13 @@ export default async function StockConfigPage({
   if (!business) notFound();
 
   const ctx = await ensureAdminAccess(business.id, business_slug);
-  void canManageBusiness(ctx);
+  // Spec 167 — acá decía `void canManageBusiness(ctx)`: llamaba a la guarda y
+  // tiraba el resultado, así que parecía defendida y no defendía nada. Un mozo
+  // entraba tipeando la URL (probado). El gate de la sección vive ahora en
+  // `stock/layout.tsx`; esto es la capa de adentro, que sí mira lo que pregunta.
+  if (!canManageBusiness(ctx)) {
+    redirect(`/${business_slug}/admin`);
+  }
 
   const products = await getAllProductsForConfig(business.id);
 
