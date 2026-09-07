@@ -4,9 +4,10 @@ import { PageShell } from "@/components/admin/shell/page-shell";
 import { SuppliersShell } from "@/components/admin/proveedores/suppliers-shell";
 import { ensureAdminAccess } from "@/lib/admin/context";
 import { canSee } from "@/lib/permissions/sections";
+import { canMakeSangria } from "@/lib/permissions/can";
 import { getSuppliers, getIngredientsForLinking } from "@/lib/proveedores/queries";
 import { getExpenseConcepts } from "@/lib/proveedores/cuenta-corriente-queries";
-import { getCajaAdministrativa } from "@/lib/caja/queries";
+import { getCajaAdministrativa, getSaldoCajaAdministrativa } from "@/lib/caja/queries";
 import { getBusiness } from "@/lib/tenant";
 
 export default async function ProveedoresPage({
@@ -31,13 +32,17 @@ export default async function ProveedoresPage({
     redirect(`/${business_slug}/admin`);
   }
 
-  const [suppliers, ingredientOptions, concepts, cajaAdministrativa] = await Promise.all([
+  const [suppliers, ingredientOptions, concepts, cajaAdministrativa, saldoCajaMayor] =
+    await Promise.all([
     getSuppliers(business.id),
     getIngredientsForLinking(business.id),
     // Todos, no sólo los activos: el ABM de la 162 necesita ver los apagados,
     // y el selector de compra filtra en el cliente.
     getExpenseConcepts(business.id),
     getCajaAdministrativa(business.id),
+    // spec 168 · por RPC: esta caja no corta nunca, y leer sus movimientos por
+    // PostgREST los truncaría en 1.000 en silencio.
+    getSaldoCajaAdministrativa(business.id),
   ]);
 
   return (
@@ -49,6 +54,8 @@ export default async function ProveedoresPage({
         ingredientOptions={ingredientOptions}
         concepts={concepts}
         cajaAdministrativa={cajaAdministrativa && { name: cajaAdministrativa.name }}
+        saldoCajaMayor={saldoCajaMayor}
+        puedeFondear={(ctx.role != null && canMakeSangria(ctx.role)) || ctx.isPlatformAdmin}
       />
     </PageShell>
   );

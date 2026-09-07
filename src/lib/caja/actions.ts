@@ -81,6 +81,24 @@ async function loadCajaForBusiness(
  * spec 160 · el mensaje único para cuando alguien apunta a la caja mayor desde una
  * pantalla de turno. Se comparte para que diga lo mismo en los cuatro caminos.
  */
+/**
+ * spec 168 · D5 — un movimiento sobre la caja administrativa no se ve en el board
+ * del turno: se ve en Proveedores (la tarjeta del saldo) y en el libro. Revalidar
+ * sólo `/admin/operacion` dejaba las dos pantallas que sí lo muestran con el
+ * número viejo.
+ */
+function revalidarMovimiento(
+  businessSlug: string,
+  esAdministrativa: boolean,
+): void {
+  if (esAdministrativa) {
+    revalidatePath(`/${businessSlug}/admin/proveedores`);
+    revalidatePath(`/${businessSlug}/admin/caja/movimientos`);
+    return;
+  }
+  revalidatePath(`/${businessSlug}/admin/operacion`);
+}
+
 const NO_ES_CAJA_DE_TURNO =
   "La Caja Mayor no es una caja de turno: no cobra ni se arquea. Los pagos a proveedor salen de ahí desde Proveedores.";
 
@@ -566,7 +584,7 @@ export async function registrarSangria(
   });
   if (error) return actionError(`No se pudo registrar la sangría: ${error.message}`);
 
-  revalidatePath(`/${businessSlug}/admin/operacion`);
+  revalidarMovimiento(businessSlug, caja.is_administrative);
   return actionOk(undefined);
 }
 
@@ -604,7 +622,7 @@ export async function registrarIngreso(
   });
   if (error) return actionError(`No se pudo registrar el ingreso: ${error.message}`);
 
-  revalidatePath(`/${businessSlug}/admin/operacion`);
+  revalidarMovimiento(businessSlug, caja.is_administrative);
   return actionOk(undefined);
 }
 

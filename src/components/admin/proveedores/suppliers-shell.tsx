@@ -11,6 +11,8 @@ import { ProyeccionView } from "./proyeccion-view";
 import { ConceptosView, type ConceptoRow } from "./conceptos-view";
 import type { ConceptOption } from "./invoice-dialog";
 import type { IngredientOption } from "@/lib/proveedores/queries";
+import type { SaldoCajaAdministrativa } from "@/lib/caja/queries";
+import { CajaMayorCard } from "./caja-mayor-card";
 
 const TAB_LABELS: Record<Tab, string> = {
   lista: "Lista",
@@ -28,6 +30,9 @@ type Props = {
   /** Todos, activos e inactivos: el selector de compra filtra, el ABM los muestra. */
   concepts: ConceptoRow[];
   cajaAdministrativa: { name: string } | null;
+  /** spec 168 · el saldo de la Caja Mayor, para la tarjeta de arriba. */
+  saldoCajaMayor: SaldoCajaAdministrativa | null;
+  puedeFondear: boolean;
 };
 
 type Tab = "lista" | "vencimientos" | "proyeccion" | "estadistica" | "conceptos";
@@ -39,6 +44,8 @@ export function SuppliersShell({
   ingredientOptions,
   concepts,
   cajaAdministrativa,
+  saldoCajaMayor,
+  puedeFondear,
 }: Props) {
   const [tab, setTab] = useState<Tab>("lista");
 
@@ -67,6 +74,10 @@ export function SuppliersShell({
           ))}
         </div>
       </div>
+
+      {/* spec 168 · la plata con la que se les paga, antes que la lista de a
+          quién. Es lo primero que el encargado necesita saber. */}
+      <CajaMayorCard slug={slug} saldo={saldoCajaMayor} puedeFondear={puedeFondear} />
 
       {tab === "lista" ? (
         <SuppliersList

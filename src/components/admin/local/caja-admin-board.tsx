@@ -23,6 +23,7 @@ import {
 } from "@/components/admin/local/caja-metricas";
 import { CobrosPorOrigen } from "@/components/admin/local/cobros-por-origen";
 import { SegmentedSelector } from "@/components/admin/local/segmented-selector";
+import { MovimientoModal } from "@/components/admin/local/movimiento-modal";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -681,95 +682,6 @@ function CobroRow({ payment, href }: { payment: CajaPayment; href: string }) {
 
 // ── Modales ──────────────────────────────────────────────────────
 
-function MovimientoModal({
-  open,
-  onOpenChange,
-  title,
-  description,
-  requiereMotivo,
-  ctaLabel,
-  disponibleCents,
-  onSubmit,
-}: {
-  open: boolean;
-  onOpenChange: (o: boolean) => void;
-  title: string;
-  description: string;
-  requiereMotivo: boolean;
-  ctaLabel: string;
-  /**
-   * Efectivo que la caja debería tener ahora. Sólo lo pasa la sangría: sacar
-   * más de lo que hay no es una operación, es un cero de más (issue #188 —
-   * $100.000 sobre una caja de $55.800 entraban sin chistar y la dejaban en
-   * −$44.200). No se bloquea, porque puede haber plata que no pasó por el
-   * sistema; se hace pisar el freno una vez.
-   */
-  disponibleCents?: number;
-  onSubmit: (amountCents: number, reason: string | null) => void;
-}) {
-  const [amount, setAmount] = useState("");
-  const [reason, setReason] = useState("");
-  const [confirmando, setConfirmando] = useState(false);
-
-  useEffect(() => {
-    if (!open) { setAmount(""); setReason(""); }
-  }, [open]);
-
-  const cents = Math.max(0, Math.round(Number(amount) * 100));
-  const canSubmit = cents > 0 && (!requiereMotivo || reason.trim() !== "");
-  const excede = disponibleCents != null && cents > disponibleCents;
-
-  // Cambiar el monto vuelve a pedir la confirmación: si corregiste el cero de
-  // más, no querés que el botón siga armado para el número viejo.
-  useEffect(() => {
-    setConfirmando(false);
-  }, [amount, open]);
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
-        <p className="-mt-2 text-sm text-zinc-600">{description}</p>
-        <div className="mt-3 grid gap-4">
-          <div className="grid gap-1.5">
-            <Label>Monto</Label>
-            <div className="relative">
-              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base font-semibold text-zinc-400">$</span>
-              <Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" autoFocus inputMode="decimal" className="pl-7 text-base tabular-nums" />
-            </div>
-            {excede && (
-              <p className="text-xs font-semibold text-amber-700">
-                En la caja hay {formatCurrency(disponibleCents!)}. Con esta
-                sangría queda en {formatCurrency(disponibleCents! - cents)}.
-              </p>
-            )}
-          </div>
-          <div className="grid gap-1.5">
-            <Label>Motivo{requiereMotivo && <span className="ml-1 text-rose-600">*</span>}</Label>
-            <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} placeholder={requiereMotivo ? "Ej: depósito en banco / pago proveedor" : "Opcional"} />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button
-            disabled={!canSubmit}
-            onClick={() => {
-              if (excede && !confirmando) {
-                setConfirmando(true);
-                return;
-              }
-              onSubmit(cents, reason.trim() || null);
-            }}
-          >
-            {excede && confirmando
-              ? `Sacar igual ${formatCurrency(cents)}`
-              : ctaLabel}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 
 // ── Cobrado por empleado ─────────────────────────────────────────

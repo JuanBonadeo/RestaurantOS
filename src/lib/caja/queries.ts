@@ -92,6 +92,58 @@ export async function getCajasParaLibro(businessId: string): Promise<Caja[]> {
   return (data ?? []) as Caja[];
 }
 
+export type SaldoCajaAdministrativa = {
+  cajaId: string;
+  cajaName: string;
+  saldo_cents: number;
+  movimientos: number;
+  ultimo_movimiento: string | null;
+};
+
+/**
+ * El saldo de la caja mayor — spec 168.
+ *
+ * Va por RPC y no por `select` a propósito: esta caja **no corta nunca**, así que
+ * sus movimientos se leen desde su `created_at` hasta hoy sin ninguna frontera, y
+ * PostgREST trunca en `PAGE_SIZE` **en silencio**. A 7,6 movimientos por día hábil
+ * el saldo empezaría a mentir hacia arriba a los 4-6 meses, sin un solo error.
+ * `saldo_caja_administrativa` agrega en Postgres y devuelve un número.
+ *
+ * `null` si el negocio todavía no tiene caja administrativa.
+ */
+export async function getSaldoCajaAdministrativa(
+  businessId: string,
+): Promise<SaldoCajaAdministrativa | null> {
+  const service = db();
+  const { data, error } = await service.rpc("saldo_caja_administrativa", {
+    p_business_id: businessId,
+  });
+
+  // spec 161 · no se traga el error: ver que se rompió es mejor que ver $0 — y un
+  // $0 acá es indistinguible de una caja recién creada.
+  if (error) {
+    throw new Error(`Falló el saldo de la caja mayor: ${error.message}`);
+  }
+
+  const fila = (data as unknown as Array<{
+    caja_id: string;
+    caja_name: string;
+    saldo_cents: number | string;
+    movimientos: number;
+    ultimo_movimiento: string | null;
+  }> | null)?.[0];
+  if (!fila) return null;
+
+  return {
+    cajaId: fila.caja_id,
+    cajaName: fila.caja_name,
+    // `bigint` vuelve como string cuando no entra en un number seguro.
+    saldo_cents: Number(fila.saldo_cents),
+    movimientos: fila.movimientos,
+    ultimo_movimiento: fila.ultimo_movimiento,
+  };
+}
+
 /**
  * La caja administrativa del negocio (spec 160), o `null` si todavía no existe.
  * Es de donde sale el pago a proveedor — y el único lugar que la resuelve.
