@@ -115,6 +115,21 @@ Vive **en Proveedores**, no en `/admin/caja`: esa pantalla ofrece «Ver ahora» 
 board del arqueo, que es justo lo que esta caja no tiene. Y Proveedores es donde el
 encargado la usa.
 
+> ⚠️ **NO IMPLEMENTADO — [#249](https://github.com/gachetponzellini/RestaurantOS-app/issues/249).**
+> Esta decisión se escribió, se puso en el Alcance… y no se construyó. Lo único que
+> se hizo es que el **nombre** de la caja viaje hasta el diálogo de pago, para el
+> renglón «Sale de Caja Mayor». No hay pantalla con su saldo ni forma de fondearla
+> (`grep registrarIngreso src/components/admin/proveedores/` → vacío).
+>
+> Consecuencia: la Caja Mayor **arranca en $0 y sólo baja**, y la única forma de
+> verla es el libro de movimientos filtrando por ella. La D7 —el negativo no se
+> bloquea— sigue siendo correcta, pero asumía que el fondeo existiera; sin él el
+> saldo no es un saldo, es la suma de todo lo pagado.
+>
+> El error de proceso fue mío: cerré la issue y escribí la verificación sin cruzar
+> el Alcance ítem por ítem. Los escenarios de aceptación no cubrían éste, y por eso
+> pasó — **ninguno de los 11 mira el saldo ni el fondeo**.
+
 **D6 · El libro la ve; el board del turno no.**
 
 Hoy `getCajasConEstado` alimenta cuatro cosas con la misma lista. Hay que partirla:
@@ -168,7 +183,8 @@ renglón.
 
 **UI:**
 - `pago-dialog`: el `<select>` de caja se va, queda el renglón fijo.
-- Proveedores: el saldo de la caja administrativa + fondearla (D5).
+- ~~Proveedores: el saldo de la caja administrativa + fondearla (D5).~~ **No se hizo
+  — pasó a [#249](https://github.com/gachetponzellini/RestaurantOS-app/issues/249).**
 - El copy de la sangría en el board, que hoy dice «(depósito en banco, pago a
   proveedor, etc.)».
 
@@ -306,3 +322,13 @@ patrón de "verificar antes de tocar" funciona.
 
 **Rastro en `demo`:** el pago de $2.900.000 a «Verdulería del Sur» y su anulación
 son de este verify.
+
+**Lo que esta verificación NO cubrió, y debería haber cubierto.** El saldo de la
+Caja Mayor y su fondeo (D5) estaban en el Alcance y no se implementaron; los 11
+escenarios de aceptación no incluían ninguno que los mirara, así que el verify pasó
+en verde igual. Quedó en
+[#249](https://github.com/gachetponzellini/RestaurantOS-app/issues/249).
+
+**La lección, para la próxima spec:** los escenarios se escriben cruzando el Alcance
+ítem por ítem. Un ítem sin escenario es un ítem que se puede olvidar sin que nada
+falle.
