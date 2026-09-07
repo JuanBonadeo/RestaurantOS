@@ -282,7 +282,7 @@ export const TEMAS: Tema[] = [
         aviso: {
           tono: "ojo",
           texto:
-            "El bar es la excepción: una caja que no es la principal cierra sin pedir rendiciones, porque puede tener que cortar en plena cena.",
+            "El bar es la excepción: una caja que no es la principal cierra sin pedir rendiciones, porque puede tener que cortar en plena cena. Y la Caja Mayor no se cierra nunca: no es una caja de turno, es de donde salen los pagos a proveedor.",
         },
         verTambien: { tema: "rendicion", texto: "Cómo se toma una rendición" },
       },
@@ -1089,29 +1089,68 @@ export const TEMAS: Tema[] = [
   },
   {
     slug: "proveedores",
-    titulo: "Proveedores y facturas de compra",
-    resumen: "Quién nos vende qué, y cargar la factura que llega con la mercadería.",
+    titulo: "Proveedores, compras y pagos",
+    resumen:
+      "Qué le compraste a cada uno, cuánto le debés, cuándo vence y de dónde sale la plata para pagarle.",
     icono: Building2,
     grupo: "resto",
     claves: [
-      "Sacale la foto a la factura cuando llega. Después no aparece.",
-      "Vincular el proveedor con sus insumos es lo que hace que los costos salgan solos.",
+      "La compra de todos los días no necesita factura: poné el importe y guardá.",
+      "El pago a proveedor sale de la Caja Mayor, nunca del cajón del turno.",
+      "Para anular un comprobante que ya se pagó, primero se anula el pago.",
     ],
     pasos: [
       {
-        titulo: "Los proveedores",
+        titulo: "Cargar una compra",
         texto:
-          "Se cargan con nombre, CUIT y contacto. Si venís de una lista en Excel, se pueden pegar todos juntos en formato CSV con los encabezados «nombre, cuit, contacto, telefono, email».",
+          "Entrá al proveedor y tocá «Cargar compra». Lo único que tenés que escribir es el importe: el concepto de gasto y el vencimiento ya vienen puestos según ese proveedor, y la fecha es hoy. Si la compra no tiene factura —el reparto de la verdulería, el pan— dejalo como está: el comprobante arranca en «Sin comprobante» y ni siquiera te pide número. Recién si elegís Factura A, B o C aparece el campo del número.",
       },
       {
-        titulo: "Vincular insumos",
+        titulo: "La foto del comprobante",
         texto:
-          "A cada proveedor se le enganchan los insumos que provee. Es lo que después permite saber a quién comprarle y a cuánto, sin buscarlo en un cuaderno.",
+          "Sacale la foto al papel cuando llega, que es cuando está en la mano. Queda guardada con la compra y la ves después tocándola en la lista. En más de la mitad de las compras el papel es la única prueba de que existieron.",
       },
       {
-        titulo: "Cargar la factura de compra",
+        titulo: "Los conceptos de gasto",
         texto:
-          "«Cargar factura de compra» pide número, monto y una foto de la factura. Hacelo cuando llega la mercadería: es el momento en que el papel está en la mano y en que alguien todavía se acuerda de qué vino.",
+          "Cada compra se guarda con un concepto —«Carnes», «Verdulería», «Gas»—, y eso es lo que después responde en qué se te fue la plata. Cada proveedor tiene el suyo por defecto, así que no lo elegís cada vez. Si te falta uno, la solapa «Conceptos» los agrega sin llamar a nadie.",
+      },
+      {
+        titulo: "Detallar los insumos",
+        texto:
+          "Si querés, la compra se puede abrir en renglones: tres cajones de tomate, cinco kilos de muzzarella. No es obligatorio y no hace falta que sumen justo el total. Lo que gana: el stock de cada insumo sube solo, y el costo de los platos que lo usan se actualiza con lo que pagaste de verdad.",
+        verTambien: { tema: "stock", texto: "Cómo se descuenta el stock" },
+      },
+      {
+        titulo: "Cuánto le debo",
+        texto:
+          "La ficha del proveedor muestra el saldo arriba y las compras abajo, cada una con lo que todavía queda debiendo. Tocá una y al costado aparece con qué pagos se canceló. Las fechas de arriba filtran las compras que ves, pero no el saldo: lo que le debés es lo que le debés, mires el mes que mires.",
+      },
+      {
+        titulo: "Pagarle",
+        texto:
+          "«Pagar» te muestra los comprobantes impagos: tildás los que estás cancelando y el total se llena solo. Si pagás de más, la diferencia queda como pago a cuenta y baja del saldo igual. Si pagás sin tildar nada, es todo a cuenta.",
+      },
+      {
+        titulo: "La Caja Mayor",
+        texto:
+          "El efectivo con el que se le paga a los proveedores no sale del cajón del turno: sale de la Caja Mayor, que es una caja aparte, administrativa. Por eso pagarle al carnicero no te descuadra el cierre. La ves arriba de todo en Proveedores, con su saldo, y le cargás plata con «Ingresar efectivo».",
+        aviso: {
+          tono: "ojo",
+          texto:
+            "Si el saldo está en rojo no es un error: quiere decir que salió más plata de la que le pusiste. Se arregla cargándole efectivo, y mientras tanto no te frena ningún pago.",
+        },
+        verTambien: { tema: "caja", texto: "Las cajas del local" },
+      },
+      {
+        titulo: "Qué vence y cuándo",
+        texto:
+          "«Vencimientos» lista lo que debés ordenado por atraso, para saber a quién llamar. «Proyección» es el mismo dato en un calendario: cada día muestra cuánta plata necesitás ese día, y tocándolo ves a quién. Lo que ya venció y no se pagó aparece sumado al día de hoy, en rojo, para que no se te escape del mes pasado.",
+      },
+      {
+        titulo: "Corregir o dar de baja",
+        texto:
+          "Si te equivocaste en el concepto, la fecha o el número, se edita y listo. Si te equivocaste en el importe de algo que ya pagaste, no: primero anulás el pago, después el comprobante. Nada se borra nunca, se anula con un motivo y queda tachado a la vista, para que dentro de un mes se entienda qué pasó.",
       },
     ],
   },
