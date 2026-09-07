@@ -19,6 +19,7 @@ import {
   type MovimientoProveedor,
   type PagoProveedor,
 } from "./cuenta-corriente";
+import { RUBRO_LABELS, type ExpenseRubro } from "./schema";
 import { enLotes, fetchAll, unwrap } from "./unwrap";
 
 type GenericClient = SupabaseClient;
@@ -332,17 +333,6 @@ export async function getGastoPorConcepto(
     cancelled_at?: string | null;
   }>;
 
-  const RUBROS: Record<string, string> = {
-    mercaderias: "Mercaderías",
-    servicios: "Servicios",
-    mantenimiento: "Mantenimiento",
-    personal: "Gastos en personal",
-    impuestos: "Impuestos y tasas",
-    vajilla: "Vajilla y mantelería",
-    societarios: "Movimientos societarios",
-    otros: "Otros gastos",
-  };
-
   return totalizarPorClave(invoices, (i) => {
     const c = i.expense_concept_id ? conceptos.get(i.expense_concept_id) : undefined;
     if (!c) return "sin-concepto";
@@ -351,7 +341,7 @@ export async function getGastoPorConcepto(
     if (t.clave === "sin-concepto") return { ...t, etiqueta: "Sin concepto" };
     const etiqueta =
       agrupacion === "rubro"
-        ? (RUBROS[t.clave] ?? t.clave)
+        ? (RUBRO_LABELS[t.clave as ExpenseRubro] ?? t.clave)
         : (conceptos.get(t.clave)?.name ?? "—");
     return { ...t, etiqueta };
   });

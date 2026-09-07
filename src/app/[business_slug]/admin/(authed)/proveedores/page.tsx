@@ -34,7 +34,9 @@ export default async function ProveedoresPage({
   const [suppliers, ingredientOptions, concepts, cajaAdministrativa] = await Promise.all([
     getSuppliers(business.id),
     getIngredientsForLinking(business.id),
-    getExpenseConcepts(business.id, true),
+    // Todos, no sólo los activos: el ABM de la 162 necesita ver los apagados,
+    // y el selector de compra filtra en el cliente.
+    getExpenseConcepts(business.id),
     getCajaAdministrativa(business.id),
   ]);
 

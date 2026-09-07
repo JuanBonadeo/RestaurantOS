@@ -45,6 +45,24 @@ export const EXPENSE_RUBROS = [
   "otros",
 ] as const;
 
+export type ExpenseRubro = (typeof EXPENSE_RUBROS)[number];
+
+/**
+ * Cómo se llama cada rubro en pantalla. Vivía adentro de `getGastoPorConcepto`
+ * como una constante local; el ABM de la spec 162 necesita las mismas
+ * etiquetas, y dos copias del mismo diccionario se desincronizan solas.
+ */
+export const RUBRO_LABELS: Record<ExpenseRubro, string> = {
+  mercaderias: "Mercaderías",
+  servicios: "Servicios",
+  mantenimiento: "Mantenimiento",
+  personal: "Gastos en personal",
+  impuestos: "Impuestos y tasas",
+  vajilla: "Vajilla y mantelería",
+  societarios: "Movimientos societarios",
+  otros: "Otros gastos",
+};
+
 export const SupplierInvoiceInput = z
   .object({
     supplier_id: z.string().uuid("Proveedor inválido."),
