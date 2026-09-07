@@ -17,6 +17,7 @@ import {
   type ImputacionPago,
   type PagoProveedor,
 } from "./cuenta-corriente";
+import { unwrap } from "./unwrap";
 import {
   AnularInput,
   ExpenseConceptInput,
@@ -158,15 +159,30 @@ export async function anularComprobante(
     return actionError("El comprobante ya estaba anulado.");
   }
 
-  const { data: allocations } = await service
+  // Spec 161 · D3 — esta guarda fallaba ABIERTA: sin destructurar `error`, una
+  // lectura caída dejaba `allocations` en null, `conPagoVivo` en false, y el
+  // comprobante pago **se anulaba igual**. No hay red abajo: el FK
+  // `ON DELETE RESTRICT` protege el borrado, no la anulación lógica.
+  //
+  // Si no se puede saber si hay pagos vivos, no se anula. Anular de más ensucia
+  // el informe y descuadra el saldo; anular de menos le pide al encargado que
+  // reintente.
+  const { data: allocations, error: allocErr } = await service
     .from("supplier_payment_allocations")
     .select("payment_id, supplier_payments!inner(cancelled_at)")
     .eq("invoice_id", parsed.data.id);
 
+  if (allocErr || !allocations) {
+    console.error("anularComprobante · imputaciones", allocErr);
+    return actionError(
+      "No pudimos verificar si el comprobante tiene pagos. Probá de nuevo en un momento.",
+    );
+  }
+
   // PostgREST devuelve el embed como array aunque el FK sea a-uno: normalizar
   // acá evita que un `.cancelled_at` sobre un array dé `undefined` y deje pasar
   // la anulación de un comprobante que sí está pago.
-  const conPagoVivo = ((allocations ?? []) as unknown as Array<{
+  const conPagoVivo = (allocations as unknown as Array<{
     supplier_payments: { cancelled_at: string | null } | Array<{ cancelled_at: string | null }> | null;
   }>).some((a) => {
     const emb = a.supplier_payments;
@@ -253,36 +269,44 @@ export async function registrarPagoProveedor(
   let aCuenta = data.amount_cents;
 
   if (data.invoice_ids.length > 0) {
-    const { data: invoices } = await service
-      .from("supplier_invoices")
-      .select("id, total_cents, invoice_date, due_date, document_type, cancelled_at")
-      .eq("business_id", business.id)
-      .eq("supplier_id", data.supplier_id)
-      .in("id", data.invoice_ids);
+    // Spec 161 · D1 — estas tres lecturas deciden CONTRA QUÉ se imputa la plata,
+    // y las tres descartaban el error. La peor era la de `allocs`: si fallaba,
+    // los comprobantes ya pagados aparecían impagos y `repartirPago` imputaba
+    // contra ellos.
+    let invoices: ComprobanteCompra[];
+    let allocs: ImputacionPago[];
+    let pagos: PagoProveedor[];
+    try {
+      const [invRes, allocRes, pagosRes] = await Promise.all([
+        service
+          .from("supplier_invoices")
+          .select("id, total_cents, invoice_date, due_date, document_type, cancelled_at")
+          .eq("business_id", business.id)
+          .eq("supplier_id", data.supplier_id)
+          .in("id", data.invoice_ids),
+        service
+          .from("supplier_payment_allocations")
+          .select("payment_id, invoice_id, amount_cents")
+          .in("invoice_id", data.invoice_ids),
+        service
+          .from("supplier_payments")
+          .select("id, amount_cents, paid_at, method, cancelled_at")
+          .eq("business_id", business.id)
+          .eq("supplier_id", data.supplier_id),
+      ]);
+      invoices = unwrap(invRes, "supplier_invoices") as unknown as ComprobanteCompra[];
+      allocs = unwrap(allocRes, "supplier_payment_allocations") as unknown as ImputacionPago[];
+      pagos = unwrap(pagosRes, "supplier_payments") as unknown as PagoProveedor[];
+    } catch (e) {
+      console.error("registrarPagoProveedor · lectura del reparto", e);
+      return actionError("No pudimos leer los comprobantes del proveedor. Probá de nuevo.");
+    }
 
-    const ids = (invoices ?? []).map((i) => (i as { id: string }).id);
-    if (ids.length !== data.invoice_ids.length) {
+    if (invoices.length !== data.invoice_ids.length) {
       return actionError("Alguno de los comprobantes no es de este proveedor.");
     }
 
-    const { data: allocs } = await service
-      .from("supplier_payment_allocations")
-      .select("payment_id, invoice_id, amount_cents")
-      .in("invoice_id", ids);
-
-    const { data: pagos } = await service
-      .from("supplier_payments")
-      .select("id, amount_cents, paid_at, method, cancelled_at")
-      .eq("business_id", business.id)
-      .eq("supplier_id", data.supplier_id);
-
-    const impagos = comprobantesImpagos(
-      (invoices ?? []) as unknown as ComprobanteCompra[],
-      (allocs ?? []) as unknown as ImputacionPago[],
-      (pagos ?? []) as unknown as PagoProveedor[],
-    );
-
-    const reparto = repartirPago(data.amount_cents, impagos);
+    const reparto = repartirPago(data.amount_cents, comprobantesImpagos(invoices, allocs, pagos));
     imputaciones = reparto.imputaciones;
     aCuenta = reparto.a_cuenta_cents;
   }
@@ -293,7 +317,6 @@ export async function registrarPagoProveedor(
   // siempre a la caja administrativa: en el cajón del turno una orden de pago
   // descuadra el arqueo por su monto entero y el encargado no puede cerrar. En
   // MaxiRest ese escape existe y se usó 2 veces en 8 años; acá se cierra.
-  let cajaMovimientoId: string | null = null;
   let cajaAdminId: string | null = null;
 
   if (data.method === "cash") {
@@ -307,77 +330,47 @@ export async function registrarPagoProveedor(
       return actionError("La Caja Mayor está inactiva.");
     }
     cajaAdminId = cajaAdmin.id;
-
-    const { data: mov, error: movErr } = await service
-      .from("caja_movimientos")
-      .insert({
-        caja_id: cajaAdmin.id,
-        business_id: business.id,
-        // `sangria` y no un kind propio: el arqueo resta filtrando este valor
-        // literal (158 · D5). Lo que cambia en la 160 no es el kind, es la caja.
-        kind: "sangria",
-        amount_cents: data.amount_cents,
-        reason: `Pago a proveedor · ${(supplier as { name: string }).name}`,
-        created_by: ctx.userId,
-      })
-      .select("id")
-      .single();
-
-    if (movErr || !mov) return actionError("No se pudo registrar el egreso de caja.");
-    cajaMovimientoId = (mov as { id: string }).id;
   }
 
-  // ── el pago ──
-  const { data: payment, error } = await service
-    .from("supplier_payments")
-    .insert({
-      business_id: business.id,
-      supplier_id: data.supplier_id,
-      amount_cents: data.amount_cents,
-      method: data.method,
-      caja_id: cajaAdminId,
-      caja_movimiento_id: cajaMovimientoId,
-      paid_at: data.paid_at ?? hoyAR(),
-      notes: data.notes ?? null,
-      created_by: ctx.userId,
-    })
-    .select("id")
-    .single();
+  // ── sangría + pago + imputaciones, en UNA transacción ──
+  //
+  // Spec 161 · D4. Antes eran tres escrituras en secuencia y sólo la segunda
+  // revertía algo: si fallaba el insert de imputaciones, la action hacía
+  // `console.error` y devolvía OK. La caja quedaba con la plata de menos, el
+  // saldo bajaba, el comprobante seguía impago en las tres pantallas, y el
+  // toast decía «Pago registrado.».
+  //
+  // Ahora el rollback lo hace Postgres. La RPC además serializa con FOR UPDATE
+  // y rechaza el comprobante sobre-imputado: la carrera entre el cálculo del
+  // reparto y la escritura no se podía ver desde acá.
+  const { data: rpc, error } = await service.rpc("registrar_pago_proveedor_tx", {
+    p_business_id: business.id,
+    p_supplier_id: data.supplier_id,
+    p_amount_cents: data.amount_cents,
+    p_method: data.method,
+    p_paid_at: data.paid_at ?? hoyAR(),
+    p_notes: data.notes ?? null,
+    p_created_by: ctx.userId,
+    p_caja_id: cajaAdminId,
+    p_caja_reason: `Pago a proveedor · ${(supplier as { name: string }).name}`,
+    p_imputaciones: imputaciones,
+  });
 
-  if (error || !payment) {
-    // El egreso ya salió: dejarlo vivo sin pago descuadraría la caja contra una
-    // deuda que sigue entera. Se revierte anulándolo, con motivo.
-    if (cajaMovimientoId) {
-      await service
-        .from("caja_movimientos")
-        .update({
-          cancelled_at: new Date().toISOString(),
-          cancelled_by: ctx.userId,
-          cancelled_reason: "Revertido: falló el registro del pago a proveedor",
-        })
-        .eq("id", cajaMovimientoId);
-    }
+  const fila = (rpc as Array<{ payment_id: string }> | null)?.[0];
+  if (error || !fila) {
     console.error("registrarPagoProveedor", error);
+    if (error?.message?.includes("COMPROBANTE_SOBRE_IMPUTADO")) {
+      return actionError(
+        "Alguien más pagó uno de estos comprobantes recién. Refrescá y volvé a intentar.",
+      );
+    }
+    if (error?.message?.includes("COMPROBANTE_NO_DISPONIBLE")) {
+      return actionError("Uno de los comprobantes se anuló mientras cargabas el pago.");
+    }
     return actionError("No pudimos registrar el pago.");
   }
 
-  const paymentId = (payment as { id: string }).id;
-
-  if (imputaciones.length > 0) {
-    const { error: allocErr } = await service
-      .from("supplier_payment_allocations")
-      .insert(
-        imputaciones.map((i) => ({
-          business_id: business.id,
-          payment_id: paymentId,
-          invoice_id: i.invoice_id,
-          amount_cents: i.amount_cents,
-        })),
-      );
-    // El pago vale igual: sin imputación es un pago a cuenta, y el saldo total
-    // del proveedor —que es el número que importa— ya está bien.
-    if (allocErr) console.error("registrarPagoProveedor · imputaciones", allocErr);
-  }
+  const paymentId = fila.payment_id;
 
   revalidatePath(`/${slug}/admin/proveedores`);
   // spec 160 · el egreso ya no toca el board del turno; el lugar donde se audita

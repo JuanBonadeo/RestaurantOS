@@ -11,7 +11,15 @@ import type { BusinessRole } from "@/lib/admin/context";
  *
  * Lo que se fija acá es el invariante que no se puede volver a romper: **la caja la
  * resuelve el server**. Mockeamos el borde (tenant, auth, la caja administrativa y
- * el service client) y afirmamos sobre las filas que se escriben.
+ * el service client) y afirmamos sobre lo que se escribe.
+ *
+ * **Spec 161 · D4 — cambió DÓNDE se observa, no qué se afirma.** Las tres
+ * escrituras del pago (sangría, pago, imputaciones) dejaron de ser tres inserts
+ * sueltos y pasaron a una RPC transaccional, porque un fallo en la tercera
+ * devolvía OK con la caja descuadrada. El invariante de la 160 es el mismo: lo
+ * que antes se leía en `inserts["caja_movimientos"][0].caja_id` ahora se lee en
+ * el `p_caja_id` con el que la action llama a la RPC. Si alguien reintroduce el
+ * `caja_id` en el input, estos tests lo siguen cazando.
  */
 
 const BIZ = "biz-1";
@@ -24,6 +32,9 @@ let cajaAdmin: { id: string; name: string; is_active: boolean } | null;
 
 /** Todo lo insertado, por tabla, en orden. */
 let inserts: Record<string, Record<string, unknown>[]>;
+
+/** Las llamadas a RPC, en orden — acá vive ahora la escritura del pago. */
+let rpcCalls: Array<{ fn: string; args: Record<string, unknown> }>;
 
 vi.mock("@/lib/tenant", () => ({
   getBusiness: async (slug: string) => (slug === "nope" ? null : { id: BIZ, slug }),
@@ -44,6 +55,10 @@ vi.mock("@/lib/caja/queries", () => ({
 
 vi.mock("@/lib/supabase/service", () => ({
   createSupabaseServiceClient: () => ({
+    rpc: async (fn: string, args: Record<string, unknown>) => {
+      rpcCalls.push({ fn, args });
+      return { data: [{ payment_id: "pago-nuevo", caja_movimiento_id: "mov-nuevo" }], error: null };
+    },
     from: (tabla: string) => {
       const chain: Record<string, unknown> = {
         select: () => chain,
@@ -77,7 +92,11 @@ beforeEach(() => {
   role = "encargado";
   cajaAdmin = { id: CAJA_ADMIN, name: "Caja Mayor", is_active: true };
   inserts = {};
+  rpcCalls = [];
 });
+
+/** El pago que la action mandó a la base, sea por RPC o por insert. */
+const pagoEscrito = () => rpcCalls.find((c) => c.fn === "registrar_pago_proveedor_tx")?.args;
 
 const pagar = (over: Record<string, unknown> = {}) =>
   registrarPagoProveedor("demo", {
@@ -93,17 +112,18 @@ describe("registrarPagoProveedor · de qué caja sale (spec 160)", () => {
     const r = await pagar();
     expect(r.ok).toBe(true);
 
-    const mov = inserts["caja_movimientos"]?.[0];
-    expect(mov?.caja_id).toBe(CAJA_ADMIN);
-    // El kind NO cambia: el arqueo resta filtrando este valor literal (158 · D5).
-    // Lo que cambia es la caja, y por eso el arqueo del turno ni se entera.
-    expect(mov?.kind).toBe("sangria");
-    expect(mov?.amount_cents).toBe(482_100_00);
+    const args = pagoEscrito();
+    expect(args?.p_caja_id).toBe(CAJA_ADMIN);
+    expect(args?.p_amount_cents).toBe(482_100_00);
+    // El `kind: "sangria"` que el arqueo filtra (158 · D5) vive ahora dentro de
+    // la RPC, y la migración 0069 lo deja escrito ahí. Lo que esta acción decide
+    // —y lo que este test cuida— es la CAJA.
+    expect(args?.p_caja_reason).toMatch(/Pago a proveedor/);
   });
 
   it("el pago guarda la caja que resolvió el server", async () => {
     await pagar();
-    expect(inserts["supplier_payments"]?.[0]?.caja_id).toBe(CAJA_ADMIN);
+    expect(pagoEscrito()?.p_caja_id).toBe(CAJA_ADMIN);
   });
 
   it("mandar una caja de turno NO la usa: el input ya no la lleva", async () => {
@@ -111,8 +131,8 @@ describe("registrarPagoProveedor · de qué caja sale (spec 160)", () => {
     // `caja_id` en el input, este test lo caza.
     await pagar({ caja_id: CAJA_TURNO });
 
-    expect(inserts["caja_movimientos"]?.[0]?.caja_id).toBe(CAJA_ADMIN);
-    expect(inserts["supplier_payments"]?.[0]?.caja_id).toBe(CAJA_ADMIN);
+    expect(pagoEscrito()?.p_caja_id).toBe(CAJA_ADMIN);
+    expect(JSON.stringify(rpcCalls)).not.toContain(CAJA_TURNO);
   });
 
   it("sin caja administrativa no se cobra a ciegas: falla y no escribe nada", async () => {
@@ -121,8 +141,7 @@ describe("registrarPagoProveedor · de qué caja sale (spec 160)", () => {
 
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toMatch(/Caja Mayor/i);
-    expect(inserts["caja_movimientos"]).toBeUndefined();
-    expect(inserts["supplier_payments"]).toBeUndefined();
+    expect(rpcCalls).toEqual([]);
   });
 
   it("con la caja administrativa inactiva tampoco", async () => {
@@ -130,15 +149,16 @@ describe("registrarPagoProveedor · de qué caja sale (spec 160)", () => {
     const r = await pagar();
 
     expect(r.ok).toBe(false);
-    expect(inserts["caja_movimientos"]).toBeUndefined();
+    expect(rpcCalls).toEqual([]);
   });
 
   it("la transferencia no toca ninguna caja", async () => {
     const r = await pagar({ method: "transfer" });
 
     expect(r.ok).toBe(true);
-    expect(inserts["caja_movimientos"]).toBeUndefined();
-    expect(inserts["supplier_payments"]?.[0]?.caja_id).toBeNull();
+    // Sin caja no hay sangría: la RPC sólo inserta el movimiento si le llega
+    // `p_caja_id`, y el CHECK `supplier_payments_caja_coherente` lo respalda.
+    expect(pagoEscrito()?.p_caja_id).toBeNull();
   });
 
   it("un mozo no puede pagarle a un proveedor", async () => {
@@ -146,6 +166,6 @@ describe("registrarPagoProveedor · de qué caja sale (spec 160)", () => {
     const r = await pagar();
 
     expect(r.ok).toBe(false);
-    expect(inserts["caja_movimientos"]).toBeUndefined();
+    expect(rpcCalls).toEqual([]);
   });
 });

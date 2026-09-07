@@ -3,6 +3,8 @@ import "server-only";
 
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
+import { enLotes, fetchAll, unwrap } from "./unwrap";
+
 import type {
   SupplierIngredientLink,
   SupplierInvoice,
@@ -41,28 +43,34 @@ export async function getSuppliers(
 ): Promise<SupplierWithStats[]> {
   const service = db();
 
-  const { data: suppliers } = await service
-    .from("suppliers")
-    .select("*")
-    .eq("business_id", businessId)
-    .order("name");
+  const suppliers = await fetchAll(
+    () => service.from("suppliers").select("*").eq("business_id", businessId).order("id"),
+    "suppliers",
+  );
 
-  if (!suppliers?.length) return [];
+  if (!suppliers.length) return [];
 
-  const supplierIds = suppliers.map((s) => s.id);
-
-  const { data: invoiceAgg } = await service
-    .from("supplier_invoices")
-    .select("supplier_id, total_cents, invoice_date")
-    .eq("business_id", businessId)
-    .in("supplier_id", supplierIds);
+  // Por lotes: con 111 proveedores hoy entra de sobra, pero el límite del
+  // `.in()` es el largo de la URL y no avisa — devuelve `Bad Request`.
+  const invoiceAgg = await enLotes(
+    suppliers.map((s) => s.id),
+    async (lote) =>
+      unwrap(
+        await service
+          .from("supplier_invoices")
+          .select("supplier_id, total_cents, invoice_date")
+          .eq("business_id", businessId)
+          .in("supplier_id", lote),
+        "supplier_invoices",
+      ),
+  );
 
   const statsMap = new Map<
     string,
     { total: number; count: number; last: string | null }
   >();
 
-  for (const inv of invoiceAgg ?? []) {
+  for (const inv of invoiceAgg) {
     const entry = statsMap.get(inv.supplier_id) ?? {
       total: 0,
       count: 0,
@@ -107,14 +115,19 @@ export async function getSupplierInvoices(
 ): Promise<SupplierInvoice[]> {
   const service = db();
 
-  const { data: invoices } = await service
-    .from("supplier_invoices")
-    .select("*")
-    .eq("supplier_id", supplierId)
-    .eq("business_id", businessId)
-    .order("invoice_date", { ascending: false });
+  const invoices = await fetchAll(
+    () =>
+      service
+        .from("supplier_invoices")
+        .select("*")
+        .eq("supplier_id", supplierId)
+        .eq("business_id", businessId)
+        .order("invoice_date", { ascending: false })
+        .order("id"),
+    "supplier_invoices",
+  );
 
-  if (!invoices?.length) return [];
+  if (!invoices.length) return [];
 
   const results: SupplierInvoice[] = [];
   for (const row of invoices) {
@@ -166,8 +179,8 @@ export async function getSupplierStats(
   if (from) query = query.gte("invoice_date", from);
   if (to) query = query.lte("invoice_date", to);
 
-  const { data } = await query;
-  if (!data?.length) return [];
+  const data = unwrap(await query, "supplier_invoices");
+  if (!data.length) return [];
 
   const map = new Map<
     string,
@@ -208,13 +221,16 @@ export async function getSupplierIngredients(
 ): Promise<SupplierIngredientLink[]> {
   const service = db();
 
-  const { data } = await service
-    .from("supplier_ingredients")
-    .select("supplier_id, ingredient_id, created_at, ingredients!inner(name, unit)")
-    .eq("supplier_id", supplierId)
-    .eq("business_id", businessId);
+  const data = unwrap(
+    await service
+      .from("supplier_ingredients")
+      .select("supplier_id, ingredient_id, created_at, ingredients!inner(name, unit)")
+      .eq("supplier_id", supplierId)
+      .eq("business_id", businessId),
+    "supplier_ingredients",
+  );
 
-  if (!data?.length) return [];
+  if (!data.length) return [];
 
   return data.map((row) => {
     const ingredient = row.ingredients as unknown as { name: string; unit: string };
@@ -237,27 +253,33 @@ export async function getSupplierProductOutflow(
 ): Promise<SupplierOutflowItem[]> {
   const service = db();
 
-  const [consumptionsRes, linksRes, suppliersRes] = await Promise.all([
-    service
-      .from("ingredient_consumptions")
-      .select("ingredient_id, cost_cents_snapshot")
-      .eq("business_id", businessId)
-      .eq("kind", "venta")
-      .gte("created_at", startIso)
-      .lt("created_at", endIso),
-    service
-      .from("supplier_ingredients")
-      .select("supplier_id, ingredient_id")
-      .eq("business_id", businessId),
-    service
-      .from("suppliers")
-      .select("id, name")
-      .eq("business_id", businessId),
+  const [consumptions, links, suppliers] = await Promise.all([
+    fetchAll(
+      () =>
+        service
+          .from("ingredient_consumptions")
+          .select("ingredient_id, cost_cents_snapshot")
+          .eq("business_id", businessId)
+          .eq("kind", "venta")
+          .gte("created_at", startIso)
+          .lt("created_at", endIso)
+          .order("id"),
+      "ingredient_consumptions",
+    ),
+    fetchAll(
+      () =>
+        service
+          .from("supplier_ingredients")
+          .select("supplier_id, ingredient_id")
+          .eq("business_id", businessId)
+          .order("ingredient_id"),
+      "supplier_ingredients",
+    ),
+    fetchAll(
+      () => service.from("suppliers").select("id, name").eq("business_id", businessId).order("id"),
+      "suppliers",
+    ),
   ]);
-
-  const consumptions = consumptionsRes.data ?? [];
-  const links = linksRes.data ?? [];
-  const suppliers = suppliersRes.data ?? [];
 
   if (!consumptions.length || !links.length) return [];
 
@@ -300,11 +322,15 @@ export async function getIngredientsForLinking(
   businessId: string,
 ): Promise<{ id: string; name: string; unit: string }[]> {
   const service = db();
-  const { data } = await service
-    .from("ingredients")
-    .select("id, name, unit")
-    .eq("business_id", businessId)
-    .eq("is_active", true)
-    .order("name");
-  return data ?? [];
+  return fetchAll(
+    () =>
+      service
+        .from("ingredients")
+        .select("id, name, unit")
+        .eq("business_id", businessId)
+        .eq("is_active", true)
+        .order("name")
+        .order("id"),
+    "ingredients",
+  );
 }

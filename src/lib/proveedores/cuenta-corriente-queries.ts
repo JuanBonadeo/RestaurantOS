@@ -19,6 +19,7 @@ import {
   type MovimientoProveedor,
   type PagoProveedor,
 } from "./cuenta-corriente";
+import { enLotes, fetchAll, unwrap } from "./unwrap";
 
 type GenericClient = SupabaseClient;
 const db = () => createSupabaseServiceClient() as unknown as GenericClient;
@@ -69,8 +70,66 @@ export async function getExpenseConcepts(
 
   if (soloActivos) q = q.eq("is_active", true);
 
-  const { data } = await q;
-  return (data ?? []) as unknown as ExpenseConcept[];
+  return unwrap(await q, "expense_concepts") as unknown as ExpenseConcept[];
+}
+
+/**
+ * Las cuatro lecturas que necesitan las tres pantallas de la 159 (saldos,
+ * vencimientos y proyección): el negocio entero, paginado.
+ *
+ * Estaban copiadas en las tres, y las tres con `?? []`. Juntarlas no es sólo
+ * DRY: garantiza que el saldo del encabezado, el de la lista de vencimientos y
+ * el del calendario salgan **de los mismos datos**. Que difieran por una página
+ * que le faltó a una y a otra no, sería el peor de los bugs posibles acá.
+ *
+ * El `.order("id")` no es decorativo: sin un orden estable, PostgREST puede
+ * repetir o saltear filas entre páginas.
+ */
+async function leerCuentaCorriente(businessId: string) {
+  const service = db();
+
+  const [suppliers, invoices, payments, allocs] = await Promise.all([
+    fetchAll(
+      () => service.from("suppliers").select("id, name").eq("business_id", businessId).order("id"),
+      "suppliers",
+    ),
+    fetchAll(
+      () =>
+        service
+          .from("supplier_invoices")
+          .select(INVOICE_COLS)
+          .eq("business_id", businessId)
+          .order("id"),
+      "supplier_invoices",
+    ),
+    fetchAll(
+      () =>
+        service
+          .from("supplier_payments")
+          .select(PAYMENT_COLS)
+          .eq("business_id", businessId)
+          .order("id"),
+      "supplier_payments",
+    ),
+    fetchAll(
+      () =>
+        service
+          .from("supplier_payment_allocations")
+          .select("payment_id, invoice_id, amount_cents")
+          .eq("business_id", businessId)
+          .order("payment_id"),
+      "supplier_payment_allocations",
+    ),
+  ]);
+
+  return {
+    nombres: new Map(
+      (suppliers as unknown as Array<{ id: string; name: string }>).map((s) => [s.id, s.name]),
+    ),
+    invoices: invoices as unknown as Array<ComprobanteCompra & { supplier_id: string }>,
+    payments: payments as unknown as Array<PagoProveedor & { supplier_id: string }>,
+    allocs: allocs as unknown as ImputacionPago[],
+  };
 }
 
 /**
@@ -84,32 +143,15 @@ export async function getExpenseConcepts(
 export async function getSaldosDeProveedores(
   businessId: string,
 ): Promise<SaldoProveedor[]> {
-  const service = db();
   const hoy = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Argentina/Buenos_Aires",
   }).format(new Date());
 
-  const [suppliersRes, invoicesRes, paymentsRes, allocsRes] = await Promise.all([
-    service.from("suppliers").select("id, name").eq("business_id", businessId),
-    service.from("supplier_invoices").select(INVOICE_COLS).eq("business_id", businessId),
-    service.from("supplier_payments").select(PAYMENT_COLS).eq("business_id", businessId),
-    service
-      .from("supplier_payment_allocations")
-      .select("payment_id, invoice_id, amount_cents")
-      .eq("business_id", businessId),
-  ]);
+  const { nombres, invoices, payments, allocs } = await leerCuentaCorriente(businessId);
 
-  const suppliers = (suppliersRes.data ?? []) as unknown as Array<{ id: string; name: string }>;
-  const invoices = (invoicesRes.data ?? []) as unknown as Array<
-    ComprobanteCompra & { supplier_id: string }
-  >;
-  const payments = (paymentsRes.data ?? []) as unknown as Array<
-    PagoProveedor & { supplier_id: string }
-  >;
-  const allocs = (allocsRes.data ?? []) as unknown as ImputacionPago[];
-
-  return suppliers
-    .map((s) => {
+  return [...nombres.entries()]
+    .map(([id, name]) => {
+      const s = { id, name };
       const mios = invoices.filter((i) => i.supplier_id === s.id);
       const pagos = payments.filter((p) => p.supplier_id === s.id);
       const impagos = comprobantesImpagos(mios, allocs, pagos);
@@ -145,30 +187,46 @@ export async function getCuentaDeProveedor(
 
   if (!supplier) return null;
 
-  const [invoicesRes, paymentsRes] = await Promise.all([
-    service
-      .from("supplier_invoices")
-      .select(INVOICE_COLS)
-      .eq("business_id", businessId)
-      .eq("supplier_id", supplierId),
-    service
-      .from("supplier_payments")
-      .select(PAYMENT_COLS)
-      .eq("business_id", businessId)
-      .eq("supplier_id", supplierId),
+  const [invoicesRaw, paymentsRaw] = await Promise.all([
+    fetchAll(
+      () =>
+        service
+          .from("supplier_invoices")
+          .select(INVOICE_COLS)
+          .eq("business_id", businessId)
+          .eq("supplier_id", supplierId)
+          .order("id"),
+      "supplier_invoices",
+    ),
+    fetchAll(
+      () =>
+        service
+          .from("supplier_payments")
+          .select(PAYMENT_COLS)
+          .eq("business_id", businessId)
+          .eq("supplier_id", supplierId)
+          .order("id"),
+      "supplier_payments",
+    ),
   ]);
 
-  const invoices = (invoicesRes.data ?? []) as unknown as ComprobanteCompra[];
-  const payments = (paymentsRes.data ?? []) as unknown as PagoProveedor[];
+  const invoices = invoicesRaw as unknown as ComprobanteCompra[];
+  const payments = paymentsRaw as unknown as PagoProveedor[];
 
-  const { data: allocsData } = invoices.length
-    ? await service
-        .from("supplier_payment_allocations")
-        .select("payment_id, invoice_id, amount_cents")
-        .in("invoice_id", invoices.map((i) => i.id))
-    : { data: [] };
-
-  const allocs = (allocsData ?? []) as unknown as ImputacionPago[];
+  // Por lotes: la lista de UUIDs no entra en la URL a partir de ~650
+  // comprobantes, y la ficha de un proveedor grande del Golf devolvía
+  // `Bad Request` en vez de abrir.
+  const allocs = (await enLotes(
+    invoices.map((i) => i.id),
+    async (lote) =>
+      unwrap(
+        await service
+          .from("supplier_payment_allocations")
+          .select("payment_id, invoice_id, amount_cents")
+          .in("invoice_id", lote),
+        "supplier_payment_allocations",
+      ),
+  )) as unknown as ImputacionPago[];
 
   return {
     supplierId: (supplier as { id: string }).id,
@@ -199,32 +257,11 @@ export async function getVencimientos(
   businessId: string,
   hastaFecha?: string,
 ): Promise<Vencimiento[]> {
-  const service = db();
   const hoy = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Argentina/Buenos_Aires",
   }).format(new Date());
 
-  const [suppliersRes, invoicesRes, paymentsRes, allocsRes] = await Promise.all([
-    service.from("suppliers").select("id, name").eq("business_id", businessId),
-    service.from("supplier_invoices").select(INVOICE_COLS).eq("business_id", businessId),
-    service.from("supplier_payments").select(PAYMENT_COLS).eq("business_id", businessId),
-    service
-      .from("supplier_payment_allocations")
-      .select("payment_id, invoice_id, amount_cents")
-      .eq("business_id", businessId),
-  ]);
-
-  const nombres = new Map(
-    ((suppliersRes.data ?? []) as unknown as Array<{ id: string; name: string }>).map((s) => [
-      s.id,
-      s.name,
-    ]),
-  );
-  const invoices = (invoicesRes.data ?? []) as unknown as Array<
-    ComprobanteCompra & { supplier_id: string }
-  >;
-  const payments = (paymentsRes.data ?? []) as unknown as PagoProveedor[];
-  const allocs = (allocsRes.data ?? []) as unknown as ImputacionPago[];
+  const { nombres, invoices, payments, allocs } = await leerCuentaCorriente(businessId);
 
   // `comprobantesImpagos` conserva las columnas que le entran, así que el
   // `supplier_id` viaja aunque el tipo público no lo declare.
@@ -259,26 +296,37 @@ export async function getGastoPorConcepto(
 ): Promise<GastoPorClave[]> {
   const service = db();
 
-  const [invoicesRes, conceptsRes] = await Promise.all([
-    service
-      .from("supplier_invoices")
-      .select("total_cents, expense_concept_id, cancelled_at")
-      .eq("business_id", businessId)
-      .gte("invoice_date", desde)
-      .lte("invoice_date", hasta),
-    service
-      .from("expense_concepts")
-      .select("id, name, rubro")
-      .eq("business_id", businessId),
+  const [invoicesRaw, conceptsRaw] = await Promise.all([
+    fetchAll(
+      () =>
+        service
+          .from("supplier_invoices")
+          .select("total_cents, expense_concept_id, cancelled_at")
+          .eq("business_id", businessId)
+          .gte("invoice_date", desde)
+          .lte("invoice_date", hasta)
+          .order("id"),
+      "supplier_invoices",
+    ),
+    fetchAll(
+      () =>
+        service
+          .from("expense_concepts")
+          .select("id, name, rubro")
+          .eq("business_id", businessId)
+          .order("id"),
+      "expense_concepts",
+    ),
   ]);
 
   const conceptos = new Map(
-    ((conceptsRes.data ?? []) as unknown as Array<{ id: string; name: string; rubro: string }>).map(
-      (c) => [c.id, c],
-    ),
+    (conceptsRaw as unknown as Array<{ id: string; name: string; rubro: string }>).map((c) => [
+      c.id,
+      c,
+    ]),
   );
 
-  const invoices = (invoicesRes.data ?? []) as unknown as Array<{
+  const invoices = invoicesRaw as unknown as Array<{
     total_cents: number;
     expense_concept_id: string | null;
     cancelled_at?: string | null;
@@ -332,32 +380,11 @@ export async function getProyeccionPagos(
   businessId: string,
   mes: string,
 ): Promise<ProyeccionDelMes> {
-  const service = db();
   const hoy = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Argentina/Buenos_Aires",
   }).format(new Date());
 
-  const [suppliersRes, invoicesRes, paymentsRes, allocsRes] = await Promise.all([
-    service.from("suppliers").select("id, name").eq("business_id", businessId),
-    service.from("supplier_invoices").select(INVOICE_COLS).eq("business_id", businessId),
-    service.from("supplier_payments").select(PAYMENT_COLS).eq("business_id", businessId),
-    service
-      .from("supplier_payment_allocations")
-      .select("payment_id, invoice_id, amount_cents")
-      .eq("business_id", businessId),
-  ]);
-
-  const nombres = new Map(
-    ((suppliersRes.data ?? []) as unknown as Array<{ id: string; name: string }>).map((s) => [
-      s.id,
-      s.name,
-    ]),
-  );
-  const invoices = (invoicesRes.data ?? []) as unknown as Array<
-    ComprobanteCompra & { supplier_id: string }
-  >;
-  const payments = (paymentsRes.data ?? []) as unknown as PagoProveedor[];
-  const allocs = (allocsRes.data ?? []) as unknown as ImputacionPago[];
+  const { nombres, invoices, payments, allocs } = await leerCuentaCorriente(businessId);
 
   const deQuien = new Map(invoices.map((i) => [i.id, i.supplier_id]));
   const impagos = comprobantesImpagos(invoices, allocs, payments);
