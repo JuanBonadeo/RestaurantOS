@@ -15,6 +15,7 @@ const CAJA: Caja = {
   is_active: true,
   sort_order: 0,
   is_default: true,
+  is_administrative: false,
 };
 
 const okResult = { ok: true as const, data: {} };
