@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import Image from "next/image";
-import { ImagePlus, Trash2 } from "lucide-react";
+import { ImageIcon, ImagePlus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,21 @@ export function ImageUploader({
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  /**
+   * Preview local de lo recién subido — spec 163.
+   *
+   * Con `returnPath` (el bucket es privado, como el de comprobantes) sólo
+   * tenemos la ruta, no una URL que `<Image>` pueda pintar, y la rama que la
+   * manejaba mostraba **el mismo ícono que el estado vacío**: no había forma de
+   * saber si la foto quedó. Ya falló en el negocio real — dos objetos huérfanos
+   * en el bucket de golf-jcr, subidos con 15 s de diferencia contra 0
+   * comprobantes: alguien subió, no vio nada, y volvió a subir.
+   *
+   * El `objectURL` del archivo elegido resuelve el caso que importa (acabás de
+   * subirla y la ves); si el valor viene de la base, al menos se distingue
+   * «hay una foto» de «no hay».
+   */
+  const [localPreview, setLocalPreview] = useState<string | null>(null);
 
   const handleFile = async (file: File) => {
     if (!file.type.startsWith("image/")) {
@@ -54,6 +69,10 @@ export function ImageUploader({
         return;
       }
       if (returnPath) {
+        setLocalPreview((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return URL.createObjectURL(file);
+        });
         onChange(path);
       } else {
         const { data } = supabase.storage.from(bucket).getPublicUrl(path);
@@ -91,9 +110,17 @@ export function ImageUploader({
             sizes={sizes}
             className="object-cover"
           />
+        ) : value && returnPath && localPreview ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={localPreview}
+            alt="Comprobante recién subido"
+            className="size-full object-cover"
+          />
         ) : value && returnPath ? (
-          <div className="text-muted-foreground flex size-full items-center justify-center text-xs">
-            <ImagePlus className={isCover ? "size-8" : "size-6"} />
+          <div className="text-muted-foreground flex size-full flex-col items-center justify-center gap-1">
+            <ImageIcon className={isCover ? "size-8" : "size-6"} />
+            <span className="text-[10px] font-medium">Cargada</span>
           </div>
         ) : (
           <div className="text-muted-foreground flex size-full items-center justify-center">

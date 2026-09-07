@@ -63,6 +63,41 @@ export const RUBRO_LABELS: Record<ExpenseRubro, string> = {
   otros: "Otros gastos",
 };
 
+/**
+ * Lo que se puede corregir de un comprobante ya cargado — spec 163.
+ *
+ * **La guarda está partida en dos**, y esa es la decisión: los campos de PLATA
+ * (total, fecha, tipo) sólo se tocan mientras no haya pagos vivos imputados;
+ * los de CLASIFICACIÓN (concepto, vencimiento, número, notas) siempre.
+ *
+ * El caso que duele es justamente el segundo: el concepto de gasto es columna
+ * nuestra, alimenta el informe de la 158, y es lo típico que se descubre mal
+ * clasificado a fin de mes con la compra ya paga. Sin esto, corregir un rótulo
+ * obliga a anular el pago —y `anularPagoProveedor` marca la sangría que el
+ * arqueo ya contó—, así que nadie lo hace y el informe queda sucio para
+ * siempre.
+ */
+export const SupplierInvoiceEditInput = z.object({
+  id: z.string().uuid(),
+  // Clasificación: siempre editable.
+  expense_concept_id: z.string().uuid().nullable().optional(),
+  invoice_number: z.string().max(50).nullable().optional(),
+  notes: z.string().max(500).nullable().optional(),
+  due_date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Vencimiento inválido.")
+    .nullable()
+    .optional(),
+  // Plata: sólo sin pagos vivos. Lo verifica el server, no este schema.
+  total_cents: z.number().int().optional(),
+  invoice_date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida.")
+    .optional(),
+  document_type: z.enum(DOCUMENT_TYPES).optional(),
+});
+export type SupplierInvoiceEditInput = z.infer<typeof SupplierInvoiceEditInput>;
+
 export const SupplierInvoiceInput = z
   .object({
     supplier_id: z.string().uuid("Proveedor inválido."),

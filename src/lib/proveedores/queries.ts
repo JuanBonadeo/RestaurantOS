@@ -60,6 +60,10 @@ export async function getSuppliers(
           .from("supplier_invoices")
           .select("supplier_id, total_cents, invoice_date")
           .eq("business_id", businessId)
+          // Spec 163 — «Total comprado» contaba los anulados. La Cta. Cte. sí los
+          // filtra, así que la misma plata daba dos números distintos a doce
+          // líneas de distancia, en tres superficies.
+          .is("cancelled_at", null)
           .in("supplier_id", lote),
         "supplier_invoices",
       ),
@@ -174,7 +178,8 @@ export async function getSupplierStats(
   let query = service
     .from("supplier_invoices")
     .select("supplier_id, total_cents, invoice_date, suppliers!inner(name)")
-    .eq("business_id", businessId);
+    .eq("business_id", businessId)
+    .is("cancelled_at", null);
 
   if (from) query = query.gte("invoice_date", from);
   if (to) query = query.lte("invoice_date", to);

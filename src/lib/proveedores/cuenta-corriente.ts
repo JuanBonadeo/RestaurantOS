@@ -36,6 +36,8 @@ export type ComprobanteCompra = {
   due_date?: string | null;
   document_type?: DocumentType;
   invoice_number?: string | null;
+  /** El concepto de gasto (spec 158). La query ya lo traía; el tipo no lo decía. */
+  expense_concept_id?: string | null;
   /** Anulado con motivo (spec 070): sigue en el libro, no cuenta para el saldo. */
   cancelled_at?: string | null;
 };
@@ -47,6 +49,12 @@ export type PagoProveedor = {
   paid_at: string;
   method: string;
   cancelled_at?: string | null;
+  /**
+   * Correlativo por negocio de la orden de pago (spec 163, migración 0071).
+   * `null` en los pagos anteriores a la spec: no se retro-numeran, igual que
+   * los cortes viejos de `caja_cortes`.
+   */
+  numero?: number | null;
 };
 
 /** Cuánto de un pago se imputó a qué comprobante. Sin filas = pago a cuenta. */
@@ -218,7 +226,11 @@ export function armarLibroProveedor(
       amount_cents: p.amount_cents,
       fecha: p.paid_at,
       anulado: !vivo(p),
-      detalle: etiquetaMetodo(p.method),
+      // Spec 163 — antes decía sólo «Efectivo», y dos pagos en efectivo del
+      // mismo monto el mismo día quedaban indistinguibles en el libro.
+      detalle: p.numero
+        ? `OP #${p.numero} · ${etiquetaMetodo(p.method)}`
+        : etiquetaMetodo(p.method),
     })),
   ];
 
@@ -335,11 +347,25 @@ export function totalesDelPeriodo(
   const conSaldo = comprobantesConSaldo(comprobantes, imputaciones, pagos);
   const vivos = conSaldo.filter(vivo);
 
-  const imputado = new Set(imputaciones.map((im) => im.payment_id));
+  // Spec 163 — esto era un `Set` de payment_id y un `.filter(p => !imputado.has(p.id))`,
+  // o sea: **una sola** imputación sacaba al pago entero de la cuenta. Pero
+  // `repartirPago` produce el caso mixto —pagás $100.000, se imputan $60.000 y
+  // $40.000 quedan a cuenta— y ahí el toast prometía «$40.000 quedaron a cuenta»
+  // mientras el pie decía $0. Con un Map, lo a-cuenta es lo que sobra de cada
+  // pago, que es la definición.
+  const imputadoPorPago = new Map<string, number>();
+  for (const im of imputaciones) {
+    imputadoPorPago.set(
+      im.payment_id,
+      (imputadoPorPago.get(im.payment_id) ?? 0) + im.amount_cents,
+    );
+  }
   const aCuenta = pagos
     .filter(vivo)
-    .filter((p) => !imputado.has(p.id))
-    .reduce((n, p) => n + p.amount_cents, 0);
+    .reduce(
+      (n, p) => n + Math.max(0, p.amount_cents - (imputadoPorPago.get(p.id) ?? 0)),
+      0,
+    );
 
   return {
     total_cents: vivos.reduce((n, c) => n + c.total_cents, 0),

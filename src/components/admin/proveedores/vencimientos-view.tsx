@@ -11,22 +11,13 @@ import {
 } from "@/lib/proveedores/actions-client";
 import type { GastoPorClave, Vencimiento } from "@/lib/proveedores/cuenta-corriente-queries";
 import { etiquetaTipo } from "@/lib/proveedores/cuenta-corriente";
-
-function hoyAR(): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Argentina/Buenos_Aires",
-  }).format(new Date());
-}
-
-function primerDiaDelMes(): string {
-  return `${hoyAR().slice(0, 7)}-01`;
-}
+import { hoyAR, primerDiaDelMesAR } from "@/lib/proveedores/fechas-ar";
 
 export function VencimientosView({ businessId }: { businessId: string }) {
   const [vencimientos, setVencimientos] = useState<Vencimiento[]>([]);
   const [gasto, setGasto] = useState<GastoPorClave[]>([]);
   const [agrupacion, setAgrupacion] = useState<"concepto" | "rubro">("rubro");
-  const [desde, setDesde] = useState(primerDiaDelMes());
+  const [desde, setDesde] = useState(primerDiaDelMesAR());
   const [hasta, setHasta] = useState(hoyAR());
   const [loading, setLoading] = useState(true);
 

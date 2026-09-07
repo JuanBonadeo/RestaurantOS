@@ -8,18 +8,13 @@ import { cn } from "@/lib/utils";
 import { getProyeccionPagos } from "@/lib/proveedores/actions-client";
 import type { ProyeccionDelMes } from "@/lib/proveedores/cuenta-corriente-queries";
 import { etiquetaTipo, type DocumentType } from "@/lib/proveedores/cuenta-corriente";
+import { hoyAR, primerDiaDelMesAR } from "@/lib/proveedores/fechas-ar";
 
 const DIAS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
 const MESES = [
   "enero", "febrero", "marzo", "abril", "mayo", "junio",
   "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
 ];
-
-function hoyAR(): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Argentina/Buenos_Aires",
-  }).format(new Date());
-}
 
 /** Las casillas del mes, con los huecos del principio para alinear los días. */
 function armarGrilla(mes: string): Array<string | null> {

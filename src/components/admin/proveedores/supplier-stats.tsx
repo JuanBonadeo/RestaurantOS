@@ -6,6 +6,7 @@ import { formatCurrency } from "@/lib/currency";
 import type { SupplierStats } from "@/lib/proveedores/types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { hoyAR, primerDiaDelMesAR } from "@/lib/proveedores/fechas-ar";
 
 type Props = {
   slug: string;
@@ -23,14 +24,12 @@ async function fetchStats(
 
 export function SupplierStatsView({ slug: _slug, businessId }: Props) {
   void _slug;
-  const now = new Date();
-  const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
-    .toISOString()
-    .slice(0, 10);
-  const today = now.toISOString().slice(0, 10);
-
-  const [from, setFrom] = useState(firstOfMonth);
-  const [to, setTo] = useState(today);
+  // Spec 163 — acá había `new Date().toISOString()`, que es UTC: después de las
+  // 21 hs de Argentina el rango saltaba a mañana, y el 30 a las 21 el «hasta» se
+  // iba al mes siguiente. Es el único de los cinco componentes de la carpeta que
+  // no usaba hora de Buenos Aires.
+  const [from, setFrom] = useState(primerDiaDelMesAR);
+  const [to, setTo] = useState(hoyAR);
   const [stats, setStats] = useState<SupplierStats[]>([]);
   const [loading, setLoading] = useState(true);
 

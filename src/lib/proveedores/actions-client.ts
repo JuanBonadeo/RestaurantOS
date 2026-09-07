@@ -53,9 +53,9 @@ export async function getCuentaDeProveedor(businessId: string, supplierId: strin
   return _getCuenta(businessId, supplierId);
 }
 
-export async function getVencimientos(businessId: string, hastaFecha?: string) {
+export async function getVencimientos(businessId: string) {
   await assertCanReadProveedores(businessId);
-  return _getVencimientos(businessId, hastaFecha);
+  return _getVencimientos(businessId);
 }
 
 export async function getGastoPorConcepto(

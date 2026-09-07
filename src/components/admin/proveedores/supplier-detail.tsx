@@ -220,6 +220,8 @@ export function SupplierDetail({
           imputaciones={cuenta?.imputaciones ?? []}
           fotos={Object.fromEntries(invoices.map((i) => [i.id, i.photoSignedUrl]))}
           onAnularComprobante={(id) => anular("comprobante", id)}
+          slug={slug}
+          conceptos={concepts}
         />
       )}
 

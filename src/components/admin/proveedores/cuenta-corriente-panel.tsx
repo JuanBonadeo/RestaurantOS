@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronRight, FileText } from "lucide-react";
+import { ChevronRight, FileText, Pencil } from "lucide-react";
 
 import { formatCurrency } from "@/lib/currency";
 import { cn } from "@/lib/utils";
@@ -16,6 +16,9 @@ import {
   type ImputacionPago,
   type PagoProveedor,
 } from "@/lib/proveedores/cuenta-corriente";
+import { hoyAR, primerDiaDelMesAR } from "@/lib/proveedores/fechas-ar";
+import { EditarComprobanteDialog } from "./editar-comprobante-dialog";
+import type { ConceptOption } from "./invoice-dialog";
 
 type Props = {
   /** El saldo TOTAL del proveedor: no depende del período que se mire (D3). */
@@ -26,21 +29,10 @@ type Props = {
   /** id del comprobante → URL firmada de su foto (1h). */
   fotos?: Record<string, string | null>;
   onAnularComprobante?: (id: string) => void;
+  /** spec 163 · para corregir un comprobante desde acá. */
+  slug?: string;
+  conceptos?: ConceptOption[];
 };
-
-function primerDiaDelMes(): string {
-  return `${new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Argentina/Buenos_Aires",
-  })
-    .format(new Date())
-    .slice(0, 7)}-01`;
-}
-
-function hoyAR(): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Argentina/Buenos_Aires",
-  }).format(new Date());
-}
 
 const nombreComprobante = (c: ComprobanteConSaldo) =>
   c.invoice_number?.trim()
@@ -62,10 +54,13 @@ export function CuentaCorrientePanel({
   imputaciones,
   fotos = {},
   onAnularComprobante,
+  slug,
+  conceptos = [],
 }: Props) {
-  const [desde, setDesde] = useState(primerDiaDelMes());
+  const [desde, setDesde] = useState(primerDiaDelMesAR());
   const [hasta, setHasta] = useState(hoyAR());
   const [seleccionada, setSeleccionada] = useState<string | null>(null);
+  const [editando, setEditando] = useState<ComprobanteConSaldo | null>(null);
 
   const delPeriodo = useMemo(
     () => filtrarPorPeriodo(compras, desde, hasta),
@@ -85,6 +80,7 @@ export function CuentaCorrientePanel({
   const elegida = delPeriodo.find((c) => c.id === seleccionada) ?? null;
 
   return (
+    <>
     <section className="space-y-3">
       <header className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-bold text-zinc-900">Cta. Cte.</h3>
@@ -161,12 +157,28 @@ export function CuentaCorrientePanel({
                           {formatCurrency(anulado ? 0 : c.saldo_cents)}
                         </td>
                         <td className="pr-2">
-                          <ChevronRight
-                            className={cn(
-                              "size-4 text-zinc-300 transition",
-                              activa && "rotate-90 text-zinc-500",
+                          <div className="flex items-center justify-end gap-0.5">
+                            {slug && !anulado && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditando(c);
+                                }}
+                                className="rounded p-1 text-zinc-300 transition hover:bg-zinc-200 hover:text-zinc-700"
+                                aria-label={`Corregir ${nombreComprobante(c)}`}
+                                title="Corregir"
+                              >
+                                <Pencil className="size-3.5" />
+                              </button>
                             )}
-                          />
+                            <ChevronRight
+                              className={cn(
+                                "size-4 text-zinc-300 transition",
+                                activa && "rotate-90 text-zinc-500",
+                              )}
+                            />
+                          </div>
                         </td>
                       </tr>
                     );
@@ -285,5 +297,23 @@ export function CuentaCorrientePanel({
         </div>
       </div>
     </section>
+
+      {editando && slug && (
+        <EditarComprobanteDialog
+          slug={slug}
+          comprobante={editando}
+          conceptos={conceptos}
+          // Un pago vivo imputado a ESTE comprobante: lo que la guarda del
+          // server mira. Se calcula acá para deshabilitar los campos de plata
+          // con el motivo a la vista, no para reemplazar esa guarda.
+          tienePagoVivo={imputaciones.some(
+            (im) =>
+              im.invoice_id === editando.id &&
+              pagos.some((p) => p.id === im.payment_id && !p.cancelled_at),
+          )}
+          onClose={() => setEditando(null)}
+        />
+      )}
+    </>
   );
 }

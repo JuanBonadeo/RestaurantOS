@@ -21,6 +21,7 @@ import { unwrap } from "./unwrap";
 import {
   AnularInput,
   ExpenseConceptInput,
+  SupplierInvoiceEditInput,
   SupplierPaymentInput,
 } from "./schema";
 
@@ -207,6 +208,109 @@ export async function anularComprobante(
     .eq("business_id", business.id);
 
   if (error) return actionError("No pudimos anular el comprobante.");
+
+  revalidatePath(`/${slug}/admin/proveedores`);
+  return actionOk(undefined);
+}
+
+/**
+ * Corrige un comprobante ya cargado — spec 163.
+ *
+ * El Alcance de la 158 decía «alta / edición / anulación», y la edición nunca
+ * existió: cero `update` sobre `supplier_invoices` fuera de `anularComprobante`.
+ * El botón «Editar» de la ficha es el del *proveedor*.
+ *
+ * **La guarda va partida** (D1): la plata (total, fecha, tipo) sólo se toca sin
+ * pagos vivos; la clasificación (concepto, vencimiento, número, notas) siempre.
+ * El caso frecuente es el segundo — el concepto mal puesto que se descubre a fin
+ * de mes con la compra ya paga— y hoy obliga a anular el pago, que marca la
+ * sangría que el arqueo ya contó. Nadie lo hace, y el informe queda sucio.
+ */
+export async function editarComprobante(
+  slug: string,
+  input: unknown,
+): Promise<ActionResult<void>> {
+  const parsed = SupplierInvoiceEditInput.safeParse(input);
+  if (!parsed.success) return actionError("Datos inválidos.");
+
+  const business = await getBusiness(slug);
+  if (!business) return actionError("Negocio no encontrado.");
+  const ctx = await requireProveedorCtx(business.id);
+  if (!ctx.ok) return ctx;
+
+  const service = db();
+  const { id, ...campos } = parsed.data;
+
+  const { data: invoice, error: invErr } = await service
+    .from("supplier_invoices")
+    .select("id, cancelled_at, total_cents, document_type")
+    .eq("id", id)
+    .eq("business_id", business.id)
+    .maybeSingle();
+
+  if (invErr) return actionError("No pudimos leer el comprobante.");
+  if (!invoice) return actionError("Comprobante no encontrado.");
+  if ((invoice as { cancelled_at: string | null }).cancelled_at) {
+    return actionError("Un comprobante anulado no se edita.");
+  }
+
+  const tocaPlata =
+    campos.total_cents !== undefined ||
+    campos.invoice_date !== undefined ||
+    campos.document_type !== undefined;
+
+  if (tocaPlata) {
+    // Misma lectura y misma política que `anularComprobante`: si no se puede
+    // saber si hay pagos vivos, no se toca la plata (spec 161 · D3).
+    const { data: allocations, error: allocErr } = await service
+      .from("supplier_payment_allocations")
+      .select("payment_id, supplier_payments!inner(cancelled_at)")
+      .eq("invoice_id", id);
+
+    if (allocErr || !allocations) {
+      console.error("editarComprobante · imputaciones", allocErr);
+      return actionError(
+        "No pudimos verificar si el comprobante tiene pagos. Probá de nuevo en un momento.",
+      );
+    }
+
+    const conPagoVivo = (allocations as unknown as Array<{
+      supplier_payments:
+        | { cancelled_at: string | null }
+        | Array<{ cancelled_at: string | null }>
+        | null;
+    }>).some((a) => {
+      const emb = a.supplier_payments;
+      const pagos = emb == null ? [] : Array.isArray(emb) ? emb : [emb];
+      return pagos.some((p) => p.cancelled_at == null);
+    });
+
+    if (conPagoVivo) {
+      return actionError(
+        "El comprobante ya tiene pagos: podés corregir el concepto, el número y las notas, pero no el importe ni la fecha.",
+      );
+    }
+
+    // El mismo signo que exige la base (158 · D4), acá para dar el mensaje bueno.
+    const tipo = campos.document_type ?? (invoice as { document_type: string }).document_type;
+    const total = campos.total_cents ?? (invoice as { total_cents: number }).total_cents;
+    if (tipo === "nota_credito" ? total > 0 : total < 0) {
+      return actionError(
+        "La nota de crédito va en negativo; el resto de los comprobantes, en positivo.",
+      );
+    }
+  }
+
+  const { error } = await service
+    .from("supplier_invoices")
+    .update(campos)
+    .eq("id", id)
+    .eq("business_id", business.id);
+
+  if (error) {
+    console.error("editarComprobante", error);
+    return actionError("No pudimos guardar los cambios.");
+  }
 
   revalidatePath(`/${slug}/admin/proveedores`);
   return actionOk(undefined);

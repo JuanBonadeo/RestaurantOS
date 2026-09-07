@@ -30,6 +30,7 @@ import { ImageUploader } from "@/components/admin/catalog/image-uploader";
 import { createSupplierInvoice } from "@/lib/proveedores/actions";
 import { calcularVencimiento, etiquetaTipo } from "@/lib/proveedores/cuenta-corriente";
 import { DOCUMENT_TYPES, SupplierInvoiceInput } from "@/lib/proveedores/schema";
+import { hoyAR, primerDiaDelMesAR } from "@/lib/proveedores/fechas-ar";
 
 type FormValues = z.input<typeof SupplierInvoiceInput>;
 
@@ -47,13 +48,6 @@ type Props = {
   onSuccess?: () => void;
   trigger: React.ReactElement;
 };
-
-/** Hoy en Buenos Aires. `new Date().toISOString()` se adelanta un día de noche. */
-function hoyAR(): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Argentina/Buenos_Aires",
-  }).format(new Date());
-}
 
 export function InvoiceDialog({
   slug,

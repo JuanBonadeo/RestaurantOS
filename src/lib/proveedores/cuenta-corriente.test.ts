@@ -428,6 +428,30 @@ describe("totalesDelPeriodo", () => {
     expect(t.pago_a_cuenta_cents).toBe(25_000_00);
   });
 
+  // Spec 163 — el pago MIXTO se evaporaba del pie. `repartirPago` produce este
+  // caso: pagás $100.000, se imputan $60.000 al comprobante y $40.000 quedan a
+  // cuenta. El toast dice «$40.000 quedaron a cuenta» y el pie decía **$0**,
+  // porque el filtro era un Set de payment_id: bastaba UNA imputación para que
+  // el pago entero dejara de contar como a-cuenta.
+  it("un pago imputado en parte deja el resto a cuenta", () => {
+    const t = totalesDelPeriodo(
+      [comprobante({ id: "a", total_cents: 60_000_00 })],
+      [imputacion({ payment_id: "p1", invoice_id: "a", amount_cents: 60_000_00 })],
+      [pago({ id: "p1", amount_cents: 100_000_00 })],
+    );
+    expect(t.saldo_cents).toBe(0);
+    expect(t.pago_a_cuenta_cents).toBe(40_000_00);
+  });
+
+  it("un pago imputado por completo no deja nada a cuenta", () => {
+    const t = totalesDelPeriodo(
+      [comprobante({ id: "a", total_cents: 60_000_00 })],
+      [imputacion({ payment_id: "p1", invoice_id: "a", amount_cents: 60_000_00 })],
+      [pago({ id: "p1", amount_cents: 60_000_00 })],
+    );
+    expect(t.pago_a_cuenta_cents).toBe(0);
+  });
+
   it("lo anulado no suma ni al total ni al saldo", () => {
     const t = totalesDelPeriodo(
       [
