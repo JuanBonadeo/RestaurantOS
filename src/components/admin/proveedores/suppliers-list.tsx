@@ -11,12 +11,13 @@ import { SupplierDialog } from "./supplier-dialog";
 import { SupplierDetail } from "./supplier-detail";
 import { ImportDialog } from "./import-dialog";
 import type { ConceptOption } from "./invoice-dialog";
+import type { IngredientOption } from "@/lib/proveedores/queries";
 
 type Props = {
   slug: string;
   businessId: string;
   suppliers: SupplierWithStats[];
-  ingredientOptions: { id: string; name: string; unit: string }[];
+  ingredientOptions: IngredientOption[];
   concepts: ConceptOption[];
   cajaAdministrativa: { name: string } | null;
 };

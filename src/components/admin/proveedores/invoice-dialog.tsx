@@ -28,6 +28,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ImageUploader } from "@/components/admin/catalog/image-uploader";
 import { createSupplierInvoice } from "@/lib/proveedores/actions";
+import type { SupplierInvoiceItemInput } from "@/lib/proveedores/schema";
+import { RenglonesEditor, type InsumoOption } from "./renglones-editor";
 import { calcularVencimiento, etiquetaTipo } from "@/lib/proveedores/cuenta-corriente";
 import { DOCUMENT_TYPES, SupplierInvoiceInput } from "@/lib/proveedores/schema";
 import { hoyAR, primerDiaDelMesAR } from "@/lib/proveedores/fechas-ar";
@@ -45,6 +47,8 @@ type Props = {
   /** El concepto y los días de crédito del proveedor: precargan la compra. */
   defaultConceptId?: string | null;
   paymentTermsDays?: number;
+  /** spec 165 · los insumos del negocio, para detallar la compra por renglón. */
+  insumos?: InsumoOption[];
   onSuccess?: () => void;
   trigger: React.ReactElement;
 };
@@ -56,6 +60,7 @@ export function InvoiceDialog({
   concepts,
   defaultConceptId,
   paymentTermsDays = 0,
+  insumos = [],
   onSuccess,
   trigger,
 }: Props) {
@@ -63,6 +68,7 @@ export function InvoiceDialog({
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [photoPath, setPhotoPath] = useState<string | null>(null);
+  const [items, setItems] = useState<SupplierInvoiceItemInput[]>([]);
 
   const today = hoyAR();
 
@@ -102,6 +108,7 @@ export function InvoiceDialog({
       const result = await createSupplierInvoice(slug, {
         ...values,
         photo_url: photoPath,
+        items,
       });
       if (!result.ok) {
         toast.error(result.error);
@@ -110,6 +117,7 @@ export function InvoiceDialog({
       toast.success("Compra cargada.");
       setOpen(false);
       setPhotoPath(null);
+      setItems([]);
       setVencTocado(false);
       form.reset();
       router.refresh();
@@ -269,6 +277,15 @@ export function InvoiceDialog({
                     <FormMessage />
                   </FormItem>
                 )}
+              />
+            )}
+
+            {insumos.length > 0 && (
+              <RenglonesEditor
+                insumos={insumos}
+                value={items}
+                onChange={setItems}
+                totalComprobanteCents={form.watch("total_cents") ?? 0}
               />
             )}
 

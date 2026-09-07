@@ -323,19 +323,61 @@ export async function getSupplierProductOutflow(
 
 // ── Ingredients for search (used by link dialog) ────────────────
 
+export type IngredientOption = {
+  id: string;
+  name: string;
+  unit: string;
+  /**
+   * spec 165 · la presentación default del insumo. Sin ella no se puede
+   * convertir «2 bolsas» a «100 kg», que es lo que el renglón necesita para dar
+   * de alta stock.
+   */
+  presentationId?: string | null;
+  netQuantity?: number;
+  costCents?: number;
+};
+
 export async function getIngredientsForLinking(
   businessId: string,
-): Promise<{ id: string; name: string; unit: string }[]> {
+): Promise<IngredientOption[]> {
   const service = db();
-  return fetchAll(
+  const filas = await fetchAll(
     () =>
       service
         .from("ingredients")
-        .select("id, name, unit")
+        .select(
+          "id, name, unit, ingredient_presentations!left(id, net_quantity, cost_cents, is_default)",
+        )
         .eq("business_id", businessId)
         .eq("is_active", true)
         .order("name")
         .order("id"),
     "ingredients",
   );
+
+  return (filas as unknown as Array<{
+    id: string;
+    name: string;
+    unit: string;
+    ingredient_presentations?: Array<{
+      id: string;
+      net_quantity: number | string;
+      cost_cents: number;
+      is_default: boolean;
+    }> | null;
+  }>).map((f) => {
+    // El embed viene como array; la default es la que importa, y si no hay
+    // ninguna marcada se toma la primera antes que dejar el insumo sin envase.
+    const pres =
+      f.ingredient_presentations?.find((p) => p.is_default) ??
+      f.ingredient_presentations?.[0];
+    return {
+      id: f.id,
+      name: f.name,
+      unit: f.unit,
+      presentationId: pres?.id ?? null,
+      netQuantity: pres ? Number(pres.net_quantity) : undefined,
+      costCents: pres?.cost_cents,
+    };
+  });
 }

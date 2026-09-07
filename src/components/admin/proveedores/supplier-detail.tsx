@@ -25,12 +25,13 @@ import { IngredientLinkDialog } from "./ingredient-link-dialog";
 import { PagoDialog } from "./pago-dialog";
 import { CuentaCorrientePanel } from "./cuenta-corriente-panel";
 import type { ConceptOption } from "./invoice-dialog";
+import type { IngredientOption } from "@/lib/proveedores/queries";
 
 type Props = {
   slug: string;
   businessId: string;
   supplier: SupplierWithStats;
-  ingredientOptions: { id: string; name: string; unit: string }[];
+  ingredientOptions: IngredientOption[];
   concepts: ConceptOption[];
   cajaAdministrativa: { name: string } | null;
   onBack: () => void;
@@ -131,6 +132,7 @@ export function SupplierDetail({
           concepts={concepts}
           defaultConceptId={supplier.defaultExpenseConceptId}
           paymentTermsDays={supplier.paymentTermsDays}
+          insumos={ingredientOptions}
           onSuccess={refreshData}
           trigger={
             <Button variant="outline" size="sm">

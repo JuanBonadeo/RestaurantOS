@@ -197,6 +197,19 @@ export async function anularComprobante(
     );
   }
 
+  // spec 165 · si el comprobante tenía renglones, devolver la mercadería que
+  // nunca entró. Va ANTES de marcar la anulación: si el stock no se puede
+  // revertir, el comprobante sigue vivo y el encargado puede reintentar — al
+  // revés quedaría anulado con el stock inflado y nadie se enteraría.
+  const { error: revErr } = await service.rpc("revertir_items_comprobante_tx", {
+    p_business_id: business.id,
+    p_invoice_id: parsed.data.id,
+  });
+  if (revErr) {
+    console.error("anularComprobante · revertir stock", revErr);
+    return actionError("No pudimos devolver el stock del comprobante. Probá de nuevo.");
+  }
+
   const { error } = await service
     .from("supplier_invoices")
     .update({
@@ -210,6 +223,7 @@ export async function anularComprobante(
   if (error) return actionError("No pudimos anular el comprobante.");
 
   revalidatePath(`/${slug}/admin/proveedores`);
+  revalidatePath(`/${slug}/admin/catalogo`);
   return actionOk(undefined);
 }
 

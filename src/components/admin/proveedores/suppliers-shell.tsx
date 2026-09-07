@@ -10,6 +10,7 @@ import { VencimientosView } from "./vencimientos-view";
 import { ProyeccionView } from "./proyeccion-view";
 import { ConceptosView, type ConceptoRow } from "./conceptos-view";
 import type { ConceptOption } from "./invoice-dialog";
+import type { IngredientOption } from "@/lib/proveedores/queries";
 
 const TAB_LABELS: Record<Tab, string> = {
   lista: "Lista",
@@ -23,7 +24,7 @@ type Props = {
   slug: string;
   businessId: string;
   suppliers: SupplierWithStats[];
-  ingredientOptions: { id: string; name: string; unit: string }[];
+  ingredientOptions: IngredientOption[];
   /** Todos, activos e inactivos: el selector de compra filtra, el ABM los muestra. */
   concepts: ConceptoRow[];
   cajaAdministrativa: { name: string } | null;

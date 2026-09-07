@@ -205,7 +205,42 @@ export async function createSupplierInvoice(
     console.error("createSupplierInvoice", error);
     return actionError("No pudimos cargar la factura.");
   }
+
+  // spec 165 · el detalle por insumo, si vino. Una RPC: cada renglón toca la
+  // línea, el stock, el consumo y el precio del insumo, y un fallo a mitad
+  // dejaría stock sumado sin rastro o precio nuevo sin mercadería.
+  //
+  // Si los renglones fallan, el comprobante NO queda: se anula, porque un
+  // comprobante que el usuario cargó con detalle y quedó sin él es peor que
+  // ninguno — parece cargado y no movió nada.
+  if (parsed.data.items.length > 0) {
+    const { error: itemsErr } = await service.rpc("registrar_items_comprobante_tx", {
+      p_business_id: businessId,
+      p_invoice_id: data.id,
+      p_created_by: ctxResult.data.userId,
+      p_items: parsed.data.items,
+    });
+
+    if (itemsErr) {
+      console.error("createSupplierInvoice · items", itemsErr);
+      await service
+        .from("supplier_invoices")
+        .update({
+          cancelled_at: new Date().toISOString(),
+          cancelled_by: ctxResult.data.userId,
+          cancelled_reason: "Revertido: falló la carga del detalle por insumo",
+        })
+        .eq("id", data.id);
+      return actionError(
+        itemsErr.message?.includes("INSUMO_DE_OTRO_NEGOCIO")
+          ? "Uno de los insumos no es de este negocio."
+          : "No pudimos cargar el detalle por insumo. El comprobante no se guardó.",
+      );
+    }
+  }
+
   revalidatePath(`/${businessSlug}/admin/proveedores`);
+  revalidatePath(`/${businessSlug}/admin/catalogo`);
   return actionOk({ id: data.id });
 }
 

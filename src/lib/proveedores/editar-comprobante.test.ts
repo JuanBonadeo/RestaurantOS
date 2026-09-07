@@ -20,6 +20,7 @@ let role: BusinessRole;
 let invoice: Record<string, unknown> | null;
 let allocsRes: { data: unknown[] | null; error: { message: string } | null };
 let updates: Array<Record<string, unknown>>;
+let rpcCalls: string[];
 
 vi.mock("@/lib/tenant", () => ({ getBusiness: async () => ({ id: BIZ, slug: "demo" }) }));
 vi.mock("@/lib/mozo/auth", () => ({
@@ -33,6 +34,13 @@ vi.mock("@/lib/caja/queries", () => ({ getCajaAdministrativa: async () => null }
 
 vi.mock("@/lib/supabase/service", () => ({
   createSupabaseServiceClient: () => ({
+    // spec 165 · anular ahora devuelve el stock de los renglones antes de
+    // marcar la anulación. Sin renglones la RPC no hace nada, que es el caso
+    // de estos tests.
+    rpc: async (fn: string) => {
+      rpcCalls.push(fn);
+      return { data: 0, error: null };
+    },
     from: (tabla: string) => {
       const chain: Record<string, unknown> = {
         select: () => chain,
@@ -68,6 +76,7 @@ beforeEach(() => {
   };
   allocsRes = { data: [], error: null };
   updates = [];
+  rpcCalls = [];
 });
 
 const conPagoVivo = () => {

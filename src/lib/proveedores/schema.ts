@@ -98,6 +98,22 @@ export const SupplierInvoiceEditInput = z.object({
 });
 export type SupplierInvoiceEditInput = z.infer<typeof SupplierInvoiceEditInput>;
 
+/**
+ * Un renglón del comprobante — spec 165.
+ *
+ * `units` son ENVASES (2 bolsas), no unidades base: el server multiplica por el
+ * `net_quantity` de la presentación, que es lo que `ingredient_presentations`
+ * ya sabe convertir. `unit_cost_cents` es lo que costó UN envase, y es el precio
+ * que se propaga al insumo.
+ */
+export const SupplierInvoiceItemInput = z.object({
+  ingredient_id: z.string().uuid("Insumo inválido."),
+  presentation_id: z.string().uuid().nullable().optional(),
+  units: z.number().positive("La cantidad debe ser mayor a 0."),
+  unit_cost_cents: z.number().int().min(0),
+});
+export type SupplierInvoiceItemInput = z.infer<typeof SupplierInvoiceItemInput>;
+
 export const SupplierInvoiceInput = z
   .object({
     supplier_id: z.string().uuid("Proveedor inválido."),
@@ -114,6 +130,16 @@ export const SupplierInvoiceInput = z
       .regex(/^\d{4}-\d{2}-\d{2}$/, "Vencimiento inválido.")
       .nullable()
       .optional(),
+    /**
+     * spec 165 · el detalle por insumo. **Opcional a propósito**: el 92% de los
+     * comprobantes del Golf se cargan sólo con concepto de gasto, y la ayuda de
+     * MaxiRest bendice ese camino. Sin renglones el comprobante sigue siendo
+     * válido — lo que no hace es mover stock ni actualizar costos.
+     *
+     * Y NO se valida que Σ renglones = total: en 2026 sólo 585 de 1.502
+     * comprobantes del Golf cuadran exacto.
+     */
+    items: z.array(SupplierInvoiceItemInput).max(100).default([]),
   })
   // El signo lo manda el tipo (D4): la nota de crédito resta, todo lo demás
   // suma. Es el mismo check que el de la base — acá para dar el mensaje bueno.
