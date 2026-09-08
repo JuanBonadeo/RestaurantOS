@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -45,7 +45,24 @@ export function RenglonesEditor({
   onChange: (items: SupplierInvoiceItemInput[]) => void;
   totalComprobanteCents: number;
 }) {
+  /**
+   * Abierto si hay renglones — spec 172.
+   *
+   * Era `useState(value.length > 0)`, que sólo mira el valor del primer render.
+   * Mientras los renglones se tipeaban a mano daba igual: se abría el editor y
+   * recién ahí aparecía el primero. Pero el lector de facturas los carga
+   * **después** de montar, y ahí el `useState` dejaba el editor CERRADO con
+   * renglones adentro que el submit mandaba igual: stock y costos escritos por
+   * líneas que nadie llegó a ver.
+   *
+   * El efecto sólo abre, nunca cierra: «Cargar sin detalle» vacía `value`, y si
+   * el efecto también cerrara, un `onChange` a cero volvería a taparlo justo
+   * cuando el usuario acaba de elegir lo contrario.
+   */
   const [abierto, setAbierto] = useState(value.length > 0);
+  useEffect(() => {
+    if (value.length > 0) setAbierto(true);
+  }, [value.length]);
 
   const filas: Renglon[] = value.map((v, i) => ({ ...v, key: `${i}` }));
   const sumaCents = value.reduce(

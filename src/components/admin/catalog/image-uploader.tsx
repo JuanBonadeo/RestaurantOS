@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { achicarImagen } from "@/lib/images/achicar";
 
 export function ImageUploader({
   businessId,
@@ -17,6 +18,7 @@ export function ImageUploader({
   variant = "avatar-square",
   layout = "auto",
   returnPath = false,
+  maxEdgePx,
 }: {
   businessId: string;
   value: string | null;
@@ -26,6 +28,12 @@ export function ImageUploader({
   variant?: "avatar-square" | "avatar-circle" | "cover";
   layout?: "auto" | "stacked";
   returnPath?: boolean;
+  /**
+   * spec 172 · si viene, la imagen se achica a ese lado largo y se convierte a
+   * JPEG antes de subir. Sin la prop no cambia nada: el catálogo, el branding y
+   * el plano de salón siguen subiendo el archivo tal cual.
+   */
+  maxEdgePx?: number;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -45,17 +53,31 @@ export function ImageUploader({
    */
   const [localPreview, setLocalPreview] = useState<string | null>(null);
 
-  const handleFile = async (file: File) => {
-    if (!file.type.startsWith("image/")) {
+  const handleFile = async (original: File) => {
+    if (!original.type.startsWith("image/")) {
       toast.error("Solo imágenes.");
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error("Máximo 5MB.");
       return;
     }
     setUploading(true);
     try {
+      /**
+       * El achicado va ANTES del control de tamaño — spec 172.
+       *
+       * Con el orden al revés, una foto de celular de 12 MP (4-6 MB) rebota
+       * contra el tope de 5 MB sin que el resize llegue a correr nunca, que es
+       * justo el caso para el que existe. Y de paso pasa el HEIC del iPhone a
+       * JPEG, que es lo único que el lector de facturas sabe leer.
+       *
+       * Es opt-in por `maxEdgePx`: sin la prop, este uploader se comporta igual
+       * que antes para el catálogo, el branding y el plano de salón.
+       */
+      const file = maxEdgePx ? await achicarImagen(original, maxEdgePx) : original;
+
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error("Máximo 5MB.");
+        return;
+      }
+
       const supabase = createSupabaseBrowserClient();
       const ext = file.name.split(".").pop() ?? "jpg";
       const prefix = pathPrefix ? `${pathPrefix}-` : "";

@@ -17,6 +17,7 @@ import {
   type PagoProveedor,
 } from "@/lib/proveedores/cuenta-corriente";
 import { hoyAR, primerDiaDelMesAR } from "@/lib/proveedores/fechas-ar";
+import type { SupplierInvoiceItem } from "@/lib/proveedores/types";
 import { EditarComprobanteDialog } from "./editar-comprobante-dialog";
 import type { ConceptOption } from "./invoice-dialog";
 
@@ -28,11 +29,31 @@ type Props = {
   imputaciones: ImputacionPago[];
   /** id del comprobante → URL firmada de su foto (1h). */
   fotos?: Record<string, string | null>;
+  /**
+   * id del comprobante → sus renglones por insumo — spec 172.
+   *
+   * La 165 los escribía y nadie los leía. Importan acá porque son las líneas que
+   * movieron stock y pisaron el costo de un insumo, **no se pueden editar** (se
+   * anula y se rehace) y el precio no vuelve al anular. Verlos es lo único que
+   * queda entre el encargado y una auditoría a ciegas.
+   */
+  renglones?: Record<string, SupplierInvoiceItem[]>;
   onAnularComprobante?: (id: string) => void;
   /** spec 163 · para corregir un comprobante desde acá. */
   slug?: string;
   conceptos?: ConceptOption[];
 };
+
+/**
+ * Cantidades con coma decimal — spec 172.
+ *
+ * `formatCurrency` ya localiza la plata, pero los envases y los kilos salían
+ * crudos del `numeric`: «8.26 × Compra 10kg · entraron 82.6 kg» en una pantalla
+ * donde todo lo demás usa coma. Un punto decimal acá se lee como separador de
+ * miles, y son justo los números que hay que contrastar contra el papel.
+ */
+const cantidad = (n: number) =>
+  n.toLocaleString("es-AR", { maximumFractionDigits: 3 });
 
 const nombreComprobante = (c: ComprobanteConSaldo) =>
   c.invoice_number?.trim()
@@ -53,6 +74,7 @@ export function CuentaCorrientePanel({
   pagos,
   imputaciones,
   fotos = {},
+  renglones = {},
   onAnularComprobante,
   slug,
   conceptos = [],
@@ -143,6 +165,15 @@ export function CuentaCorrientePanel({
                           {nombreComprobante(c)}
                           {anulado && (
                             <span className="ml-1.5 text-xs text-zinc-400">anulado</span>
+                          )}
+                          {/* Spec 172 · qué comprobantes movieron stock y costo,
+                              visible SIN abrir. Es la mitad de la auditoría: la
+                              otra mitad es el detalle al costado. */}
+                          {(renglones[c.id]?.length ?? 0) > 0 && (
+                            <span className="ml-1.5 text-xs text-zinc-400">
+                              · {renglones[c.id]!.length}{" "}
+                              {renglones[c.id]!.length === 1 ? "insumo" : "insumos"}
+                            </span>
                           )}
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums">
@@ -262,6 +293,50 @@ export function CuentaCorrientePanel({
                   </li>
                 ))}
               </ul>
+            )}
+
+            {/* Los insumos que entraron con esta compra — spec 172. Sólo si los
+                tiene: la mayoría de los comprobantes se cargan sin detalle y un
+                bloque vacío en cada uno los haría parecer incompletos. */}
+            {elegida && (renglones[elegida.id]?.length ?? 0) > 0 && (
+              <div className="border-t">
+                <div className="bg-zinc-50 px-3 py-2">
+                  <p className="text-xs font-semibold text-zinc-500">
+                    Insumos ({renglones[elegida.id]!.length})
+                  </p>
+                </div>
+                <ul className="divide-y">
+                  {renglones[elegida.id]!.map((r) => (
+                    <li key={r.id} className="px-3 py-2">
+                      <div className="flex items-baseline gap-3">
+                        <p className="min-w-0 flex-1 truncate text-sm font-medium text-zinc-900">
+                          {r.ingredientName}
+                        </p>
+                        <p className="text-sm font-semibold tabular-nums text-zinc-900">
+                          {formatCurrency(Math.round(r.units * r.unitCostCents))}
+                        </p>
+                      </div>
+                      {/* La conversión completa: la factura habla en kilos y el
+                          sistema guarda envases (165·D5). Sin los dos números al
+                          lado, «8,26» no se puede contrastar contra el papel. */}
+                      <p className="text-xs text-zinc-500 tabular-nums">
+                        {cantidad(r.units)} ×{" "}
+                        {r.presentationName ?? `${r.ingredientUnit} (sin envase)`}
+                        {" · entraron "}
+                        {cantidad(r.quantityBase)} {r.ingredientUnit}
+                        {" · "}
+                        {formatCurrency(r.unitCostCents)} por envase
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+                {!elegida.cancelled_at && (
+                  <p className="px-3 pb-2 text-[11px] text-zinc-400">
+                    Los renglones no se editan. Si hay uno mal, anulá la compra y
+                    cargala de nuevo: el stock vuelve, el precio del insumo no.
+                  </p>
+                )}
+              </div>
             )}
 
             {elegida && fotos[elegida.id] && (

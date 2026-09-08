@@ -1,6 +1,8 @@
 import "server-only";
 
 
+import type { SupabaseClient } from "@supabase/supabase-js";
+
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 import { enLotes, fetchAll, unwrap } from "./unwrap";
@@ -8,6 +10,7 @@ import { enLotes, fetchAll, unwrap } from "./unwrap";
 import type {
   SupplierIngredientLink,
   SupplierInvoice,
+  SupplierInvoiceItem,
   SupplierOutflowItem,
   SupplierStats,
   SupplierWithStats,
@@ -360,6 +363,8 @@ export type IngredientOption = {
    * de alta stock.
    */
   presentationId?: string | null;
+  /** spec 172 · «8,26» no significa nada sin «× Compra 10kg» al lado. */
+  presentationName?: string | null;
   netQuantity?: number;
   costCents?: number;
 };
@@ -373,7 +378,7 @@ export async function getIngredientsForLinking(
       service
         .from("ingredients")
         .select(
-          "id, name, unit, ingredient_presentations!left(id, net_quantity, cost_cents, is_default)",
+          "id, name, unit, ingredient_presentations!left(id, name, net_quantity, cost_cents, is_default)",
         )
         .eq("business_id", businessId)
         .eq("is_active", true)
@@ -388,6 +393,7 @@ export async function getIngredientsForLinking(
     unit: string;
     ingredient_presentations?: Array<{
       id: string;
+      name: string;
       net_quantity: number | string;
       cost_cents: number;
       is_default: boolean;
@@ -403,8 +409,85 @@ export async function getIngredientsForLinking(
       name: f.name,
       unit: f.unit,
       presentationId: pres?.id ?? null,
+      presentationName: pres?.name ?? null,
       netQuantity: pres ? Number(pres.net_quantity) : undefined,
       costCents: pres?.cost_cents,
     };
   });
 }
+
+/**
+ * Los renglones de una tanda de comprobantes, agrupados por comprobante — spec 172.
+ *
+ * La 165 dejó `supplier_invoice_items` de sólo escritura: la RPC insertaba, la
+ * reversión borraba, y no había una sola lectura en toda la app. Ésta es la
+ * primera.
+ *
+ * Se traen todos los del proveedor de una, y no de a uno al seleccionar, porque
+ * el mismo dato alimenta las dos cosas: el panel de detalle y el contador de la
+ * fila («5 insumos»), que es lo que deja ver **sin abrir** qué comprobantes
+ * movieron stock.
+ *
+ * `presentation_id` puede ser NULL —la línea se cargó sin envase, o la
+ * presentación se borró después (`on delete set null`)— y ahí `units` ya venía en
+ * unidad base. El nombre se muestra como venga; no se inventa uno.
+ */
+export async function getRenglonesPorComprobante(
+  businessId: string,
+  invoiceIds: string[],
+): Promise<Record<string, SupplierInvoiceItem[]>> {
+  // `supplier_invoice_items` es de la 0073 y todavía no está en
+  // `database.types.ts` (el `pnpm db:types` necesita el CLI linkeado). Mismo
+  // escape hatch que `actions.ts` para las columnas de la 158.
+  const service = db() as unknown as SupabaseClient;
+
+  const filas = await enLotes(invoiceIds, async (lote) =>
+    unwrap(
+      await service
+        .from("supplier_invoice_items")
+        .select(
+          "id, invoice_id, ingredient_id, units, quantity_base, unit_cost_cents, " +
+            "ingredients(name, unit), ingredient_presentations(name)",
+        )
+        .eq("business_id", businessId)
+        .in("invoice_id", lote)
+        .order("created_at"),
+      "supplier_invoice_items",
+    ),
+  );
+
+  const porComprobante: Record<string, SupplierInvoiceItem[]> = {};
+  for (const f of filas as unknown as RenglonRow[]) {
+    // PostgREST devuelve el embed como objeto o como array de uno según la
+    // cardinalidad que infiera; las dos formas llegan en la práctica.
+    const ing = Array.isArray(f.ingredients) ? f.ingredients[0] : f.ingredients;
+    const pres = Array.isArray(f.ingredient_presentations)
+      ? f.ingredient_presentations[0]
+      : f.ingredient_presentations;
+
+    (porComprobante[f.invoice_id] ??= []).push({
+      id: f.id,
+      invoiceId: f.invoice_id,
+      ingredientId: f.ingredient_id,
+      ingredientName: ing?.name ?? "Insumo borrado",
+      ingredientUnit: ing?.unit ?? "",
+      presentationName: pres?.name ?? null,
+      // numeric llega como string por PostgREST.
+      units: Number(f.units),
+      quantityBase: Number(f.quantity_base),
+      unitCostCents: Number(f.unit_cost_cents),
+    });
+  }
+  return porComprobante;
+}
+
+type RenglonRow = {
+  id: string;
+  invoice_id: string;
+  ingredient_id: string;
+  units: string | number;
+  quantity_base: string | number;
+  unit_cost_cents: string | number;
+  ingredients: { name: string; unit: string } | { name: string; unit: string }[] | null;
+  ingredient_presentations: { name: string } | { name: string }[] | null;
+};

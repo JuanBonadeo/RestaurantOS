@@ -149,7 +149,26 @@ export const SupplierInvoiceInput = z
       message: "La nota de crédito va en negativo; el resto de los comprobantes, en positivo.",
       path: ["total_cents"],
     },
-  );
+  )
+  /**
+   * Cero no es un importe — spec 172.
+   *
+   * El `defaultValue` del formulario es `0` y el input pinta `""` cuando el valor
+   * es falsy: la pantalla dice «vacío» y el modelo dice «cero». Guardar sin tocar
+   * el campo daba un comprobante de $0 que figuraba cargado en la cuenta
+   * corriente, sin un solo error.
+   *
+   * Importa el doble con el lector de facturas: un importe que el modelo no pudo
+   * leer tiene que llegar VACÍO y frenar acá, nunca convertirse en un cero que
+   * pasa de largo. Un dato faltante se completa; uno falso no se nota.
+   *
+   * El CHECK de la base sigue admitiendo 0 (cambiarlo es una migración sobre
+   * datos vivos); esta es la puerta por la que entra la app.
+   */
+  .refine((v) => v.total_cents !== 0, {
+    message: "Poné el importe del comprobante.",
+    path: ["total_cents"],
+  });
 export type SupplierInvoiceInput = z.infer<typeof SupplierInvoiceInput>;
 
 export const ExpenseConceptInput = z.object({

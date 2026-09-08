@@ -1136,7 +1136,7 @@ export const TEMAS: Tema[] = [
       {
         titulo: "La foto del comprobante",
         texto:
-          "Sacale la foto al papel cuando llega, que es cuando está en la mano. Queda guardada con la compra y la ves después tocándola en la lista. En más de la mitad de las compras el papel es la única prueba de que existieron.",
+          "Sacale la foto al papel cuando llega, que es cuando está en la mano. Además de quedar guardada con la compra, el sistema la lee: te llena el importe y el número, y si la factura trae renglones te los muestra al lado para que los confirmes. Si no la puede leer, la foto queda igual y cargás el importe a mano — no perdés nada.",
       },
       {
         titulo: "Los conceptos de gasto",
@@ -1146,7 +1146,7 @@ export const TEMAS: Tema[] = [
       {
         titulo: "Detallar los insumos",
         texto:
-          "Si querés, la compra se puede abrir en renglones: tres cajones de tomate, cinco kilos de muzzarella. No es obligatorio y no hace falta que sumen justo el total. Lo que gana: el stock de cada insumo sube solo, y el costo de los platos que lo usan se actualiza con lo que pagaste de verdad.",
+          "Si querés, la compra se puede abrir en renglones: tres cajones de tomate, cinco kilos de muzzarella. No es obligatorio y no hace falta que sumen justo el total. Lo que gana: el stock de cada insumo sube solo, y el costo de los platos que lo usan se actualiza con lo que pagaste de verdad.\n\nSi subiste la foto, los renglones vienen leídos: al lado de cada uno te muestro qué decía el papel y qué entendí. Los que estoy seguro vienen tildados; los que tengo duda —un precio muy distinto al de la última compra, un envase que no me cierra— vienen destildados y con el motivo escrito. Lo que quede destildado no se carga. Y los que no son insumos —limpieza, bebida, descartables— quedan dentro del importe: está bien que sea así.",
         verTambien: { tema: "stock", texto: "Cómo se descuenta el stock" },
       },
       {
