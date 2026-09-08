@@ -150,6 +150,55 @@ export async function venderMostrador(
     return actionError("No tenés permiso para cargar ventas de mostrador.");
   }
 
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+
+  // ── 0. ¿Esta venta ya se hizo? (issue #263) ───────────────────────────
+  //
+  // `request_id` hacía idempotente el COBRO pero no la VENTA, y son dos cosas.
+  // Al segundo «Confirmar» —el que se aprieta cuando el primero tarda y no
+  // vuelve— se creaba una orden nueva con sus ítems, se descontaba el stock de
+  // nuevo, y recién ahí la RPC devolvía el pago viejo por idempotencia. La
+  // segunda orden quedaba sin pago propio, `dine_in` sin mesa: fuera del board,
+  // fuera del plano, fuera de la lista de cuentas abiertas. Invisible en toda
+  // la UI y contada igual en la analítica del día.
+  //
+  // Se corta antes de crear nada: si ya hay un pago con este `request_id`, la
+  // venta ya ocurrió y se devuelve la de antes.
+  if (data.request_id) {
+    const { data: previo } = await service
+      .from("payments")
+      .select("id, order_id, amount_cents")
+      .eq("business_id", business.id)
+      .eq("request_id", data.request_id)
+      .maybeSingle();
+    const yaEstaba = previo as {
+      id: string;
+      order_id: string;
+      amount_cents: number;
+    } | null;
+    if (yaEstaba) {
+      const { data: ordenPrevia } = await service
+        .from("orders")
+        .select("order_number, daily_number")
+        .eq("id", yaEstaba.order_id)
+        .maybeSingle();
+      const prev = ordenPrevia as {
+        order_number: number;
+        daily_number: number;
+      } | null;
+      return actionOk({
+        order_id: yaEstaba.order_id,
+        order_number: prev?.order_number ?? 0,
+        daily_number: prev?.daily_number ?? 0,
+        cobrado_cents: yaEstaba.amount_cents,
+        comandas_creadas: 0,
+        items_sin_sector: 0,
+        ruteo_error: null,
+        comprobante: undefined,
+      });
+    }
+  }
+
   // ── 1. La orden ───────────────────────────────────────────────────────
   // `persistOrder` resuelve los precios contra el catálogo (el payload sólo
   // trae ids y cantidades) y aplica el scope `business_id`, así que un producto
@@ -168,17 +217,39 @@ export async function venderMostrador(
   );
   if (!created.ok) return created;
 
-  const service = createSupabaseServiceClient() as unknown as GenericClient;
   const orderId = created.data.order_id;
 
-  const { data: orderRow } = await service
+  // El total sale de la base y no del payload: `persistOrder` resuelve precios
+  // contra el catálogo, así que es el único número confiable.
+  //
+  // El error de esta lectura se descartaba (issue #263) y el `?? 0` convertía
+  // «no pude leer» en «no se debe nada»: se cobraba $0, la venta se cerraba, la
+  // mercadería salía y el stock se descontaba igual. Ahora se corta y se cancela
+  // la orden, que es lo mismo que hace el rescate de FR-007 cuando falla el
+  // cobro: una `dine_in` sin mesa y sin cerrar es invisible en toda la UI.
+  const { data: orderRow, error: totalErr } = await service
     .from("orders")
     .select("total_cents")
     .eq("id", orderId)
     .maybeSingle();
-  const totalCents = Number(
-    (orderRow as { total_cents: number } | null)?.total_cents ?? 0,
-  );
+  const totalCents = (orderRow as { total_cents: number } | null)?.total_cents;
+
+  if (totalErr || typeof totalCents !== "number" || totalCents <= 0) {
+    console.error("venderMostrador · no se pudo leer el total de la orden", {
+      orderId,
+      error: totalErr?.message,
+      totalCents,
+    });
+    await cancelarOrden(service, {
+      orderId,
+      businessId: business.id,
+      motivo: "Venta de mostrador sin total legible",
+      actorUserId: ctx.userId,
+    });
+    return actionError(
+      "No pudimos calcular el total de la venta. No se cobró nada: volvé a cargarla.",
+    );
+  }
 
   // ── 2. El cobro ───────────────────────────────────────────────────────
   // El recargo/descuento por método se resuelve en el server contra
@@ -230,22 +301,28 @@ export async function venderMostrador(
     return actionError(pago.error);
   }
 
-  // Un descuento configurado (porcentaje negativo) deja `total_paid` por debajo
-  // de `total_cents`, y la RPC no considera la orden saldada → no cierra. En una
-  // venta de mostrador eso es siempre un falso negativo: se pagó lo que el
-  // negocio decidió cobrar, en un único pago, acá mismo.
+  // Acá vivía un rescate: con un método con descuento la RPC no daba la orden
+  // por saldada —comparaba el bruto contra `total_cents` (issue #253)— y esto
+  // la cerraba a mano para tapar el falso negativo.
+  //
+  // El parche curaba el síntoma y causaba otro peor (issue #263): cerrar por
+  // afuera se saltea `closeOrderIfFullyPaid`, que es **quien emite el
+  // comprobante**. O sea que un negocio con descuento por efectivo configurado
+  // no facturaba NUNCA en el mostrador: ni la B automática ni la A que el
+  // cliente pidió. El IVA de esas ventas no se declaraba, y el caso que motivó
+  // la spec 157 —el evento empresarial, el abono del sanatorio, los dos a
+  // CUIT— se iba sin su Factura A.
+  //
+  // Con la migración 0076 la RPC compara en base y la orden cierra sola por el
+  // camino de siempre, comprobante incluido. El rescate se saca en vez de
+  // dejarlo «por las dudas»: si algún día `orderClosed` vuelve a venir en false
+  // es que algo está mal de verdad, y cerrar la orden en silencio sería
+  // esconderlo otra vez.
   if (!pago.data.orderClosed) {
-    await service
-      .from("orders")
-      .update({
-        lifecycle_status: "closed",
-        closed_at: new Date().toISOString(),
-        total_paid_cents: finalCents,
-        payment_status: "paid",
-      })
-      .eq("id", orderId)
-      .eq("business_id", business.id)
-      .eq("lifecycle_status", "open");
+    console.error(
+      "venderMostrador · el pago entró pero la orden no cerró",
+      { orderId, finalCents },
+    );
   }
 
   // ── 3. La cocina ──────────────────────────────────────────────────────

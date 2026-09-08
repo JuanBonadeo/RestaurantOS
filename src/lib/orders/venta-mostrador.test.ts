@@ -66,10 +66,18 @@ vi.mock("@/lib/caja/queries", () => ({
 /**
  * Service client mínimo: resuelve el `select` del total y acumula los `update`
  * sobre `orders` para poder afirmar sobre el rescate y el cierre.
+ *
+ * Distingue por tabla porque la venta ahora consulta `payments` antes de crear
+ * nada (issue #263, idempotencia de la venta y no sólo del cobro). Un mock que
+ * devuelve la misma fila para cualquier tabla haría creer que la venta ya
+ * ocurrió, y no se cobraría nunca.
  */
+let pagoPrevio: { id: string; order_id: string; amount_cents: number } | null =
+  null;
+
 vi.mock("@/lib/supabase/service", () => ({
   createSupabaseServiceClient: () => ({
-    from: () => {
+    from: (tabla: string) => {
       const chain = {
         select: () => chain,
         update: (patch: Record<string, unknown>) => {
@@ -77,7 +85,10 @@ vi.mock("@/lib/supabase/service", () => ({
           return chain;
         },
         eq: () => chain,
-        maybeSingle: async () => ({ data: { total_cents: orderTotalCents } }),
+        maybeSingle: async () =>
+          tabla === "payments"
+            ? { data: pagoPrevio }
+            : { data: { total_cents: orderTotalCents, order_number: 1, daily_number: 1 } },
         then: undefined,
       };
       return chain;
@@ -116,6 +127,7 @@ beforeEach(() => {
   currentRole = "encargado";
   orderTotalCents = 10_000;
   adjustmentPercent = 0;
+  pagoPrevio = null;
   orderUpdates = [];
   persistOrderMock.mockClear();
   registrarPagoMock.mockClear();
@@ -227,21 +239,75 @@ describe("venderMostrador — el cobro", () => {
     expect(lastPagoInput().amount_cents).toBe(9_000);
   });
 
-  it("con descuento la orden igual queda cerrada (no queda abierta e invisible)", async () => {
+  it("con descuento cierra por el camino normal, sin escribir la orden a mano", async () => {
+    // Antes, con descuento, la RPC no daba la orden por saldada (issue #253) y
+    // acá se la cerraba a mano. Ese rescate salteaba `closeOrderIfFullyPaid`,
+    // que es quien emite el comprobante: el negocio con descuento configurado no
+    // facturaba nunca en el mostrador (issue #263).
+    //
+    // Con la migración 0076 la RPC compara en base y cierra sola. Lo que se
+    // afirma acá es que `venderMostrador` **no vuelve a tocar la orden**: si
+    // escribiera, estaría de nuevo salteando la emisión.
     adjustmentPercent = -10;
-    // Con total_paid < total_cents la RPC no la da por saldada.
+    const res = await venderMostrador(ventaValida({ method: "card_manual" }));
+    expect(res.ok).toBe(true);
+    expect(orderUpdates).toHaveLength(0);
+  });
+
+  it("si el pago entró pero la orden no cerró, no la cierra en silencio", async () => {
+    // Ese estado ya no debería pasar. Si pasa, es un síntoma de algo roto y hay
+    // que verlo — no taparlo cerrando la orden por afuera, que es como se
+    // escondió la falta de comprobante durante meses.
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     registrarPagoMock.mockResolvedValue({
       ok: true as const,
       data: { payment: { id: "p1" }, splitDone: false, orderClosed: false },
     });
-    const res = await venderMostrador(ventaValida({ method: "card_manual" }));
+
+    const res = await venderMostrador(ventaValida());
+
     expect(res.ok).toBe(true);
-    expect(orderUpdates.at(-1)).toMatchObject({ lifecycle_status: "closed" });
+    expect(orderUpdates).toHaveLength(0);
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
   });
 
   it("si ya cerró por la RPC, no la vuelve a cerrar", async () => {
     await venderMostrador(ventaValida());
     expect(orderUpdates).toHaveLength(0);
+  });
+
+  it("si ya hay un pago con ese requestId, no crea una segunda venta", async () => {
+    // issue #263 — el doble «Confirmar». `request_id` hacía idempotente el
+    // COBRO pero no la VENTA: se creaba una orden nueva con sus ítems y su
+    // stock descontado, y recién la RPC devolvía el pago viejo. Esa segunda
+    // orden quedaba `dine_in` sin mesa: invisible en el board, en el plano y en
+    // las cuentas abiertas, y contada igual en la analítica.
+    pagoPrevio = { id: "pago-viejo", order_id: "orden-vieja", amount_cents: 10_000 };
+
+    const res = await venderMostrador(
+      ventaValida({ request_id: "22222222-2222-4222-8222-222222222222" }),
+    );
+
+    expect(res.ok).toBe(true);
+    expect(res.ok && res.data.order_id).toBe("orden-vieja");
+    expect(res.ok && res.data.cobrado_cents).toBe(10_000);
+    // Lo que importa: no se creó nada nuevo ni se volvió a cobrar.
+    expect(persistOrderMock).not.toHaveBeenCalled();
+    expect(registrarPagoMock).not.toHaveBeenCalled();
+  });
+
+  it("si no se puede leer el total, no cobra $0: cancela y avisa", async () => {
+    // issue #263 — el error del SELECT se descartaba y el `?? 0` convertía «no
+    // pude leer» en «no se debe nada»: se cobraba $0, la venta se cerraba, la
+    // mercadería salía y el stock quedaba descontado.
+    orderTotalCents = null as unknown as number;
+
+    const res = await venderMostrador(ventaValida());
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/no se cobró nada/i);
+    expect(registrarPagoMock).not.toHaveBeenCalled();
   });
 
   it("propaga el requestId de idempotencia al cobro", async () => {
