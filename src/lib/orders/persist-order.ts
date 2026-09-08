@@ -864,18 +864,52 @@ export async function persistOrder(
         businessSlug: business.slug,
         orderId: order.id,
         orderNumber: order.order_number,
-        items: lines.map((l) => ({
-          // MP usa el id sólo para categorización — cualquier string lo sirve.
-          // Usamos product_id o daily_menu_id según el tipo de línea.
-          id: (l.product_id ?? l.daily_menu_id) as string,
-          title: l.product_name,
-          quantity: l.quantity,
-          unit_price: Math.round(
-            (l.unit_price_cents +
-              l.modifiers.reduce((a, m) => a + m.price_delta_cents, 0)) /
-              100,
-          ),
-        })),
+        // issue #269 — la preferencia tiene que cobrar lo que dice la orden.
+        //
+        // Acá viajaban SÓLO los platos: ni el envío ni el descuento del cupón.
+        // El cliente pagaba $10.000 por un pedido de $10.800 y la caja asentaba
+        // los $10.800 igual, así que el arqueo cerraba contra sí mismo y el
+        // envío se perdía en cada delivery pagado online. Con cupón el error va
+        // para el otro lado: el cliente paga de más y no se entera.
+        //
+        // El envío va como una línea propia y no repartido entre los platos —
+        // es lo que hace el checkout y es lo que el cliente espera ver en la
+        // pantalla de MP. El descuento va en negativo por la misma razón:
+        // prorratearlo escondería de dónde salió.
+        items: [
+          ...lines.map((l) => ({
+            // MP usa el id sólo para categorización — cualquier string lo sirve.
+            // Usamos product_id o daily_menu_id según el tipo de línea.
+            id: (l.product_id ?? l.daily_menu_id) as string,
+            title: l.product_name,
+            quantity: l.quantity,
+            unit_price: Math.round(
+              (l.unit_price_cents +
+                l.modifiers.reduce((a, m) => a + m.price_delta_cents, 0)) /
+                100,
+            ),
+          })),
+          ...(deliveryFeeCents > 0
+            ? [
+                {
+                  id: "envio",
+                  title: "Envío",
+                  quantity: 1,
+                  unit_price: Math.round(deliveryFeeCents / 100),
+                },
+              ]
+            : []),
+          ...(discountCents > 0
+            ? [
+                {
+                  id: "descuento",
+                  title: "Descuento",
+                  quantity: 1,
+                  unit_price: -Math.round(discountCents / 100),
+                },
+              ]
+            : []),
+        ],
         payer: {
           name: data.customer_name,
           email: data.customer_email,

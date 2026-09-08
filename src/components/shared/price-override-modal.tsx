@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { formatCurrency } from "@/lib/currency";
+import { parsePesos } from "@/lib/catalog/money-input";
 
 /**
  * Spec 069 — cambiar el precio de UNA línea, sólo para ese pedido, con motivo.
@@ -48,9 +49,19 @@ export function PriceOverrideModal({
   );
   const [motivo, setMotivo] = useState(currentReason ?? "");
 
-  const parsed = pesos.trim() === "" ? NaN : Number(pesos.replace(",", "."));
-  const priceOk = Number.isFinite(parsed) && parsed >= 0;
-  const cents = priceOk ? Math.round(parsed * 100) : 0;
+  // issue #269 — el mismo parser que el resto de los campos de plata.
+  //
+  // Acá había `Number(pesos.replace(",", "."))`, que tiene dos agujeros y éste
+  // es el campo donde más duelen, porque no fija un precio de carta: **cobra**
+  // una línea de la mesa. «18.500» daba 18.5 → 1.850 centavos, o sea que la
+  // línea se cobraba a $18,50 en vez de $18.500. Y el `replace` reemplaza sólo
+  // la PRIMERA coma, así que «18.500,50» daba NaN.
+  //
+  // `parsePesos` centraliza el criterio: tres dígitos detrás del separador son
+  // miles, uno o dos son centavos, y lo ambiguo se rechaza en vez de adivinar.
+  const parsedPesos = parsePesos(pesos);
+  const priceOk = parsedPesos.ok;
+  const cents = parsedPesos.ok ? parsedPesos.cents : 0;
   const canConfirm = priceOk && motivo.trim() !== "";
 
   const delta = cents - catalogPriceCents;

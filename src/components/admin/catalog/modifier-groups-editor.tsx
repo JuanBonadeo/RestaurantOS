@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PrecioField } from "@/components/admin/catalog/pesos-input";
 import type { ProductInput } from "@/lib/catalog/schemas";
 
 export function ModifierGroupsEditor() {
@@ -169,7 +170,7 @@ function ModifierList({ groupIdx }: { groupIdx: number }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <Label className="text-xs uppercase tracking-wider">Opciones</Label>
+        <Label className="text-xs tracking-wider uppercase">Opciones</Label>
         <Button
           type="button"
           size="xs"
@@ -192,10 +193,10 @@ function ModifierList({ groupIdx }: { groupIdx: number }) {
         </p>
       ) : (
         <div className="flex items-center gap-2 px-1">
-          <Label className="text-muted-foreground flex-1 text-[0.65rem] font-medium uppercase tracking-wider">
+          <Label className="text-muted-foreground flex-1 text-[0.65rem] font-medium tracking-wider uppercase">
             Nombre
           </Label>
-          <Label className="text-muted-foreground w-32 text-[0.65rem] font-medium uppercase tracking-wider">
+          <Label className="text-muted-foreground w-32 text-[0.65rem] font-medium tracking-wider uppercase">
             Precio extra ($)
           </Label>
           <span className="w-6" aria-hidden />
@@ -215,33 +216,20 @@ function ModifierList({ groupIdx }: { groupIdx: number }) {
               </FormItem>
             )}
           />
-          <FormField
+          {/*
+            El adicional es el gemelo chico del precio base y tenía el MISMO
+            `parseInt`: un extra de «2.500» se guardaba como $2. Va por el mismo
+            campo para que el criterio de lectura viva en un solo lugar.
+          */}
+          <PrecioField
             control={control}
             name={`modifier_groups.${groupIdx}.modifiers.${mIdx}.price_delta_cents`}
-            render={({ field }) => (
-              <FormItem className="w-32">
-                <FormControl>
-                  <div className="relative">
-                    <span
-                      aria-hidden
-                      className="text-muted-foreground pointer-events-none absolute inset-y-0 left-2.5 flex items-center text-sm font-medium"
-                    >
-                      +$
-                    </span>
-                    <Input
-                      type="number"
-                      min={0}
-                      placeholder="0"
-                      className="pl-8"
-                      {...field}
-                      onChange={(e) =>
-                        field.onChange(parseInt(e.target.value) || 0)
-                      }
-                    />
-                  </div>
-                </FormControl>
-              </FormItem>
-            )}
+            className="w-32"
+            prefix="+$"
+            inputProps={{
+              placeholder: "0",
+              "aria-label": "Precio del adicional ($)",
+            }}
           />
           <Button
             type="button"

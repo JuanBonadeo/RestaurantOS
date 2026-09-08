@@ -321,6 +321,13 @@ export function CobroForm<T = unknown>({
     if (isMpMethod(method)) {
       if (!mp) return;
       startTransition(async () => {
+        // issue #274 · 3 — la elección del comprobante viaja también por acá.
+        //
+        // Este ramal retornaba antes del `onSubmit`, que es donde el caller
+        // valida la Factura A y arma el input fiscal. Con MP el operador tilda
+        // «Factura A», carga el CUIT, cobra… y salía la B a consumidor final:
+        // para el cliente empresa, crédito fiscal que no computa, y recuperarlo
+        // cuesta una nota de crédito más una A nueva.
         const r = await mp.start({
           method,
           amountCents: amount,

@@ -26,15 +26,13 @@ import {
 } from "@/components/ui/select";
 import { ImageUploader } from "@/components/admin/catalog/image-uploader";
 import { ModifierGroupsEditor } from "@/components/admin/catalog/modifier-groups-editor";
+import { PrecioField } from "@/components/admin/catalog/pesos-input";
 import type {
   AdminCategory,
   AdminProduct,
   AdminStation,
 } from "@/lib/admin/catalog-query";
-import {
-  createProduct,
-  updateProduct,
-} from "@/lib/catalog/product-actions";
+import { createProduct, updateProduct } from "@/lib/catalog/product-actions";
 import { ProductInput } from "@/lib/catalog/schemas";
 
 export function ProductForm({
@@ -68,7 +66,11 @@ export function ProductForm({
           name: product.name,
           slug: product.slug,
           description: product.description ?? undefined,
-          price_cents: product.price_cents / 100,
+          // El formulario trabaja en CENTAVOS, igual que la base y que el zod
+          // que lo valida. Antes dividía por 100 acá y multiplicaba al enviar,
+          // y esa ida y vuelta por pesos era la que obligaba a parsear el campo
+          // con `parseInt` (el schema pide entero) — de ahí salía el $18.
+          price_cents: product.price_cents,
           image_url: product.image_url,
           category_id: product.category_id,
           station_id: product.station_id,
@@ -87,7 +89,7 @@ export function ProductForm({
             modifiers: g.modifiers.map((m) => ({
               id: m.id,
               name: m.name,
-              price_delta_cents: m.price_delta_cents / 100,
+              price_delta_cents: m.price_delta_cents,
               is_available: m.is_available,
               sort_order: m.sort_order,
             })),
@@ -96,7 +98,11 @@ export function ProductForm({
       : {
           name: "",
           slug: "",
-          price_cents: 0,
+          // Vacío, no cero: el alta con el campo sin tocar creaba el producto
+          // en $0 y nadie se enteraba hasta que el mozo lo cobrara. NaN no pasa
+          // el zod, así que el formulario se planta y pide el precio. Un
+          // producto de cortesía a $0 sigue siendo posible: se escribe el 0.
+          price_cents: Number.NaN,
           station_id: null,
           is_available: true,
           is_active: true,
@@ -110,17 +116,10 @@ export function ProductForm({
   const onSubmit = async (values: ProductInput) => {
     setSubmitting(true);
     try {
-      const payload: ProductInput = {
-        ...values,
-        price_cents: Math.round(values.price_cents * 100),
-        modifier_groups: values.modifier_groups.map((g) => ({
-          ...g,
-          modifiers: g.modifiers.map((m) => ({
-            ...m,
-            price_delta_cents: Math.round(m.price_delta_cents * 100),
-          })),
-        })),
-      };
+      // Los importes ya vienen en centavos desde el campo: no hay conversión
+      // que redondear acá. El `Math.round(pesos * 100)` que había era la otra
+      // mitad del hallazgo 3 — lo que llegaba mal parseado se guardaba igual.
+      const payload: ProductInput = values;
       const result = product
         ? await updateProduct(slug, product.id, payload)
         : await createProduct(slug, payload);
@@ -212,29 +211,16 @@ export function ProductForm({
         />
 
         <div className="grid grid-cols-2 gap-3">
-          <FormField
+          <PrecioField
             control={form.control}
             name="price_cents"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Precio base ($)</FormLabel>
-                <FormControl>
-                  <Input
-                    type="number"
-                    min={0}
-                    {...field}
-                    onChange={(e) =>
-                      field.onChange(parseInt(e.target.value) || 0)
-                    }
-                  />
-                </FormControl>
-                <p className="text-muted-foreground text-xs">
-                  Sin adicionales. Los grupos de adicionales se suman sobre
-                  este precio.
-                </p>
-                <FormMessage />
-              </FormItem>
-            )}
+            label="Precio base ($)"
+            hint={
+              <p className="text-muted-foreground text-xs">
+                Sin adicionales. Los grupos de adicionales se suman sobre este
+                precio. Se escribe como se habla: 18.500 o 18.500,50.
+              </p>
+            }
           />
           <FormField
             control={form.control}
@@ -259,8 +245,7 @@ export function ProductForm({
                         {(value) => {
                           if (!value) return null;
                           return (
-                            categories.find((c) => c.id === value)?.name ??
-                            null
+                            categories.find((c) => c.id === value)?.name ?? null
                           );
                         }}
                       </SelectValue>
@@ -288,10 +273,10 @@ export function ProductForm({
             // que el placeholder ("Hereda de Pizzas → Cocina") sea informativo.
             const currentCategoryId = form.watch("category_id");
             const inherited = currentCategoryId
-              ? categories.find((c) => c.id === currentCategoryId) ?? null
+              ? (categories.find((c) => c.id === currentCategoryId) ?? null)
               : null;
             const inheritedStation = inherited?.station_id
-              ? stations.find((s) => s.id === inherited.station_id) ?? null
+              ? (stations.find((s) => s.id === inherited.station_id) ?? null)
               : null;
 
             return (
@@ -337,10 +322,10 @@ export function ProductForm({
                   </Select>
                 </FormControl>
                 <p className="text-muted-foreground text-xs">
-                  A qué sector se imprime la comanda. Si no especificás,
-                  hereda el de la categoría. Override útil cuando un producto
-                  sale de otro sector (ej: papas en categoría Cocina pero
-                  rutean a Fritera).
+                  A qué sector se imprime la comanda. Si no especificás, hereda
+                  el de la categoría. Override útil cuando un producto sale de
+                  otro sector (ej: papas en categoría Cocina pero rutean a
+                  Fritera).
                 </p>
                 <FormMessage />
               </FormItem>
@@ -368,7 +353,8 @@ export function ProductForm({
                 />
               </FormControl>
               <p className="text-muted-foreground text-xs">
-                Opcional. Tiempo estimado de preparación para cálculo de ETA en cocina.
+                Opcional. Tiempo estimado de preparación para cálculo de ETA en
+                cocina.
               </p>
               <FormMessage />
             </FormItem>
@@ -436,8 +422,8 @@ export function ProductForm({
         </div>
         <p className="text-muted-foreground text-xs">
           Si desmarcás <strong>Mostrar en la carta online</strong>, el producto
-          desaparece de la carta que ve el cliente pero el mozo lo sigue teniendo
-          para cargar en la mesa.
+          desaparece de la carta que ve el cliente pero el mozo lo sigue
+          teniendo para cargar en la mesa.
         </p>
 
         <ModifierGroupsEditor />

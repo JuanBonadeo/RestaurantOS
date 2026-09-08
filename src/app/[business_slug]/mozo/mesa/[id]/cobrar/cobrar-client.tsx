@@ -592,6 +592,13 @@ function CobrarSplitSheet({
                   tip_cents: input.tipCents,
                   caja_id: input.cajaId,
                   slug,
+                  // issue #274 · 3 — la Factura A elegida viaja también por el
+                  // ramal de MP. Sin esto la elección moría en el navegador:
+                  // el cobro se completa fuera de la pantalla y el webhook, que
+                  // es quien cierra la orden, caía en la B automática.
+                  comprobante: comprobanteEsValido(comprobante)
+                    ? comprobanteToInvoiceInput(comprobante)
+                    : null,
                 }).then((r) =>
                   r.ok
                     ? {

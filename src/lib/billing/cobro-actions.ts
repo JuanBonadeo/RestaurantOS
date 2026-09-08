@@ -204,6 +204,28 @@ export async function closeOrderIfFullyPaid(
   if (!order) return { orderClosed: false };
   if (order.lifecycle_status !== "open") return { orderClosed: false };
 
+  // issue #274 · 3 — la elección que quedó guardada cuando el cobro se fue por
+  // Mercado Pago. El webhook llama a esto sin comprobante (no tiene pantalla ni
+  // operador del otro lado), así que sin este rescate salía la B automática y
+  // la Factura A que el cliente empresa pidió se perdía.
+  //
+  // El argumento explícito gana: si alguien la pasa, es la decisión de ahora.
+  let elegido = comprobante ?? null;
+  if (!elegido) {
+    const { data: guardado } = await service
+      .from("orders")
+      .select("comprobante_elegido")
+      .eq("id", orderId)
+      .maybeSingle();
+    const raw = (guardado as { comprobante_elegido: unknown } | null)
+      ?.comprobante_elegido;
+    if (raw) {
+      const parsed = ComprobanteElegidoSchema.safeParse(raw);
+      if (parsed.success) elegido = parsed.data;
+      else console.error("closeOrderIfFullyPaid · comprobante_elegido inválido", raw);
+    }
+  }
+
   // Suma de payments paid del order, **en base**: `amount_cents` viaja con el
   // ajuste por método adentro (issue #253), y acá se compara contra
   // `total_cents`, que es lo que se debe sin ajustar. Con un descuento del 10%
@@ -268,6 +290,11 @@ export async function closeOrderIfFullyPaid(
       // dueño abría el panel un martes a las 4 con el local vacío y leía 47— y
       // en el historial cada mesa cobrada aparecía con badge «Pendiente».
       status: "delivered",
+      // issue #274 · 3 — la elección ya se consumió. Se limpia en el mismo
+      // UPDATE para que un cobro posterior sobre la misma mesa no herede la
+      // decisión del anterior: si la mesa se reabre por una anulación, el que
+      // vuelva a cobrar elige de nuevo.
+      comprobante_elegido: null,
     })
     .eq("id", orderId);
 
@@ -352,7 +379,7 @@ export async function closeOrderIfFullyPaid(
         total_cents: order.total_cents,
         tip_cents: order.tip_cents,
       },
-      comprobante,
+      comprobante: elegido,
     });
     if (emision.outcome === "rechazada") {
       // El aviso interno ya salió desde el motor (D6); esto es para el log. El
@@ -744,6 +771,15 @@ export type IniciarPagoMpInput = {
   tip_cents: number;
   caja_id: string;
   slug: string;
+  /**
+   * El comprobante que el operador eligió (issue #274 · 3).
+   *
+   * Con MP el cobro se completa FUERA de la pantalla: el operador se va, el
+   * cliente paga, y minutos después el webhook cierra la orden. La elección no
+   * puede quedarse en el navegador — viaja por `orders.comprobante_elegido`,
+   * que es lo único que sobrevive al salto de proceso.
+   */
+  comprobante?: ComprobanteElegido | null;
 };
 
 export async function iniciarPagoMp(
@@ -803,6 +839,27 @@ export async function iniciarPagoMp(
 
   // Insert payment row pendiente para que el webhook pueda asociar el id.
   const attributed = await deriveAttributedMozo(service, order.id);
+  // La forma del comprobante se valida ANTES de generar la preferencia: si es
+  // inválida, que el cliente ni siquiera vea el link. Es el mismo criterio que
+  // `registrarPago` (issue #263).
+  const compParsed = input.comprobante
+    ? ComprobanteElegidoSchema.safeParse(input.comprobante)
+    : null;
+  if (compParsed && !compParsed.success) {
+    return actionError("Datos del comprobante inválidos.");
+  }
+  if (compParsed?.data) {
+    const { error: compErr } = await service
+      .from("orders")
+      .update({ comprobante_elegido: compParsed.data })
+      .eq("id", order.id)
+      .eq("business_id", business.id);
+    if (compErr) {
+      console.error("iniciarPagoMp · comprobante_elegido", compErr);
+      return actionError("No pudimos guardar la elección del comprobante.");
+    }
+  }
+
   const { data: inserted, error: insErr } = await service
     .from("payments")
     .insert({

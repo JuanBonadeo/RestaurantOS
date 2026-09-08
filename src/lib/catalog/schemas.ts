@@ -5,6 +5,8 @@ import {
   SUPER_CATEGORY_ICONS,
 } from "@/lib/super-categories/visual";
 
+import { MAX_PRICE_CENTS } from "./money-input";
+
 export const CategoryInput = z.object({
   name: z.string().min(1, "Requerido.").max(60),
   slug: z
@@ -47,9 +49,7 @@ export function isValidPrinterHost(host: string): boolean {
     // (169.254/16), unspecified (0/8), multicast (>=224) y TODA IP pública.
     const [a, b] = parts.map(Number);
     const isPrivate =
-      a === 10 ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168);
+      a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
     return isPrivate;
   }
 
@@ -89,7 +89,8 @@ export const StationPrinterInput = z.object({
       return trimmed === "" ? null : trimmed;
     })
     .refine((v) => v === null || isValidPrinterHost(v), {
-      message: "IP o host inválido (ej: 192.168.10.50 o comandera-cocina.local).",
+      message:
+        "IP o host inválido (ej: 192.168.10.50 o comandera-cocina.local).",
     }),
   printer_port: z
     .number({ message: "Puerto inválido." })
@@ -115,10 +116,25 @@ export const SuperCategoryInput = z.object({
 });
 export type SuperCategoryInput = z.infer<typeof SuperCategoryInput>;
 
+/**
+ * Un importe de catálogo, en CENTAVOS (P14 · hallazgo 3).
+ *
+ * El techo no estaba y era la mitad simétrica del bug del `parseInt`: el campo
+ * truncaba «18.500» a $18 hacia abajo y dejaba pasar el cero de más hacia
+ * arriba, porque acá sólo se pedía «entero ≥ 0» y la columna es `bigint` sin
+ * CHECK. `MAX_PRICE_CENTS` no es una regla de negocio: es el límite arriba del
+ * cual un precio de carta es, con certeza, un tipeo.
+ */
+const PriceCents = z
+  .number({ message: "Ingresá un precio válido, ej: 18.500." })
+  .int()
+  .min(0)
+  .max(MAX_PRICE_CENTS, "Precio demasiado alto. ¿Sobró un cero?");
+
 export const ModifierInput = z.object({
   id: z.string().uuid().optional(),
   name: z.string().min(1).max(60),
-  price_delta_cents: z.number().int().min(0),
+  price_delta_cents: PriceCents,
   is_available: z.boolean(),
   sort_order: z.number().int().min(0),
 });
@@ -148,7 +164,7 @@ export const ProductInput = z.object({
     .max(80)
     .regex(/^[a-z0-9-]+$/, "Sólo minúsculas, números y guiones."),
   description: z.string().max(500).optional(),
-  price_cents: z.number().int().min(0),
+  price_cents: PriceCents,
   image_url: z.string().url().nullable().optional(),
   category_id: z.string().uuid().nullable().optional(),
   station_id: z.string().uuid().nullable().optional(),

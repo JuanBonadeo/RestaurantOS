@@ -13,6 +13,19 @@ import {
 
 import { requireCatalogManager } from "./require-catalog-manager";
 
+/**
+ * «Se guardó» sólo si el UPDATE tocó una fila.
+ *
+ * El patrón que se repite en todas las mutaciones de este archivo: el id viaja
+ * desde el browser y el scope es `.eq("id").eq("business_id")` + RLS. Con un id
+ * ajeno o viejo la escritura afecta 0 filas y Supabase devuelve `error = null`,
+ * así que la action contestaba «ok» y el catálogo mostraba «Actualizado» sin
+ * haber actualizado nada (issue #269).
+ */
+function tocoAlgunaFila(filas: { id: string }[] | null): boolean {
+  return (filas?.length ?? 0) > 0;
+}
+
 async function syncModifierGroups(
   productId: string,
   businessId: string,
@@ -158,11 +171,12 @@ export async function updateProduct(
 
   const supabase = await createSupabaseServerClient();
   const { modifier_groups, ...productData } = parsed.data;
-  const { error } = await supabase
+  const { data: actualizados, error } = await supabase
     .from("products")
     .update(productData)
     .eq("id", id)
-    .eq("business_id", businessId);
+    .eq("business_id", businessId)
+    .select("id");
   if (error) {
     console.error("updateProduct", error);
     return actionError(
@@ -170,6 +184,17 @@ export async function updateProduct(
         ? "Ya existe un producto con ese slug."
         : "No pudimos actualizar el producto.",
     );
+  }
+  // El id viaja desde el browser. Con uno de otro negocio, el `.eq(business_id)`
+  // + la RLS dejan el UPDATE en 0 filas… y Supabase devuelve `error = null`. Sin
+  // este corte la action seguía como si nada y `syncModifierGroups` le insertaba
+  // grupos de adicionales —con MI business_id y SU product_id— a un producto
+  // ajeno: aparecían en la carta pública y en la app del mozo de la víctima, que
+  // no los veía en su admin (issue #269). Que la base lo rechace (FK compuesta,
+  // migración 0091) no alcanza: el que llamó tiene que enterarse de que su
+  // cambio no se guardó, en vez de recibir «Actualizado».
+  if (!tocoAlgunaFila(actualizados)) {
+    return actionError("Producto no encontrado.");
   }
   const err = await syncModifierGroups(id, businessId, modifier_groups);
   if (err) return actionError(err);
@@ -188,12 +213,16 @@ export async function deleteProduct(
   const businessId = guard.data.businessId;
 
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase
+  const { data: borrados, error } = await supabase
     .from("products")
     .delete()
     .eq("id", id)
-    .eq("business_id", businessId);
+    .eq("business_id", businessId)
+    .select("id");
 
+  if (!error && !tocoAlgunaFila(borrados)) {
+    return actionError("Producto no encontrado.");
+  }
   if (!error) {
     revalidatePath(`/${businessSlug}/admin/catalogo`);
     revalidatePath(`/${businessSlug}/menu`);
@@ -233,15 +262,17 @@ export async function toggleProductAvailability(
   if (!guard.ok) return guard;
 
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase
+  const { data: tocados, error } = await supabase
     .from("products")
     .update({ is_available: isAvailable })
     .eq("id", id)
-    .eq("business_id", guard.data.businessId);
+    .eq("business_id", guard.data.businessId)
+    .select("id");
   if (error) {
     console.error("toggleProductAvailability", error);
     return actionError("No pudimos actualizar.");
   }
+  if (!tocoAlgunaFila(tocados)) return actionError("Producto no encontrado.");
   revalidatePath(`/${businessSlug}/admin/catalogo`);
   revalidatePath(`/${businessSlug}/menu`);
   return actionOk({ is_available: isAvailable });
@@ -262,15 +293,17 @@ export async function toggleProductShowOnline(
   if (!guard.ok) return guard;
 
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase
+  const { data: tocados, error } = await supabase
     .from("products")
     .update({ show_online: showOnline })
     .eq("id", id)
-    .eq("business_id", guard.data.businessId);
+    .eq("business_id", guard.data.businessId)
+    .select("id");
   if (error) {
     console.error("toggleProductShowOnline", error);
     return actionError("No pudimos actualizar.");
   }
+  if (!tocoAlgunaFila(tocados)) return actionError("Producto no encontrado.");
   revalidatePath(`/${businessSlug}/admin/catalogo`);
   revalidatePath(`/${businessSlug}/menu`);
   return actionOk({ show_online: showOnline });
@@ -285,15 +318,17 @@ export async function toggleProductActive(
   if (!guard.ok) return guard;
 
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase
+  const { data: tocados, error } = await supabase
     .from("products")
     .update({ is_active: isActive })
     .eq("id", id)
-    .eq("business_id", guard.data.businessId);
+    .eq("business_id", guard.data.businessId)
+    .select("id");
   if (error) {
     console.error("toggleProductActive", error);
     return actionError("No pudimos actualizar.");
   }
+  if (!tocoAlgunaFila(tocados)) return actionError("Producto no encontrado.");
   revalidatePath(`/${businessSlug}/admin/catalogo`);
   revalidatePath(`/${businessSlug}/menu`);
   return actionOk({ is_active: isActive });
