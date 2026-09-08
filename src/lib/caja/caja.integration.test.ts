@@ -79,6 +79,7 @@ describe.skipIf(!dbAvailable)("caja continua (integration)", () => {
   let businessId: string;
   let businessSlug: string;
   let cajaA: string;
+  let cajaPrincipal: string;
   let encargadoId: string;
   let mozoAId: string;
   let adminId: string;
@@ -122,9 +123,21 @@ describe.skipIf(!dbAvailable)("caja continua (integration)", () => {
       { business_id: businessId, user_id: adminId, role: "admin", full_name: "Admin" },
     ]);
 
+    // issue #266 — desde la 0081 un negocio SIEMPRE tiene una caja principal:
+    // la primera de turno que se crea queda marcada. Así que para tener una
+    // caja NO principal —que es lo que estos tests necesitan— hace falta crear
+    // primero la que sí lo es. Además de correcto, es más parecido al local
+    // real: una principal y una del bar.
+    const { data: cPrin } = await supabase
+      .from("cajas")
+      .insert({ business_id: businessId, name: "Principal", sort_order: 0 })
+      .select("id")
+      .single();
+    cajaPrincipal = cPrin!.id;
+
     const { data: cA } = await supabase
       .from("cajas")
-      .insert({ business_id: businessId, name: "Salón" })
+      .insert({ business_id: businessId, name: "Salón", sort_order: 1 })
       .select("id")
       .single();
     cajaA = cA!.id;
@@ -294,6 +307,13 @@ describe.skipIf(!dbAvailable)("caja continua (integration)", () => {
 
   it("corte de la caja principal libera la distribución de mozos", async () => {
     CURRENT_USER_ID = encargadoId;
+    // Mover la marca: el índice único parcial `cajas_one_default_per_business`
+    // no admite dos, así que primero se limpia la otra (es lo mismo que hace
+    // `setCajaDefault`).
+    await supabase
+      .from("cajas")
+      .update({ is_default: false })
+      .eq("id", cajaPrincipal);
     await supabase.from("cajas").update({ is_default: true }).eq("id", cajaA);
 
     const stats = await getCajaLiveStats(cajaA, businessId);

@@ -66,3 +66,6 @@ backups/
 /playwright-report/
 /blob-report/
 /e2e/.auth/
+
+# Basura de builds que caen dentro del repo por una ruta relativa
+/private/
