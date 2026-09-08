@@ -336,6 +336,8 @@ export type IngredientOption = {
    * de alta stock.
    */
   presentationId?: string | null;
+  /** spec 172 · «8,26» no significa nada sin «× Compra 10kg» al lado. */
+  presentationName?: string | null;
   netQuantity?: number;
   costCents?: number;
 };
@@ -349,7 +351,7 @@ export async function getIngredientsForLinking(
       service
         .from("ingredients")
         .select(
-          "id, name, unit, ingredient_presentations!left(id, net_quantity, cost_cents, is_default)",
+          "id, name, unit, ingredient_presentations!left(id, name, net_quantity, cost_cents, is_default)",
         )
         .eq("business_id", businessId)
         .eq("is_active", true)
@@ -364,6 +366,7 @@ export async function getIngredientsForLinking(
     unit: string;
     ingredient_presentations?: Array<{
       id: string;
+      name: string;
       net_quantity: number | string;
       cost_cents: number;
       is_default: boolean;
@@ -379,6 +382,7 @@ export async function getIngredientsForLinking(
       name: f.name,
       unit: f.unit,
       presentationId: pres?.id ?? null,
+      presentationName: pres?.name ?? null,
       netQuantity: pres ? Number(pres.net_quantity) : undefined,
       costCents: pres?.cost_cents,
     };

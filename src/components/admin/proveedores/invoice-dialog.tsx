@@ -31,9 +31,18 @@ import { LADO_LARGO_DEFAULT } from "@/lib/images/achicar";
 import { createSupplierInvoice } from "@/lib/proveedores/actions";
 import type { SupplierInvoiceItemInput } from "@/lib/proveedores/schema";
 import { RenglonesEditor, type InsumoOption } from "./renglones-editor";
+import { RevisionLectura } from "./revision-lectura";
+import type { RenglonPropuesto } from "@/lib/proveedores/lectura/a-propuesta";
 import { calcularVencimiento, etiquetaTipo } from "@/lib/proveedores/cuenta-corriente";
 import { DOCUMENT_TYPES, SupplierInvoiceInput } from "@/lib/proveedores/schema";
 import { hoyAR, primerDiaDelMesAR } from "@/lib/proveedores/fechas-ar";
+import { parseNumeroAR } from "@/lib/proveedores/lectura/numeros-ar";
+
+/** El importe de la cabecera, de texto impreso a centavos. `null` si no se leyó. */
+function parsearImporte(raw: string | null | undefined): number | null {
+  const n = parseNumeroAR(raw ?? null);
+  return n === null ? null : Math.round(n * 100);
+}
 
 type FormValues = z.input<typeof SupplierInvoiceInput>;
 
@@ -70,6 +79,9 @@ export function InvoiceDialog({
   const [submitting, setSubmitting] = useState(false);
   const [photoPath, setPhotoPath] = useState<string | null>(null);
   const [items, setItems] = useState<SupplierInvoiceItemInput[]>([]);
+  /** spec 172 · lo que devolvió el lector, esperando confirmación. */
+  const [leido, setLeido] = useState<RenglonPropuesto[] | null>(null);
+  const [leyendo, setLeyendo] = useState(false);
 
   const today = hoyAR();
 
@@ -102,6 +114,47 @@ export function InvoiceDialog({
     if (vencTocado || !fecha) return;
     form.setValue("due_date", calcularVencimiento(fecha, paymentTermsDays));
   }, [fecha, paymentTermsDays, vencTocado, form]);
+
+  /**
+   * Leer la foto — spec 172.
+   *
+   * Arranca solo al elegir el archivo: un botón que hay que descubrir y apretar
+   * es un botón que no se aprieta, y la función queda invisible. Falle lo que
+   * falle, la foto ya quedó subida y el formulario manual sigue igual — el
+   * lector es un acelerador, nunca una dependencia.
+   */
+  const leerLaFoto = async (path: string) => {
+    setLeyendo(true);
+    try {
+      const res = await fetch("/api/proveedores/leer-comprobante", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ businessSlug: slug, photoPath: path, supplierId }),
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        toast.error(json.error ?? "No pudimos leer el comprobante. Cargalo a mano.");
+        return;
+      }
+      if (!json.data.esComprobante) {
+        toast.error(`Esto no parece un comprobante: ${json.data.motivoDescarte ?? "no se entiende"}.`);
+        return;
+      }
+
+      // El importe leído se precarga pero NUNCA se rellena con la suma de los
+      // renglones (172·D2): si no se leyó, el campo queda vacío y el Zod frena.
+      const cab = json.data.cabecera;
+      const total = parsearImporte(cab?.total);
+      if (total !== null) form.setValue("total_cents", total);
+      if (cab?.numero) form.setValue("invoice_number", cab.numero);
+
+      setLeido(json.data.renglones as RenglonPropuesto[]);
+    } catch {
+      toast.error("No pudimos leer el comprobante. Cargalo a mano.");
+    } finally {
+      setLeyendo(false);
+    }
+  };
 
   const onSubmit = async (values: FormValues) => {
     setSubmitting(true);
@@ -281,7 +334,30 @@ export function InvoiceDialog({
               />
             )}
 
-            {insumos.length > 0 && (
+            {leyendo && (
+              <p className="rounded-lg border border-dashed border-zinc-200 py-3 text-center text-xs text-zinc-500">
+                Leyendo la factura… puede tardar hasta medio minuto. La foto ya
+                quedó guardada.
+              </p>
+            )}
+
+            {leido && !leyendo && (
+              <RevisionLectura
+                renglones={leido}
+                insumos={insumos}
+                totalComprobanteCents={Number(form.watch("total_cents")) || 0}
+                onConfirmar={(nuevos) => {
+                  setItems(nuevos);
+                  setLeido(null);
+                }}
+                onDescartar={() => {
+                  setItems([]);
+                  setLeido(null);
+                }}
+              />
+            )}
+
+            {!leido && !leyendo && insumos.length > 0 && (
               <RenglonesEditor
                 insumos={insumos}
                 value={items}
@@ -295,7 +371,10 @@ export function InvoiceDialog({
               <ImageUploader
                 businessId={businessId}
                 value={photoPath}
-                onChange={(url) => setPhotoPath(url)}
+                onChange={(url) => {
+                  setPhotoPath(url);
+                  if (url) leerLaFoto(url);
+                }}
                 bucket="supplier-invoices"
                 returnPath
                 // spec 172 · la foto de una factura se va a leer con un modelo

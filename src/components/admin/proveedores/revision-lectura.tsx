@@ -1,0 +1,299 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { AlertTriangle, Check } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { formatCurrency } from "@/lib/currency";
+import { cn } from "@/lib/utils";
+import {
+  aPropuesta,
+  type CodigoAviso,
+  type InsumoDelCatalogo,
+  type RenglonPropuesto,
+} from "@/lib/proveedores/lectura/a-propuesta";
+import type { SupplierInvoiceItemInput } from "@/lib/proveedores/schema";
+
+/**
+ * La pantalla de revisión — spec 172.
+ *
+ * Es la ÚNICA oportunidad barata de corregir: los renglones no se editan después
+ * de guardar (165, «qué no entra»: se anula y se rehace) y anular devuelve el
+ * stock pero no el precio (165·D4).
+ *
+ * Tres zonas por renglón, siempre en el mismo orden:
+ *   1 · lo que decía el papel, verbatim y entre comillas — el ancla
+ *   2 · lo que entendió el sistema, editable
+ *   3 · la conversión y el precio por unidad base contra el actual
+ *
+ * **La certeza está en el checkbox, no en el color.** Una fila destildada no
+ * entra en el payload: es la prohibición de auto-asignar (172·D3) implementada
+ * en el dato y no en la disciplina de la UI.
+ */
+const cantidad = (n: number) => n.toLocaleString("es-AR", { maximumFractionDigits: 3 });
+
+const TEXTO_AVISO: Record<CodigoAviso, string> = {
+  no_cuadra: "La cuenta de esta línea no cierra con lo que dice el papel.",
+  reconstruido: "Este número no estaba impreso: lo saqué de los otros dos.",
+  unidad_ambigua: "El papel no dice en qué unidad viene. Lo tomé como la del insumo.",
+  sin_presentacion: "Este insumo no tiene envase cargado: entra el stock pero no se actualiza el costo.",
+  cantidad_muy_chica: "La cantidad es demasiado chica para este envase.",
+  costo_excede_columna: "El precio es demasiado grande para cargarlo.",
+  salto_de_precio: "",
+};
+
+export function RevisionLectura({
+  renglones,
+  insumos,
+  totalComprobanteCents,
+  onConfirmar,
+  onDescartar,
+}: {
+  renglones: RenglonPropuesto[];
+  insumos: InsumoDelCatalogo[];
+  totalComprobanteCents: number;
+  onConfirmar: (items: SupplierInvoiceItemInput[]) => void;
+  onDescartar: () => void;
+}) {
+  const [filas, setFilas] = useState(renglones);
+
+  const incluidas = filas.filter((f) => f.incluir && f.ingredientId && f.units && f.unitCostCents);
+  const sumaCents = incluidas.reduce(
+    (n, f) => n + Math.round((f.units ?? 0) * (f.unitCostCents ?? 0)),
+    0,
+  );
+
+  const sinInsumo = filas.filter((f) => !f.ingredientId).length;
+
+  const porId = useMemo(() => new Map(insumos.map((i) => [i.id, i])), [insumos]);
+
+  /**
+   * Al cambiar el insumo se RECALCULA la conversión desde lo impreso.
+   *
+   * El editor viejo hacía lo contrario: pisaba `unit_cost_cents` con el costo
+   * actual del insumo nuevo y tiraba el precio leído. Acá el papel manda — por
+   * eso `aPropuesta` es puro y corre en el cliente.
+   */
+  const cambiarInsumo = (i: number, ingredientId: string) => {
+    setFilas((prev) =>
+      prev.map((f, j) => {
+        if (j !== i) return f;
+        const insumo = ingredientId ? (porId.get(ingredientId) ?? null) : null;
+        const rehecho = aPropuesta(
+          {
+            descripcion: f.sourceText,
+            cantidad: f.units !== null ? String(f.units) : null,
+            unidad: null,
+            precio_unitario: f.unitCostCents !== null ? String(f.unitCostCents / 100) : null,
+            total_linea: null,
+            origen: f.origen,
+            confianza: "alta",
+          },
+          insumo,
+          "manual_corregido",
+        );
+        // Una corrección explícita entra tildada: la persona ya decidió.
+        return { ...rehecho, incluir: Boolean(insumo) };
+      }),
+    );
+  };
+
+  const set = (i: number, patch: Partial<RenglonPropuesto>) =>
+    setFilas((prev) => prev.map((f, j) => (i === j ? { ...f, ...patch } : f)));
+
+  if (filas.length === 0) {
+    return (
+      <div className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+        <p className="text-sm text-zinc-700">
+          No encontré renglones que sean insumos del sistema. Si es limpieza,
+          descartables o bebida, eso no se detalla por insumo: va con el concepto
+          de gasto y listo. La compra se carga igual, entera.
+        </p>
+        <Button type="button" variant="outline" size="sm" onClick={onDescartar}>
+          Seguir sin detalle
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2 rounded-lg border border-zinc-200 p-3">
+      <div className="flex items-baseline justify-between">
+        <p className="text-xs font-semibold text-zinc-700">Leí esto del papel</p>
+        <button
+          type="button"
+          onClick={onDescartar}
+          className="text-[11px] text-zinc-400 underline hover:text-zinc-700"
+        >
+          Cargar sin detalle
+        </button>
+      </div>
+
+      <ul className="divide-y">
+        {filas.map((f, i) => {
+          const insumo = f.ingredientId ? porId.get(f.ingredientId) : null;
+          const salto = f.avisos.find((a) => a.codigo === "salto_de_precio");
+          const otros = f.avisos.filter(
+            (a) => a.codigo !== "salto_de_precio" && TEXTO_AVISO[a.codigo],
+          );
+          const dudoso = Boolean(salto) || otros.some((a) => a.codigo === "no_cuadra");
+          const costoBase =
+            f.unitCostCents && insumo?.netQuantity
+              ? f.unitCostCents / insumo.netQuantity
+              : f.unitCostCents;
+
+          return (
+            <li key={i} className={cn("py-2", dudoso && "-mx-3 border-l-2 border-amber-400 px-3")}>
+              {/* Lo que decía el papel. No se edita: es la evidencia. */}
+              <p className="text-xs text-zinc-500">«{f.sourceText}»</p>
+
+              <div className="mt-1 flex items-start gap-2">
+                <button
+                  type="button"
+                  onClick={() => set(i, { incluir: !f.incluir })}
+                  disabled={!f.ingredientId || !f.units}
+                  aria-label={f.incluir ? "No cargar este insumo" : "Cargar este insumo"}
+                  className={cn(
+                    "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border transition",
+                    f.incluir
+                      ? "border-zinc-900 bg-zinc-900 text-white"
+                      : "border-zinc-300 bg-white hover:border-zinc-400",
+                    (!f.ingredientId || !f.units) && "cursor-not-allowed opacity-40",
+                  )}
+                >
+                  {f.incluir && <Check className="size-3" />}
+                </button>
+
+                <div className="min-w-0 flex-1 space-y-1">
+                  <select
+                    value={f.ingredientId ?? ""}
+                    onChange={(e) => cambiarInsumo(i, e.target.value)}
+                    className="h-8 w-full rounded-md border border-zinc-200 bg-white px-2 text-xs"
+                    aria-label="Insumo"
+                  >
+                    <option value="">Elegí el insumo…</option>
+                    {insumos.map((x) => (
+                      <option key={x.id} value={x.id}>
+                        {x.name}
+                      </option>
+                    ))}
+                  </select>
+
+                  {f.units !== null && f.unitCostCents !== null && (
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        className="h-7 w-16 text-xs"
+                        inputMode="decimal"
+                        value={f.units}
+                        onChange={(e) => set(i, { units: Number(e.target.value) || 0 })}
+                        aria-label="Envases"
+                      />
+                      <span className="text-[11px] text-zinc-400">×</span>
+                      <Input
+                        className="h-7 w-24 text-xs"
+                        inputMode="decimal"
+                        value={f.unitCostCents / 100}
+                        onChange={(e) =>
+                          set(i, {
+                            unitCostCents: Math.round(
+                              (Number(e.target.value.replace(",", ".")) || 0) * 100,
+                            ),
+                          })
+                        }
+                        aria-label="Precio por envase"
+                      />
+                      <span className="truncate text-[11px] text-zinc-400">
+                        {f.presentationName ?? insumo?.unit}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* La conversión completa: la factura habla en kilos y el
+                      sistema guarda envases. Sin los dos números al lado, «8,26»
+                      no se puede contrastar contra el papel. */}
+                  {f.quantityBase !== null && insumo && (
+                    <p className="text-[11px] text-zinc-500 tabular-nums">
+                      → entran {cantidad(f.quantityBase)} {insumo.unit}
+                      {f.units !== null && f.unitCostCents !== null && (
+                        <> · {formatCurrency(Math.round(f.units * f.unitCostCents))}</>
+                      )}
+                    </p>
+                  )}
+
+                  {/* El precio por unidad base es el número que EFECTIVAMENTE se
+                      escribe y se propaga a las recetas. Es lo único que caza el
+                      caso «4 maples o 4 cajas». */}
+                  {salto && costoBase && insumo && (
+                    <p className="flex items-start gap-1 text-[11px] text-amber-700">
+                      <AlertTriangle className="mt-px size-3 shrink-0" />
+                      <span>
+                        {insumo.unit === "un" ? "La unidad" : `El ${insumo.unit}`} te queda a{" "}
+                        {formatCurrency(Math.round(costoBase))} — es {salto.detalle} veces el
+                        precio anterior. Fijate que el envase sea el que dice el papel.
+                      </span>
+                    </p>
+                  )}
+                  {otros.map((a, k) => (
+                    <p key={k} className="text-[11px] text-zinc-400">
+                      {TEXTO_AVISO[a.codigo]}
+                    </p>
+                  ))}
+                  {!f.ingredientId && (
+                    <p className="text-[11px] text-zinc-400">
+                      No encontramos a qué insumo corresponde. Si no es un insumo,
+                      queda dentro del importe y no se detalla.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+
+      <div className="flex items-center justify-between border-t pt-2 text-xs">
+        <span className="text-zinc-500">Suma del detalle</span>
+        <span className="font-semibold tabular-nums text-zinc-800">{formatCurrency(sumaCents)}</span>
+      </div>
+      {totalComprobanteCents > 0 && sumaCents !== totalComprobanteCents && (
+        <p className="text-[11px] text-zinc-400">
+          El total del comprobante es {formatCurrency(totalComprobanteCents)} — la
+          diferencia queda sin detallar, y está bien.
+        </p>
+      )}
+      {sinInsumo > 0 && (
+        <p className="text-[11px] text-zinc-400">
+          {sinInsumo === 1
+            ? "1 renglón no es un insumo del sistema."
+            : `${sinInsumo} renglones no son insumos del sistema.`}{" "}
+          Quedan dentro del importe.
+        </p>
+      )}
+
+      {/* El conteo va ADENTRO del botón: es un número que se ve sin leer nada
+          más, y «3 de 5» molesta lo justo para que abra los otros dos. */}
+      <Button
+        type="button"
+        size="sm"
+        className="w-full"
+        onClick={() =>
+          onConfirmar(
+            incluidas.map((f) => ({
+              ingredient_id: f.ingredientId!,
+              presentation_id: f.presentationId,
+              units: f.units!,
+              unit_cost_cents: f.unitCostCents!,
+            })),
+          )
+        }
+      >
+        {incluidas.length === 0
+          ? "Cargar la compra sin detallar"
+          : incluidas.length === filas.length
+            ? `Cargar la compra con ${incluidas.length} ${incluidas.length === 1 ? "insumo" : "insumos"}`
+            : `Cargar la compra con ${incluidas.length} de ${filas.length} insumos`}
+      </Button>
+    </div>
+  );
+}
