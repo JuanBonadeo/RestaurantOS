@@ -2,7 +2,9 @@ import "server-only";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getProfitMetrics, type ProfitMetrics } from "@/lib/admin/profit-query";
+import { startOfOperatingDayUtc } from "@/lib/admin/orders-query";
 import { isOrderAlive, isOrderDead } from "@/lib/orders/predicates";
+import { fetchAll } from "@/lib/proveedores/unwrap";
 
 export type DashboardOverview = {
   today: {
@@ -32,37 +34,50 @@ export type DashboardOverview = {
   topProducts: { name: string; quantity: number; revenueCents: number }[];
 };
 
-function startOfDayUtc(tz: string, daysAgo = 0): Date {
-  const now = new Date();
-  now.setUTCDate(now.getUTCDate() - daysAgo);
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).formatToParts(now);
-  const pick = (type: string) =>
-    parts.find((p) => p.type === type)?.value ?? "00";
-  const isoLocal = `${pick("year")}-${pick("month")}-${pick("day")}T00:00:00`;
-  const nowInTz = new Date(
-    `${pick("year")}-${pick("month")}-${pick("day")}T${pick("hour")}:${pick("minute")}:${pick("second")}Z`,
-  );
-  const offsetMs = nowInTz.getTime() - now.getTime();
-  const localMidnight = new Date(`${isoLocal}Z`);
-  return new Date(localMidnight.getTime() - offsetMs);
+/**
+ * Arranque de la jornada operativa de hace `daysAgo` jornadas, en UTC.
+ *
+ * Esto era medianoche calendario (`startOfDayUtc`) y ahí estaba el bug del
+ * hallazgo 1 de la issue #272: a las 00:30 el tile «Pedidos hoy» arrancaba de
+ * cero mientras la lista «Pedidos de hoy» de MÁS ABAJO EN LA MISMA PÁGINA
+ * —que sí corta por jornada— seguía mostrando la cena. La noche entera, con
+ * mesas abiertas y sin cobrar, se caía a «ayer» estando todavía viva. En Golf,
+ * que cierra 01:00–02:00, eso es la cola de cada servicio.
+ *
+ * La jornada es la de `public.operating_day()` (corte 6 AM, migración 0049),
+ * que es quien numera la comanda y llena `orders.business_day`; el helper vive
+ * en `orders-query.ts` desde el arreglo del board (#259) y acá se reusa en vez
+ * de escribir un tercer corte.
+ *
+ * El desplazamiento se hace sobre el instante y no sobre la fecha local, igual
+ * que hacía la versión de medianoche.
+ */
+function startOfOperatingDayAgo(
+  tz: string,
+  daysAgo = 0,
+  now: Date = new Date(),
+): Date {
+  const ref = new Date(now.getTime());
+  ref.setUTCDate(ref.getUTCDate() - daysAgo);
+  return startOfOperatingDayUtc(tz, ref);
 }
 
-function dayKey(date: Date, tz: string): string {
+/**
+ * A qué jornada pertenece un instante: la misma cuenta que hace
+ * `public.operating_day()` en la base (hora local menos 6 horas → fecha).
+ *
+ * Con la clave de calendario, el gráfico de los últimos 30 días partía cada
+ * noche en dos barras y la del cierre quedaba pegada al día siguiente.
+ */
+function operatingDayKey(date: Date, tz: string): string {
+  const HORA_DE_CORTE = 6;
+  const corrido = new Date(date.getTime() - HORA_DE_CORTE * 60 * 60 * 1000);
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: tz,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).formatToParts(date);
+  }).formatToParts(corrido);
   const pick = (type: string) =>
     parts.find((p) => p.type === type)?.value ?? "00";
   return `${pick("year")}-${pick("month")}-${pick("day")}`;
@@ -73,38 +88,70 @@ const DAYS_IN_MONTH_RANGE = 30;
 export async function getDashboardOverview(
   businessId: string,
   timezone: string,
+  now: Date = new Date(),
 ): Promise<DashboardOverview> {
   const supabase = await createSupabaseServerClient();
 
-  const startToday = startOfDayUtc(timezone, 0);
-  const startYesterday = startOfDayUtc(timezone, 1);
-  const startMonth = startOfDayUtc(timezone, DAYS_IN_MONTH_RANGE - 1);
+  const startToday = startOfOperatingDayAgo(timezone, 0, now);
+  const startYesterday = startOfOperatingDayAgo(timezone, 1, now);
+  const startMonth = startOfOperatingDayAgo(
+    timezone,
+    DAYS_IN_MONTH_RANGE - 1,
+    now,
+  );
 
-  const [ordersRes, todayItemsRes, customersRes] = await Promise.all([
-    supabase
-      .from("orders")
-      .select("created_at, total_cents, tip_cents, status, lifecycle_status, delivery_type")
-      .eq("business_id", businessId)
-      .gte("created_at", startMonth.toISOString()),
-    supabase
-      .from("order_items")
-      .select(
-        "product_name, quantity, subtotal_cents, orders!inner(business_id, created_at, status, lifecycle_status)",
-      )
-      .eq("orders.business_id", businessId)
-      .gte("orders.created_at", startToday.toISOString())
-      // spec 091 — los dos ejes. Con uno solo, Top productos seguía mostrando
-      // las 6 cervezas de una mesa anulada al día siguiente.
-      .neq("orders.status", "cancelled")
-      .neq("orders.lifecycle_status", "cancelled")
-      // issue #190 — y el tercer eje: la **línea** anulada adentro de una mesa
-      // viva. Las dos milanesas que se cayeron al piso seguían en Top productos.
-      .is("cancelled_at", null),
-    supabase
-      .from("customers")
-      .select("created_at")
-      .eq("business_id", businessId)
-      .gte("created_at", startYesterday.toISOString()),
+  // `fetchAll` en vez de una sola vuelta (issue #272 · hallazgo 8): PostgREST
+  // corta en 1.000 filas y devuelve 206 sin error, así que `(data ?? [])`
+  // recibía el recorte y el tile dejaba de crecer justo cuando el negocio
+  // empezaba a crecer. Además lanza si la lectura falla (spec 161 · D1): ver
+  // que se rompió es mejor que ver $0.
+  const [ordersData, todayItemsData, customersData] = await Promise.all([
+    fetchAll(
+      () =>
+        supabase
+          .from("orders")
+          .select(
+            "id, created_at, total_cents, tip_cents, status, lifecycle_status, delivery_type",
+          )
+          .eq("business_id", businessId)
+          .gte("created_at", startMonth.toISOString())
+          .order("id"),
+      "orders",
+    ),
+    fetchAll(
+      () =>
+        supabase
+          .from("order_items")
+          .select(
+            "id, product_name, quantity, subtotal_cents, orders!inner(business_id, created_at, status, lifecycle_status)",
+          )
+          .eq("orders.business_id", businessId)
+          .gte("orders.created_at", startToday.toISOString())
+          // issue #269 — las líneas hijas de un menú del día no son ventas.
+          // Entran con `subtotal_cents = 0` (el precio vive en el padre), así
+          // que inflan las unidades sin mover la plata: la guarnición aparece
+          // como un producto vendidísimo a $0.
+          .not("is_combo_component", "is", true)
+          // spec 091 — los dos ejes. Con uno solo, Top productos seguía mostrando
+          // las 6 cervezas de una mesa anulada al día siguiente.
+          .neq("orders.status", "cancelled")
+          .neq("orders.lifecycle_status", "cancelled")
+          // issue #190 — y el tercer eje: la **línea** anulada adentro de una mesa
+          // viva. Las dos milanesas que se cayeron al piso seguían en Top productos.
+          .is("cancelled_at", null)
+          .order("id"),
+      "order_items",
+    ),
+    fetchAll(
+      () =>
+        supabase
+          .from("customers")
+          .select("id, created_at")
+          .eq("business_id", businessId)
+          .gte("created_at", startYesterday.toISOString())
+          .order("id"),
+      "customers",
+    ),
   ]);
 
   type OrderRow = {
@@ -114,7 +161,7 @@ export async function getDashboardOverview(
     lifecycle_status: string;
     delivery_type: string;
   };
-  const orders: OrderRow[] = (ordersRes.data ?? []).map((r) => ({
+  const orders: OrderRow[] = ordersData.map((r) => ({
     created_at: r.created_at,
     total_cents: Number(r.total_cents) - (Number(r.tip_cents) || 0),
     status: r.status as string,
@@ -133,10 +180,7 @@ export async function getDashboardOverview(
   );
 
   const todayNotCancelled = todayRows.filter(isOrderAlive);
-  const todayRevenue = todayNotCancelled.reduce(
-    (s, r) => s + r.total_cents,
-    0,
-  );
+  const todayRevenue = todayNotCancelled.reduce((s, r) => s + r.total_cents, 0);
   const todayCancelled = todayRows.filter(isOrderDead).length;
   const activeStatuses = new Set([
     "pending",
@@ -150,7 +194,10 @@ export async function getDashboardOverview(
   // `orders.status`) y las anuladas. El dueño abría el panel un martes a las 4
   // con el local vacío y leía «Pedidos activos: 47».
   const activeOrderCount = todayRows.filter(
-    (r) => isOrderAlive(r) && r.lifecycle_status !== "closed" && activeStatuses.has(r.status),
+    (r) =>
+      isOrderAlive(r) &&
+      r.lifecycle_status !== "closed" &&
+      activeStatuses.has(r.status),
   ).length;
 
   const yesterdayNotCancelled = yesterdayRows.filter(isOrderAlive);
@@ -160,21 +207,21 @@ export async function getDashboardOverview(
   );
 
   const monthNotCancelled = orders.filter(isOrderAlive);
-  const monthRevenue = monthNotCancelled.reduce(
-    (s, r) => s + r.total_cents,
-    0,
-  );
+  const monthRevenue = monthNotCancelled.reduce((s, r) => s + r.total_cents, 0);
 
   const dailyBuckets = new Map<
     string,
     { revenueCents: number; orders: number }
   >();
   for (let i = DAYS_IN_MONTH_RANGE - 1; i >= 0; i--) {
-    const d = startOfDayUtc(timezone, i);
-    dailyBuckets.set(dayKey(d, timezone), { revenueCents: 0, orders: 0 });
+    const d = startOfOperatingDayAgo(timezone, i, now);
+    dailyBuckets.set(operatingDayKey(d, timezone), {
+      revenueCents: 0,
+      orders: 0,
+    });
   }
   for (const r of monthNotCancelled) {
-    const k = dayKey(new Date(r.created_at), timezone);
+    const k = operatingDayKey(new Date(r.created_at), timezone);
     const bucket = dailyBuckets.get(k);
     if (bucket) {
       bucket.revenueCents += r.total_cents;
@@ -188,7 +235,8 @@ export async function getDashboardOverview(
     dine_in: { count: 0, revenueCents: 0 },
   };
   for (const r of monthNotCancelled) {
-    const key = (r.delivery_type as keyof typeof channelBreakdown) ?? "delivery";
+    const key =
+      (r.delivery_type as keyof typeof channelBreakdown) ?? "delivery";
     if (key in channelBreakdown) {
       channelBreakdown[key].count += 1;
       channelBreakdown[key].revenueCents += r.total_cents;
@@ -199,7 +247,7 @@ export async function getDashboardOverview(
     string,
     { quantity: number; revenueCents: number }
   >();
-  for (const it of todayItemsRes.data ?? []) {
+  for (const it of todayItemsData) {
     const name = (it as { product_name: string }).product_name;
     const qty = Number((it as { quantity: number }).quantity) || 0;
     const sub = Number((it as { subtotal_cents: number }).subtotal_cents) || 0;
@@ -220,7 +268,7 @@ export async function getDashboardOverview(
     .sort((a, b) => b.quantity - a.quantity)
     .slice(0, 5);
 
-  const customers = customersRes.data ?? [];
+  const customers = customersData;
   const newCustomersToday = customers.filter((c) => {
     const t = new Date(c.created_at as string).getTime();
     return t >= startToday.getTime();
@@ -284,17 +332,27 @@ const HEATMAP_DAYS = 90;
 export async function getHourlyHeatmap(
   businessId: string,
   timezone: string,
+  now: Date = new Date(),
 ): Promise<HourlyHeatmap> {
   const supabase = await createSupabaseServerClient();
-  const start = startOfDayUtc(timezone, HEATMAP_DAYS - 1);
+  const start = startOfOperatingDayAgo(timezone, HEATMAP_DAYS - 1, now);
 
-  const { data } = await supabase
-    .from("orders")
-    .select("created_at, total_cents, status")
-    .eq("business_id", businessId)
-    .neq("status", "cancelled")
-    .neq("lifecycle_status", "cancelled")
-    .gte("created_at", start.toISOString());
+  // La celda se sigue ubicando por la hora de RELOJ (para eso es un mapa de
+  // horas: dice a qué hora entra el trabajo). Lo que cambia es la ventana, que
+  // ahora arranca en una jornada y no a media noche, y que se pide `tip_cents`:
+  // sin él la facturación por hora salía con la propina adentro.
+  const data = await fetchAll(
+    () =>
+      supabase
+        .from("orders")
+        .select("id, created_at, total_cents, tip_cents, status")
+        .eq("business_id", businessId)
+        .neq("status", "cancelled")
+        .neq("lifecycle_status", "cancelled")
+        .gte("created_at", start.toISOString())
+        .order("id"),
+    "orders",
+  );
 
   const grid = new Map<string, HourlyHeatmapCell>();
   for (let dow = 0; dow < 7; dow++) {
@@ -327,7 +385,7 @@ export async function getHourlyHeatmap(
     Sat: 6,
   };
 
-  for (const row of data ?? []) {
+  for (const row of data) {
     const date = new Date(row.created_at as string);
     const dowName = dowFmt.format(date);
     const dow = dowMap[dowName] ?? 0;
@@ -336,7 +394,13 @@ export async function getHourlyHeatmap(
     const cell = grid.get(`${dow}-${hour}`);
     if (cell) {
       cell.orderCount += 1;
-      cell.revenueCents += Number(row.total_cents) || 0;
+      // issue #272 · hallazgo 7 — `total_cents` lleva la propina adentro
+      // (`total = subtotal + tip + fee − discount`). El tooltip decía
+      // «facturación» y medía con otra regla que los tiles de arriba de la
+      // misma página, que restan el tip desde la spec 098. No mueve el color de
+      // la celda (eso va por `orderCount`), pero sí el número que se lee.
+      cell.revenueCents +=
+        (Number(row.total_cents) || 0) - (Number(row.tip_cents) || 0);
     }
   }
 
@@ -352,10 +416,10 @@ export async function getHourlyHeatmap(
 export async function getDashboardProfit(
   businessId: string,
   timezone: string,
+  now: Date = new Date(),
 ): Promise<ProfitMetrics> {
-  const start = startOfDayUtc(timezone, DAYS_IN_MONTH_RANGE - 1);
-  const end = new Date();
-  return getProfitMetrics(businessId, start.toISOString(), end.toISOString());
+  const start = startOfOperatingDayAgo(timezone, DAYS_IN_MONTH_RANGE - 1, now);
+  return getProfitMetrics(businessId, start.toISOString(), now.toISOString());
 }
 
 // ── Mix de medios de pago (últimos 30 días) ───────────────────────
@@ -370,47 +434,79 @@ export type PaymentMethodKey =
 
 export type PaymentMix = {
   byMethod: Record<PaymentMethodKey, { count: number; amountCents: number }>;
+  /** Lo que efectivamente entró: el fiado NO suma acá. */
   totalCents: number;
   cashCents: number;
   digitalCents: number;
+  /**
+   * Fiado del período (`method = 'cuenta_corriente'`, spec 141): venta sí,
+   * plata cobrada no. Va aparte y no entra a ningún total ni porcentaje.
+   */
+  fiadoCents: number;
+  fiadoCount: number;
 };
 
-const EMPTY_MIX: Record<PaymentMethodKey, { count: number; amountCents: number }> =
-  {
-    cash: { count: 0, amountCents: 0 },
-    card_manual: { count: 0, amountCents: 0 },
-    mp_link: { count: 0, amountCents: 0 },
-    mp_qr: { count: 0, amountCents: 0 },
-    transfer: { count: 0, amountCents: 0 },
-    other: { count: 0, amountCents: 0 },
-  };
+const EMPTY_MIX: Record<
+  PaymentMethodKey,
+  { count: number; amountCents: number }
+> = {
+  cash: { count: 0, amountCents: 0 },
+  card_manual: { count: 0, amountCents: 0 },
+  mp_link: { count: 0, amountCents: 0 },
+  mp_qr: { count: 0, amountCents: 0 },
+  transfer: { count: 0, amountCents: 0 },
+  other: { count: 0, amountCents: 0 },
+};
 
 export async function getPaymentMix(
   businessId: string,
   timezone: string,
+  now: Date = new Date(),
 ): Promise<PaymentMix> {
   const supabase = await createSupabaseServerClient();
-  const start = startOfDayUtc(timezone, DAYS_IN_MONTH_RANGE - 1);
+  const start = startOfOperatingDayAgo(timezone, DAYS_IN_MONTH_RANGE - 1, now);
 
-  const { data } = await supabase
-    .from("payments")
-    .select("method, amount_cents")
-    .eq("business_id", businessId)
-    .eq("payment_status", "paid")
-    .gte("created_at", start.toISOString());
+  const data = await fetchAll(
+    () =>
+      supabase
+        .from("payments")
+        .select("id, method, amount_cents")
+        .eq("business_id", businessId)
+        .eq("payment_status", "paid")
+        .gte("created_at", start.toISOString())
+        .order("id"),
+    "payments",
+  );
 
   const byMethod: Record<
     PaymentMethodKey,
     { count: number; amountCents: number }
   > = JSON.parse(JSON.stringify(EMPTY_MIX));
   let totalCents = 0;
+  let fiadoCents = 0;
+  let fiadoCount = 0;
 
-  for (const p of data ?? []) {
+  for (const p of data) {
     const row = p as { method: string; amount_cents: number };
-    const key = (row.method as PaymentMethodKey) in byMethod
-      ? (row.method as PaymentMethodKey)
-      : "other";
     const amount = Number(row.amount_cents) || 0;
+
+    // issue #272 · hallazgo 2 — el fiado no es plata cobrada. Como
+    // `PaymentMethodKey` no lo listaba, caía en el balde «Otros» del donut,
+    // sumaba a `totalCents` y con eso bajaba el «% efectivo» del centro del
+    // gráfico. La caja ya lo separa desde la spec 141 · D3
+    // (`total_fiado_cents`); ésta era la pantalla del DUEÑO diciendo otra cosa
+    // que la del encargado. Se lo saca de los totales y se lo devuelve aparte
+    // para que se pueda mostrar sin volver a mezclarlo.
+    if (row.method === "cuenta_corriente") {
+      fiadoCents += amount;
+      fiadoCount += 1;
+      continue;
+    }
+
+    const key =
+      (row.method as PaymentMethodKey) in byMethod
+        ? (row.method as PaymentMethodKey)
+        : "other";
     byMethod[key].count += 1;
     byMethod[key].amountCents += amount;
     totalCents += amount;
@@ -419,7 +515,14 @@ export async function getPaymentMix(
   const cashCents = byMethod.cash.amountCents;
   const digitalCents = totalCents - cashCents;
 
-  return { byMethod, totalCents, cashCents, digitalCents };
+  return {
+    byMethod,
+    totalCents,
+    cashCents,
+    digitalCents,
+    fiadoCents,
+    fiadoCount,
+  };
 }
 
 // ── Control de caja (por rango) ───────────────────────────────────
@@ -440,27 +543,52 @@ export async function getCashControl(
 ): Promise<CashControl> {
   const supabase = await createSupabaseServerClient();
 
-  const [cortesRes, movRes] = await Promise.all([
-    supabase
-      .from("caja_cortes")
-      .select("difference_cents")
-      .eq("business_id", businessId)
-      .gte("created_at", startIso)
-      .lt("created_at", endIso),
-    supabase
-      .from("caja_movimientos")
-      .select("kind, amount_cents")
-      .eq("business_id", businessId)
-      .gte("created_at", startIso)
-      .lt("created_at", endIso),
+  const [cortes, movimientos] = await Promise.all([
+    fetchAll(
+      () =>
+        supabase
+          .from("caja_cortes")
+          .select("id, difference_cents")
+          .eq("business_id", businessId)
+          .gte("created_at", startIso)
+          .lt("created_at", endIso)
+          .order("id"),
+      "caja_cortes",
+    ),
+    // issue #272 · hallazgo 5 — los dos filtros que le faltaban a «Sangrías».
+    //
+    // `cancelled_at`: un movimiento anulado (spec 070) sigue en el libro para
+    // que quede la huella, pero no mueve la caja. `calculateExpectedCash` ya lo
+    // filtra; esta tarjeta no, así que la sangría que el encargado cargó mal y
+    // corrigió seguía contando como plata sacada.
+    //
+    // `corte_id`: el retiro que escribe `cerrar_caja_tx` al vaciar el cajón no
+    // es una sangría del turno, es el cierre — `separarRetiroDelCierre` lo
+    // netea contra la apertura por eso mismo (spec 130). Sin este filtro,
+    // «¿cuánta plata se está sacando de la caja?» respondía con TODO el
+    // efectivo de la semana, y un retiro discrecional de $80.000 escondido
+    // adentro de $583.500 no se veía. La tarjeta se llama «Control de arqueos».
+    fetchAll(
+      () =>
+        supabase
+          .from("caja_movimientos")
+          .select("id, kind, amount_cents")
+          .eq("business_id", businessId)
+          .gte("created_at", startIso)
+          .lt("created_at", endIso)
+          .is("cancelled_at", null)
+          .is("corte_id", null)
+          .order("id"),
+      "caja_movimientos",
+    ),
   ]);
 
   let netDifferenceCents = 0;
   let shortageCents = 0;
   let surplusCents = 0;
-  const cortes = cortesRes.data ?? [];
   for (const c of cortes) {
-    const diff = Number((c as { difference_cents: number }).difference_cents) || 0;
+    const diff =
+      Number((c as { difference_cents: number }).difference_cents) || 0;
     netDifferenceCents += diff;
     if (diff < 0) shortageCents += Math.abs(diff);
     else surplusCents += diff;
@@ -468,7 +596,7 @@ export async function getCashControl(
 
   let sangriaCents = 0;
   let ingresoCents = 0;
-  for (const m of movRes.data ?? []) {
+  for (const m of movimientos) {
     const row = m as { kind: string; amount_cents: number };
     const amount = Number(row.amount_cents) || 0;
     if (row.kind === "sangria") sangriaCents += amount;

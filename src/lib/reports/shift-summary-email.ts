@@ -37,11 +37,7 @@ function sectionTitle(title: string): string {
   return `<h2 style="font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:${C.muted};margin:28px 0 10px;">${esc(title)}</h2>`;
 }
 
-function rowsTable(
-  headers: string[],
-  rows: string[][],
-  empty: string,
-): string {
+function rowsTable(headers: string[], rows: string[][], empty: string): string {
   if (rows.length === 0) {
     return `<p style="color:${C.muted};font-size:14px;margin:0;">${esc(empty)}</p>`;
   }
@@ -73,7 +69,10 @@ export function renderShiftSummaryEmail(summary: ShiftSummary): {
 } {
   const subject = `Resumen de cierre · ${summary.businessName} · ${summary.rangeLabel}`;
 
-  const metodoRows = summary.recaudacion.porMetodo.map((m) => [m.label, m.value]);
+  const metodoRows = summary.recaudacion.porMetodo.map((m) => [
+    m.label,
+    m.value,
+  ]);
   const corteRows = summary.caja.cortes.map((c) => [
     c.caja,
     c.encargado,
@@ -102,6 +101,7 @@ export function renderShiftSummaryEmail(summary: ShiftSummary): {
     <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:8px 0;width:100%;">
       <tr>
         ${kpi("Ventas", summary.recaudacion.total)}
+        ${summary.recaudacion.tieneFiado ? kpi("Fiado (no entró)", summary.recaudacion.fiado) : ""}
         ${kpi("Propinas", summary.recaudacion.propinas)}
         ${kpi("Cobros", String(summary.recaudacion.cobros))}
       </tr>
@@ -179,20 +179,36 @@ function renderText(s: ShiftSummary): string {
     return lines.join("\n");
   }
   lines.push("RECAUDACIÓN");
-  lines.push(`  Ventas: ${s.recaudacion.total}  ·  Propinas: ${s.recaudacion.propinas}  ·  Cobros: ${s.recaudacion.cobros}`);
-  for (const m of s.recaudacion.porMetodo) lines.push(`  - ${m.label}: ${m.value}`);
+  lines.push(
+    `  Ventas: ${s.recaudacion.total}  ·  Propinas: ${s.recaudacion.propinas}  ·  Cobros: ${s.recaudacion.cobros}`,
+  );
+  // El fiado sólo aparece cuando lo hubo: un renglón «$0» todos los días lo
+  // vuelve invisible justo el día que importa.
+  if (s.recaudacion.tieneFiado) {
+    lines.push(`  Fiado (no entró al cajón): ${s.recaudacion.fiado}`);
+  }
+  for (const m of s.recaudacion.porMetodo)
+    lines.push(`  - ${m.label}: ${m.value}`);
   lines.push("");
   lines.push("FACTURACIÓN AFIP");
-  lines.push(`  Facturado: ${s.facturacion.total}  ·  Comprobantes: ${s.facturacion.comprobantes} (${s.facturacion.desglose})  ·  Pend/Fallidos: ${s.facturacion.pendientes}/${s.facturacion.fallidos}`);
+  lines.push(
+    `  Facturado: ${s.facturacion.total}  ·  Comprobantes: ${s.facturacion.comprobantes} (${s.facturacion.desglose})  ·  Pend/Fallidos: ${s.facturacion.pendientes}/${s.facturacion.fallidos}`,
+  );
   lines.push("");
   lines.push("OPERACIÓN");
-  lines.push(`  Pedidos: ${s.operacion.pedidos}  ·  Ticket prom.: ${s.operacion.ticketPromedio}  ·  Cancelados: ${s.operacion.cancelados}`);
-  lines.push(`  Mesas: ${s.operacion.mesas}  ·  Delivery: ${s.operacion.delivery}  ·  Retiro: ${s.operacion.pickup}`);
+  lines.push(
+    `  Pedidos: ${s.operacion.pedidos}  ·  Ticket prom.: ${s.operacion.ticketPromedio}  ·  Cancelados: ${s.operacion.cancelados}`,
+  );
+  lines.push(
+    `  Mesas: ${s.operacion.mesas}  ·  Delivery: ${s.operacion.delivery}  ·  Retiro: ${s.operacion.pickup}`,
+  );
   lines.push("");
   lines.push("CAJA — CIERRES");
   if (s.caja.cortes.length === 0) lines.push("  (sin cortes)");
   for (const c of s.caja.cortes)
-    lines.push(`  - ${c.caja} · ${c.encargado} · dif ${c.diferencia} · ${c.hora}`);
+    lines.push(
+      `  - ${c.caja} · ${c.encargado} · dif ${c.diferencia} · ${c.hora}`,
+    );
   lines.push(`  Diferencia total: ${s.caja.diferenciaTotal}`);
   lines.push("");
   lines.push("POR MOZO");
@@ -208,7 +224,9 @@ function renderText(s: ShiftSummary): string {
     lines.push("");
     lines.push("CORRECCIONES DE CAJA");
     for (const c of s.correcciones)
-      lines.push(`  - ${c.detalle}: ${c.cambio} · ${c.motivo} · ${c.responsable} · ${c.hora}`);
+      lines.push(
+        `  - ${c.detalle}: ${c.cambio} · ${c.motivo} · ${c.responsable} · ${c.hora}`,
+      );
   }
   return lines.join("\n");
 }

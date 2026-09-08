@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { fetchAll } from "@/lib/proveedores/unwrap";
 
 // ── Performance de mozos ──────────────────────────────────────────
 //
@@ -29,16 +30,24 @@ export async function getMozoPerformance(
 ): Promise<StaffPerformance> {
   const supabase = await createSupabaseServerClient();
 
-  const { data } = await supabase
-    .from("payments")
-    .select("attributed_mozo_id, amount_cents, tip_cents")
-    .eq("business_id", businessId)
-    .eq("payment_status", "paid")
-    .not("attributed_mozo_id", "is", null)
-    .gte("created_at", startIso)
-    .lt("created_at", endIso);
+  // Paginado (issue #272 · hallazgo 8): PostgREST corta en 1.000 filas y no
+  // avisa. Un mes de cobros de Golf pasa ese techo y el ranking se quedaba
+  // congelado en los primeros mil.
+  const data = await fetchAll(
+    () =>
+      supabase
+        .from("payments")
+        .select("id, attributed_mozo_id, amount_cents, tip_cents")
+        .eq("business_id", businessId)
+        .eq("payment_status", "paid")
+        .not("attributed_mozo_id", "is", null)
+        .gte("created_at", startIso)
+        .lt("created_at", endIso)
+        .order("id"),
+    "payments",
+  );
 
-  const rows = (data ?? []) as Array<{
+  const rows = data as Array<{
     attributed_mozo_id: string;
     amount_cents: number;
     tip_cents: number;
@@ -53,8 +62,21 @@ export async function getMozoPerformance(
 
   for (const r of rows) {
     const id = r.attributed_mozo_id;
-    const sales = Number(r.amount_cents) || 0;
     const tips = Number(r.tip_cents) || 0;
+    // issue #272 · hallazgo 3 — la venta es `amount − tip` (spec 098).
+    //
+    // La propina viaja adentro de `amount_cents` porque es plata que pasó por
+    // la caja, pero no es del negocio: es del mozo. Sumándola, dos mozos que
+    // vendieron exactamente lo mismo aparecían separados por lo que dejaron sus
+    // mesas encima del mantel, y con `salesCents` se corrían también el ticket
+    // promedio y el largo de la barra de la tarjeta — las tres cifras derivan
+    // de acá, así que eran internamente consistentes y por eso nadie las
+    // cruzaba. El mismo cálculo ya se había arreglado en la liquidación del
+    // mozo (`caja/liquidacion-mozo.ts`), que es la pantalla del encargado.
+    //
+    // Se pierde el «cuánta plata movió» del mozo: si algún día hace falta, es
+    // `salesCents + tipsCents`, y los dos números siguen estando.
+    const sales = (Number(r.amount_cents) || 0) - tips;
     const existing = agg.get(id) ?? {
       salesCents: 0,
       tipsCents: 0,

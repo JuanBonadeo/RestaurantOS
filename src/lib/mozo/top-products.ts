@@ -29,6 +29,11 @@ export async function getTopProductIds(
     .eq("orders.business_id", businessId)
     .gte("orders.created_at", since)
     .is("cancelled_at", null)
+    // issue #269 — las líneas hijas de un menú del día no son ventas.
+    // Entran con `subtotal_cents = 0` (el precio vive en el padre), así
+    // que inflan las unidades sin mover la plata: la guarnición aparece
+    // como un producto vendidísimo a $0.
+    .not("is_combo_component", "is", true)
     .not("product_id", "is", null);
 
   if (error) {

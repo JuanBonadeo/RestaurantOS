@@ -6,6 +6,7 @@ import { z } from "zod";
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { requireMozoActionContext } from "@/lib/mozo/auth";
 import { notifyDeliveryStatusChange } from "@/lib/notifications/delivery-notify";
+import { marcarPagosReembolsados } from "@/lib/billing/refund-payments";
 import { cancelarOrden } from "@/lib/orders/cancel-order";
 import { refundPayment } from "@/lib/payments/mercadopago";
 import { canConfirmOrder } from "@/lib/permissions/can";
@@ -138,6 +139,15 @@ export async function rechazarPedido(
       .from("orders")
       .update({ payment_status: "refunded" })
       .eq("id", order.id);
+    // issue #272 — la caja no lee `orders.payment_status`, lee `payments`.
+    // Sin esto se le devolvía la plata al cliente por Mercado Pago y el arqueo
+    // la seguía esperando para siempre.
+    await marcarPagosReembolsados(service, {
+      orderId: order.id,
+      businessId: business.id,
+      motivo: `Pedido rechazado: ${motivo}`,
+      actorUserId: ctxResult.data.userId,
+    });
   }
 
   // El aviso del rechazo, con el motivo que escribió el encargado. `rejected`

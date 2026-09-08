@@ -88,7 +88,13 @@ export type ShiftSummaryData = {
   /** Etiqueta del rango ya formateada por el loader (ej. "sábado 28/06/2026"). */
   rangeLabel: string;
   recaudacion: {
+    /** Lo que entró al cajón. El fiado NO suma acá (spec 141 · D3). */
     total_cents: number;
+    /**
+     * Fiado del día (`cuenta_corriente`): venta sí, plata cobrada no.
+     * Opcional: un resumen calculado antes de la issue #272 no lo trae.
+     */
+    fiado_cents?: number;
     propinas_cents: number;
     por_metodo: Record<PaymentMethod, number>;
     cobros_count: number;
@@ -127,6 +133,10 @@ export type ShiftSummary = {
   recaudacion: {
     total: string;
     propinas: string;
+    /** Fiado del día, formateado. "$0" cuando nadie firmó. */
+    fiado: string;
+    /** False cuando el fiado es cero: el mail no muestra el renglón. */
+    tieneFiado: boolean;
     cobros: number;
     porMetodo: MetodoLine[];
   };
@@ -199,7 +209,8 @@ export function valorCorregido(
   if (field === "method") {
     return PAYMENT_METHOD_LABELS[raw as PaymentMethod] ?? raw;
   }
-  if (field === "attributed_mozo_id" || field === "caja_id") return label ?? raw;
+  if (field === "attributed_mozo_id" || field === "caja_id")
+    return label ?? raw;
   return raw;
 }
 
@@ -220,6 +231,11 @@ export function buildShiftSummary(data: ShiftSummaryData): ShiftSummary {
   const { recaudacion, afip, operacion, cortes, porMozo, anulaciones } = data;
   const correcciones = data.correcciones ?? [];
 
+  // `METHOD_ORDER` no lista `cuenta_corriente` a propósito: son los métodos de
+  // COBRO, y el fiado no es uno — sale en su propio KPI, al lado de la
+  // recaudación, para que la tabla vuelva a sumar al total de arriba.
+  const fiadoCents = recaudacion.fiado_cents ?? 0;
+
   const porMetodo: MetodoLine[] = METHOD_ORDER.filter(
     (m) => (recaudacion.por_metodo[m] ?? 0) > 0,
   ).map((m) => ({
@@ -234,6 +250,7 @@ export function buildShiftSummary(data: ShiftSummaryData): ShiftSummary {
 
   const hasData =
     recaudacion.total_cents > 0 ||
+    fiadoCents > 0 ||
     operacion.orderCount > 0 ||
     cortes.length > 0 ||
     afip.count > 0;
@@ -244,6 +261,8 @@ export function buildShiftSummary(data: ShiftSummaryData): ShiftSummary {
     recaudacion: {
       total: formatCurrency(recaudacion.total_cents),
       propinas: formatCurrency(recaudacion.propinas_cents),
+      fiado: formatCurrency(fiadoCents),
+      tieneFiado: fiadoCents > 0,
       cobros: recaudacion.cobros_count,
       porMetodo,
     },

@@ -1,10 +1,11 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { formatInTimeZone, toZonedTime } from "date-fns-tz";
+import { formatInTimeZone } from "date-fns-tz";
 import { es } from "date-fns/locale";
 
 import { getInvoiceKPIs } from "@/lib/afip/queries";
+import { startOfOperatingDayUtc } from "@/lib/admin/orders-query";
 import type { PaymentMethod } from "@/lib/caja/types";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
@@ -32,14 +33,6 @@ const EMPTY_METODO: Record<PaymentMethod, number> = {
   cuenta_corriente: 0,
 };
 
-/** Inicio del día (en `timezone`) traducido a instante UTC. Igual que reports. */
-function startOfDayInTz(date: Date, timezone: string): Date {
-  const zoned = toZonedTime(date, timezone);
-  zoned.setHours(0, 0, 0, 0);
-  const offsetMs = toZonedTime(date, timezone).getTime() - date.getTime();
-  return new Date(zoned.getTime() - offsetMs);
-}
-
 function tipoLabel(tipo: string): string {
   switch (tipo) {
     case "factura_a":
@@ -59,7 +52,9 @@ async function resolveUserNames(
   service: AnyClient,
   ids: (string | null)[],
 ): Promise<Map<string, string>> {
-  const unique = Array.from(new Set(ids.filter((x): x is string => Boolean(x))));
+  const unique = Array.from(
+    new Set(ids.filter((x): x is string => Boolean(x))),
+  );
   if (unique.length === 0) return new Map();
   const { data } = await service
     .from("users")
@@ -97,10 +92,21 @@ export async function loadShiftSummaryData(
   const timezone = (biz as { timezone: string }).timezone;
   const businessName = (biz as { name: string }).name;
 
-  const start = startOfDayInTz(now, timezone);
+  // issue #272 · hallazgo 1 — el día del resumen es la JORNADA, no el
+  // calendario.
+  //
+  // Cortaba a medianoche: el mail que Golf recibe al cerrar (01:00–02:00)
+  // resumía dos horas de servicio y mandaba el resto de la noche al resumen del
+  // día siguiente. La jornada es `public.operating_day()` (corte 6 AM,
+  // migración 0049), el mismo corte que numera la comanda y que usa el board de
+  // pedidos desde el arreglo #259.
+  //
+  // `rangeLabel` se arma sobre el arranque de la jornada y no sobre `now`: a las
+  // 00:30 el mail decía «lunes 07/09» arriba de los números del domingo.
+  const start = startOfOperatingDayUtc(timezone, now);
   const startIso = start.toISOString();
   const endIso = now.toISOString();
-  const rangeLabel = formatInTimeZone(now, timezone, "EEEE dd/MM/yyyy", {
+  const rangeLabel = formatInTimeZone(start, timezone, "EEEE dd/MM/yyyy", {
     locale: es,
   });
 
@@ -122,6 +128,7 @@ export async function loadShiftSummaryData(
 
   const por_metodo: Record<PaymentMethod, number> = { ...EMPTY_METODO };
   let total_cents = 0;
+  let fiado_cents = 0;
   let propinas_cents = 0;
   const mozoAgg = new Map<
     string,
@@ -135,8 +142,16 @@ export async function loadShiftSummaryData(
     // dos pantallas del mismo negocio daban números distintos para lo mismo.
     const venta = p.amount_cents - p.tip_cents;
     por_metodo[p.method] = (por_metodo[p.method] ?? 0) + venta;
-    total_cents += venta;
+    // issue #272 · hallazgo 2 — el fiado (spec 141) es venta pero NO entró al
+    // cajón, y el mail lo imprimía bajo el título «Recaudación». Peor que en el
+    // donut del panel: `METHOD_ORDER` tampoco lo lista, así que la tabla de
+    // abajo no sumaba al KPI de arriba y no había forma de notarlo. La caja ya
+    // lo separa en `total_fiado_cents` desde la 141 · D3; acá se hace lo mismo.
+    if (p.method === "cuenta_corriente") fiado_cents += venta;
+    else total_cents += venta;
     propinas_cents += p.tip_cents;
+    // Lo del mozo sí incluye el fiado: él vendió la mesa. Lo que no le
+    // corresponde es la propina, que ya se resta arriba.
     if (p.attributed_mozo_id) {
       const cur = mozoAgg.get(p.attributed_mozo_id) ?? {
         ventas: 0,
@@ -167,7 +182,7 @@ export async function loadShiftSummaryData(
   const { data: orderRows } = await service
     .from("orders")
     .select(
-      "id, total_cents, status, lifecycle_status, delivery_type, cancelled_at, cancelled_reason, cancelled_by, table_id, order_number",
+      "id, total_cents, tip_cents, status, lifecycle_status, delivery_type, cancelled_at, cancelled_reason, cancelled_by, table_id, order_number",
     )
     .eq("business_id", businessId)
     .gte("created_at", startIso)
@@ -176,6 +191,7 @@ export async function loadShiftSummaryData(
   const orders = (orderRows ?? []) as {
     id: string;
     total_cents: number;
+    tip_cents: number;
     status: string;
     lifecycle_status: string | null;
     delivery_type: string;
@@ -190,8 +206,26 @@ export async function loadShiftSummaryData(
     o.status === "cancelled" || o.lifecycle_status === "cancelled";
   const live = orders.filter((o) => !isCancelled(o));
   const orderCount = live.length;
-  const revenueCents = live.reduce((acc, o) => acc + Number(o.total_cents), 0);
-  const deliveryCount = live.filter((o) => o.delivery_type === "delivery").length;
+  // issue #272 · hallazgo 4 — la misma regla que 55 líneas más arriba.
+  //
+  // `orders.total_cents` lleva la propina adentro (`recomputeOrderTotals`:
+  // `total = subtotal + tip + fee − discount`), así que el bloque «Operación»
+  // medía con otra vara que el bloque «Recaudación» del MISMO mail. Lo único
+  // que se imprime de acá es el ticket promedio —`revenueCents` no está en el
+  // modelo de vista— y es el número con el que el dueño decide los precios de
+  // la carta: salía inflado por la propina, todos los días.
+  //
+  // Ojo, siguen siendo dos poblaciones distintas y eso no lo arregla esto:
+  // «Recaudación» son cobros del día, y esto son órdenes creadas en el día
+  // (incluidas las abiertas y sin cobrar). Por eso el promedio puede superar la
+  // recaudación de arriba sin que ninguno de los dos esté mal.
+  const revenueCents = live.reduce(
+    (acc, o) => acc + Number(o.total_cents) - (Number(o.tip_cents) || 0),
+    0,
+  );
+  const deliveryCount = live.filter(
+    (o) => o.delivery_type === "delivery",
+  ).length;
   const pickupCount = live.filter((o) => o.delivery_type === "pickup").length;
   const dineInCount = live.filter((o) => o.delivery_type === "dine_in").length;
   const cancelledOrders = orders.filter(isCancelled);
@@ -199,7 +233,9 @@ export async function loadShiftSummaryData(
   // ── Cortes del día (diferencia + encargado + hora) ────────────────────
   const { data: corteRows } = await service
     .from("caja_cortes")
-    .select("caja_id, encargado_id, difference_cents, closing_cash_cents, expected_cash_cents, created_at, cajas(name)")
+    .select(
+      "caja_id, encargado_id, difference_cents, closing_cash_cents, expected_cash_cents, created_at, cajas(name)",
+    )
     .eq("business_id", businessId)
     .gte("created_at", startIso)
     .lte("created_at", endIso)
@@ -247,6 +283,7 @@ export async function loadShiftSummaryData(
     rangeLabel,
     recaudacion: {
       total_cents,
+      fiado_cents,
       propinas_cents,
       por_metodo,
       cobros_count: payments.length,
@@ -328,7 +365,10 @@ async function loadCorrecciones(
         .eq("business_id", businessId)
         .in("id", lista),
     ]);
-    for (const u of (users ?? []) as { user_id: string; full_name: string | null }[]) {
+    for (const u of (users ?? []) as {
+      user_id: string;
+      full_name: string | null;
+    }[]) {
       if (u.full_name) labels.set(u.user_id, u.full_name);
     }
     for (const c of (cajas ?? []) as { id: string; name: string }[]) {
@@ -371,7 +411,9 @@ async function loadCancellations(
   // Mesas anuladas (orders ya cargadas) — label por etiqueta de mesa.
   const mesaAnuladas = cancelledOrders.filter((o) => o.cancelled_at);
   const tableIds = Array.from(
-    new Set(mesaAnuladas.map((o) => o.table_id).filter((x): x is string => !!x)),
+    new Set(
+      mesaAnuladas.map((o) => o.table_id).filter((x): x is string => !!x),
+    ),
   );
   const tableLabels = new Map<string, string>();
   if (tableIds.length > 0) {
@@ -399,7 +441,9 @@ async function loadCancellations(
   // Ítems anulados.
   const { data: itemRows } = await service
     .from("order_items")
-    .select("product_name, cancelled_at, cancelled_reason, cancelled_by, orders!inner(business_id)")
+    .select(
+      "product_name, cancelled_at, cancelled_reason, cancelled_by, orders!inner(business_id)",
+    )
     .not("cancelled_at", "is", null)
     .gte("cancelled_at", startIso)
     .lte("cancelled_at", endIso)
@@ -424,7 +468,9 @@ async function loadCancellations(
   // Facturas anuladas (sin timestamp de anulación → se usa created_at).
   const { data: invRows } = await service
     .from("invoices")
-    .select("punto_venta, numero, tipo_comprobante, cancelled_reason, cancelled_by, created_at")
+    .select(
+      "punto_venta, numero, tipo_comprobante, cancelled_reason, cancelled_by, created_at",
+    )
     .eq("business_id", businessId)
     .eq("status", "cancelled")
     .gte("created_at", startIso)

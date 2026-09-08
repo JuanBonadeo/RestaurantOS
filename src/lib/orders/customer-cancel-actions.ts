@@ -10,6 +10,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 import { cancelDownstream } from "./cancel-order";
+import { marcarPagosReembolsados } from "@/lib/billing/refund-payments";
 
 const CancelInput = z.object({
   order_id: z.string().uuid(),
@@ -128,6 +129,22 @@ export async function cancelOrderByCustomer(
   if (error) {
     console.error("cancelOrderByCustomer", error);
     return actionError("No pudimos cancelar el pedido.");
+  }
+
+  // issue #272 — la caja no lee `orders.payment_status`, lee `payments`.
+  // Sin esto, el cliente cancelaba, Mercado Pago le devolvía la plata, y el
+  // arqueo la seguía esperando: «Ingresos hoy» bajaba y el efectivo esperado
+  // no, así que los dos números divergían sin que nada los limpiara.
+  //
+  // `actorUserId` va null a propósito: acá el que canceló es el cliente, que no
+  // es del equipo del local. El motivo del rastro lo dice.
+  if (refundOutcome === "refunded") {
+    await marcarPagosReembolsados(service, {
+      orderId: order_id,
+      businessId: order.business_id,
+      motivo: "Cancelado por el cliente",
+      actorUserId: null,
+    });
   }
 
   // Ítems, comandas (con su ticket «ANULADA») y totales. Un pedido que el
