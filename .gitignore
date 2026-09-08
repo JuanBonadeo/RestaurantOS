@@ -60,3 +60,9 @@ backups/
 
 # Build aislado cuando hay un `next dev` abierto (NEXT_BUILD_DIR)
 .next-build/
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/e2e/.auth/
