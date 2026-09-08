@@ -90,7 +90,7 @@ test.describe("P02 · el plano, la mesa y el cobro dicen lo mismo", () => {
     ).toBeVisible();
   });
 
-  test("«Cobrar» abre el cobro por el mismo total, sin recalcular nada", async ({
+  test("«Cobrar» abre la cuenta por el mismo total, sin recalcular nada", async ({
     page,
   }) => {
     const bizId = await businessId(SLUG);
@@ -114,11 +114,21 @@ test.describe("P02 · el plano, la mesa y el cobro dicen lo mismo", () => {
       .getByRole("button", { name: new RegExp(escapeRe(orden.customer_name)) })
       .first()
       .click();
-    await page.getByRole("button", { name: /^Cobrar/ }).first().click();
+    await page.getByRole("button", { name: /^Cobrar$/ }).first().click();
 
-    // El salto de pantalla es donde un total se puede perder. Acá se verifica
-    // que lo que se va a cobrar es lo que la mesa debía.
-    await expect(page.getByText(montoAR(falta)).first()).toBeVisible();
+    // El salto de pantalla es donde un total se puede perder, y hay que
+    // afirmarlo sobre la pantalla NUEVA.
+    //
+    // Antes esto decía `getByText(monto).toBeVisible()` a secas, y pasaba sin
+    // que el panel llegara a abrir: el mismo importe ya estaba a la vista en el
+    // detalle de la mesa, dos centímetros más arriba. Un test que puede pasar
+    // sin ejercer la transición que dice probar no prueba nada.
+    //
+    // El botón «Pasar a cobro · $ 47.000» sólo existe en el panel de la cuenta,
+    // así que afirmarlo sobre él es afirmar que el salto ocurrió.
+    const pasar = page.getByRole("button", { name: /Pasar a cobro/ });
+    await expect(pasar).toBeVisible({ timeout: 20_000 });
+    await expect(pasar).toContainText(montoAR(falta));
   });
 });
 
