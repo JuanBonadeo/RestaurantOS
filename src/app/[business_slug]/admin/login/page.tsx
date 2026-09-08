@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { AlertTriangle } from "lucide-react";
 
 import { LoginForm } from "@/components/admin/login-form";
+import { MOTIVO_LINK_VENCIDO } from "@/lib/auth/link-caido";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
@@ -19,6 +20,10 @@ export default async function AdminLoginPage({
   if (!business) notFound();
 
   const isDisabledNotice = reason === "disabled";
+  // Spec 171 · D4 — el motivo llega como código y el texto lo elige esta
+  // pantalla. Un `?error=<texto libre>` dejaría que cualquiera le firme un
+  // cartel al sistema («Llamá al 11-5555») mandando un link armado.
+  const isLinkVencido = reason === MOTIVO_LINK_VENCIDO;
 
   // If already signed in AND member (active) of this business, skip login.
   // Si la membership está deshabilitada o el usuario llega con
@@ -65,6 +70,21 @@ export default async function AdminLoginPage({
             <p className="mt-1 text-amber-800">
               Un administrador del negocio dio de baja tu acceso. Si fue un
               error, contactalo para reactivarte.
+            </p>
+          </div>
+        </div>
+      )}
+      {isLinkVencido && (
+        <div
+          role="alert"
+          className="flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"
+        >
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          <div>
+            <p className="font-semibold">Ese link ya venció</p>
+            <p className="mt-1 text-amber-800">
+              Los links de acceso duran una hora. Pedile otro a tu encargado, o
+              entrá acá con tu PIN (o tu email) y tu contraseña.
             </p>
           </div>
         </div>

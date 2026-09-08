@@ -12,6 +12,28 @@
  * arman este texto por su cuenta: los dos modos del alta y el botón nuevo de la
  * fila del miembro.
  */
+/**
+ * Con qué entra la persona, dicho una sola vez y en un solo lugar.
+ *
+ * Lo usan el mensaje que el encargado copia y manda, y la pantalla de
+ * bienvenida donde la persona elige su contraseña (spec 171 · D1). No pueden
+ * enseñarle a entrar de dos maneras distintas: el mensaje se pierde entre otros
+ * veinte, la pantalla es la que se lee.
+ *
+ * El PIN adelante cuando existe: son los 4 dígitos que ya usa todos los días
+ * para fichar, y es lo único de todo esto que se va a acordar sin mirar un
+ * papel. El email atrás, que entra igual y es lo que le sirve el día que el PIN
+ * se le fue de la cabeza — o si no tiene PIN.
+ */
+export function identificadorPara(input: {
+  pin: string | null;
+  email: string;
+}): string {
+  return input.pin
+    ? `tu PIN ${input.pin} (o tu email, ${input.email})`
+    : `tu email, ${input.email}`;
+}
+
 export function buildAccessMessage(input: {
   businessName: string;
   link: string;
@@ -23,11 +45,7 @@ export function buildAccessMessage(input: {
 }): string {
   const { businessName, link, pin, email, yaTienePassword } = input;
 
-  // El PIN adelante cuando existe: son los 4 dígitos que ya usa para fichar, y
-  // es lo único de todo esto que se va a acordar sin mirar el papel.
-  const conQue = pin
-    ? `tu PIN ${pin} (o tu email, ${email})`
-    : `tu email, ${email}`;
+  const conQue = identificadorPara({ pin, email });
 
   const cuerpo = yaTienePassword
     ? [

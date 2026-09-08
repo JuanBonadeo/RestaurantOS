@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import type { EmailOtpType } from "@supabase/supabase-js";
 
+import { destinoDeLinkCaido } from "@/lib/auth/link-caido";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const VALID_TYPES: EmailOtpType[] = [
@@ -38,9 +39,7 @@ export async function GET(request: NextRequest) {
       hasToken: !!tokenHash,
       type,
     });
-    return NextResponse.redirect(
-      `${origin}${next}?error=${encodeURIComponent("Link inválido.")}`,
-    );
+    return NextResponse.redirect(`${origin}${destinoDeLinkCaido(next)}`);
   }
 
   const supabase = await createSupabaseServerClient();
@@ -50,10 +49,12 @@ export async function GET(request: NextRequest) {
   });
 
   if (error) {
+    // Spec 171 · D3/D4 — el `error.message` de Supabase («Email link is invalid
+    // or has expired») no se filtra a la query: es inglés y jerga para alguien
+    // que está tratando de entrar a trabajar, y el texto de un cartel no lo
+    // puede elegir el que arma la URL. Va el código, y el login lo traduce.
     console.error("[auth/confirm] verifyOtp failed", error);
-    return NextResponse.redirect(
-      `${origin}${next}?error=${encodeURIComponent(error.message)}`,
-    );
+    return NextResponse.redirect(`${origin}${destinoDeLinkCaido(next)}`);
   }
 
   return NextResponse.redirect(`${origin}${next}`);

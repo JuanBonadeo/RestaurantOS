@@ -37,7 +37,7 @@ export default async function BienvenidaPage({
   const service = createSupabaseServiceClient();
   const { data: membership } = await service
     .from("business_users")
-    .select("role")
+    .select("role, pin")
     .eq("business_id", business.id)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -70,6 +70,7 @@ export default async function BienvenidaPage({
         businessSlug={business_slug}
         businessLogoUrl={business.logo_url}
         email={user.email ?? ""}
+        pin={(membership?.pin as string | null) ?? null}
         displayName={displayName ?? ""}
         destino={destino}
       />

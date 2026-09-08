@@ -18,6 +18,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { identificadorPara } from "@/lib/admin/access-message";
 import { completeWelcome } from "@/lib/admin/welcome-actions";
 import { cn } from "@/lib/utils";
 
@@ -76,6 +77,7 @@ export function WelcomeForm({
   businessSlug,
   businessLogoUrl,
   email,
+  pin,
   displayName,
   destino,
 }: {
@@ -83,6 +85,8 @@ export function WelcomeForm({
   businessSlug: string;
   businessLogoUrl: string | null;
   email: string;
+  /** Los 4 dígitos con los que ficha. Null para quien no tiene (spec 171 · D1). */
+  pin: string | null;
   displayName: string;
   /** Dónde cae al terminar. Lo calcula el server, que es el único que sabe el
    *  rol y, con él, cuál es el primer tema del recorrido (spec 169 · D1). */
@@ -164,13 +168,46 @@ export function WelcomeForm({
       </div>
 
       <p className="text-sm text-zinc-600">
-        Ya te dimos acceso al panel. Para poder volver a entrar más adelante,
-        necesitás fijar una contraseña. Usamos{" "}
-        <code className="rounded bg-zinc-100 px-1.5 py-0.5 text-zinc-700">
-          {email}
-        </code>{" "}
-        como tu email de login.
+        Ya tenés acceso al sistema de {businessName}. Elegí acá tu contraseña: es
+        lo único nuevo que vas a tener que acordarte.
       </p>
+
+      {/* Spec 171 · D1 — con qué entra a partir de mañana.
+          Esta es la única pantalla que la persona mira con toda la atención
+          puesta en «cómo entro después», y hasta hoy le enseñaba el
+          identificador difícil (`nombre.apellido@golf-jcr.internal`) y le
+          escondía el fácil. El PIN adelante, el mail atrás, los dos a la vista:
+          el mensaje que le mandaron por WhatsApp dice exactamente lo mismo. */}
+      <div className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200/70">
+        <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+          Con esto vas a entrar
+        </p>
+        <div className="mt-3 grid gap-3">
+          {pin && (
+            <div className="flex items-center gap-3">
+              <span className="flex h-11 min-w-[5.5rem] items-center justify-center rounded-xl bg-zinc-900 px-3 font-mono text-xl font-bold tracking-[0.28em] text-white">
+                {pin}
+              </span>
+              <span className="text-xs text-zinc-500">
+                <span className="block text-sm font-medium text-zinc-800">
+                  Tu PIN
+                </span>
+                Los mismos 4 dígitos con los que fichás.
+              </span>
+            </div>
+          )}
+          <div className="flex items-center gap-3">
+            <span className="min-w-0">
+              <code className="block truncate rounded-lg bg-zinc-100 px-2.5 py-2 text-xs text-zinc-700">
+                {email}
+              </code>
+            </span>
+            <span className="text-xs text-zinc-500">
+              {pin ? "O tu email, si se te fue el PIN." : "Tu email de login."}
+            </span>
+          </div>
+        </div>
+      </div>
 
       <Form {...form}>
         <form
@@ -302,7 +339,7 @@ export function WelcomeForm({
           <code className="rounded bg-zinc-100 px-1 py-0.5 text-zinc-700">
             /{businessSlug}/admin/login
           </code>{" "}
-          con este email y la contraseña que elijas.
+          con {identificadorPara({ pin, email })} y la contraseña que elijas.
         </li>
       </ul>
     </div>
