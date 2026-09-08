@@ -1,5 +1,5 @@
 -- ────────────────────────────────────────────────────────────────────────
--- 0092 — la Factura A elegida sobrevive al rodeo por Mercado Pago
+-- 0093 — la Factura A elegida sobrevive al rodeo por Mercado Pago
 --
 -- El operador tilda «Factura A», carga el CUIT del cliente empresa y cobra con
 -- MP. La elección se perdía en el camino: el ramal de MP en `CobroForm` retorna

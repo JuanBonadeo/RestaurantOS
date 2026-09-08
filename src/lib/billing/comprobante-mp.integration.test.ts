@@ -5,7 +5,7 @@
 // Con MP el cobro se completa FUERA de la pantalla: el operador tilda «Factura
 // A», carga el CUIT, genera el link y se va. Minutos después el webhook cierra
 // la orden — sin pantalla y sin operador. La elección no puede quedarse en el
-// navegador: viaja por `orders.comprobante_elegido` (migración 0092), que es lo
+// navegador: viaja por `orders.comprobante_elegido` (migración 0093), que es lo
 // único que sobrevive al salto de proceso.
 //
 // Antes salía la B a consumidor final, y para el cliente empresa eso es crédito
