@@ -15,6 +15,14 @@ export type MermaConsumptionRow = {
   wastePercent: number;
   kind: ConsumptionKind;
   quantity: number;
+  /**
+   * Qué línea de pedido originó el movimiento, si vino de una. Es lo que
+   * distingue las DOS reversiones, que comparten `kind` y no son la misma cosa:
+   * la de una línea cancelada lo tiene seteado y viene en positivo; la de un
+   * comprobante anulado (o una nota de crédito) lo tiene en null y viene en
+   * negativo.
+   */
+  orderItemId: string | null;
 };
 
 export type MermaReportItem = {
@@ -43,8 +51,16 @@ function round4(n: number): number {
 
 /**
  * Agrega las filas de consumo por insumo y calcula el reporte de merma.
- * Las filas de kind 'reversion'/'ajuste' no cuentan como salida ni entrada
- * (revierten un descargo previo / corrigen inventario, no son merma).
+ *
+ * Las de `ajuste` no cuentan: corrigen un conteo, no mueven mercadería.
+ *
+ * Las de `reversion` SÍ, y para el lado que corresponde — issue #270 · 6. Antes
+ * se ignoraban, y eso rompía la única columna que el encargado usaría para
+ * decidir si le están robando: se anulaba un comprobante cargado por error y
+ * «Entró» seguía contando los 20 kg que nunca entraron, así que «Diferencia»
+ * inventaba 20 kg de faltante ($140.000 de sospecha sobre el personal); y en
+ * espejo, se cancelaba un plato y la `venta` se seguía contando como salida
+ * aunque el insumo hubiera vuelto a la heladera.
  */
 export function computeMermaReport(
   rows: MermaConsumptionRow[],
@@ -78,6 +94,14 @@ export function computeMermaReport(
     if (row.kind === "compra") acc.entered += qty;
     else if (row.kind === "venta") acc.venta += qty;
     else if (row.kind === "merma") acc.merma += qty;
+    else if (row.kind === "reversion") {
+      // El `order_item_id` es el único discriminante: `kind` no alcanza.
+      if (row.orderItemId) acc.venta -= qty;
+      // Con SIGNO, no con `qty`: la fila ya viene en negativo cuando devuelve
+      // mercadería (comprobante anulado, nota de crédito) y en positivo cuando
+      // deshace esa devolución. Sumar el absoluto la contaría al revés.
+      else acc.entered += row.quantity;
+    }
   }
 
   return [...map.entries()]

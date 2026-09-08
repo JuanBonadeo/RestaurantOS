@@ -4,6 +4,8 @@ import { fromZonedTime } from "date-fns-tz";
 
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
+import { fetchAll } from "@/lib/proveedores/unwrap";
+
 import { computeMermaReport, type MermaConsumptionRow, type MermaReportItem } from "./merma";
 
 function db() {
@@ -618,16 +620,22 @@ export async function getConsumptionSummary(
 ): Promise<ConsumptionSummaryItem[]> {
   const service = db();
 
-  let query = service
-    .from("ingredient_consumptions")
-    .select("ingredient_id, quantity, cost_cents_snapshot, kind, created_at, ingredients(name, unit)")
-    .eq("business_id", businessId)
-    .eq("kind", "venta");
+  // Mismo techo de 1.000 filas que `getMermaReport`: este resumen alimenta
+  // «cuánto se consumió de cada insumo» y se truncaba igual de callado.
+  const data = await fetchAll(() => {
+    let query = service
+      .from("ingredient_consumptions")
+      .select(
+        "id, ingredient_id, quantity, cost_cents_snapshot, kind, created_at, ingredients(name, unit)",
+      )
+      .eq("business_id", businessId)
+      .eq("kind", "venta");
 
-  if (fromDate) query = query.gte("created_at", fromDate);
-  if (toDate) query = query.lte("created_at", toDate);
+    if (fromDate) query = query.gte("created_at", fromDate);
+    if (toDate) query = query.lte("created_at", toDate);
 
-  const { data } = await query;
+    return query.order("id");
+  }, "ingredient_consumptions");
 
   // Aggregate by ingredient
   const map = new Map<string, ConsumptionSummaryItem>();
@@ -670,14 +678,30 @@ export async function getMermaReport(
   const startUtc = fromZonedTime(`${fromDate}T00:00:00`, timezone).toISOString();
   const endUtc = fromZonedTime(`${toDate}T23:59:59.999`, timezone).toISOString();
 
-  const { data } = await service
-    .from("ingredient_consumptions")
-    .select(
-      "ingredient_id, quantity, kind, created_at, ingredients(name, unit, waste_percent)",
-    )
-    .eq("business_id", businessId)
-    .gte("created_at", startUtc)
-    .lte("created_at", endUtc);
+  // Issue #270 · 7 — `fetchAll` y no una lectura suelta.
+  //
+  // PostgREST corta en `max_rows = 1000` y devuelve 200 con un array corto: sin
+  // error, sin bandera, y con la agregación hecha en JS sobre el recorte. El
+  // reporte quedaba subestimado siempre para abajo — el modo de falla más caro,
+  // porque el número da lindo. Con recetas completas son ~200 platos × ~5
+  // insumos hoja = mil filas por servicio, así que el techo se cruza en una
+  // noche. El helper ya existía en el repo (spec 161) para exactamente esto;
+  // estas lecturas simplemente no lo usaban. Ordena por `id` porque es lo único
+  // único: sin un orden estable, entre página y página se repiten o se saltean
+  // filas.
+  const data = await fetchAll(
+    () =>
+      service
+        .from("ingredient_consumptions")
+        .select(
+          "id, ingredient_id, order_item_id, quantity, kind, created_at, ingredients(name, unit, waste_percent)",
+        )
+        .eq("business_id", businessId)
+        .gte("created_at", startUtc)
+        .lte("created_at", endUtc)
+        .order("id"),
+    "ingredient_consumptions",
+  );
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows: MermaConsumptionRow[] = (data ?? []).map((r: any) => ({
@@ -687,6 +711,9 @@ export async function getMermaReport(
     wastePercent: Number(r.ingredients?.waste_percent ?? 0),
     kind: r.kind as ConsumptionKind,
     quantity: Number(r.quantity),
+    // Lo que distingue la reversión de una línea cancelada (lo tiene) de la de
+    // un comprobante anulado o una nota de crédito (no lo tiene).
+    orderItemId: r.order_item_id ?? null,
   }));
 
   return computeMermaReport(rows);

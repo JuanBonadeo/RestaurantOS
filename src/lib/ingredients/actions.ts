@@ -38,6 +38,16 @@ function db() {
   return createSupabaseServiceClient();
 }
 
+/**
+ * La RPC `adjust_ingredient_stock` (0086) y las columnas `reason`/`created_by`
+ * de `ingredient_consumptions` todavía no están en `database.types.ts`: el
+ * `pnpm db:types` de este repo necesita el CLI linkeado. Mismo escape hatch que
+ * usan `proveedores/actions.ts` (spec 158) y `caja/cuenta-corriente-actions.ts`
+ * (spec 141) — se apaga el tipado de UNA llamada, no del cliente entero.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type RpcCaller = { rpc: (fn: string, args: Record<string, unknown>) => Promise<any> };
+
 async function authDb() {
   return createSupabaseServerClient();
 }
@@ -51,7 +61,7 @@ async function authDb() {
  */
 async function requireCatalogAdmin(
   businessSlug: string,
-): Promise<ActionResult<{ businessId: string }>> {
+): Promise<ActionResult<{ businessId: string; userId: string }>> {
   const businessId = await getBusinessIdBySlug(businessSlug);
   if (!businessId) return actionError("Negocio no encontrado.");
   const ctxResult = await requireMozoActionContext(businessId);
@@ -59,7 +69,11 @@ async function requireCatalogAdmin(
   if (ctxResult.data.role !== "admin" && ctxResult.data.role !== "encargado") {
     return actionError("Solo admin o encargado pueden gestionar el catálogo.");
   }
-  return actionOk({ businessId });
+  // Issue #270 · el `userId` viaja desde acá porque el ajuste de inventario
+  // tiene que decir QUIÉN lo hizo. Antes este gate devolvía sólo el negocio, así
+  // que el autor ni siquiera estaba disponible en la action: bajar 5 kg de
+  // entraña era anónimo por construcción.
+  return actionOk({ businessId, userId: ctxResult.data.userId });
 }
 
 /**
@@ -462,7 +476,7 @@ export async function ingresarStockCocina(
   // Get the presentation to know the net_quantity
   const { data: pres } = await service
     .from("ingredient_presentations")
-    .select("id, net_quantity, ingredient_id")
+    .select("id, net_quantity, cost_cents, ingredient_id")
     .eq("id", parsed.data.presentation_id)
     .maybeSingle();
   if (!pres || pres.ingredient_id !== parsed.data.ingredient_id) {
@@ -479,30 +493,35 @@ export async function ingresarStockCocina(
     return actionError("Ingrediente no encontrado.");
   }
 
-  // Calculate total base units: units × net_quantity
+  // Cuántas unidades base entran: envases × neto de la presentación.
   const totalBaseUnits = parsed.data.units * Number(pres.net_quantity);
 
-  // Read current stock and add
-  const { data: current } = await service
-    .from("ingredients")
-    .select("stock_quantity")
-    .eq("id", parsed.data.ingredient_id)
-    .single();
-  if (!current) return actionError("Error al leer stock.");
-
-  await service
-    .from("ingredients")
-    .update({ stock_quantity: Number(current.stock_quantity) + totalBaseUnits })
-    .eq("id", parsed.data.ingredient_id);
-
-  // Log stock entry as 'compra' consumption
-  await service.from("ingredient_consumptions").insert({
-    business_id: businessId,
-    ingredient_id: parsed.data.ingredient_id,
-    quantity: totalBaseUnits,
-    cost_cents_snapshot: 0,
-    kind: "compra",
+  // Issue #268 · un solo `stock_quantity = stock_quantity + delta` en la base.
+  //
+  // Antes esto era leer el stock, sumar en JS y escribir el ABSOLUTO. Entre la
+  // lectura y la escritura hay dos round-trips a Supabase: la comanda que
+  // descargaba receta ahí en el medio se perdía, y los kilos vendidos
+  // reaparecían solos en el inventario. El bar ya usaba `adjust_stock_item`
+  // desde la spec 36 y la compra por renglón la RPC de la 0073; este camino
+  // —el más a mano en hora pico— fue el único que quedó afuera.
+  //
+  // Y el costo: la fila `kind='compra'` se escribía con `cost_cents_snapshot: 0`
+  // aunque el precio del envase estaba a la vista dos consultas más arriba. La
+  // 0073 lo denuncia por su nombre en su propia cabecera.
+  const { error } = await (service as unknown as RpcCaller).rpc("adjust_ingredient_stock", {
+    p_business_id: businessId,
+    p_ingredient_id: parsed.data.ingredient_id,
+    p_delta: totalBaseUnits,
+    p_kind: "compra",
+    p_cost_cents: Math.round(Number(pres.cost_cents ?? 0) * parsed.data.units),
+    p_reason: parsed.data.reason ?? null,
+    p_created_by: auth.data.userId,
   });
+
+  if (error) {
+    console.error("ingresarStockCocina", error);
+    return actionError("No pudimos ingresar el stock.");
+  }
 
   revalidatePath(`/${businessSlug}/admin/catalogo`);
   return actionOk(null);
@@ -521,31 +540,48 @@ export async function ajustarStockCocina(
 
   const service = db();
 
-  // Verify ingredient belongs to business
-  const { data: ing } = await service
-    .from("ingredients")
-    .select("id, business_id, stock_quantity")
-    .eq("id", parsed.data.ingredient_id)
-    .maybeSingle();
-  if (!ing || ing.business_id !== businessId) {
-    return actionError("Ingrediente no encontrado.");
-  }
+  // Issue #270 · lo que baja a mano es MERMA, no un ajuste mudo.
+  //
+  // Decisión de producto: el tile «Merma · 30 días» del dashboard suma
+  // `kind='merma'` y venía diciendo $0,00 desde siempre porque ningún camino de
+  // la app escribía nunca esa fila — el único productor era el seed. La
+  // pantalla de este ajuste ya dice de qué se trata: el placeholder del motivo
+  // es «Ej: Merma por vencimiento». Lo que SUBE sigue siendo 'ajuste': un
+  // conteo que aparece de más no es una pérdida.
+  //
+  // Se pierde precisión en un caso: el conteo físico que da de menos («había 8
+  // y no 10») queda contado como merma. Es el trade-off correcto — en los dos
+  // casos la mercadería no está y el costo se fue igual — y evita meter un
+  // selector de tipo en una pantalla que ya tiene demasiada fricción.
+  const kind = parsed.data.quantity < 0 ? "merma" : "ajuste";
 
-  const newQty = Number(ing.stock_quantity) + parsed.data.quantity;
-
-  await service
-    .from("ingredients")
-    .update({ stock_quantity: newQty })
-    .eq("id", parsed.data.ingredient_id);
-
-  // Log adjustment in consumption log
-  await service.from("ingredient_consumptions").insert({
-    business_id: businessId,
-    ingredient_id: parsed.data.ingredient_id,
-    quantity: Math.abs(parsed.data.quantity),
-    cost_cents_snapshot: 0,
-    kind: "ajuste",
+  // Issue #270 · un solo `stock_quantity = stock_quantity + delta`, con el
+  // motivo, el autor y el SIGNO. El read-modify-write anterior se comía las
+  // ventas que cayeran entre su lectura y su escritura; y guardaba
+  // `abs(quantity)` con `cost_cents_snapshot: 0`, así que en el log una baja de
+  // 5 kg y un alta de 5 kg eran la misma fila anónima, sin plata y sin autor.
+  // El motivo que la pantalla exige con asterisco rojo no tenía siquiera
+  // columna dónde guardarse (0086).
+  //
+  // El costo lo valoriza la RPC con `fn_ingredient_cost_per_unit`, el mismo
+  // costo vivo que usa el costeo del plato.
+  const { error } = await (service as unknown as RpcCaller).rpc("adjust_ingredient_stock", {
+    p_business_id: businessId,
+    p_ingredient_id: parsed.data.ingredient_id,
+    p_delta: parsed.data.quantity,
+    p_kind: kind,
+    p_cost_cents: null,
+    p_reason: parsed.data.reason,
+    p_created_by: auth.data.userId,
   });
+
+  if (error) {
+    if ((error.message ?? "").includes("INSUMO_NO_ENCONTRADO")) {
+      return actionError("Ingrediente no encontrado.");
+    }
+    console.error("ajustarStockCocina", error);
+    return actionError("No pudimos ajustar el stock.");
+  }
 
   revalidatePath(`/${businessSlug}/admin/catalogo`);
   return actionOk(null);

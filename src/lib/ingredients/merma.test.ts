@@ -10,6 +10,7 @@ function row(partial: Partial<MermaConsumptionRow>): MermaConsumptionRow {
     wastePercent: 12,
     kind: "compra",
     quantity: 0,
+    orderItemId: null,
     ...partial,
   };
 }
@@ -38,10 +39,23 @@ describe("computeMermaReport", () => {
     expect(item.wastePercent).toBe(12);
   });
 
-  it("ignora reversiones y ajustes (no son entrada ni salida)", () => {
+  // Issue #270 · hallazgo 6 — las reversiones NO se ignoran.
+  //
+  // Este test decía «ignora reversiones y ajustes» y consagraba el bug: se
+  // anulaba un comprobante cargado por error y «Entró» seguía diciendo los 20 kg
+  // que nunca entraron, así que «Diferencia» inventaba 20 kg de faltante. Y en
+  // espejo, se cancelaba un plato y la `venta` se seguía contando como salida
+  // aunque el insumo hubiera vuelto a la heladera. La columna no se podía
+  // conciliar contra un conteo físico en NINGUNA de las dos direcciones — que es
+  // literalmente el daño que la cabecera de la 0039 dice querer evitar («el
+  // reporte de merma se lo muestra al encargado como robo»).
+  //
+  // Los ajustes sí se siguen ignorando: son correcciones de conteo, no
+  // movimientos de mercadería. La baja a mano ya no cae ahí — desde el issue
+  // #270 escribe `kind='merma'`, que es salida.
+  it("ignora los ajustes de conteo, que no son entrada ni salida", () => {
     const rows: MermaConsumptionRow[] = [
       row({ kind: "compra", quantity: 10 }),
-      row({ kind: "reversion", quantity: 3 }),
       row({ kind: "ajuste", quantity: 2 }),
       row({ kind: "venta", quantity: 5 }),
     ];
@@ -51,6 +65,52 @@ describe("computeMermaReport", () => {
     expect(item.enteredQty).toBe(10);
     expect(item.exitedQty).toBe(5);
     expect(item.diffQty).toBe(5);
+  });
+
+  // Las dos reversiones comparten `kind` pero no son la misma cosa, y se
+  // distinguen por `order_item_id`: la de compra lo tiene en null y viene con la
+  // cantidad en NEGATIVO; la de venta lo tiene seteado y viene en positivo. Un
+  // `entered -= qty` a secas sobre las dos introduciría el bug espejado.
+  it("la reversión de un comprobante descuenta de lo que entró", () => {
+    const rows: MermaConsumptionRow[] = [
+      row({ kind: "compra", quantity: 20 }),
+      row({ kind: "reversion", quantity: -20, orderItemId: null }),
+      row({ kind: "venta", quantity: 5 }),
+    ];
+
+    const [item] = computeMermaReport(rows);
+
+    expect(item.enteredQty).toBe(0);
+    expect(item.exitedQty).toBe(5);
+    // El faltante fantasma de 20 kg que el reporte le mostraba al encargado
+    // como robo.
+    expect(item.diffQty).toBe(-5);
+  });
+
+  it("la reversión de una línea cancelada descuenta de lo que se vendió", () => {
+    const rows: MermaConsumptionRow[] = [
+      row({ kind: "compra", quantity: 10 }),
+      row({ kind: "venta", quantity: 4 }),
+      row({ kind: "reversion", quantity: 4, orderItemId: "oi-1" }),
+    ];
+
+    const [item] = computeMermaReport(rows);
+
+    expect(item.enteredQty).toBe(10);
+    expect(item.ventaQty).toBe(0);
+    expect(item.exitedQty).toBe(0);
+    expect(item.diffQty).toBe(10);
+  });
+
+  // La nota de crédito devuelve mercadería y se anota igual que la reversión de
+  // compra (0085): sin `order_item_id` y en negativo.
+  it("la nota de crédito baja lo que entró", () => {
+    const rows: MermaConsumptionRow[] = [
+      row({ kind: "compra", quantity: 40 }),
+      row({ kind: "reversion", quantity: -40, orderItemId: null }),
+    ];
+
+    expect(computeMermaReport(rows)[0].enteredQty).toBe(0);
   });
 
   it("normaliza cantidades negativas con valor absoluto", () => {

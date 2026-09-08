@@ -18,7 +18,9 @@ export type StockOverviewItem = {
 
 export type StockMovimiento = {
   id: string;
-  kind: "ingreso" | "venta" | "ajuste";
+  // Issue #270 · 'merma' es el kind nuevo de la baja manual del bar: hasta ahora
+  // una botella rota y un conteo físico eran la misma fila 'ajuste'.
+  kind: "ingreso" | "venta" | "ajuste" | "reversion" | "merma";
   qty: number;
   reason: string | null;
   createdByName: string | null;
@@ -178,4 +180,70 @@ export async function getAllProductsForConfig(
       minQty: stock?.min_qty ?? null,
     };
   });
+}
+
+// ── getMermaDeBar (issue #270 · hallazgo 5) ──────────────────────
+//
+// La solapa «Merma» del catálogo lee sólo `ingredient_consumptions`, o sea
+// insumos de cocina: el bar vive en otra tabla que ese reporte ni mira. Para
+// enterarse de que se rompió una botella había que entrar producto por producto
+// al sheet del historial. Esta lectura devuelve la merma de bar del período ya
+// valorizada, para que el reporte tenga a quién preguntarle.
+
+/** Cliente sin tipar para las columnas que `database.types.ts` todavía no conoce. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type LooseTable = { from: (t: string) => any };
+
+export type MermaBarItem = {
+  productId: string;
+  productName: string;
+  stockItemId: string;
+  /** Unidades perdidas, en positivo. */
+  qty: number;
+  /** Lo que costaron, al costo de reposición del ítem. 0 si nadie lo cargó. */
+  costCents: number;
+  movimientos: number;
+};
+
+export async function getMermaDeBar(
+  businessId: string,
+  startIso: string,
+  endIso: string,
+): Promise<MermaBarItem[]> {
+  const service = createSupabaseServiceClient();
+
+  // Mismo escape hatch que el resto del back-office: `cost_cents_snapshot` es de
+  // la 0086 y `database.types.ts` todavía no la conoce.
+  const { data, error } = await (service as unknown as LooseTable)
+    .from("stock_movimientos")
+    .select("stock_item_id, qty, cost_cents_snapshot, stock_items(product_id, products(name))")
+    .eq("business_id", businessId)
+    .eq("kind", "merma")
+    .gte("created_at", startIso)
+    .lte("created_at", endIso);
+
+  // Falla ruidosa antes que un $0 plausible: la merma en cero es exactamente lo
+  // que este reporte viene a dejar de decir.
+  if (error) throw new Error(`Falló la lectura (stock_movimientos): ${error.message}`);
+
+  const map = new Map<string, MermaBarItem>();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const row of (data ?? []) as any[]) {
+    const item = row.stock_items;
+    const productId = item?.product_id ?? row.stock_item_id;
+    const acc = map.get(productId) ?? {
+      productId,
+      productName: item?.products?.name ?? "—",
+      stockItemId: row.stock_item_id,
+      qty: 0,
+      costCents: 0,
+      movimientos: 0,
+    };
+    acc.qty += Math.abs(Number(row.qty) || 0);
+    acc.costCents += Math.abs(Number(row.cost_cents_snapshot) || 0);
+    acc.movimientos += 1;
+    map.set(productId, acc);
+  }
+
+  return [...map.values()].sort((a, b) => b.costCents - a.costCents || b.qty - a.qty);
 }
