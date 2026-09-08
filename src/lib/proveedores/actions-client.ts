@@ -13,6 +13,7 @@ import {
   getSupplierInvoices as _getInvoices,
   getSupplierIngredients as _getIngredients,
   getSupplierStats as _getStats,
+  getRenglonesPorComprobante as _getRenglones,
 } from "./queries";
 
 /**
@@ -42,6 +43,22 @@ export async function getSupplierIngredients(supplierId: string, businessId: str
 export async function getSupplierStats(businessId: string, from?: string, to?: string) {
   await assertCanReadProveedores(businessId);
   return _getStats(businessId, from, to);
+}
+
+/**
+ * Los renglones de una tanda de comprobantes — spec 172.
+ *
+ * Mismo gate que el resto: la query filtra por el `businessId` del argumento con
+ * el service client, así que sin esto se leería el detalle de compras de otro
+ * negocio pasando ids. Los `invoiceIds` van igual contra el `business_id` en el
+ * `where`, así que un id ajeno no devuelve nada.
+ */
+export async function getRenglonesPorComprobante(
+  businessId: string,
+  invoiceIds: string[],
+) {
+  await assertCanReadProveedores(businessId);
+  return _getRenglones(businessId, invoiceIds);
 }
 
 // ── spec 158 · cuenta corriente ────────────────────────────────────

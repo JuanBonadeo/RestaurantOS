@@ -6,10 +6,15 @@ import { ArrowLeft, Ban, Link2, Pencil, Plus, Wallet } from "lucide-react";
 import { formatCurrency } from "@/lib/currency";
 import { cn } from "@/lib/utils";
 import type { SupplierWithStats } from "@/lib/proveedores/types";
-import type { SupplierInvoice, SupplierIngredientLink } from "@/lib/proveedores/types";
+import type {
+  SupplierInvoice,
+  SupplierIngredientLink,
+  SupplierInvoiceItem,
+} from "@/lib/proveedores/types";
 import {
   getSupplierInvoices,
   getSupplierIngredients,
+  getRenglonesPorComprobante,
   getCuentaDeProveedor,
 } from "@/lib/proveedores/actions-client";
 import {
@@ -50,6 +55,8 @@ export function SupplierDetail({
   const [invoices, setInvoices] = useState<SupplierInvoice[]>([]);
   const [ingredients, setIngredients] = useState<SupplierIngredientLink[]>([]);
   const [cuenta, setCuenta] = useState<CuentaDeProveedor | null>(null);
+  /** spec 172 · id del comprobante → sus renglones por insumo. */
+  const [renglones, setRenglones] = useState<Record<string, SupplierInvoiceItem[]>>({});
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -62,12 +69,21 @@ export function SupplierDetail({
         getSupplierIngredients(supplier.id, businessId),
         getCuentaDeProveedor(businessId, supplier.id),
       ]);
-      if (!cancelled) {
-        setInvoices(invs);
-        setIngredients(ings);
-        setCuenta(cta);
-        setLoading(false);
-      }
+      if (cancelled) return;
+      setInvoices(invs);
+      setIngredients(ings);
+      setCuenta(cta);
+      setLoading(false);
+
+      // Spec 172 · va encadenado y no en el `Promise.all` porque necesita los
+      // ids de los comprobantes. Fuera del `setLoading(false)` a propósito: la
+      // Cta. Cte. se pinta con lo de arriba y el detalle por insumo aparece
+      // cuando llega — no vale trabar la pantalla por un adorno de auditoría.
+      const rens = await getRenglonesPorComprobante(
+        businessId,
+        invs.map((i) => i.id),
+      );
+      if (!cancelled) setRenglones(rens);
     }
     load();
     return () => {
@@ -221,6 +237,7 @@ export function SupplierDetail({
           pagos={cuenta?.pagos ?? []}
           imputaciones={cuenta?.imputaciones ?? []}
           fotos={Object.fromEntries(invoices.map((i) => [i.id, i.photoSignedUrl]))}
+          renglones={renglones}
           onAnularComprobante={(id) => anular("comprobante", id)}
           slug={slug}
           conceptos={concepts}
