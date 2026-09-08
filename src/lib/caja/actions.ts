@@ -217,6 +217,24 @@ export async function setCajaActive(
   // spec 160 · desactivarla dejaría al pago a proveedor sin destino.
   if (caja.is_administrative) return actionError(NO_ES_CAJA_DE_TURNO);
 
+  // issue #254 — apagar la caja principal apagaba las guardas del cierre.
+  //
+  // Las dos guardas que impiden cerrar el día con plata suelta —cuentas
+  // abiertas y rendiciones sin resolver— cuelgan de `caja.is_default`, acá
+  // abajo y en la RPC vía `p_barrer_salon`. Y esta action no limpiaba la marca
+  // al desactivar, mientras que `setCajaDefault` sí se niega a marcar una caja
+  // inactiva. Esa asimetría dejaba alcanzable, con un click, el estado
+  // «ninguna caja ACTIVA es la principal»: desde ahí el cierre de la caja que
+  // sí se usa no chequeaba nada y tampoco barría el salón.
+  //
+  // Se corta acá y no traspasando la marca sola: mover la default es decidir
+  // dónde caen los cobros online sin cajero, y eso lo elige una persona.
+  if (!isActive && caja.is_default) {
+    return actionError(
+      "Es la caja principal: marcá otra como principal antes de desactivarla. Si no, el cierre deja de controlar mesas abiertas y rendiciones.",
+    );
+  }
+
   const { error } = await service
     .from("cajas")
     .update({ is_active: isActive })
@@ -721,10 +739,34 @@ export async function registrarRendicionMozo(
     .maybeSingle();
   if (!mozoUser) return actionError("El mozo no pertenece a este negocio.");
 
+  // issue #264 — el corte se fija ANTES de leer, y es el mismo que se guarda.
+  //
+  // Antes esto leía «todo lo cobrado desde la última rendición» sin techo, y
+  // después insertaba la fila con el `now()` del server. Entre las dos cosas hay
+  // un round-trip contra la base, y un cobro que entrara en ese hueco quedaba
+  // huérfano: no lo cubría esta rendición —se leyó antes— ni la siguiente, cuyo
+  // piso es el `created_at` de esta fila, posterior al del cobro. Ese efectivo
+  // dejaba de figurar en «deben rendir» para siempre, pero seguía contado en el
+  // esperado del cajón: el faltante aparecía en el arqueo sin dueño.
+  //
+  // Fijando el corte y guardándolo como `created_at`, el período que cierra y el
+  // que abre se tocan exactamente, sin hueco ni solape.
+  //
+  // Residual honesto: el corte sale del reloj de Node y los `created_at` de los
+  // pagos, del de Postgres. Si Node adelantara MÁS de lo que tarda el
+  // round-trip, un pago podría volver a caer en el hueco. Antes el hueco existía
+  // siempre; ahora hace falta desincronización de relojes. Cerrarlo del todo
+  // pide mover la rendición entera a una RPC transaccional —como
+  // `registrar_pago_tx`— y eso es otra tanda: no se hace acá para no duplicar la
+  // aritmética de la rendición en SQL, que es justo lo que causó el #253.
+  const corteIso = new Date().toISOString();
+
   const pendiente = await getRendicionPendienteMozo(
     mozoId,
     business.id,
     (mozoUser as { full_name: string | null }).full_name ?? "Sin nombre",
+    undefined,
+    corteIso,
   );
 
   const expected_cash_cents = pendiente.efectivo_cents;
@@ -755,6 +797,8 @@ export async function registrarRendicionMozo(
       notes: motivo,
       por_metodo: pendiente.por_metodo,
       estado,
+      // El mismo instante con el que se leyó: define el piso del próximo período.
+      created_at: corteIso,
     })
     .select("*")
     .single();

@@ -336,6 +336,8 @@ export type MozoRendicion = {
 export type RendicionMozoPendiente = {
   mozo_id: string;
   mozo_name: string;
+  /** Rol en el negocio. Decide si tiene que rendir (issue #264). */
+  mozo_role?: string;
   efectivo_cents: number;
   tickets_cents: number;
   por_metodo: Record<PaymentMethod, number>;

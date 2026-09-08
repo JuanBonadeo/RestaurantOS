@@ -948,6 +948,35 @@ export async function getRendicionPendienteMozo(
   mozoId: string,
   businessId: string,
   mozoName: string,
+  /**
+   * Scope opcional por caja, para el **reparto del arqueo** (issue #264).
+   *
+   * Lo que el mozo DEBE rendir es de todo el negocio: la plata la tiene encima
+   * una sola vez y la entrega una sola vez. Pero el reparto de una caja explica
+   * el efectivo esperado **de ese cajón**, y ese esperado se calcula por caja
+   * (`getCajaStatsEnVentana` filtra `caja_id`). Sin este scope, al cajón de la
+   * Principal se le restaba lo que el mozo había cobrado en el Bar —plata que
+   * nunca estuvo en el esperado de la Principal— y el modal mostraba menos de
+   * lo que había que contar.
+   *
+   * Sin `cajaId` el comportamiento es el de siempre: todo el negocio.
+   */
+  cajaId?: string,
+  /**
+   * Techo del período, inclusive (issue #264).
+   *
+   * El período de un mozo tenía piso —su última rendición— pero no techo, y la
+   * rendición se insertaba con `now()` de otra transacción. Un cobro que entrara
+   * entre la lectura y el insert quedaba **huérfano para siempre**: no lo cubría
+   * esta rendición (se leyó antes) ni la siguiente (su `created_at` es anterior
+   * al de la fila que define el nuevo piso).
+   *
+   * Con un techo explícito, el que rinde y el que guarda usan exactamente el
+   * mismo corte, y lo que caiga después queda para la próxima.
+   */
+  hastaIso?: string,
+  /** Rol del usuario, para decidir si tiene que rendir (issue #264). */
+  mozoRole?: string,
 ): Promise<RendicionMozoPendiente> {
   const ultima = await getUltimaRendicionMozo(mozoId, businessId);
   const service = db();
@@ -964,6 +993,12 @@ export async function getRendicionPendienteMozo(
   if (ultima) {
     query = query.gt("created_at", ultima.created_at);
   }
+  if (cajaId) {
+    query = query.eq("caja_id", cajaId);
+  }
+  if (hastaIso) {
+    query = query.lte("created_at", hastaIso);
+  }
 
   const { data } = await query;
   const payments = (data ?? []) as Array<{
@@ -977,6 +1012,7 @@ export async function getRendicionPendienteMozo(
   return {
     mozo_id: mozoId,
     mozo_name: mozoName,
+    mozo_role: mozoRole,
     efectivo_cents: rendicion.efectivo_cents,
     tickets_cents: rendicion.tickets_cents,
     por_metodo: rendicion.por_metodo,
@@ -987,6 +1023,8 @@ export async function getRendicionPendienteMozo(
 
 export async function getRendicionesPendientesTodosLosMozos(
   businessId: string,
+  /** Scope por caja — sólo para el reparto del arqueo. Ver `getRendicionPendienteMozo`. */
+  cajaId?: string,
 ): Promise<RendicionMozoPendiente[]> {
   const service = db();
 
@@ -1013,6 +1051,9 @@ export async function getRendicionesPendientesTodosLosMozos(
         m.user_id,
         businessId,
         m.full_name ?? "Sin nombre",
+        cajaId,
+        undefined,
+        m.role,
       ),
     ),
   );
@@ -1778,24 +1819,37 @@ export async function getCierreCajaData(
     };
   }
 
-  const [pendientes, operadores, cuentas, pedidos, salon] = await Promise.all([
-    getRendicionesPendientesTodosLosMozos(businessId),
-    getOperadoresDeCaja(cajaId, businessId),
-    getCuentasAbiertas(businessId),
-    getPedidosAbiertosSinMesa(businessId),
-    contarSalonPorLiberar(businessId),
-  ]);
+  // Dos lecturas del mismo concepto, y la diferencia importa (issue #264):
+  //
+  //  · `pendientes` es de TODO el negocio — es lo que cada mozo debe entregar,
+  //    y se entrega una sola vez, sin importar en qué caja cobró. Alimenta
+  //    `deben_rendir` y el bloqueo del cierre.
+  //  · `pendientesDeEstaCaja` está scopeado a ESTA caja — es lo único que puede
+  //    restarse de SU cajón, porque `stats.expected_cash_cents` también se
+  //    calcula por caja. Antes se usaba el business-wide para las dos cosas, y
+  //    al cajón de la Principal se le descontaba el efectivo que el mozo había
+  //    cobrado en el Bar: plata que jamás estuvo en el esperado de la Principal.
+  const [pendientes, pendientesDeEstaCaja, operadores, cuentas, pedidos, salon] =
+    await Promise.all([
+      getRendicionesPendientesTodosLosMozos(businessId),
+      getRendicionesPendientesTodosLosMozos(businessId, cajaId),
+      getOperadoresDeCaja(cajaId, businessId),
+      getCuentasAbiertas(businessId),
+      getPedidosAbiertosSinMesa(businessId),
+      contarSalonPorLiberar(businessId),
+    ]);
 
   // Spec 139 · D3 — el operador de la caja no rinde, y tampoco se le resta al
   // cajón: lo que cobró ya está adentro. Antes el reparto le restaba su
   // efectivo al cajón y el modal mostraba menos plata de la que hay.
   const debenRendir = mozosQueDebenRendir(pendientes, operadores);
+  const restanDeEsteCajon = mozosQueDebenRendir(pendientesDeEstaCaja, operadores);
 
   return {
     stats,
     reparto: repartirEfectivoEsperado({
       expected_cash_cents: stats.expected_cash_cents,
-      mozos_sin_rendir: debenRendir.map((p) => ({
+      mozos_sin_rendir: restanDeEsteCajon.map((p) => ({
         mozo_id: p.mozo_id,
         mozo_name: p.mozo_name,
         efectivo_cents: p.efectivo_cents,

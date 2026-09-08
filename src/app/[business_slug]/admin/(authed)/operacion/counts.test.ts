@@ -23,8 +23,18 @@ const table = (
     FloorPlanWithTables["tables"][number];
 const plan = (tables: FloorPlanWithTables["tables"]): FloorPlanWithTables =>
   ({ plan: {}, tables }) as unknown as FloorPlanWithTables;
-const pendiente = (pagos_count: number) =>
-  ({ pagos_count }) as RendicionMozoPendiente;
+const pendiente = (
+  pagos_count: number,
+  mozo_role = "mozo",
+  mozo_name = "Alguien",
+) =>
+  ({
+    pagos_count,
+    mozo_role,
+    mozo_name,
+    mozo_id: `${mozo_name}-${mozo_role}`,
+    efectivo_cents: 0,
+  }) as RendicionMozoPendiente;
 
 describe("operacion/counts — predicados de pills (FR-012)", () => {
   it("countPedidosNuevos: pending + confirmed cuentan; el resto no", () => {
@@ -52,8 +62,23 @@ describe("operacion/counts — predicados de pills (FR-012)", () => {
   });
 
   it("countRendicionesPendientes: solo mozos con pagos_count > 0", () => {
-    const pendientes = [pendiente(0), pendiente(3), pendiente(1)];
+    const pendientes = [
+      pendiente(0, "mozo", "Ana"),
+      pendiente(3, "mozo", "Beto"),
+      pendiente(1, "mozo", "Cami"),
+    ];
     expect(countRendicionesPendientes(pendientes)).toBe(2);
+  });
+
+  it("countRendicionesPendientes: el encargado no cuenta — maneja la caja (issue #264)", () => {
+    // Su efectivo entra derecho al cajón, así que no tiene nada que entregar.
+    // Antes sumaba todas las noches y la pill nunca bajaba a cero.
+    const pendientes = [
+      pendiente(4, "mozo", "Pedro"),
+      pendiente(9, "encargado", "Sofía"),
+      pendiente(2, "admin", "Martín"),
+    ];
+    expect(countRendicionesPendientes(pendientes)).toBe(1);
   });
 
   it("countReservasPorSentar: solo las confirmadas (las sentadas ya están en mesa)", () => {
@@ -151,5 +176,32 @@ describe("operacion/counts — dos salones a la vez (fast-follow 065)", () => {
       reservaEn("confirmed", "quincho"),
     ];
     expect(countReservasPorSentar(rows, ["terraza", "comedor"])).toBe(2);
+  });
+});
+
+describe("el contador no cuenta encargues que todavía no piden nada (issue #260)", () => {
+  const ahora = new Date("2026-09-08T20:00:00.000Z");
+  const base = { status: "confirmed" } as never as AdminOrder;
+
+  it("un encargue para el sábado no suma hoy", () => {
+    const sabado = new Date(ahora.getTime() + 3 * 86_400_000).toISOString();
+    const orders = [
+      { ...base, scheduled_at: sabado },
+      { ...base, scheduled_at: sabado },
+    ] as AdminOrder[];
+    // Antes la pill quedaba en 2 toda la semana, apuntando a pedidos que viven
+    // en «Próximos» y no piden nada.
+    expect(countPedidosNuevos(orders, ahora)).toBe(0);
+  });
+
+  it("cuando el encargue entra en ventana, sí suma", () => {
+    const yaFue = new Date(ahora.getTime() - 10 * 60_000).toISOString();
+    const orders = [{ ...base, scheduled_at: yaFue }] as AdminOrder[];
+    expect(countPedidosNuevos(orders, ahora)).toBe(1);
+  });
+
+  it("un pedido sin hora pedida suma siempre: es de ahora", () => {
+    const orders = [{ ...base, scheduled_at: null }] as AdminOrder[];
+    expect(countPedidosNuevos(orders, ahora)).toBe(1);
   });
 });

@@ -1,3 +1,4 @@
+import { mozosQueDebenRendir } from "@/lib/caja/deben-rendir";
 import type { AdminOrder } from "@/lib/admin/orders-query";
 import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
 import { matchesSalon, matchesSalonReserva } from "@/lib/admin/salon-filter";
@@ -17,10 +18,32 @@ import type { PresentEmployee } from "@/lib/rrhh/clock-actions";
  * Son idénticos a los criterios que vivían inline en `local-shell.tsx`.
  */
 
-/** Pedidos online que requieren atención (nuevos / por confirmar). */
-export function countPedidosNuevos(orders: AdminOrder[]): number {
-  return orders.filter((o) => ["pending", "confirmed"].includes(o.status))
-    .length;
+/**
+ * Pedidos online que requieren atención (nuevos / por confirmar).
+ *
+ * issue #260 — un encargue para el sábado no requiere atención hoy.
+ *
+ * El contador sumaba todo lo `pending`/`confirmed` que trajera la query, y esa
+ * query incluye los programados futuros (`scheduled_at >= hoy`). Cargabas cinco
+ * encargues para el sábado y la pill quedaba en 5 toda la semana, apuntando a
+ * pedidos que viven en «Próximos» y no piden nada. Un número que nunca baja a
+ * cero deja de mirarse — y la noche que significa algo, ya nadie lo ve.
+ *
+ * Lo mismo que el rojo crónico de una suite de tests: el daño no es el número,
+ * es que entrena a ignorarlo.
+ *
+ * Se cuenta un programado sólo cuando entró en ventana, o sea cuando su hora de
+ * marchar ya pasó: ahí sí hay algo que hacer.
+ */
+export function countPedidosNuevos(
+  orders: AdminOrder[],
+  now: Date = new Date(),
+): number {
+  return orders.filter((o) => {
+    if (!["pending", "confirmed"].includes(o.status)) return false;
+    if (!o.scheduled_at) return true;
+    return new Date(o.scheduled_at).getTime() <= now.getTime();
+  }).length;
 }
 
 /**
@@ -50,7 +73,13 @@ export function countCajas(cajas: CajaConEstado[]): number {
 export function countRendicionesPendientes(
   pendientes: RendicionMozoPendiente[],
 ): number {
-  return pendientes.filter((p) => p.pagos_count > 0).length;
+  // issue #264 — el mismo criterio que el cierre y que la tab.
+  //
+  // Contaba `pagos_count > 0` a secas, así que el que maneja la caja sumaba
+  // todas las noches y la pill nunca bajaba a cero. Un badge que no llega a
+  // cero se deja de mirar, y la noche que significa algo —un mozo de verdad con
+  // efectivo encima— ya nadie lo ve.
+  return mozosQueDebenRendir(pendientes, []).length;
 }
 
 /**

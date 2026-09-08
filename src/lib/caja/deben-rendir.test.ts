@@ -67,3 +67,40 @@ describe("mozosQueDebenRendir (spec 139 · D3 + D4)", () => {
     );
   });
 });
+
+describe("el encargado no rinde: maneja la caja (issue #264)", () => {
+  const base = { efectivo_cents: 10_000, pagos_count: 3 };
+
+  it("deja afuera a encargado y admin, aunque hayan cobrado", () => {
+    const r = mozosQueDebenRendir(
+      [
+        { ...base, mozo_id: "m1", mozo_name: "Pedro", mozo_role: "mozo" },
+        { ...base, mozo_id: "e1", mozo_name: "Sofía", mozo_role: "encargado" },
+        { ...base, mozo_id: "a1", mozo_name: "Martín", mozo_role: "admin" },
+      ],
+      [],
+    );
+    expect(r.map((m) => m.mozo_id)).toEqual(["m1"]);
+  });
+
+  it("sigue dejando afuera al operador de la caja, sea del rol que sea", () => {
+    // La regla vieja (D3) no se reemplaza: un mozo parado en la caja tampoco
+    // rinde. Las dos conviven.
+    const r = mozosQueDebenRendir(
+      [
+        { ...base, mozo_id: "m1", mozo_name: "Pedro", mozo_role: "mozo" },
+        { ...base, mozo_id: "m2", mozo_name: "Lucía", mozo_role: "mozo" },
+      ],
+      ["m2"],
+    );
+    expect(r.map((m) => m.mozo_id)).toEqual(["m1"]);
+  });
+
+  it("sin rol conocido, rinde: no se asume que alguien está exento", () => {
+    const r = mozosQueDebenRendir(
+      [{ ...base, mozo_id: "x", mozo_name: "Sin rol" }],
+      [],
+    );
+    expect(r).toHaveLength(1);
+  });
+});

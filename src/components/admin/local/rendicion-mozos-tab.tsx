@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { CajaAssignmentsPanel } from "@/components/admin/local/caja-assignments-tab";
 import { registrarRendicionMozo } from "@/lib/caja/actions";
+import { mozosQueDebenRendir } from "@/lib/caja/deben-rendir";
 import type {
   Caja,
   CajaUserAssignment,
@@ -110,8 +111,20 @@ export function RendicionMozosTab({
   // hace horas. Reemplaza al puente `router.refresh()` de la spec 101.
   useOnActivate(active, refetchRendicion, { onMount: refetchAlMontar });
 
-  const conPagos = pendientes.filter((p) => p.pagos_count > 0);
-  const sinPagos = pendientes.filter((p) => p.pagos_count === 0);
+  // issue #264 — la misma regla que el cierre, y no una copia con criterio
+  // propio. Acá se filtraba sólo por `pagos_count > 0`, así que el que maneja
+  // la caja aparecía como pendiente todas las noches **con los botones
+  // «Rindió» y «No entregó» disponibles** — y tomarle una rendición a alguien
+  // cuyo efectivo ya está en el cajón deja una diferencia negativa por todo lo
+  // que cobró, más un aviso de faltante al dueño.
+  //
+  // `mozosQueDebenRendir` es la función que ya usan el modal de cierre y la
+  // server action que bloquea; usarla acá es lo que hace que la pantalla diga
+  // lo mismo que el sistema exige.
+  const conPagos = mozosQueDebenRendir(pendientes, []);
+  const sinPagos = pendientes.filter(
+    (p) => !conPagos.some((c) => c.mozo_id === p.mozo_id),
+  );
 
   return (
     <div className="space-y-5">
