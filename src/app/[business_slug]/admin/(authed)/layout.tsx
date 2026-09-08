@@ -1,13 +1,18 @@
 import { notFound, redirect } from "next/navigation";
 
 import { AdminSidebar } from "@/components/admin/admin-sidebar";
+import { AyudaProgresoProvider } from "@/components/admin/ayuda-progreso";
 import { BrandStyle } from "@/components/admin/shell/brand-style";
 import { NotificationsLauncher } from "@/components/notifications/notifications-launcher";
 import { ensureAdminAccess } from "@/lib/admin/context";
+import { getTemasLeidos, rolDeLaGuia } from "@/lib/ayuda/queries";
+import { recorrido } from "@/lib/ayuda/recorrido";
 import { getMyAdminBusinesses } from "@/lib/platform/queries";
 import { getPendingOrderCount } from "@/lib/admin/orders-query";
 import { getLowKitchenStockCount } from "@/lib/ingredients/queries";
 import { countUnread, listForUser } from "@/lib/notifications/queries";
+import { getReservationSettings } from "@/lib/reservations/queries";
+import type { ReservationMode } from "@/lib/reservations/types";
 import { getLowStockCount } from "@/lib/stock/queries";
 import { hasAnySection } from "@/lib/permissions/sections";
 import { getBusiness, getBusinessSettings } from "@/lib/tenant";
@@ -47,6 +52,11 @@ export default async function AdminAuthedLayout({
   // layout pagaba dos round-trips a la DB antes de dejar renderizar `children`.
   // Y `getMyAdminBusinesses` recibe el user ya resuelto, en vez de preguntarle
   // de nuevo a Supabase Auth quién es.
+  //
+  // Spec 169: `getTemasLeidos` y `getReservationSettings` entran en la MISMA
+  // tanda y no después. Son dos filas indexadas y van en paralelo con las otras
+  // seis, así que no agregan latencia — pero si se encadenaran, el panel entero
+  // pagaría un round-trip más por navegación para pintar un punto.
   const [
     pendingCount,
     lowBebidasCount,
@@ -54,6 +64,8 @@ export default async function AdminAuthedLayout({
     myBusinesses,
     notifications,
     unreadCount,
+    temasLeidos,
+    reservas,
   ] = await Promise.all([
     getPendingOrderCount(business.id, business.timezone),
     getLowStockCount(business.id),
@@ -70,7 +82,17 @@ export default async function AdminAuthedLayout({
       businessId: business.id,
       role: notiRole,
     }),
+    getTemasLeidos(business.id, ctx.userId),
+    getReservationSettings(business.id),
   ]);
+
+  // Lo que le falta del recorrido: el número del badge de Ayuda y el punto de
+  // cada chip `?` salen los dos de acá (spec 169 · D4). Vacío —el recorrido
+  // terminado, o un rol que todavía no tiene guía— es que no se pinta nada.
+  const modoReservas: ReservationMode = reservas.mode ?? "estricto";
+  const ayudaPendiente = recorrido(rolDeLaGuia(ctx), modoReservas)
+    .filter((tema) => !temasLeidos.has(tema.slug))
+    .map((tema) => tema.slug);
   // Switcher de negocio: solo si el dueño es admin de ≥2 locales (spec 14).
   const siblings =
     myBusinesses.length >= 2
@@ -106,11 +128,16 @@ export default async function AdminAuthedLayout({
         siblings={siblings}
         initialPendingCount={pendingCount}
         lowStockCount={lowStockCount}
+        ayudaPendientes={ayudaPendiente.length}
         isActive={business.is_active ?? true}
       />
       {/* En mobile el contenido despeja la top-bar fija (h-14) de
           AdminMobileNav. En md+ el rail lateral ocupa el flujo. */}
-      <div className="min-w-0 flex-1 pt-14 md:pt-0">{children}</div>
+      <div className="min-w-0 flex-1 pt-14 md:pt-0">
+        <AyudaProgresoProvider pendientes={ayudaPendiente}>
+          {children}
+        </AyudaProgresoProvider>
+      </div>
 
       {/* Bell fixed top-right — visible en todas las pantallas admin,
           z-50 queda por encima del overlay del LocalShell (z-30) y de los

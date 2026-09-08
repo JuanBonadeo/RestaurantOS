@@ -272,6 +272,7 @@ export function AdminSidebar({
   siblings = [],
   initialPendingCount = 0,
   lowStockCount = 0,
+  ayudaPendientes = 0,
   isActive: _isActive = true,
 }: {
   slug: string;
@@ -285,6 +286,9 @@ export function AdminSidebar({
   siblings?: { slug: string; name: string; logoUrl: string | null }[];
   initialPendingCount?: number;
   lowStockCount?: number;
+  /** Temas del recorrido de la guía sin leer (spec 169 · D4). 0 = nada que
+   *  mostrar: o lo terminó, o su rol todavía no tiene guía. */
+  ayudaPendientes?: number;
   isActive?: boolean;
 }) {
   void _isActive;
@@ -469,7 +473,13 @@ export function AdminSidebar({
                       : item.label === "Productos e inventario" &&
                           lowStockCount > 0
                         ? lowStockCount
-                        : undefined
+                        : // Spec 169 · D4 — lo que le falta leer del turno. Es
+                          // la única forma que tiene el rail colapsado de decir
+                          // que el recorrido quedó a medias, y se apaga solo
+                          // cuando lo termina.
+                          item.section === "ayuda" && ayudaPendientes > 0
+                          ? ayudaPendientes
+                          : undefined
                   }
                 />
               ))}
@@ -518,6 +528,7 @@ export function AdminSidebar({
         pathname={pathname}
         pendingCount={pendingCount}
         lowStockCount={lowStockCount}
+        ayudaPendientes={ayudaPendientes}
         businessName={businessName}
         businessLogoUrl={businessLogoUrl}
         userEmail={userEmail}

@@ -1,4 +1,4 @@
-import { GRUPOS, TEMAS, pasosDe } from "@/lib/ayuda/contenido";
+import { GRUPOS, TEMAS, pasosDe, type Tema } from "@/lib/ayuda/contenido";
 import type { ReservationMode } from "@/lib/reservations/types";
 
 // ============================================
@@ -29,11 +29,15 @@ export type Turno = { rol: "usuario" | "asistente"; texto: string };
  * una copia, se desactualizaría, y un asistente que cita una guía vieja es peor
  * que uno que no sabe. Acá la fuente es la misma que se pinta en pantalla.
  */
-export function guiaComoTexto(modo: ReservationMode): string {
+export function guiaComoTexto(
+  modo: ReservationMode,
+  /** Los temas del rol que pregunta (spec 169 · D8). Default: todos. */
+  disponibles: Tema[] = TEMAS,
+): string {
   const partes: string[] = [];
 
   for (const grupo of GRUPOS) {
-    const temas = TEMAS.filter((t) => t.grupo === grupo.id);
+    const temas = disponibles.filter((t) => t.grupo === grupo.id);
     if (temas.length === 0) continue;
     partes.push(`\n## GRUPO: ${grupo.titulo} — ${grupo.bajada}`);
 
@@ -76,7 +80,13 @@ export function guiaComoTexto(modo: ReservationMode): string {
  *  3. **Decir que no sabe.** Es la respuesta correcta más seguido de lo que
  *     parece, y la que mantiene el resto creíble.
  */
-export function systemPrompt(modo: ReservationMode): string {
+export function systemPrompt(
+  modo: ReservationMode,
+  /** Idem: el asistente no puede contestar sobre pantallas que el que pregunta
+   *  no ve. Si el corpus no se filtra, un mozo recibiría por chat exactamente
+   *  lo que la spec 169 le sacó del índice. */
+  disponibles: Tema[] = TEMAS,
+): string {
   return `Sos el asistente de la guía del encargado de un restaurante que usa RestaurantOS.
 Te hablan encargados de salón en medio del turno: apurados, de pie, a veces desde el celular.
 
@@ -109,7 +119,7 @@ para ese modo. No menciones que existe otro modo.
 
 === GUÍA ===
 
-${guiaComoTexto(modo)}`;
+${guiaComoTexto(modo, disponibles)}`;
 }
 
 /** Los `[slug]` que el modelo citó, filtrados contra los temas que existen: si

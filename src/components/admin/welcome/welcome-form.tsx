@@ -77,12 +77,16 @@ export function WelcomeForm({
   businessLogoUrl,
   email,
   displayName,
+  destino,
 }: {
   businessName: string;
   businessSlug: string;
   businessLogoUrl: string | null;
   email: string;
   displayName: string;
+  /** Dónde cae al terminar. Lo calcula el server, que es el único que sabe el
+   *  rol y, con él, cuál es el primer tema del recorrido (spec 169 · D1). */
+  destino: string;
 }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
@@ -114,7 +118,11 @@ export function WelcomeForm({
       // Spec 142 · D4 — recién creó su contraseña: lo que necesita no es el
       // panel vacío sino saber qué hacer con él. Sólo acá, al terminar la
       // bienvenida; en los logins siguientes entra derecho a lo suyo.
-      router.replace(`/${businessSlug}/admin/ayuda`);
+      //
+      // Spec 169 · D1 — y no cae en el índice sino en el PRIMER TEMA. Un índice
+      // de veinte tarjetas es para volver, no para empezar: el que llega por
+      // primera vez no sabe cuál de las veinte le toca.
+      router.replace(destino);
       router.refresh();
     } finally {
       setSubmitting(false);

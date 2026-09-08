@@ -217,9 +217,12 @@ const MATRIX: Record<AdminSection, Record<BusinessRole, SectionAccess>> = {
     admin: "full",
     encargado: "full",
     // Spec 142 · D4: se abre para el salón, porque al terminar la bienvenida
-    // se los manda acá a aprender el sistema. OJO — el contenido de hoy está
-    // escrito para el encargado (spec 134); la guía del mozo es su propia
-    // spec. Esto abre la puerta, no la llena.
+    // se los manda acá a aprender el sistema. El contenido de hoy sigue siendo
+    // el del encargado (spec 134) y la guía del salón es su propia spec, pero
+    // desde la 169 eso ya no se les cuela: `Tema.roles` filtra el índice, el
+    // recorrido y el corpus del asistente, así que acá adentro ven una guía
+    // corta que dice que la suya se está escribiendo — y no los topes de
+    // autorización del encargado, que no son los de ellos.
     mozo: "full",
     terminal: "full",
     personal: "none",

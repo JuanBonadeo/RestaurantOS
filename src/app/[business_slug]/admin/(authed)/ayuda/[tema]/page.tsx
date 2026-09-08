@@ -5,6 +5,8 @@ import { ArrowLeft, ChevronRight, CircleAlert, CornerDownRight, Star, TriangleAl
 import { Captura } from "../captura";
 
 import { PageShell } from "@/components/admin/shell/page-shell";
+import { ensureAdminAccess } from "@/lib/admin/context";
+import { marcarLeidoYSeguir } from "@/lib/ayuda/actions";
 import {
   estaEscrito,
   loomEmbedSrc,
@@ -14,6 +16,8 @@ import {
   type Aviso,
   type Video,
 } from "@/lib/ayuda/contenido";
+import { getTemasLeidos, rolDeLaGuia } from "@/lib/ayuda/queries";
+import { posicionEnRecorrido, progresoDelRecorrido } from "@/lib/ayuda/recorrido";
 import { getReservationSettings } from "@/lib/reservations/queries";
 import type { ReservationMode } from "@/lib/reservations/types";
 import { getBusiness } from "@/lib/tenant";
@@ -121,6 +125,65 @@ function VideoDelTema({ video }: { video: Video }) {
   );
 }
 
+/**
+ * La barra del recorrido — spec 169 · D1 y D3.
+ *
+ * Dice dónde está («3 de 9») y ofrece la puerta de salida en la misma línea. Lo
+ * segundo no es una concesión: sin salida visible, un recorrido de nueve pasos
+ * el primer día se siente como un trámite obligatorio, y lo que se hace con un
+ * trámite obligatorio es apretar *siguiente* hasta el final sin leer.
+ *
+ * Sólo se pinta mientras el recorrido esté a medias. Terminado, un tema es un
+ * tema y no el paso de nada.
+ */
+function BarraRecorrido({
+  indice,
+  total,
+  salir,
+}: {
+  indice: number;
+  total: number;
+  salir: string;
+}) {
+  // Lo COMPLETADO, que es lo de antes de este tema: recién cuando lo termine y
+  // apriete el botón del pie, la barra avanza. Marcarlo lleno al abrirlo sería
+  // contar como leído algo que todavía no leyó.
+  const pct = Math.round(((indice - 1) / total) * 100);
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3 rounded-2xl bg-white p-4 ring-1 ring-zinc-200/70 sm:p-5">
+      <div className="min-w-[220px] flex-1">
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="text-[17px] font-semibold text-zinc-900">
+            Arrancá por acá
+          </span>
+          <span className="text-[17px] leading-[1.6] text-zinc-600">
+            {indice} de {total}
+          </span>
+        </div>
+        <div
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={total}
+          aria-valuenow={indice - 1}
+          aria-label={`Tema ${indice} de ${total} de la guía`}
+          className="mt-2 h-2 w-full overflow-hidden rounded-full bg-zinc-200"
+        >
+          <div
+            className="h-full rounded-full transition-[width]"
+            style={{ width: `${pct}%`, background: "var(--brand)" }}
+          />
+        </div>
+      </div>
+      <Link
+        href={salir}
+        className="inline-flex min-h-12 items-center text-[17px] font-medium text-zinc-600 underline underline-offset-4 transition hover:text-zinc-900"
+      >
+        Salir de la guía
+      </Link>
+    </div>
+  );
+}
+
 export default async function TemaPage({
   params,
 }: {
@@ -137,6 +200,16 @@ export default async function TemaPage({
   // config, no se le pregunta al lector "¿tu local usa reservas flexibles?".
   const settings = await getReservationSettings(business.id);
   const modo: ReservationMode = settings.mode ?? "estricto";
+
+  // Spec 169 — el rol decide si este tema es parte de SU recorrido, y las
+  // lecturas dicen si el recorrido sigue abierto. Las dos consultas salen del
+  // mismo request que ya hace el layout, así que no agregan viaje.
+  const ctx = await ensureAdminAccess(business.id, business_slug);
+  const rol = rolDeLaGuia(ctx);
+  const leidos = await getTemasLeidos(business.id, ctx.userId);
+  const progreso = progresoDelRecorrido(rol, modo, leidos);
+  const posicion = posicionEnRecorrido(tema.slug, rol, modo);
+  const enRecorrido = posicion !== null && !progreso.completo;
 
   const base = `/${business_slug}/admin/ayuda`;
   const pasos = pasosDe(tema, modo);
@@ -159,6 +232,14 @@ export default async function TemaPage({
         >
           <ArrowLeft className="size-5" strokeWidth={1.75} /> Volver a Ayuda
         </Link>
+
+        {enRecorrido && posicion && (
+          <BarraRecorrido
+            indice={posicion.indice}
+            total={posicion.total}
+            salir={`/${business_slug}/admin`}
+          />
+        )}
 
         <h1 className={`mt-2 ${H1} ${TEXTO}`}>{tema.titulo}</h1>
         <p className={`mt-3 ${SECUNDARIO} ${TEXTO}`}>{tema.resumen}</p>
@@ -233,19 +314,32 @@ export default async function TemaPage({
           </div>
         )}
 
-        {siguiente && (
+        {/* El botón del pie es lo único que marca un tema como leído (D5), y por
+            eso es un form y no un Link: un GET no puede escribir. Sin JS
+            hidratado igual funciona, que en el celular del salón importa.
+
+            La etiqueta cambia con el lugar: adentro del recorrido nombra el
+            paso que sigue, y en el último cierra. Afuera del recorrido queda
+            como estaba — la guía también se lee salteada. */}
+        {(posicion || siguiente) && (
           <div className="mt-16 border-t border-zinc-200 pt-8">
-            <Link
-              href={`${base}/${siguiente.slug}`}
-              className="inline-flex min-h-12 items-center gap-2 rounded-xl px-5 text-[17px] font-medium"
-              style={{
-                background: "var(--brand)",
-                color: "var(--brand-foreground)",
-              }}
-            >
-              Seguir con: {siguiente.titulo}{" "}
-              <ChevronRight className="size-5" strokeWidth={1.75} />
-            </Link>
+            <form action={marcarLeidoYSeguir.bind(null, business_slug, tema.slug)}>
+              <button
+                type="submit"
+                className="inline-flex min-h-12 items-center gap-2 rounded-xl px-5 text-[17px] font-medium"
+                style={{
+                  background: "var(--brand)",
+                  color: "var(--brand-foreground)",
+                }}
+              >
+                {posicion
+                  ? posicion.siguiente
+                    ? `Listo, seguir con: ${posicion.siguiente.titulo}`
+                    : "Listo, terminé la guía"
+                  : `Seguir con: ${siguiente?.titulo ?? "la guía"}`}
+                <ChevronRight className="size-5" strokeWidth={1.75} />
+              </button>
+            </form>
           </div>
         )}
       </div>

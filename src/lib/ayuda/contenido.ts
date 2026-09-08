@@ -26,6 +26,7 @@ import {
   DESCUENTO_MEDIO_PCT,
   DIFERENCIA_CAJA_OK_CENTS,
 } from "@/lib/permissions/can";
+import type { BusinessRole } from "@/lib/admin/context";
 import type { ReservationMode } from "@/lib/reservations/types";
 
 // ============================================
@@ -143,7 +144,8 @@ export const GRUPOS: { id: Grupo; titulo: string; bajada: string }[] = [
   {
     id: "operacion",
     titulo: "Operación",
-    bajada: "El turno completo: las ocho pestañas de la pantalla donde pasás el día.",
+    bajada:
+      "El turno completo, tema por tema: la pantalla donde pasás el día.",
   },
   {
     id: "catalogo",
@@ -198,6 +200,16 @@ export type Tema = {
    * que puede hacer sola, o la cosa que si se hace mal cuesta plata.
    */
   claves: string[];
+  /**
+   * A quién le habla este tema — spec 169 · D8. Default: `["admin",
+   * "encargado"]`, que es lo que son los veinte temas de la spec 134.
+   *
+   * Es el seam de las guías por rol: el índice, el recorrido de primer ingreso
+   * y el contexto que se le pasa al asistente filtran por acá. Cuando se
+   * escriba la guía del salón, sus temas van a llevar `["mozo", "terminal"]` y
+   * ninguno de éstos hay que tocarlo.
+   */
+  roles?: BusinessRole[];
   /** Default 'pasos'. */
   tipo?: TipoTema;
   /** Loom del tema. Opcional: se van grabando de a poco. */

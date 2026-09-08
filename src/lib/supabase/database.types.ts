@@ -154,6 +154,35 @@ export type Database = {
         };
         Relationships: [];
       };
+      ayuda_lecturas: {
+        Row: {
+          business_id: string;
+          leido_at: string;
+          tema: string;
+          user_id: string;
+        };
+        Insert: {
+          business_id: string;
+          leido_at?: string;
+          tema: string;
+          user_id: string;
+        };
+        Update: {
+          business_id?: string;
+          leido_at?: string;
+          tema?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "ayuda_lecturas_business_id_fkey";
+            columns: ["business_id"];
+            isOneToOne: false;
+            referencedRelation: "businesses";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       business_hours: {
         Row: {
           business_id: string;

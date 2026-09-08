@@ -45,10 +45,14 @@ function badgeFor(
   item: NavItem,
   pendingCount: number,
   lowStockCount: number,
+  ayudaPendientes: number,
 ): number | undefined {
   if (item.label === "Operación Diaria" && pendingCount > 0) return pendingCount;
   if (item.label === "Productos e inventario" && lowStockCount > 0)
     return lowStockCount;
+  // Spec 169 · D4 — lo que le falta del recorrido. Acá importa incluso más que
+  // en el rail: es el celular el que tiene a mano el que está aprendiendo.
+  if (item.section === "ayuda" && ayudaPendientes > 0) return ayudaPendientes;
   return undefined;
 }
 
@@ -58,6 +62,7 @@ export function AdminMobileNav({
   pathname,
   pendingCount,
   lowStockCount,
+  ayudaPendientes = 0,
   businessName,
   businessLogoUrl,
   userEmail,
@@ -70,6 +75,8 @@ export function AdminMobileNav({
   pathname: string;
   pendingCount: number;
   lowStockCount: number;
+  /** Temas del recorrido de la guía sin leer (spec 169 · D4). */
+  ayudaPendientes?: number;
   businessName: string;
   businessLogoUrl: string | null;
   userEmail: string;
@@ -173,7 +180,7 @@ export function AdminMobileNav({
                 </p>
                 {group.items.map((item) => {
                   const active = item.match(pathname);
-                  const badge = badgeFor(item, pendingCount, lowStockCount);
+                  const badge = badgeFor(item, pendingCount, lowStockCount, ayudaPendientes);
                   return (
                     <Link
                       key={item.href}
