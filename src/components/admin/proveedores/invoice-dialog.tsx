@@ -27,6 +27,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ImageUploader } from "@/components/admin/catalog/image-uploader";
+import { LADO_LARGO_DEFAULT } from "@/lib/images/achicar";
 import { createSupplierInvoice } from "@/lib/proveedores/actions";
 import type { SupplierInvoiceItemInput } from "@/lib/proveedores/schema";
 import { RenglonesEditor, type InsumoOption } from "./renglones-editor";
@@ -297,6 +298,12 @@ export function InvoiceDialog({
                 onChange={(url) => setPhotoPath(url)}
                 bucket="supplier-invoices"
                 returnPath
+                // spec 172 · la foto de una factura se va a leer con un modelo
+                // de visión: tiene que entrar en los 5 MB del bucket, ser JPEG
+                // y no HEIC, y quedar por debajo de ~3,6 MB para que el base64
+                // no pase el techo de la API. 2200 px es más de lo que el
+                // modelo usa (reescala a 1568) y alcanza para leerla a ojo.
+                maxEdgePx={LADO_LARGO_DEFAULT}
               />
             </div>
 
