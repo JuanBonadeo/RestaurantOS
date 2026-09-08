@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
+import { acumularLibroIva, type FilaComprobante } from "./libro-iva";
 import type { Invoice, InvoiceStatus, TipoComprobante } from "./types";
 
 // The invoices table was added in migration 0048 but Supabase types haven't
@@ -118,60 +119,27 @@ export async function getInvoiceKPIs(
   if (to) query = query.lte("created_at", to);
 
   const { data } = await query;
-  const rows = (data ?? []) as { total_cents: number; status: string; tipo_comprobante: string }[];
+  const rows = (data ?? []) as FilaComprobante[];
 
-  let totalCents = 0;
-  let count = 0;
-  let countA = 0;
-  let countB = 0;
-  let countFailed = 0;
-  let countPending = 0;
-  let notasCreditoCents = 0;
-  let countNotasCredito = 0;
+  // La regla vive en `libro-iva.ts` y no acá: `getFiscalSummary` la tenía
+  // copiada con el bug original (sumaba las NC en vez de restarlas, en el
+  // importe y en el IVA). Escrita una vez, los dos lectores no se pueden
+  // volver a desincronizar.
+  const libro = acumularLibroIva(rows);
 
-  for (const row of rows) {
-    const esNota =
-      row.tipo_comprobante === "nota_credito_a" ||
-      row.tipo_comprobante === "nota_credito_b";
-
-    if (row.status === "authorized" && esNota) {
-      // El importe de la NC se guarda positivo en la fila (es el mismo total
-      // que la factura que anula); el signo lo pone la lectura, acá.
-      notasCreditoCents += Number(row.total_cents) || 0;
-      countNotasCredito++;
-      continue;
-    }
-
-    // Una factura `cancelled` **tiene CAE**: `anularFactura` sólo la marca así
-    // después de que la nota de crédito quedó autorizada, y anular no borra
-    // nada ante ARCA — el comprobante sigue en Mis Comprobantes y en la
-    // declaración. Excluirla del facturado mientras se incluía su NC era la
-    // mitad que hacía dar cualquier cosa: en el flujo D5 (B anulada + NC + A)
-    // el neto correcto es un ticket, y sin la B daba cero.
-    if (row.status === "authorized" || row.status === "cancelled") {
-      totalCents += Number(row.total_cents) || 0;
-    }
-
-    if (row.status === "authorized") {
-      // Los conteos responden otra pregunta que el importe: «cuántos
-      // comprobantes vigentes tengo», no «cuánto declaré». Una factura anulada
-      // ya no es de nadie, así que no entra acá aunque sí entre en el neto.
-      count++;
-      if (row.tipo_comprobante === "factura_a") countA++;
-      else countB++;
-    } else if (row.status === "failed") {
-      countFailed++;
-    } else if (row.status === "pending") {
-      countPending++;
-    }
-  }
+  const {
+    netoCents: totalCents,
+    notasCreditoCents,
+    countNotasCredito,
+    count,
+    countA,
+    countB,
+    countFailed,
+    countPending,
+  } = libro;
 
   return {
-    // Puede dar negativo si en el período se anuló más de lo que se facturó
-    // (típico del primer día del mes con NC de ventas del mes anterior). Es un
-    // dato, no un error: taparlo con un `Math.max(0, …)` sería volver a
-    // maquillar el número, que es justo el bug.
-    totalCents: totalCents - notasCreditoCents,
+    totalCents,
     count,
     countA,
     countB,

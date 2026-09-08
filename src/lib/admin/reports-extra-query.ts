@@ -1,5 +1,6 @@
 import "server-only";
 
+import { acumularLibroIva, type FilaComprobante } from "@/lib/afip/libro-iva";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 // ── Facturación fiscal (AFIP) ─────────────────────────────────────
@@ -24,7 +25,9 @@ export async function getFiscalSummary(
   const [invoicesRes, ordersRes] = await Promise.all([
     supabase
       .from("invoices")
-      .select("total_cents, iva_cents, status")
+      // `tipo_comprobante` es lo que faltaba: sin él una nota de crédito es
+      // indistinguible de una factura y suma con signo positivo.
+      .select("total_cents, iva_cents, status, tipo_comprobante")
       .eq("business_id", businessId)
       .gte("created_at", startIso)
       .lt("created_at", endIso),
@@ -41,28 +44,21 @@ export async function getFiscalSummary(
       .lt("created_at", endIso),
   ]);
 
-  let invoicedCents = 0;
-  let ivaCents = 0;
-  let authorizedCount = 0;
-  let pendingCount = 0;
-  let failedCount = 0;
-
-  for (const inv of invoicesRes.data ?? []) {
-    const row = inv as {
-      total_cents: number;
-      iva_cents: number;
-      status: string;
-    };
-    if (row.status === "authorized") {
-      invoicedCents += Number(row.total_cents) || 0;
-      ivaCents += Number(row.iva_cents) || 0;
-      authorizedCount += 1;
-    } else if (row.status === "pending") {
-      pendingCount += 1;
-    } else if (row.status === "failed") {
-      failedCount += 1;
-    }
-  }
+  // #274·5, la mitad que quedó viva: esto agregaba por `status === 'authorized'`
+  // sin mirar nunca el tipo, así que **cada nota de crédito sumaba en vez de
+  // restar** — en el facturado y en el IVA. Y como el denominador (las ventas)
+  // estaba bien, el ratio facturado/ventas de /admin/reportes daba arriba de
+  // 100% en cualquier período con una anulación, que se lee como «facturamos
+  // todo» y no como «esto está mal sumado».
+  //
+  // `getInvoiceKPIs` tenía el mismo bug y se arregló en la ronda anterior. La
+  // regla ahora vive una sola vez, en `libro-iva.ts`, y la usan los dos.
+  const libro = acumularLibroIva((invoicesRes.data ?? []) as FilaComprobante[]);
+  const invoicedCents = libro.netoCents;
+  const ivaCents = libro.ivaCents;
+  const authorizedCount = libro.count;
+  const pendingCount = libro.countPending;
+  const failedCount = libro.countFailed;
 
   let netSalesCents = 0;
   for (const o of ordersRes.data ?? []) {

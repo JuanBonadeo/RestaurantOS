@@ -500,6 +500,61 @@ describe.skipIf(!dbAvailable)("billing/cobro (integration)", () => {
     expect(payments!.every((p) => p.payment_status === "paid")).toBe(true);
   });
 
+  it("anularCobro: con la factura todavía PENDING en el gateway, tampoco", { timeout: 30_000 }, async () => {
+    // La emisión contra ARCA es asíncrona: entre que se encola y que vuelve el
+    // CAE la fila está `pending`, y ahí la guarda miraba sólo `authorized` y se
+    // abría. Se devolvía la plata, el cron autorizaba la factura igual y al
+    // cliente le llegaba el comprobante de una venta reembolsada.
+    const { orderId } = await newOrder("E4");
+    CURRENT_USER_ID = mozoId;
+    await registrarPago({
+      orderId,
+      splitId: null,
+      method: "cash",
+      amount_cents: 10_000,
+      tip_cents: 0,
+      caja_id: cajaId,
+      slug: businessSlug,
+    });
+
+    await supabase.from("invoices").insert({
+      business_id: businessId,
+      order_id: orderId,
+      tipo_comprobante: "factura_b",
+      punto_venta: 3,
+      // Sin CAE y sin número: todavía no volvió del gateway.
+      numero: null,
+      total_cents: 10_000,
+      neto_cents: 8_264,
+      iva_cents: 1_736,
+      status: "pending",
+      provider: "sandbox",
+    });
+
+    CURRENT_USER_ID = encargadoId;
+    const r = await anularCobro(orderId, "cliente reclamó", businessSlug);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      // El mensaje tiene que decir la verdad: no hay número que citar todavía.
+      expect(r.error).toContain("emitiéndose");
+    }
+
+    // Y sobre todo: no se devolvió un peso.
+    const { data: ord } = await supabase
+      .from("orders")
+      .select("lifecycle_status, total_paid_cents")
+      .eq("id", orderId)
+      .single();
+    expect(ord!.lifecycle_status).toBe("closed");
+    expect(ord!.total_paid_cents).toBe(10_000);
+
+    const { data: payments } = await supabase
+      .from("payments")
+      .select("payment_status")
+      .eq("order_id", orderId);
+    expect(payments!.every((p) => p.payment_status === "paid")).toBe(true);
+  });
+
   it("cancelarSplit sin pagos: status=cancelled + redistribución", { timeout: 30_000 }, async () => {
     const { orderId } = await newOrder("F");
     CURRENT_USER_ID = mozoId;

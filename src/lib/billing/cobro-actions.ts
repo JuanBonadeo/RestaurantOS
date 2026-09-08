@@ -42,6 +42,7 @@ type InvoiceRef = {
   tipo_comprobante: TipoComprobante;
   punto_venta: number;
   numero: number | null;
+  status: string;
 };
 
 // ── Helpers ────────────────────────────────────────────────────
@@ -1117,15 +1118,34 @@ export async function anularCobro(
   //
   // Bloquear en vez de encadenar la NC: la NC puede fallar en ARCA, y no
   // querés haber devuelto la plata antes de saberlo.
+  //
+  // `pending` cuenta igual que `authorized`. La emisión contra el gateway es
+  // asíncrona: entre que se encola y que ARCA devuelve el CAE hay minutos, y en
+  // esa ventana la fila está `pending`. Mirando sólo `authorized` la guarda se
+  // abría justo ahí — se devolvía la plata, el cron autorizaba la factura igual
+  // y al cliente le llegaba el comprobante de una venta reembolsada.
+  //
+  // Es la misma regla que `bloqueoPorPlata` (src/lib/orders/cancel-guards.ts:66)
+  // ya escribe bien, con el comentario que describe este mismo agujero, y la que
+  // la spec 147 arregló en `emit-core.ts`. Estaba escrita en tres lugares y sólo
+  // este quedó con el bug.
   const { data: facturasVivas } = await service
     .from("invoices")
-    .select("tipo_comprobante, punto_venta, numero")
+    .select("tipo_comprobante, punto_venta, numero, status")
     .eq("business_id", business.id)
     .eq("order_id", orderId)
-    .eq("status", "authorized")
+    .in("status", ["pending", "authorized"])
     .in("tipo_comprobante", ["factura_a", "factura_b"]);
-  const factura = ((facturasVivas ?? []) as InvoiceRef[])[0];
+  // La autorizada manda sobre la pendiente: si hay las dos, el mensaje que le
+  // sirve al encargado es el de la que ya tiene CAE.
+  const vivas = (facturasVivas ?? []) as InvoiceRef[];
+  const factura = vivas.find((f) => f.status === "authorized") ?? vivas[0];
   if (factura) {
+    if (factura.status === "pending") {
+      return actionError(
+        `Esta cuenta tiene una ${tipoLabel(factura.tipo_comprobante)} emitiéndose ante ARCA. Esperá a que termine y anulá el comprobante antes de anular el cobro.`,
+      );
+    }
     return actionError(
       `Esta cuenta tiene la ${tipoLabel(factura.tipo_comprobante)} ${formatInvoiceNumber(
         factura.punto_venta,
