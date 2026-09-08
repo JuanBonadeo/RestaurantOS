@@ -319,7 +319,7 @@ function PedidosPanel({
   timezone: string;
   active: boolean;
 }) {
-  const { initialOrders, marchLeadKitchenMin } = use(promise);
+  const { initialOrders, marchLeadKitchenMin, deliveryFeeCents } = use(promise);
   return (
     <OrdersRealtimeBoard
       businessId={businessId}
@@ -327,6 +327,7 @@ function PedidosPanel({
       timezone={timezone}
       initialOrders={initialOrders}
       marchLeadKitchenMin={marchLeadKitchenMin}
+      deliveryFeeCents={deliveryFeeCents}
       active={active}
     />
   );

@@ -770,13 +770,24 @@ function PaymentChip({
   // ningún indicador de pago en el detalle — ni antes ni después de cobrarlo.
   if (!method) return null;
   if (method !== "mp") {
+    // issue #260 — acá decía «Efectivo» hardcodeado para cualquier método.
+    //
+    // Un pedido cargado a mano nace con `payment_method = 'cash'` (es una
+    // anotación provisoria) y nadie lo actualiza al cobrar: el método real vive
+    // en `payments`. Así que cobrabas por transferencia y el detalle seguía
+    // diciendo «Efectivo · Cobrado» — y es la pantalla donde el encargado va
+    // justamente a verificar qué pasó con la plata de ese pedido. Nunca se
+    // contradecía a sí misma, porque no hay otra vista que muestre el método.
+    //
+    // Cobrado: no se afirma un método que no sabemos. Sin cobrar: se dice que
+    // es lo anotado, que es la verdad («dijo que paga en efectivo»).
     return status === "paid" ? (
       <span className="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-800">
-        Efectivo · Cobrado
+        Cobrado
       </span>
     ) : (
       <span className="inline-flex items-center rounded-full bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800">
-        Efectivo · A cobrar
+        {method === "cash" ? "Efectivo · A cobrar" : "A cobrar"}
       </span>
     );
   }

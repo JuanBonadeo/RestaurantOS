@@ -82,6 +82,7 @@ export default async function LocalEnVivoPage({
   const comandas = loadComandas(business.id);
   const pedidos = loadPedidos(business.id, business.timezone, {
     kitchenMin: business.scheduled_march_lead_kitchen_min,
+    deliveryFeeCents: Number(business.delivery_fee_cents ?? 0),
   });
   const caja = loadCaja(business.id);
   const cuentas = loadCuentas(business.id);

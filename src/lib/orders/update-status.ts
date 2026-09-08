@@ -8,6 +8,7 @@ import { notifyDeliveryStatusChange } from "@/lib/notifications/delivery-notify"
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
+import { bloqueoPorPlata } from "./cancel-guards";
 import { cancelDownstream } from "./cancel-order";
 
 import {
@@ -67,6 +68,27 @@ export async function updateOrderStatus(
   const isCancel = next_status === "cancelled";
   const nowIso = new Date().toISOString();
 
+  // issue #259 — cancelar un pedido ya pagado no puede tragarse la plata.
+  //
+  // `anularMesa` ya pasaba por esta guarda (spec 092); el board de pedidos
+  // online nunca lo hizo. Cancelar desde acá un pedido pagado por Mercado Pago
+  // no devolvía nada, no avisaba, y dejaba el cobro adentro de la caja contra
+  // una venta que ya no existe: el cliente pagó y no recibe ni el pedido ni el
+  // reembolso, y el arqueo cuadra igual porque el pago sigue ahí.
+  //
+  // La política es la que la guarda ya tenía escrita y vale igual acá: primero
+  // se deshace la plata, después se anula. Bloquea en vez de arreglarlo sola
+  // porque anular un cobro o emitir una nota de crédito son decisiones con
+  // consecuencia fiscal, y las toma una persona.
+  //
+  // El rechazo (`rechazarPedido`, spec 139) sigue siendo el camino que SÍ
+  // devuelve por MP: es para antes de marchar, y ahí la decisión ya está tomada.
+  if (isCancel) {
+    const guardService = createSupabaseServiceClient();
+    const bloqueo = await bloqueoPorPlata(guardService, [order_id], "pedido");
+    if (bloqueo) return actionError(bloqueo);
+  }
+
   const { error: updateErr } = await supabase
     .from("orders")
     .update({
@@ -109,7 +131,14 @@ export async function updateOrderStatus(
   // Aviso de WhatsApp al cliente por el nuevo estado de delivery. Best-effort:
   // la función no lanza y no bloquea el cambio de estado (si WhatsApp no está
   // conectado, queda registrado en el outbox sin afectar la operación).
-  await notifyDeliveryStatusChange({ orderId: order_id, toStatus: next_status });
+  await notifyDeliveryStatusChange({
+    orderId: order_id,
+    toStatus: next_status,
+    // issue #259 — el motivo se pedía como obligatorio, se guardaba, y después
+    // no se pasaba acá: moría en la base. `notifyDeliveryStatusChange` ya sabía
+    // recibirlo (lo usa el rechazo, spec 139); lo que faltaba era mandárselo.
+    motivo: isCancel ? (cancelled_reason?.trim() ?? undefined) : undefined,
+  });
 
   revalidatePath(`/${business_slug}/admin`);
   revalidatePath(`/${business_slug}/admin/pedidos/${order_id}`);

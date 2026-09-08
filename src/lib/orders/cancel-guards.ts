@@ -38,7 +38,14 @@ type GenericClient = SupabaseClient;
 export async function bloqueoPorPlata(
   service: GenericClient,
   orderIds: string[],
+  /**
+   * Cómo nombrar lo que se anula. La guarda nació para el salón y decía «esta
+   * mesa» siempre; desde la issue #259 también la usa el board de pedidos
+   * online, donde no hay ninguna mesa.
+   */
+  sujeto: "mesa" | "pedido" = "mesa",
 ): Promise<string | null> {
+  const Sujeto = sujeto === "mesa" ? "Esta mesa" : "Este pedido";
   if (orderIds.length === 0) return null;
 
   const { data: pagos } = await service
@@ -52,7 +59,7 @@ export async function bloqueoPorPlata(
     0,
   );
   if (cobrado > 0) {
-    return `Esta mesa tiene ${formatCurrency(cobrado)} ya cobrados. Anulá el cobro primero y después la mesa.`;
+    return `${Sujeto} tiene ${formatCurrency(cobrado)} ya cobrados. Anulá el cobro primero y después ${sujeto === "mesa" ? "la mesa" : "el pedido"}.`;
   }
 
   const { data: facturas } = await service
@@ -65,8 +72,8 @@ export async function bloqueoPorPlata(
   if (rows.length > 0) {
     const autorizada = rows.some((f) => f.status === "authorized");
     return autorizada
-      ? "Esta mesa ya tiene una factura autorizada con CAE. Emití la nota de crédito antes de anular."
-      : "Esta mesa tiene una factura en curso. Esperá a que termine de emitirse y resolvela antes de anular.";
+      ? `${Sujeto} ya tiene una factura autorizada con CAE. Emití la nota de crédito antes de anular.`
+      : `${Sujeto} tiene una factura en curso. Esperá a que termine de emitirse y resolvela antes de anular.`;
   }
 
   return null;

@@ -117,7 +117,18 @@ export function CargarPedidoSheet({
   timezone,
   marchLeadKitchenMin = DEFAULT_MARCH_LEAD_KITCHEN_MIN,
   agregarA,
+  deliveryFeeCents = 0,
 }: {
+  /**
+   * Envío del negocio (issue #260).
+   *
+   * `persistOrder` se lo suma al total cuando el destino es delivery, y la hoja
+   * no lo mostraba en ningún lado: la encargada leía «Total $10.000», se lo
+   * decía al cliente por teléfono, y el pedido nacía en $10.800. La diferencia
+   * recién aparecía al cobrar, con la hoja ya cerrada y sin forma de saber de
+   * dónde salió. El checkout público sí lo muestra como línea aparte.
+   */
+  deliveryFeeCents?: number;
   slug: string;
   open: boolean;
   onClose: () => void;
@@ -372,6 +383,11 @@ export function CargarPedidoSheet({
   if (!open || !portalHost) return null;
 
   const cartTotal = cart.reduce((a, c) => a + c.line_subtotal_cents, 0);
+  // issue #260 — el envío que el server suma, mostrado acá. `agregarA` no lo
+  // lleva: sumarle líneas a un pedido existente no vuelve a cobrar el envío.
+  const envioCents =
+    deliveryType === "delivery" && !agregarA ? deliveryFeeCents : 0;
+  const totalConEnvio = cartTotal + envioCents;
   const cartCount = cart.reduce((a, c) => a + c.quantity, 0);
 
   function addToCart(item: AddToCartItem) {
@@ -797,7 +813,7 @@ export function CargarPedidoSheet({
                         : "vacío"}
                     </p>
                     <p className="text-lg font-bold text-zinc-900 tabular-nums">
-                      {formatCurrency(cartTotal)}
+                      {formatCurrency(totalConEnvio)}
                     </p>
                   </div>
                   <button
@@ -1193,12 +1209,20 @@ export function CargarPedidoSheet({
                     ))}
                   </ul>
                 )}
+                {envioCents > 0 && (
+                  <div className="flex items-center justify-between pt-2.5 text-sm">
+                    <span className="text-zinc-600">Envío</span>
+                    <span className="tabular-nums text-zinc-700">
+                      {formatCurrency(envioCents)}
+                    </span>
+                  </div>
+                )}
                 <div className="flex items-center justify-between border-t border-zinc-100 pt-2.5">
                   <span className="text-sm font-medium text-zinc-600">
                     Total
                   </span>
                   <span className="text-lg font-bold text-zinc-900 tabular-nums">
-                    {formatCurrency(cartTotal)}
+                    {formatCurrency(totalConEnvio)}
                   </span>
                 </div>
               </section>

@@ -187,7 +187,12 @@ export async function routeOrderToCocina(
     }
   }
 
-  const route = await createComandasForItems(service, orderId, itemsByStation);
+  // `primeraRuteada`: confirmar una orden online pasa una sola vez, así que su
+  // batch es siempre el 1 y el unique de la tabla puede arbitrar la carrera de
+  // las dos pestañas (issue #259).
+  const route = await createComandasForItems(service, orderId, itemsByStation, {
+    primeraRuteada: true,
+  });
   if (!route.ok) return actionError(route.error);
 
   // Guarda de estado #2 (ver docblock): optimista, cierra la ventana entre el

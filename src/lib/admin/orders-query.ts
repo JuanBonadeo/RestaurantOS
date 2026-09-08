@@ -35,9 +35,29 @@ export type AdminOrder = {
   items: { product_name: string; quantity: number }[];
 };
 
-export function startOfTodayUtc(tz: string): Date {
-  // Midnight in the business timezone, converted to UTC for the query.
-  const now = new Date();
+/**
+ * Arranque de la **jornada operativa** en curso, en UTC.
+ *
+ * No es medianoche: es la última vez que dieron las 6 AM en el local — el mismo
+ * corte que `public.operating_day()` (migración 0049), que es quien materializa
+ * `orders.business_day` y sobre quien se reinicia `daily_number`.
+ *
+ * Antes esto era medianoche calendario y ahí estaba el bug (issue #259): a las
+ * 00:00 el delivery de las 23:40 dejaba de cumplir el filtro y **se caía del
+ * board**, con su botón de cobrar adentro. La cocina ya tenía el papel, el
+ * cliente esperaba, y el pedido quedaba `preparing` + impago para siempre: el
+ * realtime de UPDATE hace `prev.map`, o sea que sólo pisa lo que ya está en la
+ * lista, nunca lo reinserta. Nadie se enteraba hasta que el cliente llamaba.
+ *
+ * El resto del sistema ya usaba la jornada operativa; el board era el único que
+ * miraba el calendario. El mismo arreglo ya se había hecho en el tablero de
+ * comandas y éste quedó sin él.
+ *
+ * `now` se puede inyectar para poder probar el borde de las 00:05 sin esperar a
+ * que sean las 00:05.
+ */
+export function startOfOperatingDayUtc(tz: string, now = new Date()): Date {
+  const HORA_DE_CORTE = 6;
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: tz,
     year: "numeric",
@@ -50,13 +70,58 @@ export function startOfTodayUtc(tz: string): Date {
   }).formatToParts(now);
   const pick = (type: string) =>
     parts.find((p) => p.type === type)?.value ?? "00";
-  const isoLocal = `${pick("year")}-${pick("month")}-${pick("day")}T00:00:00`;
-  // Need to offset by the difference between the tz-local time and UTC.
+
+  // Diferencia entre la hora local del negocio y UTC, medida sobre este mismo
+  // instante: sirve para cualquier huso y contempla horario de verano.
   const nowInTz = new Date(
     `${pick("year")}-${pick("month")}-${pick("day")}T${pick("hour")}:${pick("minute")}:${pick("second")}Z`,
   );
   const offsetMs = nowInTz.getTime() - now.getTime();
-  const localMidnight = new Date(`${isoLocal}Z`);
+
+  // Antes de las 6 AM todavía se está trabajando la jornada de ayer: la cena
+  // que cruza las doce no se parte en dos.
+  const corte = new Date(
+    `${pick("year")}-${pick("month")}-${pick("day")}T0${HORA_DE_CORTE}:00:00Z`,
+  );
+  if (Number(pick("hour")) < HORA_DE_CORTE) {
+    corte.setUTCDate(corte.getUTCDate() - 1);
+  }
+  return new Date(corte.getTime() - offsetMs);
+}
+
+/**
+ * Medianoche calendario en la TZ del negocio, en UTC.
+ *
+ * **No es lo mismo que `startOfOperatingDayUtc` y no son intercambiables.** Una
+ * reserva pertenece a un día del calendario —«la del jueves» es del jueves aunque
+ * el local siga sirviendo a la 1 AM—, mientras que un pedido pertenece a la
+ * jornada de trabajo, con corte a las 6. Usar ésta para el board fue el bug
+ * #259; usar la otra para reservas correría el día del libro tres horas.
+ *
+ * Si estás eligiendo entre las dos: ¿lo que filtrás lo numera `business_day`?
+ * Entonces va la jornada operativa. ¿Lo elige una persona en un calendario?
+ * Entonces va medianoche.
+ */
+export function startOfTodayUtc(tz: string, now = new Date()): Date {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const pick = (type: string) =>
+    parts.find((p) => p.type === type)?.value ?? "00";
+  const nowInTz = new Date(
+    `${pick("year")}-${pick("month")}-${pick("day")}T${pick("hour")}:${pick("minute")}:${pick("second")}Z`,
+  );
+  const offsetMs = nowInTz.getTime() - now.getTime();
+  const localMidnight = new Date(
+    `${pick("year")}-${pick("month")}-${pick("day")}T00:00:00Z`,
+  );
   return new Date(localMidnight.getTime() - offsetMs);
 }
 
@@ -65,7 +130,7 @@ export async function getTodayOrders(
   timezone: string,
 ): Promise<AdminOrder[]> {
   const supabase = await createSupabaseServerClient();
-  const since = startOfTodayUtc(timezone).toISOString();
+  const since = startOfOperatingDayUtc(timezone).toISOString();
   // Filtramos `dine_in` afuera: las orders de mesa viven en otra pantalla
   // (Salón). Aquí solo queremos delivery / pickup (canal online).
   //
@@ -123,7 +188,7 @@ export async function getPendingOrderCount(
   timezone: string,
 ): Promise<number> {
   const supabase = await createSupabaseServerClient();
-  const since = startOfTodayUtc(timezone).toISOString();
+  const since = startOfOperatingDayUtc(timezone).toISOString();
   const { count } = await supabase
     .from("orders")
     .select("id", { count: "exact", head: true })
@@ -162,7 +227,7 @@ export type OrderListResult = {
 
 function rangeStart(tz: string, range: OrderListRange): string | null {
   if (range === "all") return null;
-  const today = startOfTodayUtc(tz);
+  const today = startOfOperatingDayUtc(tz);
   if (range === "today") return today.toISOString();
   const days = range === "7d" ? 7 : 30;
   const since = new Date(today.getTime() - (days - 1) * 24 * 60 * 60 * 1000);

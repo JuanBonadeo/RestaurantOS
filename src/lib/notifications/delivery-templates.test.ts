@@ -183,3 +183,33 @@ describe("isDeliveryNotifyStatus / defaults", () => {
     expect(sinMotivo).not.toContain("  ");
   });
 });
+
+describe("el motivo de cancelación llega al cliente (issue #259)", () => {
+  it("la plantilla de cancelado incluye el motivo que escribió el encargado", () => {
+    const body = renderDeliveryBody({
+      status: "cancelled",
+      motivo: "Sin stock",
+      deliveryType: "delivery",
+      customerName: "Ana",
+      orderNumber: 42,
+      businessName: "Golf",
+      template: null,
+    });
+    // La ayuda del panel promete que el cliente lo lee. Antes moría en la base:
+    // la action no lo pasaba y la plantilla no tenía dónde ponerlo.
+    expect(body).toContain("Sin stock");
+  });
+
+  it("sin motivo, el mensaje sigue leyéndose bien", () => {
+    const body = renderDeliveryBody({
+      status: "cancelled",
+      deliveryType: "delivery",
+      customerName: "Ana",
+      orderNumber: 42,
+      businessName: "Golf",
+      template: null,
+    });
+    expect(body).toContain("cancelado");
+    expect(body).not.toMatch(/\{motivo\}|Motivo:\s*\./);
+  });
+});

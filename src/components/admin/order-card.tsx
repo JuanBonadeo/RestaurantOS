@@ -16,7 +16,6 @@ import { tonoDeEspera } from "@/lib/orders/espera";
 import { entregaLabel } from "@/lib/orders/entrega";
 import {
   DEFAULT_MARCH_LEAD_KITCHEN_MIN,
-  isScheduledForLater,
   marchAtForOrder,
 } from "@/lib/orders/scheduled";
 import type { OrderStatus } from "@/lib/orders/status";
@@ -142,7 +141,19 @@ export function OrderCard({
   // Spec 127 — el pedido agendado vive acá, en «Nuevos», con un chip que lo
   // dice: antes tenía su propia sección y eso movía media pantalla. Sigue
   // esperando su hora —lo marcha el cron— pero se ve como un pedido más.
-  const agendado = isScheduledForLater(order.scheduled_at);
+  // issue #259 — la alarma no puede apagarse justo cuando importa.
+  //
+  // Acá se usaba `isScheduledForLater(order.scheduled_at)`, que es
+  // `scheduled_at > now`: el pedido dejaba de contar como agendado **en el
+  // instante en que se pasaba de la hora prometida**. Con eso `marchAt` quedaba
+  // en null y el chip rojo «No marchó» desaparecía — el pedido de las 21:00 se
+  // ponía en rojo a las 20:40, y a las 21:00 en punto la tarjeta volvía a
+  // parecer normal, con el cliente ya en la puerta y la comida sin empezar.
+  //
+  // Lo que define «agendado» es tener hora pedida, no que esa hora todavía no
+  // haya llegado. Quién está a tiempo y quién no lo decide `marchAt` unas
+  // líneas más abajo, que es su trabajo.
+  const agendado = Boolean(order.scheduled_at);
   // La red del automatismo, del lado del cliente: un agendado que sigue acá
   // pasada su hora de marcha es un pedido que el cron no levantó. El aviso del
   // server lo emitiría el propio cron, así que si el cron **no corre** nadie

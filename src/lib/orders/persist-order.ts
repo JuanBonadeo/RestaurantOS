@@ -212,10 +212,26 @@ export async function persistOrder(
     { id: string; name: string; price_delta_cents: number; is_available: boolean }
   >();
   if (allModifierIds.length > 0) {
+    // issue #260 — los adicionales también se scopean por negocio.
+    //
+    // Esto buscaba sólo por id y del resultado miraba únicamente
+    // `is_available`. `persistOrder` escribe con el service client, así que las
+    // policies de `modifiers` —que cuelgan de `modifier_groups.business_id`, la
+    // tabla no tiene `business_id` propio— no corren. Resultado: mandando en
+    // `modifier_ids` el id de un adicional de OTRO local (en la nube conviven
+    // `demo`, `golf-jcr` y `kcc`) la línea entraba con su nombre y su precio.
+    // El `product_id` sí se validaba; el adicional no.
+    //
+    // El embed a `modifier_groups` es el único camino al negocio, y el filtro
+    // va sobre esa relación (`!inner`) para que un adicional ajeno directamente
+    // no vuelva en el resultado — y ahí lo caza el chequeo de cantidad de abajo.
     const { data: modifiers } = await supabase
       .from("modifiers")
-      .select("id, name, price_delta_cents, is_available")
-      .in("id", allModifierIds);
+      .select(
+        "id, name, price_delta_cents, is_available, modifier_groups!inner(business_id)",
+      )
+      .in("id", allModifierIds)
+      .eq("modifier_groups.business_id", business.id);
     if (!modifiers || modifiers.length !== allModifierIds.length) {
       return actionError("Algún adicional ya no está disponible.");
     }
@@ -695,6 +711,25 @@ export async function persistOrder(
         quantity: line.quantity,
         notes: line.notes,
         subtotal_cents: line.subtotal_cents,
+        // issue #260 — quién cargó la línea.
+        //
+        // Esto no se escribía nunca, y de ahí colgaba una cadena: sin
+        // `loaded_by` y sin mesa, `deriveAttributedMozo` no encuentra a nadie y
+        // el cobro queda con `attributed_mozo_id` en NULL. Consecuencias: el
+        // pedido no entra en «Ventas y propinas por mozo» (que filtra por esa
+        // columna), y —lo caro— si se cobró en efectivo el que lo cobró **no
+        // aparece en «deben rendir»**: tiene la plata encima y el sistema no se
+        // la reclama.
+        //
+        // El propio contrato del módulo ya decía cuál era la respuesta
+        // (`atribucion-mozo.ts`): «lo que no tiene mesa sigue cayendo en
+        // loaded_by, que ahí es la respuesta correcta: la cargó quien la
+        // cargó». Faltaba escribirlo.
+        //
+        // `mozoId` sólo viene por el camino de staff; el checkout público lo
+        // omite y queda null, que es lo correcto: ahí no lo cargó nadie del
+        // local.
+        loaded_by: options?.mozoId ?? null,
         // Spec 069. Los combos no llevan override (el precio vive en el padre),
         // así que van en null por el `kind`.
         ...(line.kind === "product"

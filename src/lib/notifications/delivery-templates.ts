@@ -59,8 +59,16 @@ export const DEFAULT_DELIVERY_TEMPLATES: Record<DeliveryNotifyStatus, string> = 
   on_the_way: "Tu pedido #{numero} salió y está en camino. 🛵",
   delivered:
     "Tu pedido #{numero} fue entregado. ¡Gracias por elegir {negocio}! 🙏",
+  // issue #259 — el `{motivo}` faltaba acá y sí estaba en `rejected`, así que
+  // el motivo que el encargado escribía al cancelar no llegaba a ningún lado.
+  // La ayuda del panel le promete lo contrario («El motivo de cancelación lo lee
+  // el cliente en el seguimiento de su pedido»), y por eso lo redacta pensando
+  // en él. Sin destinatario, esa redacción no servía para nada.
+  //
+  // `{motivo}` se renderiza vacío cuando no hay: un cancelado sin motivo sigue
+  // leyéndose bien.
   cancelled:
-    "Tu pedido #{numero} fue cancelado. Ante cualquier duda, escribinos. 🙏",
+    "Tu pedido #{numero} fue cancelado. {motivo} Ante cualquier duda, escribinos. 🙏",
   rejected:
     "¡Hola {cliente}! No pudimos tomar tu pedido #{numero}. {motivo} Perdón, y gracias por escribirnos. 🙏",
 };

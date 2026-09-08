@@ -120,6 +120,7 @@ export function OrdersRealtimeBoard({
   timezone,
   initialOrders,
   marchLeadKitchenMin,
+  deliveryFeeCents = 0,
   active,
 }: {
   businessId: string;
@@ -128,6 +129,8 @@ export function OrdersRealtimeBoard({
   initialOrders: AdminOrder[];
   /** Horarios que el negocio ofrece hoy para programar (spec 085). */
   marchLeadKitchenMin: number;
+  /** Envío del negocio, para que la hoja de carga lo muestre (issue #260). */
+  deliveryFeeCents?: number;
   /** Si la tab «Pedidos online» está a la vista. El panel no se desmonta al
    *  cambiar de tab, así que es la señal para revalidar al volver. */
   active: boolean;
@@ -494,6 +497,7 @@ export function OrdersRealtimeBoard({
         onClose={() => setCargarOpen(false)}
         timezone={timezone}
         marchLeadKitchenMin={marchLeadKitchenMin}
+        deliveryFeeCents={deliveryFeeCents}
       />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">

@@ -4,9 +4,11 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
+import { requireMozoActionContext } from "@/lib/mozo/auth";
 import { notifyDeliveryStatusChange } from "@/lib/notifications/delivery-notify";
 import { cancelarOrden } from "@/lib/orders/cancel-order";
 import { refundPayment } from "@/lib/payments/mercadopago";
+import { canConfirmOrder } from "@/lib/permissions/can";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
@@ -56,8 +58,25 @@ export async function rechazarPedido(
   } = await supabase.auth.getUser();
   if (!user) return actionError("No autenticado.");
 
-  // El SELECT bajo RLS es también la prueba de permisos: si este usuario no
-  // puede ver la orden de este negocio, no la puede rechazar.
+  // issue #259 — el rol, además de la pertenencia.
+  //
+  // Acá decía que «el SELECT bajo RLS es también la prueba de permisos». Eso
+  // prueba **tenancy**, no rol: cualquier miembro del negocio ve las órdenes de
+  // su negocio, así que un mozo o alguien de cocina podía rechazar un pedido —
+  // y este camino **devuelve la plata por Mercado Pago**. Sin tope y sin
+  // autorización de nadie.
+  //
+  // Es `canConfirmOrder` y no una condición nueva: rechazar es la otra mitad de
+  // la misma decisión, en la misma pantalla, y esa función ya dice por qué el
+  // mozo no entra («está en salón, no tiene visibilidad de la cola de pedidos
+  // online»).
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  if (!canConfirmOrder(ctxResult.data.role)) {
+    return actionError("No tenés permiso para rechazar pedidos.");
+  }
+
+  // El SELECT bajo RLS suma la guarda de tenancy.
   const { data: found } = await supabase
     .from("orders")
     .select("id, status, delivery_type, payment_status, mp_payment_id")

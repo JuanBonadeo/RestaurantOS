@@ -26,6 +26,26 @@ export async function createComandasForItems(
   itemsByStation: Map<string, string[]>,
   opts: {
     /**
+     * Primera ruteada de la orden (issue #259).
+     *
+     * Con esto el batch NO se calcula leyendo el último: se fuerza a 1 y se
+     * deja que el unique `(order_id, station_id, batch)` arbitre. Es la única
+     * parte atómica de todo el camino.
+     *
+     * Por qué hace falta: `routeOrderToCocina` chequea idempotencia contando
+     * comandas, y el batch se leía aparte con `max(batch)+1`. Dos pestañas
+     * confirmando el mismo pedido entraban así: la segunda contaba cero
+     * (la primera todavía no había insertado) pero para cuando leyó el batch ya
+     * veía el 1 — y creaba un **batch 2 con los mismos ítems**. La cocina
+     * recibía dos papeles bien formados, sin marca de reimpresión, y cocinaba
+     * dos veces.
+     *
+     * Confirmar una orden online pasa una sola vez: su batch siempre es el 1.
+     * Las tandas siguientes de una mesa son otro camino (`enviarComanda`), que
+     * sí necesita incrementar y por eso no pasa este flag.
+     */
+    primeraRuteada?: boolean;
+    /**
      * La observación de **este envío** (spec 128), ya normalizada por el
      * caller. Se escribe igual en todas las comandas que crea esta llamada:
      * una indicación de coordinación —«va todo junto»— que sólo le llega a un
@@ -42,16 +62,18 @@ export async function createComandasForItems(
   for (const [stationId, orderItemIds] of itemsByStation) {
     if (orderItemIds.length === 0) continue;
 
-    const { data: lastBatch } = await service
-      .from("comandas")
-      .select("batch")
-      .eq("order_id", orderId)
-      .eq("station_id", stationId)
-      .order("batch", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    const nextBatch =
-      ((lastBatch as { batch: number } | null)?.batch ?? 0) + 1;
+    let nextBatch = 1;
+    if (!opts.primeraRuteada) {
+      const { data: lastBatch } = await service
+        .from("comandas")
+        .select("batch")
+        .eq("order_id", orderId)
+        .eq("station_id", stationId)
+        .order("batch", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      nextBatch = ((lastBatch as { batch: number } | null)?.batch ?? 0) + 1;
+    }
 
     const { data: comanda, error: comandaErr } = await service
       .from("comandas")
@@ -66,6 +88,12 @@ export async function createComandasForItems(
       .select("id")
       .single();
     if (comandaErr || !comanda) {
+      // 23505 sobre la primera ruteada = otra pestaña ganó la carrera y esta
+      // comanda ya existe. No es un error: es la idempotencia funcionando, y
+      // seguir sería mandarle el mismo plato dos veces a la cocina.
+      if (opts.primeraRuteada && comandaErr?.code === "23505") {
+        continue;
+      }
       console.error("createComandasForItems · comanda insert", comandaErr);
       return { ok: false, error: "No pudimos crear la comanda." };
     }

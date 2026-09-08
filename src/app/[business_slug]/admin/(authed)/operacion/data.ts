@@ -94,6 +94,8 @@ export type PedidosData = {
    * para decir a qué hora va a salir el papel; el server hace la misma cuenta.
    */
   marchLeadKitchenMin: number;
+  /** Envío del negocio, para que la hoja de carga lo muestre (issue #260). */
+  deliveryFeeCents: number;
 };
 
 export type CajaData = { cajas: CajaConEstado[] };
@@ -291,7 +293,7 @@ export async function loadComandas(businessId: string): Promise<ComandasData> {
 export async function loadPedidos(
   businessId: string,
   timezone: string,
-  marchLead: { kitchenMin: number },
+  marchLead: { kitchenMin: number; deliveryFeeCents: number },
 ): Promise<PedidosData> {
   // Spec 127 — la grilla de chips del checkout ya no entra acá: el encargue del
   // staff escribe la hora libre, así que la hoja no necesita los horarios del
@@ -299,6 +301,7 @@ export async function loadPedidos(
   return {
     initialOrders: await getTodayOrders(businessId, timezone),
     marchLeadKitchenMin: marchLead.kitchenMin,
+    deliveryFeeCents: marchLead.deliveryFeeCents,
   };
 }
 

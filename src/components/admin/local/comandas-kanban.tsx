@@ -140,18 +140,37 @@ const COLUMNS: Column[] = [
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/** Reloj vivo: `Date.now()` que se refresca cada `everyMs`. */
-function useNow(everyMs: number): number {
-  const [now, setNow] = useState(() => Date.now());
+/**
+ * Reloj vivo: `Date.now()` que se refresca cada `everyMs`.
+ *
+ * Devuelve `null` hasta que monta, y eso NO es un detalle (issue #257).
+ * `useState(() => Date.now())` corre en el server y otra vez en el cliente, con
+ * dos relojes distintos. Acá el `now` no sólo pinta un texto: filtra **qué
+ * comandas se muestran** (la ventana de entregadas de la spec 082, más abajo).
+ * Una comanda parada justo en el borde de los 30 min entraba en un render y no
+ * en el otro → distinta cantidad de tarjetas → la secuencia de `useId` se
+ * corría → todos los ids que genera base-ui para los menús quedaban
+ * desalineados, y React tiraba hydration mismatch en cada carga. Los ids eran
+ * el síntoma; el árbol distinto era la causa.
+ *
+ * Con `null` el server y el primer render del cliente producen el MISMO árbol
+ * por construcción. El efecto pone la hora real enseguida, así que el precio es
+ * un frame sin tiempos, no un parpadeo visible.
+ */
+function useNow(everyMs: number): number | null {
+  const [now, setNow] = useState<number | null>(null);
   useEffect(() => {
+    setNow(Date.now());
     const i = setInterval(() => setNow(Date.now()), everyMs);
     return () => clearInterval(i);
   }, [everyMs]);
   return now;
 }
 
-function useElapsedMinutes(iso: string): number {
+/** Minutos desde `iso`, o `null` mientras el reloj no montó. */
+function useElapsedMinutes(iso: string): number | null {
   const now = useNow(30_000);
+  if (now === null) return null;
   return Math.max(0, Math.floor((now - new Date(iso).getTime()) / 60_000));
 }
 
@@ -159,7 +178,10 @@ function useElapsedMinutes(iso: string): number {
  * Mismo formato que el salón ("ahora", "5 min", "1h 20", "2h", "3 d") para
  * que el encargado lea el mismo lenguaje de tiempos en todas las tabs.
  */
-function formatRelativeTime(minutes: number): string {
+function formatRelativeTime(minutes: number | null): string {
+  // Sin reloj todavía (primer render): se reserva el lugar sin inventar un
+  // número. Ver `useNow`.
+  if (minutes === null) return "·";
   if (minutes < 1) return "ahora";
   if (minutes < 60) return `${minutes} min`;
   const hours = Math.floor(minutes / 60);
@@ -171,8 +193,8 @@ function formatRelativeTime(minutes: number): string {
   return `${days} d`;
 }
 
-function elapsedTone(min: number, terminal: boolean): string {
-  if (terminal) return "text-muted-foreground";
+function elapsedTone(min: number | null, terminal: boolean): string {
+  if (terminal || min === null) return "text-muted-foreground";
   if (min >= 15) return "text-rose-700";
   if (min >= 8) return "text-amber-700";
   return "text-muted-foreground";
@@ -441,7 +463,12 @@ export function ComandasKanban({
       comandas.filter(
         (c) =>
           matchesSalon(salonIds, c.floor_plan_id) &&
-          (c.status !== "entregado" || isEntregadaVisible(c.delivered_at, now)),
+          // `now === null` es el primer render (ver `useNow`): sin ventana, para
+          // que el árbol del server y el del cliente sean idénticos. El efecto
+          // la aplica un frame después.
+          (c.status !== "entregado" ||
+            now === null ||
+            isEntregadaVisible(c.delivered_at, now)),
       ),
     [comandas, salonIds, now],
   );
@@ -825,7 +852,7 @@ function ComandaCard({
             className={`text-xs font-medium tabular-nums ${elapsedTone(elapsed, isTerminal)}`}
           >
             {isTerminal
-              ? deliveredAgo < 1
+              ? deliveredAgo !== null && deliveredAgo < 1
                 ? "recién"
                 : `hace ${formatRelativeTime(deliveredAgo)}`
               : formatRelativeTime(elapsed)}
@@ -1094,18 +1121,22 @@ function ComandaMenu({
 // ─── Pill de salud del print agent (spec 35) ────────────────────────────────
 
 /**
- * Deriva la salud del print agent del último heartbeat, con un reloj vivo (no
- * depende del tiempo del server render). "Conectada" si el último latido fue
- * hace menos del umbral; si no, "sin conexión hace X". `null` = nunca reportó.
+ * Deriva la salud del print agent del último heartbeat, con un reloj vivo.
+ * "Conectada" si el último latido fue hace menos del umbral; si no, "sin
+ * conexión hace X". `null` = nunca reportó.
+ *
+ * Usa `useNow`, que arranca en `null`, y no un `useState(() => Date.now())`
+ * propio: ese initializer corre **también en el render del server** —el
+ * comentario viejo acá decía lo contrario— con un reloj distinto al del
+ * cliente. Y `now` no pinta sólo un texto: decide `connected`, o sea **qué
+ * rama se renderiza**. Con el heartbeat cerca del umbral, server y cliente
+ * armaban pills distintas. Mismo peligro que el reloj de las cards (#257).
  */
 function AgentHealthPill({ lastSeenAt }: { lastSeenAt: string | null }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const i = setInterval(() => setNow(Date.now()), 15_000);
-    return () => clearInterval(i);
-  }, []);
+  const now = useNow(15_000);
 
-  const msSince = lastSeenAt ? now - new Date(lastSeenAt).getTime() : null;
+  const msSince =
+    lastSeenAt && now !== null ? now - new Date(lastSeenAt).getTime() : null;
   const connected =
     msSince != null && msSince < PRINT_AGENT_OFFLINE_THRESHOLD_MS;
 
