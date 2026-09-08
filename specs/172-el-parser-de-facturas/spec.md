@@ -227,4 +227,51 @@ en la cuenta corriente; `capture` y achicado en el uploader.
 
 ## Verificación
 
-*(pendiente — se completa al cerrar)*
+**Implementado y verificado el 2026-09-08**, salvo la lectura real. `pnpm
+typecheck` limpio y **2.512 unitarios en verde** (43 más que la baseline).
+
+**Lo determinístico, que es casi todo, corre en CI:** el parseo de números
+argentinos, la conciliación aritmética, la conversión a envases y las guardas de
+columna. El test de aceptación de la feature está escrito: `82,600 kg × $17.500`
+→ `units = 8,26` y `unit_cost_cents = 17.500.000`, los tres números de la nota de
+pedido real de la carnicería.
+
+**Los umbrales del matcher, contra el catálogo real de 122 insumos**: 13 aciertos,
+0 errores, 6 abstenciones. `QUESO MUZZARELLA` → Muzarella entra a 0,650 (el caso
+que la 164·D2 dejó pendiente) y `PAN RALLADO` se abstiene a 0,355 en vez de
+escribir su precio sobre el panko. Queda como test de regresión: si alguien baja
+el umbral, ese archivo dice cuál es el primero que se rompe.
+
+**La RPC de la 165, cubierta**: 7 escenarios, incluida la conversión por envase,
+el consumo con costo real, el precio que se reescribe y el que no, la rama sin
+presentación, el insumo de otro negocio, y anular —el stock vuelve, el precio no.
+P13 la había reportado sin un solo test.
+
+**En vivo como Sofía (encargada) sobre el stack local:**
+
+- Los renglones de un comprobante cargado se ven: «8,26 × Compra 10kg · entraron
+  82,6 kg · $175.000 por envase», subtotal **$1.445.500** — el mismo número que el
+  papel. El stock del Entrecot subió de 15,11 a 97,71 kg.
+- La ficha del insumo muestra el historial: «08/09/2026 · Compra 10kg · $15.100 →
+  $175.000 · **+1059%**», en ámbar por superar el ±60%.
+- El endpoint de lectura, de punta a punta: auth, la guarda de tenant sobre el
+  `photoPath`, la descarga del bucket privado y el error tipado que no filtra el
+  mensaje del proveedor.
+
+### Lo que queda pendiente
+
+**La lectura real no se pudo probar: la `ANTHROPIC_API_KEY` del entorno devuelve
+401.** Todo lo que rodea al modelo está verificado; falta la corrida con las 5
+fotos, que es la que dice si el prompt sirve. Los escenarios 1, 2, 5 y 9 dependen
+de eso.
+
+**La `0085` no está aplicada al cloud** — en `golf-jcr`, hoy, una nota de crédito
+con renglones suma stock y pisa el costo con el precio de la devolución (#268,
+hallazgo 1). No es de esta spec, pero el lector multiplica la exposición.
+
+**El aviso de duplicado** (escenario 9) todavía no está: el número leído está
+disponible en la cabecera, falta el chequeo contra los comprobantes del proveedor
+antes de guardar.
+
+**Los renglones de producto** (bebida y reventa) quedaron fuera con la decisión
+D7: se lee la línea, no matchea insumo, y se dice.
