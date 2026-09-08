@@ -14,6 +14,8 @@ import { listBusinessMembers } from "@/lib/admin/members-query";
 import {
   getClockHistory,
   getMonthlyOverview,
+  monthKey,
+  parseMonthStart,
 } from "@/lib/rrhh/clock-queries";
 import { getBusiness } from "@/lib/tenant";
 
@@ -43,11 +45,14 @@ export default async function RrhhPage({
 
   const activeTab: RrhhTab = tab === "equipo" ? "equipo" : "asistencia";
 
-  const monthStart = parseMonth(month);
-  const currentMonth = `${monthStart.getFullYear()}-${String(monthStart.getMonth() + 1).padStart(2, "0")}`;
+  // El mes y el día del drill-down se resuelven en la timezone del local, no
+  // en la del proceso: en Vercel (UTC) el mes arrancaba el 31 a las 21:00 AR.
+  const timezone = business.timezone;
+  const monthStart = parseMonthStart(month, timezone);
+  const currentMonth = monthKey(monthStart, timezone);
 
   const [monthly, members, dayEntries] = await Promise.all([
-    getMonthlyOverview(business.id, monthStart),
+    getMonthlyOverview(business.id, monthStart, timezone),
     activeTab === "equipo"
       ? listBusinessMembers(business.id, { includeDisabled: disabled === "1" })
       : Promise.resolve([]),
@@ -55,6 +60,7 @@ export default async function RrhhPage({
       ? getClockHistory(business.id, {
           from: `${day}T00:00:00`,
           to: `${day}T23:59:59`,
+          timezone,
         })
       : Promise.resolve(undefined),
   ]);
@@ -90,13 +96,4 @@ export default async function RrhhPage({
       </Suspense>
     </PageShell>
   );
-}
-
-function parseMonth(month?: string): Date {
-  if (month && /^\d{4}-\d{2}$/.test(month)) {
-    const [y, m] = month.split("-").map(Number);
-    return new Date(y, m - 1, 1, 0, 0, 0, 0);
-  }
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
 }

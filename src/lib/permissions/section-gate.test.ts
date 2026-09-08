@@ -142,7 +142,12 @@ describe("a dónde rebota el que no puede ver la sección", () => {
     expect(landingPath("demo", "terminal", NO_PA)).toBe("/demo/admin/operacion");
     // El mozo no ve ninguna de las dos: su superficie es /mozo.
     expect(landingPath("demo", "mozo", NO_PA)).toBe("/demo/mozo");
-    expect(landingPath("demo", "personal", NO_PA)).toBe("/demo/mozo");
+    // issue #271 — el `personal` va al FICHAJE, no a /mozo. Este test decía
+    // /mozo y con eso fijaba el rulo: `requireMozo` no lo deja entrar, lo
+    // devuelve a /admin/login, el login lo manda a /admin por no ser mozo, y el
+    // layout del panel lo manda de vuelta a /mozo por no tener secciones.
+    // Cocina y limpieza no podían usar el sistema.
+    expect(landingPath("demo", "personal", NO_PA)).toBe("/demo/fichar");
   });
 
   it("el platform admin sin rol en el negocio cae en el dashboard", () => {
@@ -160,7 +165,11 @@ describe("a dónde rebota el que no puede ver la sección", () => {
       } else if (destino === "/demo/admin/operacion") {
         expect(canSee("operacion", role), `${role} → operación que no ve`).toBe(true);
       } else {
-        expect(destino, `${role} cayó fuera del panel a un lugar raro`).toBe("/demo/mozo");
+        // Fuera del panel sólo hay dos destinos legítimos, y cada rol tiene el
+        // suyo: el mozo el salón, el personal el fichaje. Cualquier otra cosa
+        // es un rebote.
+        const suyo = role === "personal" ? "/demo/fichar" : "/demo/mozo";
+        expect(destino, `${role} cayó fuera del panel a un lugar raro`).toBe(suyo);
       }
     }
   });

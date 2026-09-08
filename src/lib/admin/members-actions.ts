@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { buildAccessMessage } from "@/lib/admin/access-message";
+import { findAuthUserByEmail } from "@/lib/admin/auth-user-lookup";
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
@@ -137,6 +138,117 @@ async function assertCanManage(businessSlug: string) {
   };
 }
 
+type MiembroExistente = {
+  role: BusinessRoleInput;
+  pin: string | null;
+  full_name: string | null;
+  disabled_at: string | null;
+};
+
+async function buscarMiembro(
+  service: AnyClient,
+  businessId: string,
+  userId: string,
+): Promise<MiembroExistente | null> {
+  const { data } = await service
+    .from("business_users")
+    .select("role, pin, full_name, disabled_at")
+    .eq("business_id", businessId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  return (data as MiembroExistente | null) ?? null;
+}
+
+/**
+ * Las guardas de `updateMemberRole`, aplicadas al alta.
+ *
+ * El formulario de alta escribe con `upsert onConflict: business_id,user_id`.
+ * Para un email que ya es del equipo eso no da de alta a nadie: cambia el rol
+ * del que estaba. Era la misma escritura que `updateMemberRole` rechaza, por
+ * otra puerta — y por ahí se llegaba a dejar el negocio en cero admins, que
+ * desde la UI no tiene vuelta atrás (no queda nadie que pueda cambiar roles).
+ *
+ * Lo que se pierde: el alta ya no sirve como atajo para degradar a alguien.
+ * Para eso está el cambio de rol de la lista del equipo, con sus mismas reglas.
+ */
+async function guardaDeCambioDeRol(
+  service: AnyClient,
+  guard: { businessId: string; user: { id: string }; isPlatformAdmin: boolean },
+  userId: string,
+  nuevoRol: BusinessRoleInput,
+  existente: MiembroExistente | null,
+): Promise<string | null> {
+  if (!existente) return null;
+  if (existente.role === nuevoRol) return null;
+
+  if (userId === guard.user.id && !guard.isPlatformAdmin) {
+    return "No podés cambiarte el rol a vos mismo.";
+  }
+
+  if (existente.role === "admin" && existente.disabled_at === null) {
+    const { count } = await service
+      .from("business_users")
+      .select("user_id", { count: "exact", head: true })
+      .eq("business_id", guard.businessId)
+      .eq("role", "admin")
+      .is("disabled_at", null);
+    if ((count ?? 0) <= 1) {
+      return "Tiene que quedar al menos un Admin activo en el negocio.";
+    }
+  }
+
+  return null;
+}
+
+/**
+ * ¿Quién tiene ese PIN? Mira también a los dados de baja.
+ *
+ * El índice único de PIN es parcial (sólo filas activas), así que el chequeo de
+ * duplicados miraba únicamente a los activos y dejaba reciclar el PIN de un
+ * dado de baja. Eso daba verde y armaba una trampa a futuro: el día que alguien
+ * quería reactivar al primero, el índice lo rebotaba con un error genérico y no
+ * había ninguna pantalla para cambiarle el PIN a nadie.
+ *
+ * Lo que se pierde: el PIN de alguien dado de baja queda reservado. Para
+ * liberarlo hay que reasignárselo a esa persona (el alta sobre su mismo email
+ * pisa el PIN) — con 10.000 combinaciones, el costo es barato al lado de un
+ * empleado que no puede volver.
+ */
+async function pinOcupadoPor(
+  service: AnyClient,
+  businessId: string,
+  pin: string,
+  exceptUserId?: string,
+): Promise<{ nombre: string; deBaja: boolean } | null> {
+  const { data } = await service
+    .from("business_users")
+    .select("user_id, full_name, disabled_at")
+    .eq("business_id", businessId)
+    .eq("pin", pin);
+  type Fila = {
+    user_id: string;
+    full_name: string | null;
+    disabled_at: string | null;
+  };
+  const otros = ((data ?? []) as Fila[]).filter(
+    (m) => m.user_id !== exceptUserId,
+  );
+  // El activo primero: es el único choque accionable (el índice único sólo
+  // cuenta filas activas), y es el nombre que hay que decirle al admin.
+  const fila = otros.find((m) => m.disabled_at === null) ?? otros[0];
+  if (!fila) return null;
+  return {
+    nombre: fila.full_name ?? "otro miembro",
+    deBaja: fila.disabled_at !== null,
+  };
+}
+
+function errorDePin(ocupado: { nombre: string; deBaja: boolean }): string {
+  return ocupado.deBaja
+    ? `Ese PIN es de ${ocupado.nombre}, que está dado de baja. Elegí otro: si lo reciclás, después no vas a poder reactivarlo.`
+    : "Ese PIN ya está en uso en este negocio.";
+}
+
 function revalidateEmpleados(slug: string) {
   revalidatePath(`/${slug}/admin/empleados`);
   revalidatePath(`/${slug}/admin/usuarios`);
@@ -157,23 +269,45 @@ export async function inviteBusinessMemberByAdmin(
 
   const service = svc();
 
-  if (pin) {
-    const { data: pinConflict } = await service
-      .from("business_users")
-      .select("user_id")
-      .eq("business_id", guard.businessId)
-      .eq("pin", pin)
-      .is("disabled_at", null)
-      .maybeSingle();
-    if (pinConflict) return actionError("Ese PIN ya está en uso en este negocio.");
+  let user = await findAuthUserByEmail(service, email);
+
+  // El email puede ser de alguien que ya está en el equipo: entonces esto no
+  // es un alta sino una edición, y valen las mismas reglas que el cambio de rol.
+  const existente = user
+    ? await buscarMiembro(service, guard.businessId, user.id)
+    : null;
+
+  const errorDeRol = await guardaDeCambioDeRol(
+    service,
+    guard,
+    user?.id ?? "",
+    role,
+    existente,
+  );
+  if (errorDeRol) return actionError(errorDeRol);
+
+  // El PIN que va a quedar: si el formulario no manda uno, se conserva el que
+  // ya tenía. El tab de link ni siquiera dibuja el campo, así que un `pin`
+  // vacío ahí no es «borrale el PIN», es «no lo toques» — y borrárselo dejaba
+  // sin fichar a alguien que fichaba, sin decir una palabra.
+  const pinFinal = pin ?? existente?.pin ?? null;
+
+  // El rol Personal entra al sistema sólo por PIN: sin PIN no puede fichar, que
+  // es literalmente todo lo que hace en el sistema. La regla ya estaba escrita
+  // en los otros dos caminos (alta por contraseña y cambio de rol).
+  if (role === "personal" && !pinFinal) {
+    return actionError("El rol Personal requiere un PIN de 4 dígitos.");
   }
 
-  const {
-    data: { users: allUsers },
-  } = await service.auth.admin.listUsers({ perPage: 200 });
-  let user = allUsers.find(
-    (u) => u.email?.toLowerCase() === email.toLowerCase(),
-  );
+  if (pinFinal) {
+    const ocupado = await pinOcupadoPor(
+      service,
+      guard.businessId,
+      pinFinal,
+      user?.id,
+    );
+    if (ocupado) return actionError(errorDePin(ocupado));
+  }
 
   const siteUrl = getSiteUrl();
   // Usamos /auth/confirm con verifyOtp + token_hash en lugar del action_link
@@ -230,7 +364,7 @@ export async function inviteBusinessMemberByAdmin(
       role,
       full_name,
       phone: phone ?? null,
-      pin: pin ?? null,
+      pin: pinFinal,
       disabled_at: null,
     },
     { onConflict: "business_id,user_id" },
@@ -307,17 +441,6 @@ export async function createBusinessMemberWithPassword(
 
   const service = svc();
 
-  if (pin) {
-    const { data: pinConflict } = await service
-      .from("business_users")
-      .select("user_id")
-      .eq("business_id", guard.businessId)
-      .eq("pin", pin)
-      .is("disabled_at", null)
-      .maybeSingle();
-    if (pinConflict) return actionError("Ese PIN ya está en uso en este negocio.");
-  }
-
   if (role === "personal") {
     if (!pin) return actionError("El rol Personal requiere un PIN de 4 dígitos.");
     email = `personal-${pin}@${business_slug}.internal`;
@@ -327,12 +450,42 @@ export async function createBusinessMemberWithPassword(
     if (!password) return actionError("La contraseña es obligatoria.");
   }
 
-  const {
-    data: { users: allUsers },
-  } = await service.auth.admin.listUsers({ perPage: 200 });
-  const existing = allUsers.find(
-    (u) => u.email?.toLowerCase() === email!.toLowerCase(),
+  const existing = await findAuthUserByEmail(service, email!);
+
+  const existente = existing
+    ? await buscarMiembro(service, guard.businessId, existing.id)
+    : null;
+
+  const errorDeRol = await guardaDeCambioDeRol(
+    service,
+    guard,
+    existing?.id ?? "",
+    role,
+    existente,
   );
+  if (errorDeRol) return actionError(errorDeRol);
+
+  // Personal no tiene email propio: su cuenta se deriva del PIN
+  // (`personal-XXXX@slug.internal`). Reciclar el PIN de un Personal dado de
+  // baja no daba de alta a nadie nuevo — pisaba SU fila, y las horas fichadas
+  // que ya estaban en la base pasaban a figurar con el nombre del reemplazo.
+  if (role === "personal" && existente?.disabled_at) {
+    return actionError(
+      `Ese PIN es de ${existente.full_name ?? "alguien"}, que está dado de baja. Elegí otro PIN, o reactivalo desde el equipo.`,
+    );
+  }
+
+  const pinFinal = pin ?? existente?.pin ?? null;
+
+  if (pinFinal) {
+    const ocupado = await pinOcupadoPor(
+      service,
+      guard.businessId,
+      pinFinal,
+      existing?.id,
+    );
+    if (ocupado) return actionError(errorDePin(ocupado));
+  }
 
   let userId: string;
   let wasCreated = false;
@@ -394,7 +547,7 @@ export async function createBusinessMemberWithPassword(
       role,
       full_name,
       phone: phone ?? null,
-      pin: pin ?? null,
+      pin: pinFinal,
       disabled_at: null,
     },
     { onConflict: "business_id,user_id" },
@@ -456,6 +609,26 @@ export async function enableBusinessMember(
   if (!guard.ok) return actionError(guard.error);
 
   const service = svc();
+
+  // El índice único de PIN sólo cuenta filas activas, así que reactivar a
+  // alguien puede chocar contra el PIN que mientras tanto se le dio a otro. El
+  // update pelado devolvía "No pudimos reactivar al miembro." y ahí terminaba
+  // todo: ni qué pasó, ni cómo salir. Ahora dice quién tiene el PIN, que es lo
+  // único accionable (dárselo a otro, o dar de baja al que lo tiene).
+  const miembro = await buscarMiembro(service, guard.businessId, userId);
+  if (miembro?.pin) {
+    const ocupado = await pinOcupadoPor(
+      service,
+      guard.businessId,
+      miembro.pin,
+      userId,
+    );
+    if (ocupado && !ocupado.deBaja) {
+      return actionError(
+        `No pudimos reactivar a ${miembro.full_name ?? "este miembro"}: su PIN (${miembro.pin}) ahora lo usa ${ocupado.nombre}. Cambiale el PIN a ${ocupado.nombre} —o dalo de baja— y reintentá.`,
+      );
+    }
+  }
 
   const { error } = await service
     .from("business_users")

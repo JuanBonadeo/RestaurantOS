@@ -66,6 +66,15 @@ export function landingPath(
 ): string {
   if (canSee("dashboard", role, opts)) return `/${businessSlug}/admin`;
   if (canSee("operacion", role, opts)) return `/${businessSlug}/admin/operacion`;
+  // issue #271 — el rol `personal` no tiene NINGUNA sección del panel («none»
+  // en las diecinueve) y tampoco entra a /mozo. Sin esta rama caía en el
+  // fallback de mozo y quedaba rebotando para siempre entre tres pantallas:
+  // /admin/login lo mandaba a /admin por no ser mozo, el layout del panel lo
+  // mandaba a /mozo por no tener secciones, y `requireMozo` lo devolvía a
+  // /admin/login por no ser mozo. Cocina y limpieza no podían usar el sistema.
+  //
+  // Su superficie es el fichaje: el PIN es lo único que su rol usa.
+  if (role === "personal") return `/${businessSlug}/fichar`;
   // Mozo: su superficie es /mozo. Es lo que ya hacía `operacion/page.tsx`.
   return `/${businessSlug}/mozo`;
 }

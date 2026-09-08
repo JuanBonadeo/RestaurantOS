@@ -43,11 +43,16 @@ export default async function AdminLoginPage({
         .eq("user_id", user.id)
         .maybeSingle();
       if (membership && !membership.disabled_at) {
-        // Mozos van a /mozo (su pantalla operativa). El resto al panel.
+        // Cada rol a su superficie (issue #271). El `personal` no tiene
+        // ninguna sección del panel ni entra a /mozo: mandarlo a /admin lo
+        // dejaba rebotando entre tres pantallas para siempre. Su lugar es el
+        // fichaje.
         const target =
           membership.role === "mozo"
             ? `/${business_slug}/mozo`
-            : `/${business_slug}/admin`;
+            : membership.role === "personal"
+              ? `/${business_slug}/fichar`
+              : `/${business_slug}/admin`;
         redirect(target);
       }
     }

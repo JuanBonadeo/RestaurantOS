@@ -1,8 +1,59 @@
 import "server-only";
 
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
+
+export const TZ_AR = "America/Argentina/Buenos_Aires";
+
+/**
+ * Convierte un borde de rango a instante absoluto.
+ *
+ * Las fechas del fichaje entraban acá como strings sin offset
+ * (`"2026-09-08T00:00:00"`), y tanto `new Date(...)` como Postgres los
+ * interpretaban en la timezone del proceso / de la sesión. En la máquina de dev
+ * (AR) eso daba la medianoche correcta y el bug quedaba tapado; en Vercel el
+ * proceso corre en UTC, así que el día del fichaje arrancaba a las 21:00 de la
+ * noche anterior y se comía la cola de la cena.
+ *
+ * Lo que se pierde: un `from` sin offset ya NO significa «medianoche del
+ * proceso». Significa medianoche del local. Es la misma convención que usa el
+ * resto del código (`fromZonedTime` en operación, reservas y disponibilidad).
+ */
+function toInstant(value: string, timezone: string): string {
+  const traeOffset = /(?:Z|[+-]\d{2}:?\d{2})$/.test(value);
+  return traeOffset ? value : fromZonedTime(value, timezone).toISOString();
+}
+
+/**
+ * Primer instante del mes `YYYY-MM` en el calendario del local. Sin mes (o con
+ * uno inválido) devuelve el mes corriente del local.
+ *
+ * Vive acá y no en la página de RRHH porque ahí se armaba con
+ * `new Date(y, m - 1, 1)` —medianoche del PROCESO—, y en un server UTC eso es
+ * el 31 a las 21:00 AR: el panel del mes arrancaba en el mes anterior.
+ */
+export function parseMonthStart(
+  month: string | undefined,
+  timezone: string = TZ_AR,
+): Date {
+  const key =
+    month && /^\d{4}-\d{2}$/.test(month)
+      ? month
+      : formatInTimeZone(new Date(), timezone, "yyyy-MM");
+  return fromZonedTime(`${key}-01T00:00:00`, timezone);
+}
+
+/** `Date` → `"YYYY-MM"` en el calendario del local. */
+export function monthKey(date: Date, timezone: string = TZ_AR): string {
+  return formatInTimeZone(date, timezone, "yyyy-MM");
+}
+
+/** Fecha calendario del local (no la UTC) para agrupar horas por día. */
+function diaLocal(instant: string, timezone: string): string {
+  return formatInTimeZone(new Date(instant), timezone, "yyyy-MM-dd");
+}
 
 // Post-migration types not yet regenerated; cast to bypass strict table checks.
 // Remove after running `pnpm db:types` against a DB with 0045_rrhh applied.
@@ -22,9 +73,16 @@ export type ClockEntry = {
 
 export async function getClockHistory(
   businessId: string,
-  opts?: { from?: string; to?: string; userId?: string; limit?: number },
+  opts?: {
+    from?: string;
+    to?: string;
+    userId?: string;
+    limit?: number;
+    timezone?: string;
+  },
 ): Promise<ClockEntry[]> {
   const service = db();
+  const timezone = opts?.timezone ?? TZ_AR;
 
   let query = service
     .from("clock_entries")
@@ -33,8 +91,8 @@ export async function getClockHistory(
     .order("clock_in", { ascending: false })
     .limit(opts?.limit ?? 100);
 
-  if (opts?.from) query = query.gte("clock_in", opts.from);
-  if (opts?.to) query = query.lte("clock_in", opts.to);
+  if (opts?.from) query = query.gte("clock_in", toInstant(opts.from, timezone));
+  if (opts?.to) query = query.lte("clock_in", toInstant(opts.to, timezone));
   if (opts?.userId) query = query.eq("user_id", opts.userId);
 
   const { data: entries } = await query;
@@ -73,7 +131,7 @@ export type TodaySummary = {
 
 export async function getTodaySummary(
   businessId: string,
-  timezone: string = "America/Argentina/Buenos_Aires",
+  timezone: string = TZ_AR,
 ): Promise<TodaySummary> {
   const service = db();
 
@@ -85,7 +143,9 @@ export async function getTodaySummary(
     day: "2-digit",
   });
   const todayStr = formatter.format(now);
-  const dayStart = new Date(`${todayStr}T00:00:00`);
+  // `new Date("…T00:00:00")` parseaba en la timezone del proceso: en un server
+  // UTC el «hoy» arrancaba tres horas antes, a las 21:00 de ayer.
+  const dayStart = fromZonedTime(`${todayStr}T00:00:00`, timezone);
 
   const { data: entries } = await service
     .from("clock_entries")
@@ -168,22 +228,37 @@ export type MonthlyOverview = {
 export async function getMonthlyOverview(
   businessId: string,
   monthStart: Date,
+  timezone: string = TZ_AR,
 ): Promise<MonthlyOverview> {
   const service = db();
 
-  const monthEnd = new Date(monthStart);
-  monthEnd.setMonth(monthEnd.getMonth() + 1);
+  // El mes se re-ancla al calendario del local: `monthStart` sólo dice cuál es
+  // el mes, y las fronteras se calculan siempre en AR. Antes el `setMonth` (y
+  // el `new Date(y, m-1, 1)` de quien llama) corrían en la timezone del
+  // proceso, así que en un server UTC el mes empezaba y terminaba a las 21:00
+  // del día anterior — y las horas del borde caían en el mes vecino.
+  const [year, month] = formatInTimeZone(monthStart, timezone, "yyyy-MM")
+    .split("-")
+    .map(Number);
+  const inicioMes = fromZonedTime(
+    `${formatMonthKey(year, month)}-01T00:00:00`,
+    timezone,
+  );
+  const finMes = fromZonedTime(
+    `${formatMonthKey(year + (month === 12 ? 1 : 0), month === 12 ? 1 : month + 1)}-01T00:00:00`,
+    timezone,
+  );
 
   const { data: entries } = await service
     .from("clock_entries")
     .select("user_id, clock_in, clock_out, duration_minutes")
     .eq("business_id", businessId)
-    .gte("clock_in", monthStart.toISOString())
-    .lt("clock_in", monthEnd.toISOString())
+    .gte("clock_in", inicioMes.toISOString())
+    .lt("clock_in", finMes.toISOString())
     .order("clock_in", { ascending: true });
 
-  const rangeStart = monthStart.toISOString();
-  const rangeEnd = monthEnd.toISOString();
+  const rangeStart = inicioMes.toISOString();
+  const rangeEnd = finMes.toISOString();
 
   if (!entries || entries.length === 0) {
     return {
@@ -229,7 +304,9 @@ export async function getMonthlyOverview(
     // Use clock_in or fallback to wallclock duration (in-progress entries
     // count as zero for monthly view since clock_out is null).
     const minutes = e.duration_minutes ?? 0;
-    const day = e.clock_in.slice(0, 10);
+    // Día del LOCAL, no fecha UTC: un fichaje de las 22:00 AR es 01:00Z del día
+    // siguiente, y con `slice(0, 10)` sus horas se le acreditaban a mañana.
+    const day = diaLocal(e.clock_in, timezone);
 
     grandTotalMinutes += minutes;
 
@@ -302,6 +379,7 @@ export type WeeklySummaryRow = {
 export async function getWeeklySummary(
   businessId: string,
   weekStart: Date,
+  timezone: string = TZ_AR,
 ): Promise<WeeklySummaryRow[]> {
   const service = db();
 
@@ -337,7 +415,7 @@ export async function getWeeklySummary(
       days: new Set<string>(),
     };
     existing.totalMinutes += e.duration_minutes ?? 0;
-    existing.days.add(e.clock_in.slice(0, 10));
+    existing.days.add(diaLocal(e.clock_in, timezone));
     agg.set(e.user_id, existing);
   }
 
@@ -351,4 +429,9 @@ export async function getWeeklySummary(
       daysWorked: stats.days.size,
     };
   });
+}
+
+/** `2026-9` → `"2026-09"`. */
+function formatMonthKey(year: number, month: number): string {
+  return `${year}-${String(month).padStart(2, "0")}`;
 }

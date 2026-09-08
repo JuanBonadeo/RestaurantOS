@@ -74,6 +74,18 @@ vi.mock("@/lib/supabase/service", () => ({
   createSupabaseServiceClient: () => currentClient,
 }));
 
+// ── Techo de intentos por IP ───────────────────────────────────────────
+// El limitador real vive en `@/lib/rate-limit` (Upstash). Acá lo controlamos a
+// mano para poder probar el caso «budget agotado» sin Redis.
+let limitOk = true;
+const limitCalls: string[] = [];
+vi.mock("@/lib/rate-limit", () => ({
+  limitClockPunch: async (ip: string) => {
+    limitCalls.push(ip);
+    return { success: limitOk };
+  },
+}));
+
 vi.mock("next/headers", () => ({
   headers: async () => ({
     get: (k: string) => (k === "x-forwarded-for" ? currentXff : null),
@@ -91,6 +103,8 @@ const MEMBER: Member = {
 describe("clockPunch — enforcement de origen (spec 11)", () => {
   beforeEach(() => {
     currentXff = null;
+    limitOk = true;
+    limitCalls.length = 0;
   });
 
   it("PIN mal formado → error sin tocar la DB", async () => {
@@ -150,5 +164,48 @@ describe("clockPunch — enforcement de origen (spec 11)", () => {
     expect(r.ok).toBe(false);
     expect(captured.blocked).toHaveLength(1);
     expect(captured.blocked[0].ip).toBe("unknown");
+  });
+});
+
+// ── Enumeración de PINs ────────────────────────────────────────────────
+// `/fichar` es un kiosco público: no pide sesión, y el PIN es la credencial.
+// Sin techo de intentos, los 10.000 PINs de cuatro dígitos se barren desde
+// internet — y cada acierto no es una lectura, es un fichaje real insertado en
+// `clock_entries` a nombre de otro (horas que van a la liquidación).
+describe("clockPunch — techo de intentos por IP", () => {
+  beforeEach(() => {
+    currentXff = "200.51.23.7";
+    limitOk = true;
+    limitCalls.length = 0;
+  });
+
+  it("consume el techo con la IP del que ficha, incluso sin allowlist", async () => {
+    currentClient = makeFakeService({ origins: [], member: MEMBER, openEntry: null });
+    const r = await clockPunch("house", "1234");
+    expect(r.ok).toBe(true);
+    expect(limitCalls).toEqual(["200.51.23.7"]);
+  });
+
+  it("techo agotado → no ficha, no revela si el PIN existe, y deja rastro", async () => {
+    currentClient = makeFakeService({ origins: [], member: MEMBER, openEntry: null });
+    limitOk = false;
+
+    const r = await clockPunch("house", "1234");
+
+    expect(r.ok).toBe(false);
+    // El efecto que importa: NO hay fichaje nuevo.
+    expect(captured.entries).toHaveLength(0);
+    // Y el intento queda registrado — antes, sin allowlist cargada, barrer el
+    // padrón entero no dejaba una sola fila en ningún lado.
+    expect(captured.blocked).toHaveLength(1);
+    expect(captured.blocked[0].reason).toBe("rate_limit");
+    expect(captured.blocked[0].pin_masked).toBe("1**4");
+  });
+
+  it("PIN mal formado no consume el techo (no llega a la DB)", async () => {
+    currentClient = makeFakeService({});
+    const r = await clockPunch("house", "12");
+    expect(r.ok).toBe(false);
+    expect(limitCalls).toHaveLength(0);
   });
 });

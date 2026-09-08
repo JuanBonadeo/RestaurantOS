@@ -106,6 +106,40 @@ export async function limitLogin(ip: string): Promise<LimitResult> {
   return { success: a.success && b.success };
 }
 
+// Fichaje por PIN (`clockPunch`). `/{slug}/fichar` es un kiosco público: no
+// pide sesión y el PIN de 4 dígitos ES la credencial. Sin techo, los 10.000
+// PINs se barren desde internet, y acá cada acierto no es una lectura sino un
+// fichaje real a nombre de otro — horas que van a la liquidación.
+//
+// Los números están calibrados para el kiosco del local, no para el atacante:
+// todo el local sale por una sola IP (NAT), así que un cambio de turno con
+// cola frente a la comandera tiene que entrar cómodo. Con el techo por hora,
+// barrer el espacio entero pasa de minutos a más de tres días.
+//
+// Lo que se pierde: si el local llegara a fichar más de lo previsto en una
+// hora, el kiosco empieza a rebotar gente. Por eso los dos números son env.
+const CLOCK_PER_IP_PER_MIN = Number(process.env.CLOCK_RL_PER_IP_PER_MIN ?? 30);
+const CLOCK_PER_IP_PER_HOUR = Number(
+  process.env.CLOCK_RL_PER_IP_PER_HOUR ?? 120,
+);
+
+export async function limitClockPunch(ip: string): Promise<LimitResult> {
+  const burst = getLimiter(
+    "pedidos:clock:min",
+    Ratelimit.slidingWindow(CLOCK_PER_IP_PER_MIN, "1 m"),
+  );
+  const hourly = getLimiter(
+    "pedidos:clock:hour",
+    Ratelimit.slidingWindow(CLOCK_PER_IP_PER_HOUR, "1 h"),
+  );
+  // Sin Upstash configurado → degradación elegante, igual que el resto. En el
+  // deploy on-site esto significa que el techo real es la allowlist de la LAN.
+  if (!burst || !hourly) return { success: true };
+
+  const [a, b] = await Promise.all([burst.limit(ip), hourly.limit(ip)]);
+  return { success: a.success && b.success };
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // SPEC 25 (PENDING) — limitador de envío de códigos por WhatsApp, DESACTIVADO.
 // Preservado (comentado) hasta reactivar la verificación. Dos niveles por

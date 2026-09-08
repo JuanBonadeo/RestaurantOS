@@ -52,17 +52,30 @@ type Mode = "password" | "link";
 function RoleSelect({
   value,
   onChange,
+  excluir = [],
 }: {
   value: BusinessRoleInput;
   onChange: (v: BusinessRoleInput) => void;
+  /**
+   * Roles que este formulario no puede dar de alta (issue #271).
+   *
+   * El alta ahora exige PIN para `personal` —es lo único que ese rol usa para
+   * entrar, y sin PIN la persona queda dada de alta sin poder fichar—, pero el
+   * tab de link no tiene dónde pedirlo. Ofrecer la opción ahí es un callejón:
+   * el server la rechaza siempre y la pantalla no da forma de cumplir. Se saca
+   * del combo en vez de dibujar un campo más, porque el link existe justamente
+   * para que la persona complete sus datos del otro lado.
+   */
+  excluir?: readonly BusinessRoleInput[];
 }) {
+  const roles = BUSINESS_ROLES.filter((r) => !excluir.includes(r));
   return (
     <Select value={value} onValueChange={(v) => onChange(v as BusinessRoleInput)}>
       <SelectTrigger>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        {BUSINESS_ROLES.map((r) => (
+        {roles.map((r) => (
           <SelectItem key={r} value={r}>
             <div className="flex flex-col gap-0.5 py-0.5">
               <span className="font-medium">{ROLE_META[r].label}</span>
@@ -731,7 +744,11 @@ function LinkInviteForm({
               <FormItem>
                 <FormLabel>Rol</FormLabel>
                 <FormControl>
-                  <RoleSelect value={field.value} onChange={field.onChange} />
+                  <RoleSelect
+                    value={field.value}
+                    onChange={field.onChange}
+                    excluir={["personal"]}
+                  />
                 </FormControl>
               </FormItem>
             )}

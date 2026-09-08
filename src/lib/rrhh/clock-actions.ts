@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
+import { limitClockPunch } from "@/lib/rate-limit";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 import {
@@ -43,6 +44,30 @@ export async function clockPunch(
     .maybeSingle();
   if (!business) return actionError("Negocio no encontrado.");
 
+  const h = await headers();
+  const ip = clientIpFromForwarded(h.get("x-forwarded-for"));
+
+  // ── Techo de intentos por IP ───────────────────────────────────────
+  // Esto es un kiosco sin sesión y el PIN es la credencial, así que sin techo
+  // el espacio de 10.000 PINs se barre solo — y un acierto no devuelve un
+  // "sí": ficha entrada o salida de una persona real. El login ya se defendía
+  // así (`limitLogin`, spec 142) citando justamente que "un PIN válido sirve
+  // para fichar por otro"; faltaba el otro lado de esa misma puerta.
+  //
+  // Va ANTES de buscar el PIN para que el rechazo no dependa de si el PIN
+  // existe, y se registra en la misma tabla que los bloqueos de origen: sin
+  // allowlist cargada, barrer el padrón no dejaba una sola fila en ningún lado.
+  const { success: dentroDelTecho } = await limitClockPunch(ip ?? "unknown");
+  if (!dentroDelTecho) {
+    await service.from("clock_blocked_attempts").insert({
+      business_id: business.id,
+      ip: ip ?? "unknown",
+      pin_masked: maskPin(pin),
+      reason: "rate_limit",
+    });
+    return actionError("Demasiados intentos. Esperá un momento y probá de nuevo.");
+  }
+
   // ── Enforcement de origen (spec 11) ────────────────────────────────
   // Si el negocio configuró una allowlist, sólo se ficha desde un origen
   // autorizado de la LAN del local. Allowlist vacía = sin enforcement
@@ -54,13 +79,12 @@ export async function clockPunch(
     .eq("business_id", business.id);
   const cidrs = (origins ?? []).map((o) => o.cidr as string);
   if (cidrs.length > 0) {
-    const h = await headers();
-    const ip = clientIpFromForwarded(h.get("x-forwarded-for"));
     if (!isOriginAllowed(ip, cidrs)) {
       await service.from("clock_blocked_attempts").insert({
         business_id: business.id,
         ip: ip ?? "unknown",
         pin_masked: maskPin(pin),
+        reason: "origin",
       });
       return actionError(
         "El fichaje sólo está habilitado desde las computadoras del local.",
