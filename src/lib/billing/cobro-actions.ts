@@ -204,16 +204,29 @@ export async function closeOrderIfFullyPaid(
   if (!order) return { orderClosed: false };
   if (order.lifecycle_status !== "open") return { orderClosed: false };
 
-  // Suma de payments paid del order.
+  // Suma de payments paid del order, **en base**: `amount_cents` viaja con el
+  // ajuste por método adentro (issue #253), y acá se compara contra
+  // `total_cents`, que es lo que se debe sin ajustar. Con un descuento del 10%
+  // pagar $9.000 de una cuenta de $10.000 es pagar completo, y sumando el bruto
+  // esta cuenta daba que faltaban $1.000 para siempre.
+  //
+  // El bruto sigue siendo el que vale para la caja: `calculateExpectedCash` lee
+  // `payments.amount_cents` tal cual, porque eso es lo que hay en el cajón. Son
+  // dos magnitudes distintas y conviven a propósito.
+  //
+  // Ojo: esta es la MISMA regla que aplica `registrar_pago_tx` (migración
+  // 0076). Está escrita dos veces —acá y en SQL— y esa duplicación es lo que
+  // dejó el bug vivo la primera vez: se arregló un lado y el otro siguió
+  // diciendo que faltaba plata. Si cambia una, cambia la otra.
   const { data: paid } = await service
     .from("payments")
-    .select("amount_cents")
+    .select("amount_cents, adjustment_cents")
     .eq("order_id", orderId)
     .eq("payment_status", "paid");
-  const total_paid = (paid ?? []).reduce(
-    (acc, p) => acc + (p as { amount_cents: number }).amount_cents,
-    0,
-  );
+  const total_paid = (paid ?? []).reduce((acc, p) => {
+    const row = p as { amount_cents: number; adjustment_cents: number | null };
+    return acc + row.amount_cents - (row.adjustment_cents ?? 0);
+  }, 0);
 
   // Splits no cancelados.
   const { data: splits } = await service
@@ -634,6 +647,25 @@ export async function registrarPago(input: RegistrarPagoInput): Promise<
     remaining_cents: remainingCents,
   });
 
+  // issue #263 — la forma del comprobante se valida ANTES de tocar la plata.
+  //
+  // Esto vivía después de la RPC, o sea después de que el `payments` ya estaba
+  // commiteado, y devolvía `actionError`. Para el caller eso significa «no se
+  // cobró»: la venta de mostrador cancela la orden por el rescate de FR-007 y
+  // queda un pago vivo contra una orden cancelada. El operador lee «Datos del
+  // comprobante inválidos» y asume, con razón, que no entró nada — mientras la
+  // caja ya lo cuenta.
+  //
+  // Es validación de forma pura, sin I/O: no hay ninguna razón para hacerla
+  // tarde. La coherencia FISCAL (que una A tenga CUIT, que la condición case
+  // con la letra) sigue donde vive, en `emitInvoiceCore`.
+  const parsed = input.comprobante
+    ? ComprobanteElegidoSchema.safeParse(input.comprobante)
+    : null;
+  if (parsed && !parsed.success) {
+    return actionError("Datos del comprobante inválidos.");
+  }
+
   const attributed = await deriveAttributedMozo(service, order.id);
 
   // El registro del pago va por una RPC transaccional (migración 0007): lock
@@ -681,16 +713,9 @@ export async function registrarPago(input: RegistrarPagoInput): Promise<
   // El cierre de la orden + liberación de mesa se mantienen en TS
   // (closeOrderIfFullyPaid, guardado por lifecycle_status e idempotente): no se
   // duplica esa lógica en SQL. En un retry idempotente la orden ya está cerrada.
-  // Borde: el comprobante viene del navegador. La forma se valida acá; la
-  // coherencia fiscal (que una A tenga CUIT, que la condición case con la
-  // letra) la valida `emitInvoiceCore`, que es donde vive esa regla.
-  const parsed = input.comprobante
-    ? ComprobanteElegidoSchema.safeParse(input.comprobante)
-    : null;
-  if (parsed && !parsed.success) {
-    return actionError("Datos del comprobante inválidos.");
-  }
-
+  //
+  // El comprobante ya se validó de forma más arriba, ANTES de la RPC (#263): acá
+  // sólo se usa. La coherencia fiscal la sigue validando `emitInvoiceCore`.
   let orderClosed = false;
   let comprobante: AutoEmitResult | undefined;
   if (row.fully_paid && !row.idempotent) {
