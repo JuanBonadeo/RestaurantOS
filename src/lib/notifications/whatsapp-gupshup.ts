@@ -100,7 +100,8 @@ export function parseGupshupResponse(
 /**
  * Forma neutra de un evento entrante ya parseado.
  * - `text`: mensaje de texto del cliente → dispara el bot.
- * - `media`: mensaje no-texto (foto/audio/etc) → fase 1 no lo procesa.
+ * - `media`: mensaje no-texto (foto/audio/ubicación/etc) → el bot no lo procesa,
+ *   pero **sí** se anota en la bandeja, así que viaja con remitente e id.
  * - `event`: message-event (DLR) / user-event / system-event → se ackea y descarta.
  * - `ignore`: cualquier otra cosa (payload no reconocido).
  */
@@ -113,7 +114,16 @@ export type GupshupInbound =
       text: string;
       providerEventId: string;
     }
-  | { kind: "media" | "event" | "ignore"; app: string | null };
+  | {
+      kind: "media";
+      app: string | null;
+      phone: string;
+      name: string | null;
+      /** `image` | `audio` | `video` | `file` | `location` | `contact` | … */
+      mediaType: string;
+      providerEventId: string;
+    }
+  | { kind: "event" | "ignore"; app: string | null };
 
 /**
  * Parsea el envelope propio de Gupshup:
@@ -150,8 +160,18 @@ export function parseGupshupInbound(raw: unknown): GupshupInbound {
     return { kind: "ignore", app };
   }
   if (inner.type !== "text" || typeof text !== "string" || text.length === 0) {
-    // image/audio/video/file/location/contact → fase 1 no procesa media.
-    return { kind: "media", app };
+    // image/audio/video/file/location/contact → el bot no los procesa, pero el
+    // webhook los anota en la bandeja para que los atienda un humano: en
+    // Argentina el audio es el modo natural de escribir por WhatsApp, así que
+    // descartarlos era tirar pedidos y reservas enteros.
+    return {
+      kind: "media",
+      app,
+      phone,
+      name: inner.sender?.name ?? null,
+      mediaType: inner.type ?? "desconocido",
+      providerEventId,
+    };
   }
 
   return {

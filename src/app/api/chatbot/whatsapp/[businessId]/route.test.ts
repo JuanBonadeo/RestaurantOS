@@ -36,23 +36,46 @@ vi.mock("@/lib/supabase/service", () => ({
   }),
 }));
 
-const runChatbot = vi.fn(async (_input: Record<string, unknown>) => ({
+// El envío vive DENTRO de runChatbot (via `deliver`), así que el doble tiene
+// que ejercitarlo igual que el real: entrega y sólo entonces "persiste".
+const runChatbot = vi.fn(async (input: Record<string, unknown>) => {
+  const assistantMessage = "¡Hola! ¿Querés reservar?";
+  const deliver = input.deliver as
+    | ((t: string) => Promise<{ ok: boolean }>)
+    | undefined;
+  const delivery = deliver ? await deliver(assistantMessage) : { ok: true };
+  return {
+    conversationId: "c1",
+    assistantMessage: delivery.ok ? assistantMessage : "",
+    toolTrace: [],
+    delivered: delivery.ok,
+  };
+});
+const persistInboundMessage = vi.fn(async (_input: Record<string, unknown>) => ({
   conversationId: "c1",
-  assistantMessage: "¡Hola! ¿Querés reservar?",
-  toolTrace: [],
 }));
 class ChatbotRateLimitedError extends Error {}
-vi.mock("@/lib/chatbot/agent", () => ({ runChatbot, ChatbotRateLimitedError }));
+vi.mock("@/lib/chatbot/agent", () => ({
+  runChatbot,
+  persistInboundMessage,
+  ChatbotRateLimitedError,
+}));
 
 class ChatbotNotConfiguredError extends Error {}
 vi.mock("@/lib/chatbot/config-state", () => ({ ChatbotNotConfiguredError }));
 
-const sendWhatsapp = vi.fn(async () => ({
-  ok: true,
-  sent_at: "now",
-  messageId: "m1",
-}));
+type SendResult =
+  | { ok: true; sent_at: string; messageId: string | null }
+  | { ok: false; error: string };
+const sendWhatsapp = vi.fn(
+  async (): Promise<SendResult> => ({ ok: true, sent_at: "now", messageId: "m1" }),
+);
 vi.mock("@/lib/notifications/whatsapp-sender", () => ({ sendWhatsapp }));
+
+const recordWhatsappFailure = vi.fn(
+  async (_params: Record<string, unknown>) => undefined,
+);
+vi.mock("@/lib/notifications/whatsapp-outbox", () => ({ recordWhatsappFailure }));
 
 vi.mock("@/lib/reservations/chatbot-actions", () => ({
   normalizePhone: (s: string) => s.replace(/\D/g, ""),
@@ -93,7 +116,10 @@ beforeEach(() => {
   insertError = null;
   afterCbs.length = 0;
   runChatbot.mockClear();
+  persistInboundMessage.mockClear();
   sendWhatsapp.mockClear();
+  sendWhatsapp.mockResolvedValue({ ok: true, sent_at: "now", messageId: "m1" });
+  recordWhatsappFailure.mockClear();
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -117,6 +143,7 @@ describe("POST /api/chatbot/whatsapp/[businessId]", () => {
       conversationId: "c1",
       assistantMessage: "",
       toolTrace: [],
+      delivered: true,
     });
     const res = await POST(makeReq(textEnvelope()), ctx);
     expect(res.status).toBe(200);
@@ -154,6 +181,39 @@ describe("POST /api/chatbot/whatsapp/[businessId]", () => {
     };
     const res = await POST(makeReq(media), ctx);
     expect(res.status).toBe(200);
+    await runAfters();
+    expect(runChatbot).not.toHaveBeenCalled();
+
+    // El bot no la procesa, pero la encargada tiene que verla: antes el webhook
+    // cortaba antes de cualquier escritura y la foto/el audio no existían para
+    // el sistema, con el cliente viendo el tilde de entregado.
+    expect(persistInboundMessage).toHaveBeenCalledOnce();
+    const arg = persistInboundMessage.mock.calls[0]![0] as Record<string, unknown>;
+    expect(arg.contactIdentifier).toBe("5491122334455");
+    expect(String(arg.userMessage)).toContain("imagen");
+  });
+
+  it("Gupshup rechaza el envío → queda fila failed y el bot no figura como que contestó", async () => {
+    sendWhatsapp.mockResolvedValueOnce({ ok: false, error: "sin saldo" });
+    const res = await POST(makeReq(textEnvelope()), ctx);
+    expect(res.status).toBe(200);
+    await runAfters();
+    expect(sendWhatsapp).toHaveBeenCalledOnce();
+    // Sin esto, el envío fallido no dejaba ni un console.error: el único
+    // síntoma era que el cliente no volvía a escribir.
+    expect(recordWhatsappFailure).toHaveBeenCalledOnce();
+    const arg = recordWhatsappFailure.mock.calls[0]![0];
+    expect(arg.error).toBe("sin saldo");
+    expect(arg.toPhone).toBe("5491122334455");
+  });
+
+  it("error de base que NO es duplicado → 5xx para que Gupshup reintente", async () => {
+    // Colapsar todo error del insert de dedupe en "ya procesado" convertía un
+    // pool agotado o un timeout en un 200: Gupshup daba el mensaje por
+    // entregado y se perdía para siempre, justo cuando la base está sufriendo.
+    insertError = { code: "57014" }; // query_canceled (timeout)
+    const res = await POST(makeReq(textEnvelope()), ctx);
+    expect(res.status).toBeGreaterThanOrEqual(500);
     await runAfters();
     expect(runChatbot).not.toHaveBeenCalled();
   });

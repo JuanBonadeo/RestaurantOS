@@ -9,9 +9,10 @@ import {
   type BaseMessage,
 } from "@langchain/core/messages";
 import { tool, type StructuredToolInterface } from "@langchain/core/tools";
-import { formatInTimeZone, toZonedTime } from "date-fns-tz";
+import { formatInTimeZone } from "date-fns-tz";
 import { z } from "zod";
 
+import { currentDayOfWeek, dayOfWeekName } from "@/lib/day-of-week";
 import { limitChatbotTurn } from "@/lib/rate-limit";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import {
@@ -51,6 +52,9 @@ type StoredMessage = {
   content: string;
 };
 
+/** Resultado de intentar entregarle la respuesta al cliente. */
+export type ChatbotDeliveryResult = { ok: true } | { ok: false; error: string };
+
 export type RunChatbotInput = {
   businessId: string;
   businessSlug: string;
@@ -59,12 +63,27 @@ export type RunChatbotInput = {
   contactIdentifier: string;
   contactDisplayName?: string;
   userMessage: string;
+  /**
+   * Entrega la respuesta al cliente (en WhatsApp, `sendWhatsapp`). Va acá y no
+   * en el caller para que la burbuja del bot se persista **sólo si el envío
+   * salió bien**, que es la misma regla que ya aplicaba `sendStaffMessage`
+   * ("para no dejar mensajes fantasma"). Cuando el webhook mandaba después de
+   * que `runChatbot` había persistido, un rechazo de Gupshup dejaba la bandeja
+   * mostrando una conversación contestada que el cliente nunca recibió.
+   * Sin `deliver` (panel de prueba del admin) no hay nada que entregar.
+   */
+  deliver?: (text: string) => Promise<ChatbotDeliveryResult>;
 };
 
 export type RunChatbotResult = {
   conversationId: string;
   assistantMessage: string;
   toolTrace: ToolTraceEntry[];
+  /**
+   * `false` sólo cuando había una respuesta y `deliver` la rechazó. Sin
+   * respuesta que mandar (handoff, bot mudo) o sin `deliver`, es `true`.
+   */
+  delivered: boolean;
 };
 
 /**
@@ -215,10 +234,41 @@ async function loadChatbotEnabled(
 export async function runChatbot(
   input: RunChatbotInput,
 ): Promise<RunChatbotResult> {
-  // Gate de rate-limit: protege contra spam por contacto y DoS por costo a
-  // nivel negocio ANTES de tocar la DB o instanciar el modelo. El canal
-  // `web-test` se exime — ya está detrás de `ensureAdminAccess` en el admin.
-  if (input.channel !== "web-test") {
+  const service = createSupabaseServiceClient();
+
+  // `web-test` es el panel de prueba del admin: un ensayo cuyo error se ve en
+  // pantalla al instante y donde no hay nada que rescatar. Ahí seguimos cortando
+  // ANTES de escribir, para no llenar la bandeja de conversaciones de prueba.
+  const isDryRun = input.channel === "web-test";
+
+  const enabled = await loadChatbotEnabled(service, input.businessId);
+  const configState = resolveChatbotState({
+    hasApiKey: isAnthropicKeyConfigured(),
+    enabled,
+  });
+  if (isDryRun && !configState.ready) {
+    throw new ChatbotNotConfiguredError(configState.reason);
+  }
+
+  // Persistir el entrante es lo PRIMERO en un canal real. Los gates de
+  // configuración y de rate-limit corrían arriba de todo y se llevaban puesto el
+  // mensaje: el webhook ya había devuelto 200 y ya había quemado la fila de
+  // dedupe, así que ese WhatsApp no existía para nadie —ni en la bandeja ni para
+  // un reintento de Gupshup—. Y el estado en el que más se pierde es el default:
+  // `chatbot_enabled` arranca en `false`, o sea que apagar el bot para atender a
+  // mano era justo lo que hacía desaparecer los mensajes a atender.
+  const { conversationId, messageId: inboundMessageId } =
+    await persistInbound(service, input);
+
+  if (!configState.ready) {
+    throw new ChatbotNotConfiguredError(configState.reason);
+  }
+
+  // Rate-limit: lo que protege es el gasto del modelo, no la bandeja, así que
+  // corre DESPUÉS de persistir. El techo por negocio (240 turnos/hora) se
+  // tragaba los mensajes de TODOS los clientes durante el resto de la ventana,
+  // no sólo los del que abusó.
+  if (!isDryRun) {
     const { success } = await limitChatbotTurn(
       input.businessId,
       input.contactIdentifier,
@@ -226,29 +276,8 @@ export async function runChatbot(
     if (!success) throw new ChatbotRateLimitedError();
   }
 
-  const service = createSupabaseServiceClient();
-
-  // Gate de configuración: el bot sólo corre si la API key está presente en el
-  // entorno y el dueño lo dejó habilitado. Si no, cortamos ANTES de instanciar
-  // el modelo y devolvemos un error tipado que las rutas mapean a un mensaje
-  // legible ("falta API key") en vez de un 500 opaco. Nunca exponemos la key.
-  const enabled = await loadChatbotEnabled(service, input.businessId);
-  const state = resolveChatbotState({
-    hasApiKey: isAnthropicKeyConfigured(),
-    enabled,
-  });
-  if (!state.ready) throw new ChatbotNotConfiguredError(state.reason);
-
-  const contactId = await upsertContact(service, input);
-  const conversationId = await getOrOpenConversation(
-    service,
-    input.businessId,
-    contactId,
-  );
-
   // Handoff humano (spec 32): si el staff apagó el agente para ESTA conversación
-  // desde la bandeja, el bot no responde. Persistimos el mensaje entrante (para
-  // que aparezca en la bandeja y el humano lo vea) y NO invocamos al LLM.
+  // desde la bandeja, el bot no responde. El entrante ya quedó persistido arriba.
   // Fail-CLOSED: ante error de lectura NO respondemos (un turno no enviado es
   // recuperable; un WhatsApp ya enviado no). La invariante dura es "no se pisan".
   const agentEnabled = await loadConversationAgentEnabled(
@@ -257,12 +286,17 @@ export async function runChatbot(
     conversationId,
   );
   if (!agentEnabled) {
-    await insertMessage(service, conversationId, "user", input.userMessage);
-    await touchConversation(service, conversationId);
-    return { conversationId, assistantMessage: "", toolTrace: [] };
+    return {
+      conversationId,
+      assistantMessage: "",
+      toolTrace: [],
+      delivered: true,
+    };
   }
 
-  const history = await fetchHistory(service, conversationId);
+  // El historial excluye el mensaje que acabamos de insertar: viaja aparte como
+  // `userMessage` y si no, el modelo lo vería dos veces.
+  const history = await fetchHistory(service, conversationId, inboundMessageId);
   const { enabledTools, toolOverrides } = await loadToolConfig(
     service,
     input.businessId,
@@ -274,8 +308,6 @@ export async function runChatbot(
     enabledTools,
     toolOverrides,
   );
-
-  await insertMessage(service, conversationId, "user", input.userMessage);
 
   const { assistantMessage, toolTrace } = await invokeLlm({
     businessId: input.businessId,
@@ -293,8 +325,8 @@ export async function runChatbot(
   // y el staff pudo tomar la conversación en ese lapso (tomarla al ver el
   // entrante ES el flujo de la feature). Si el agente se apagó durante el turno,
   // descartamos la respuesta del bot para no pisar al humano — el entrante ya
-  // quedó persistido arriba. Cierra casi toda la ventana (queda solo el gap
-  // sub-ms hasta el sendWhatsapp del webhook).
+  // quedó persistido arriba. Con el envío adentro de esta función, la ventana se
+  // cierra entera: antes quedaba el gap hasta el `sendWhatsapp` del webhook.
   const stillEnabled = await loadConversationAgentEnabled(
     service,
     input.businessId,
@@ -302,13 +334,85 @@ export async function runChatbot(
   );
   if (!stillEnabled) {
     await touchConversation(service, conversationId);
-    return { conversationId, assistantMessage: "", toolTrace };
+    return {
+      conversationId,
+      assistantMessage: "",
+      toolTrace,
+      delivered: true,
+    };
+  }
+
+  // Envío ANTES de persistir: la burbuja del bot en la bandeja significa "esto
+  // le llegó al cliente". Si Gupshup rechaza (saldo, número inválido, 500), no
+  // dejamos la burbuja: el hilo queda arriba de todo y sin responder, que es
+  // exactamente lo que pasó, y la encargada puede contestarlo a mano.
+  if (assistantMessage.trim() && input.deliver) {
+    const delivery = await input.deliver(assistantMessage);
+    if (!delivery.ok) {
+      return {
+        conversationId,
+        assistantMessage: "",
+        toolTrace,
+        delivered: false,
+      };
+    }
   }
 
   await insertMessage(service, conversationId, "assistant", assistantMessage);
   await touchConversation(service, conversationId);
 
-  return { conversationId, assistantMessage, toolTrace };
+  return { conversationId, assistantMessage, toolTrace, delivered: true };
+}
+
+/**
+ * Deja el entrante del cliente en la bandeja: contacto, conversación abierta,
+ * fila en `chatbot_messages` y bump del hilo. Sin gates de ningún tipo — es lo
+ * que tiene que pasar sí o sí, porque el webhook ya ackeó 200 y ya quemó la
+ * fila de dedupe: lo que no se escriba acá no existe para nadie.
+ *
+ * El bump va pegado al insert (y no al final del turno) porque la bandeja
+ * ordena por `updated_at desc`: si el turno se cae en el medio, el hilo tiene
+ * que subir igual, con el mensaje sin responder adentro.
+ */
+async function persistInbound(
+  service: Service,
+  input: RunChatbotInput,
+): Promise<{ conversationId: string; messageId: string }> {
+  const contactId = await upsertContact(service, input);
+  const conversationId = await getOrOpenConversation(
+    service,
+    input.businessId,
+    contactId,
+  );
+  const messageId = await insertMessage(
+    service,
+    conversationId,
+    "user",
+    input.userMessage,
+  );
+  await touchConversation(service, conversationId);
+  return { conversationId, messageId };
+}
+
+/**
+ * Anota en la bandeja un entrante que el bot no va a procesar (audio, foto,
+ * ubicación). No corre gates ni invoca al modelo: sólo deja el rastro para que
+ * un humano lo atienda. Antes el webhook cortaba antes de cualquier escritura y
+ * esos mensajes no existían para el sistema, con el cliente viendo el tilde de
+ * entregado y esperando respuesta.
+ */
+export async function persistInboundMessage(input: {
+  businessId: string;
+  businessSlug: string;
+  businessName: string;
+  channel: ChatbotChannel;
+  contactIdentifier: string;
+  contactDisplayName?: string;
+  userMessage: string;
+}): Promise<{ conversationId: string }> {
+  const service = createSupabaseServiceClient();
+  const { conversationId } = await persistInbound(service, input);
+  return { conversationId };
 }
 
 export async function closeConversation(
@@ -329,18 +433,24 @@ export async function closeConversation(
 
 type Service = ReturnType<typeof createSupabaseServiceClient>;
 
-async function upsertContact(
+/**
+ * Contacto del canal (teléfono de WhatsApp). Exportada para poder testear la
+ * carrera del primer mensaje sin depender del scheduler.
+ */
+export async function upsertContact(
   service: Service,
   input: RunChatbotInput,
 ): Promise<string> {
-  const { data: existing } = await service
-    .from("chatbot_contacts")
-    .select("id")
-    .eq("business_id", input.businessId)
-    .eq("channel", input.channel)
-    .eq("identifier", input.contactIdentifier)
-    .maybeSingle();
+  const leer = () =>
+    service
+      .from("chatbot_contacts")
+      .select("id")
+      .eq("business_id", input.businessId)
+      .eq("channel", input.channel)
+      .eq("identifier", input.contactIdentifier)
+      .maybeSingle();
 
+  const { data: existing } = await leer();
   if (existing?.id) return existing.id;
 
   const { data: created, error } = await service
@@ -353,10 +463,19 @@ async function upsertContact(
     })
     .select("id")
     .single();
-  if (error || !created) {
-    throw new Error(`Failed to upsert contact: ${error?.message ?? "unknown"}`);
+  if (created?.id) return created.id;
+
+  // Cliente nuevo que manda dos mensajes pegados: los dos turnos leen sin
+  // encontrar fila y los dos insertan. La constraint UNIQUE (business_id,
+  // channel, identifier) hace que el perdedor reciba 23505 — y sin esta rama
+  // ese turno moría entero, así que el primer mensaje de un cliente nuevo se
+  // perdía. Es la misma guarda que `getOrOpenConversation` ya tenía treinta
+  // líneas más abajo: estaba escrita en un solo lado de los dos.
+  if (error?.code === "23505") {
+    const { data: raced } = await leer();
+    if (raced?.id) return raced.id;
   }
-  return created.id;
+  throw new Error(`Failed to upsert contact: ${error?.message ?? "unknown"}`);
 }
 
 async function getOrOpenConversation(
@@ -366,16 +485,26 @@ async function getOrOpenConversation(
 ): Promise<string> {
   const { data: open } = await service
     .from("chatbot_conversations")
-    .select("id, updated_at")
+    .select("id, updated_at, agent_enabled")
     .eq("contact_id", contactId)
     .is("closed_at", null)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
+  // El handoff se hereda al reciclar. La conversación nueva nacía con
+  // `agent_enabled` en su default (`true`), así que el "lo atiendo yo" de la
+  // encargada caducaba solo a las 8 h de silencio —de un servicio de noche al
+  // mediodía siguiente— sin que nadie lo decidiera ni lo viera: el bot volvía a
+  // contestar por encima de lo que el humano ya había acordado a mano. Se pierde
+  // que el handoff ahora es indefinido: para que el bot vuelva, alguien lo tiene
+  // que prender desde la bandeja.
+  let heredaHandoff = false;
+
   if (open?.id) {
     const ageMs = Date.now() - new Date(open.updated_at).getTime();
     if (ageMs < CONVERSATION_TTL_HOURS * 3_600_000) return open.id;
+    heredaHandoff = open.agent_enabled === false;
     // Vencida por inactividad → cerrarla y caer a abrir una nueva.
     await service
       .from("chatbot_conversations")
@@ -385,7 +514,11 @@ async function getOrOpenConversation(
 
   const { data: created, error } = await service
     .from("chatbot_conversations")
-    .insert({ business_id: businessId, contact_id: contactId })
+    .insert({
+      business_id: businessId,
+      contact_id: contactId,
+      ...(heredaHandoff ? { agent_enabled: false } : {}),
+    })
     .select("id")
     .single();
   if (created?.id) return created.id;
@@ -452,14 +585,18 @@ async function loadConversationAgentEnabled(
 async function fetchHistory(
   service: Service,
   conversationId: string,
+  excludeMessageId?: string,
 ): Promise<StoredMessage[]> {
   // Últimos HISTORY_WINDOW mensajes (desc + limit) y luego revertidos a orden
   // cronológico ascendente para el prompt. Acota lo que ve el modelo sin borrar
-  // nada de la DB.
-  const { data, error } = await service
+  // nada de la DB. `excludeMessageId` saca el entrante de este turno, que ahora
+  // se persiste antes de armar el prompt y viaja aparte como `userMessage`.
+  let q = service
     .from("chatbot_messages")
     .select("role, content")
-    .eq("conversation_id", conversationId)
+    .eq("conversation_id", conversationId);
+  if (excludeMessageId) q = q.neq("id", excludeMessageId);
+  const { data, error } = await q
     .order("created_at", { ascending: false })
     .limit(HISTORY_WINDOW);
   if (error) throw new Error(`Failed to load history: ${error.message}`);
@@ -471,11 +608,16 @@ async function insertMessage(
   conversationId: string,
   role: Role,
   content: string,
-): Promise<void> {
-  const { error } = await service
+): Promise<string> {
+  const { data, error } = await service
     .from("chatbot_messages")
-    .insert({ conversation_id: conversationId, role, content });
-  if (error) throw new Error(`Failed to insert message: ${error.message}`);
+    .insert({ conversation_id: conversationId, role, content })
+    .select("id")
+    .single();
+  if (error || !data) {
+    throw new Error(`Failed to insert message: ${error?.message ?? "unknown"}`);
+  }
+  return data.id;
 }
 
 async function touchConversation(service: Service, conversationId: string) {
@@ -483,6 +625,26 @@ async function touchConversation(service: Service, conversationId: string) {
     .from("chatbot_conversations")
     .update({ updated_at: new Date().toISOString() })
     .eq("id", conversationId);
+}
+
+/**
+ * Bloque «## Contexto temporal» que se le pega al system prompt.
+ *
+ * Sin esto el LLM no sabe qué día es hoy y resuelve mal las fechas relativas
+ * ("mañana", "el sábado") en reservas. Se computa en la zona horaria del
+ * negocio, no en la del server. Sólo fecha + día de semana (no la hora) para no
+ * romper el prompt caching cada minuto — la hora exacta la da
+ * `check_business_status` cuando hace falta.
+ */
+export function buildDateContext(now: Date, tz: string): string {
+  const todayIso = formatInTimeZone(now, tz, "yyyy-MM-dd");
+  // El nombre del día sale del MISMO reloj que la fecha (`formatInTimeZone`,
+  // vía `currentDayOfWeek`). Antes se leía con `toZonedTime(now, tz).getUTCDay()`,
+  // que sólo acierta si el proceso corre en UTC: en un server en UTC-3 el prompt
+  // decía "Hoy es sábado 2026-09-11" cuando el 11 era viernes, y el modelo
+  // resolvía "el sábado" a hoy → reserva tomada para el día equivocado.
+  const todayDow = currentDayOfWeek(tz, now);
+  return `\n\n## Contexto temporal\nHoy es ${nombreDelDia(todayDow)} ${todayIso} (zona horaria ${tz}). Usá esta fecha para resolver referencias relativas como "hoy", "mañana" o "el sábado". Las fechas que pases a las herramientas van siempre en formato YYYY-MM-DD.`;
 }
 
 async function resolveSystemPrompt(
@@ -510,16 +672,8 @@ async function resolveSystemPrompt(
       ? data.system_prompt
       : DEFAULT_SYSTEM_PROMPT;
 
-  // Contexto temporal: sin esto el LLM no sabe qué día es hoy y resuelve mal
-  // las fechas relativas ("mañana", "el sábado") en reservas. Lo computamos en
-  // la zona horaria del negocio (no la del server). Solo fecha + día de semana
-  // (no la hora) para no romper el prompt caching cada minuto — la hora exacta
-  // la da `check_business_status` cuando hace falta.
   const tz = business?.timezone || "America/Argentina/Buenos_Aires";
-  const now = new Date();
-  const todayIso = formatInTimeZone(now, tz, "yyyy-MM-dd");
-  const todayDow = toZonedTime(now, tz).getUTCDay();
-  const dateContext = `\n\n## Contexto temporal\nHoy es ${DAY_NAMES_ES[todayDow]} ${todayIso} (zona horaria ${tz}). Usá esta fecha para resolver referencias relativas como "hoy", "mañana" o "el sábado". Las fechas que pases a las herramientas van siempre en formato YYYY-MM-DD.`;
+  const dateContext = buildDateContext(new Date(), tz);
 
   return (
     template
@@ -607,15 +761,15 @@ function buildSearchProductsTool(businessId: string) {
   );
 }
 
-const DAY_NAMES_ES = [
-  "domingo",
-  "lunes",
-  "martes",
-  "miércoles",
-  "jueves",
-  "viernes",
-  "sábado",
-];
+/**
+ * El nombre del día para el prompt y para el JSON de las tools, en minúscula
+ * (van embebidos en prosa). La tabla vive en `@/lib/day-of-week` — acá había una
+ * copia, y con la copia se copiaba también la forma equivocada de calcular el
+ * índice.
+ */
+function nombreDelDia(dow: number): string {
+  return dayOfWeekName(dow).toLowerCase();
+}
 
 function parseTimeToMinutes(hms: string): number | null {
   // Accept HH:MM or HH:MM:SS.
@@ -632,6 +786,31 @@ function formatMinutesAsHHMM(total: number): string {
   const h = Math.floor(m / 60);
   const min = m % 60;
   return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+}
+
+/**
+ * Ubica "ahora" en el eje semanal del negocio: minutos 0..10079 contando desde
+ * el domingo 00:00 de su zona horaria. Es lo que usa `check_business_status`
+ * para decidir si estamos dentro de una ventana de `business_hours`.
+ */
+export function positionInBusinessWeek(
+  now: Date,
+  tz: string,
+): { dow: number; dayMinutes: number; weekMinutes: number } {
+  // Todo el eje se lee con `formatInTimeZone`, que no depende del TZ del
+  // proceso. El código anterior hacía `toZonedTime(now, tz).getUTC*()` con un
+  // comentario que afirmaba lo contrario ("toZonedTime returns a Date whose
+  // *UTC* methods reflect the target-zone wall clock"): eso es cierto sólo si el
+  // proceso corre en UTC. `toZonedTime` devuelve un Date pensado para leerse con
+  // los getters LOCALES, así que en un server en UTC-3 el eje se corría +1 día y
+  // +3 horas — un viernes 21:00 se leía como sábado 00:00. El JSON de
+  // `check_business_status` quedaba contradiciéndose solo: `current_time` salía
+  // bien (formatInTimeZone) y el día y los `today_hours`, del día siguiente.
+  const dow = currentDayOfWeek(tz, now);
+  const dayMinutes =
+    Number(formatInTimeZone(now, tz, "H")) * 60 +
+    Number(formatInTimeZone(now, tz, "m"));
+  return { dow, dayMinutes, weekMinutes: dow * 1440 + dayMinutes };
 }
 
 function buildBusinessStatusTool(businessId: string) {
@@ -666,15 +845,8 @@ function buildBusinessStatusTool(businessId: string) {
         });
       }
 
-      // Position "now" on a 0..10080 week-minutes axis (Sunday 00:00 = 0).
-      // date-fns-tz v3: toZonedTime returns a Date whose *UTC* methods reflect
-      // the target-zone wall clock. Using .getHours() here would re-apply the
-      // server's local offset and break on non-UTC servers.
-      const zoned = toZonedTime(now, tz);
-      const currentDow = zoned.getUTCDay();
-      const currentDayMin =
-        zoned.getUTCHours() * 60 + zoned.getUTCMinutes();
-      const currentWeekMin = currentDow * 1440 + currentDayMin;
+      const { dow: currentDow, weekMinutes: currentWeekMin } =
+        positionInBusinessWeek(now, tz);
 
       type Window = {
         startMin: number;
@@ -726,7 +898,7 @@ function buildBusinessStatusTool(businessId: string) {
         return JSON.stringify({
           is_open: true,
           current_time: currentTime,
-          current_day: DAY_NAMES_ES[currentDow],
+          current_day: nombreDelDia(currentDow),
           timezone: tz,
           closes_at: openWindow.closesAt,
           closes_in_minutes: minutesToClose,
@@ -751,7 +923,7 @@ function buildBusinessStatusTool(businessId: string) {
         return JSON.stringify({
           is_open: false,
           current_time: currentTime,
-          current_day: DAY_NAMES_ES[currentDow],
+          current_day: nombreDelDia(currentDow),
           timezone: tz,
           today_hours: todayHours,
           message: "No se encontraron próximos horarios.",
@@ -760,16 +932,16 @@ function buildBusinessStatusTool(businessId: string) {
 
       const dowDiff = (best.dow - currentDow + 7) % 7;
       const relative =
-        dowDiff === 0 ? "hoy" : dowDiff === 1 ? "mañana" : DAY_NAMES_ES[best.dow];
+        dowDiff === 0 ? "hoy" : dowDiff === 1 ? "mañana" : nombreDelDia(best.dow);
 
       return JSON.stringify({
         is_open: false,
         current_time: currentTime,
-        current_day: DAY_NAMES_ES[currentDow],
+        current_day: nombreDelDia(currentDow),
         timezone: tz,
         today_hours: todayHours,
         opens_next: {
-          day: DAY_NAMES_ES[best.dow],
+          day: nombreDelDia(best.dow),
           relative,
           at: best.at,
           in_minutes: best.delta,

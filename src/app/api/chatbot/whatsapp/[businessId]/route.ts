@@ -1,12 +1,17 @@
 import { after, NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { ChatbotRateLimitedError, runChatbot } from "@/lib/chatbot/agent";
+import {
+  ChatbotRateLimitedError,
+  persistInboundMessage,
+  runChatbot,
+} from "@/lib/chatbot/agent";
 import { ChatbotNotConfiguredError } from "@/lib/chatbot/config-state";
 import {
   parseGupshupInbound,
   verifyGupshupToken,
 } from "@/lib/notifications/whatsapp-gupshup";
+import { recordWhatsappFailure } from "@/lib/notifications/whatsapp-outbox";
 import { sendWhatsapp } from "@/lib/notifications/whatsapp-sender";
 import { normalizePhone } from "@/lib/reservations/chatbot-actions";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
@@ -66,8 +71,9 @@ export async function POST(
   }
   const inbound = parseGupshupInbound(raw);
 
-  // Sólo el texto dispara el bot; media / message-event / user-event → ack y descarte.
-  if (inbound.kind !== "text") {
+  // Los eventos de sistema (DLR, user-event) y los payloads que no reconocemos
+  // no tienen remitente ni contenido: no hay nada que guardar ni a quién.
+  if (inbound.kind !== "text" && inbound.kind !== "media") {
     return NextResponse.json({ ok: true, skipped: inbound.kind });
   }
 
@@ -87,8 +93,22 @@ export async function POST(
       type: "message",
     });
   if (dupErr) {
-    // 23505 (unique_violation) u otro → tratamos como ya procesado; ack sin reprocesar.
-    return NextResponse.json({ ok: true, skipped: "duplicate" });
+    // Sólo el 23505 (unique_violation) significa "ya lo procesamos". Cualquier
+    // otro error es la base sufriendo (pool agotado, timeout, deadlock): ahí
+    // hay que devolver 5xx para que Gupshup reintente. Colapsar los dos casos
+    // en un 200 convertía un incidente transitorio en pérdida definitiva —y era
+    // el único punto del webhook donde un 5xx es lo correcto.
+    if (dupErr.code === "23505") {
+      return NextResponse.json({ ok: true, skipped: "duplicate" });
+    }
+    console.error("whatsapp webhook: no pudimos registrar el entrante", {
+      businessId,
+      code: dupErr.code,
+    });
+    return NextResponse.json(
+      { error: "inbound_not_recorded" },
+      { status: 503 },
+    );
   }
 
   // 5. Resolver slug + nombre del negocio para el agente.
@@ -102,21 +122,46 @@ export async function POST(
     return NextResponse.json({ ok: true, skipped: "no-business" });
   }
 
-  // 6. Ack rápido + turno en background (presupuesto <10s de Gupshup). Si el
-  //    turno falla, es best-effort: Gupshup ya recibió el 200 y no reintenta.
-  //    Handoff (spec 32): `runChatbot` chequea `chatbot_conversations.agent_enabled`
-  //    y, si el staff apagó el agente, persiste el entrante y devuelve
-  //    `assistantMessage` vacío → no se manda respuesta (el `.trim()` de abajo).
   const businessSlug = business.slug;
   const businessName = business.name ?? businessSlug;
   const contactIdentifier = normalizePhone(inbound.phone);
   const contactDisplayName = inbound.name ?? undefined;
   const toPhone = inbound.phone;
+
+  // 6. Media (audio, foto, ubicación): el bot no la procesa, pero se anota en la
+  //    bandeja para que la atienda un humano. Antes se descartaba antes incluso
+  //    del dedupe, así que no quedaba rastro de ningún tipo — y el audio es el
+  //    modo natural de escribir por WhatsApp en Argentina.
+  if (inbound.kind === "media") {
+    const nota = describirMedia(inbound.mediaType);
+    after(async () => {
+      try {
+        await persistInboundMessage({
+          businessId,
+          businessSlug,
+          businessName,
+          channel: "whatsapp",
+          contactIdentifier,
+          contactDisplayName,
+          userMessage: nota,
+        });
+      } catch (err) {
+        console.error("whatsapp webhook: no pudimos anotar el media", err);
+      }
+    });
+    return NextResponse.json({ ok: true, skipped: "media" });
+  }
+
   const userMessage = inbound.text;
 
+  // 7. Ack rápido + turno en background (presupuesto <10s de Gupshup). Si el
+  //    turno falla, es best-effort: Gupshup ya recibió el 200 y no reintenta —
+  //    por eso `runChatbot` persiste el entrante antes que nada.
+  //    Handoff (spec 32): `runChatbot` chequea `chatbot_conversations.agent_enabled`
+  //    y, si el staff apagó el agente, persiste el entrante y no responde.
   after(async () => {
     try {
-      const result = await runChatbot({
+      await runChatbot({
         businessId,
         businessSlug,
         businessName,
@@ -124,17 +169,37 @@ export async function POST(
         contactIdentifier,
         contactDisplayName,
         userMessage,
+        // El envío va acá adentro, no después: la burbuja del bot en la bandeja
+        // significa "esto le llegó al cliente". Antes el webhook mandaba después
+        // de que el mensaje ya estaba persistido y descartaba el resultado (sin
+        // chequear `.ok`, sin log, sin fila en la cola), así que un rechazo de
+        // Gupshup dejaba la conversación como contestada y nadie lo notaba.
+        deliver: async (text) => {
+          const res = await sendWhatsapp({ businessId, to: toPhone, text });
+          if (res.ok) return { ok: true };
+          console.error("whatsapp webhook: Gupshup rechazó la respuesta", {
+            businessId,
+            error: res.error,
+          });
+          await recordWhatsappFailure({
+            businessId,
+            toPhone,
+            body: text,
+            error: res.error,
+          });
+          return { ok: false, error: res.error };
+        },
       });
-      if (result.assistantMessage?.trim()) {
-        await sendWhatsapp({
-          businessId,
-          to: toPhone,
-          text: result.assistantMessage,
-        });
-      }
     } catch (err) {
-      // Rate-limit: ackear y no responder (no spamear de vuelta).
-      if (err instanceof ChatbotRateLimitedError) return;
+      // Rate-limit: no respondemos (no spamear de vuelta), pero el entrante ya
+      // quedó en la bandeja y dejamos rastro — el techo por negocio corta a
+      // TODOS los clientes durante el resto de la ventana y antes era mudo.
+      if (err instanceof ChatbotRateLimitedError) {
+        console.warn("whatsapp webhook: turno cortado por rate-limit", {
+          businessId,
+        });
+        return;
+      }
       if (err instanceof ChatbotNotConfiguredError) {
         console.warn("whatsapp webhook: chatbot no configurado", { businessId });
         return;
@@ -144,4 +209,21 @@ export async function POST(
   });
 
   return NextResponse.json({ ok: true });
+}
+
+/** Nota que ve la encargada en la bandeja cuando entra algo que no es texto. */
+function describirMedia(mediaType: string): string {
+  const nombres: Record<string, string> = {
+    image: "una imagen",
+    audio: "un audio",
+    voice: "un audio",
+    video: "un video",
+    file: "un archivo",
+    document: "un archivo",
+    location: "una ubicación",
+    contact: "un contacto",
+    sticker: "un sticker",
+  };
+  const que = nombres[mediaType] ?? `un mensaje de tipo "${mediaType}"`;
+  return `[el cliente mandó ${que} — abrilo en WhatsApp para verlo y contestale desde acá]`;
 }

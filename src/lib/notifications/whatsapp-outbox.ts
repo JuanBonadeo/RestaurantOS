@@ -54,6 +54,38 @@ export async function enqueueWhatsapp(params: {
   }
 }
 
+/**
+ * Deja constancia en `whatsapp_outbox` de un envío que ya se intentó y falló.
+ *
+ * Existe para las respuestas del bot: son el único camino de salida a WhatsApp
+ * que no pasaba por el outbox, así que cuando Gupshup rechazaba (saldo agotado,
+ * app pausada, 500) no quedaba ni una fila ni un log — el canal se caía entero
+ * un viernes y no había forma de enterarse ni de reprocesar. Best-effort: nunca
+ * lanza; si no puede escribir la fila, no rompe el turno.
+ */
+export async function recordWhatsappFailure(params: {
+  businessId: string;
+  toPhone: string | null;
+  body: string;
+  error: string;
+  kind?: WhatsappOutboxKind;
+}): Promise<void> {
+  try {
+    const service = createSupabaseServiceClient() as unknown as GenericClient;
+    const { error } = await service.from("whatsapp_outbox").insert({
+      business_id: params.businessId,
+      to_phone: params.toPhone,
+      body: params.body,
+      kind: params.kind ?? "notification",
+      status: "failed",
+      error: params.error,
+    });
+    if (error) console.error("recordWhatsappFailure insert", error);
+  } catch (err) {
+    console.error("recordWhatsappFailure", err);
+  }
+}
+
 /** Decide y ejecuta el envío según las reglas, sin tocar la DB. */
 async function resolveSend(params: {
   businessId: string;

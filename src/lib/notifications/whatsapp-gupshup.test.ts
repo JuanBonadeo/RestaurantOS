@@ -130,6 +130,31 @@ describe("parseGupshupInbound", () => {
     expect(r.kind).toBe("media");
   });
 
+  it("media trae el remitente y el id, para poder guardarla en la bandeja", () => {
+    // El parser devolvía sólo `{kind:'media', app}`, así que el webhook no tenía
+    // con qué anotar el audio/foto/ubicación en la bandeja: quedaba sin
+    // teléfono al que atribuirlo y sin id para deduplicar.
+    const r = parseGupshupInbound({
+      app: "GolfHouse",
+      type: "message",
+      payload: {
+        id: "AUD-1",
+        source: "5491122334455",
+        type: "audio",
+        payload: { url: "https://filemanager.gupshup.io/a.ogg" },
+        sender: { phone: "5491122334455", name: "Ana" },
+      },
+    });
+    expect(r).toEqual({
+      kind: "media",
+      app: "GolfHouse",
+      phone: "5491122334455",
+      name: "Ana",
+      mediaType: "audio",
+      providerEventId: "AUD-1",
+    });
+  });
+
   it("message-event (DLR) → kind event", () => {
     const r = parseGupshupInbound({ app: "GolfHouse", type: "message-event", payload: {} });
     expect(r.kind).toBe("event");
