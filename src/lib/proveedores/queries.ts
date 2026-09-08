@@ -60,10 +60,71 @@ type ColumnasSpec158 = {
   due_date?: string | null;
   cancelled_at?: string | null;
   cancelled_reason?: string | null;
+  /** spec 173 · las páginas del comprobante. Misma historia: columna nueva que
+   *  todavía no está en `database.types.ts`. */
+  photo_urls?: string[] | null;
 };
 
 function extra(row: unknown): ColumnasSpec158 {
   return row as ColumnasSpec158;
+}
+
+// ── Fotos del comprobante ───────────────────────────────────────
+
+/** El bucket es privado: sin firma no se ve nada. Una hora alcanza para revisar
+ *  una compra y es lo que ya se usaba. */
+const FIRMA_SEGUNDOS = 3600;
+
+/**
+ * Las páginas de un comprobante, en orden — spec 173.
+ *
+ * `photo_urls` es la columna nueva y `photo_url` la vieja, que NO se dropeó: los
+ * comprobantes cargados antes de la migración tienen la foto sólo en la vieja y
+ * tienen que seguir viéndose. Si están las dos, manda el array — el alta escribe
+ * `photo_url` con la primera página, así que la vieja no agrega nada.
+ */
+function pathsDeFoto(row: { photo_url?: string | null }): string[] {
+  const páginas = extra(row).photo_urls;
+  if (páginas && páginas.length > 0) return páginas.filter(Boolean);
+  return row.photo_url ? [row.photo_url] : [];
+}
+
+/**
+ * Firma todas las fotos de una tanda en UNA sola llamada.
+ *
+ * Antes se firmaba de a una adentro del `for` de los comprobantes: con la ficha
+ * de un proveedor del Golf (cientos de compras) eso ya era un round-trip por
+ * fila, y con varias páginas por comprobante pasa a ser N×M. `createSignedUrls`
+ * hace todas de una.
+ *
+ * Devuelve un mapa path → URL firmada y **no lanza**: que no se pueda firmar una
+ * foto no puede tumbar la ficha entera del proveedor, donde lo que importa es la
+ * plata. Lo que no se firmó queda sin foto, y el error se ve en el log.
+ */
+async function firmarFotos(
+  service: ReturnType<typeof db>,
+  paths: string[],
+): Promise<Map<string, string>> {
+  const firmadas = new Map<string, string>();
+  const únicos = [...new Set(paths)];
+  if (únicos.length === 0) return firmadas;
+
+  const { data, error } = await service.storage
+    .from("supplier-invoices")
+    .createSignedUrls(únicos, FIRMA_SEGUNDOS);
+
+  if (error || !data) {
+    console.error("firmarFotos", error);
+    return firmadas;
+  }
+
+  // Se mapea por `path`, no por posición. El orden que devuelve coincide con el
+  // que se pidió, pero acá se está armando de qué comprobante es cada foto: si
+  // algún día no coincidiera, la compra mostraría el papel de otra.
+  for (const fila of data) {
+    if (fila.path && fila.signedUrl) firmadas.set(fila.path, fila.signedUrl);
+  }
+  return firmadas;
 }
 
 // ── Suppliers list (with aggregated stats) ──────────────────────
@@ -163,17 +224,22 @@ export async function getSupplierInvoices(
 
   if (!invoices.length) return [];
 
-  const results: SupplierInvoice[] = [];
-  for (const row of invoices) {
-    let photoSignedUrl: string | null = null;
-    if (row.photo_url) {
-      const { data } = await service.storage
-        .from("supplier-invoices")
-        .createSignedUrl(row.photo_url, 3600);
-      photoSignedUrl = data?.signedUrl ?? null;
-    }
+  // Todas las fotos de todos los comprobantes, en una sola firma.
+  const firmadas = await firmarFotos(
+    service,
+    invoices.flatMap((row) => pathsDeFoto(row)),
+  );
 
-    results.push({
+  return invoices.map((row) => {
+    // Lo que no se pudo firmar se cae del array. Pasa cuando el objeto ya no
+    // está en el bucket (una foto borrada a mano, un huérfano de una subida a
+    // medias): pintar el cuadrito de imagen rota es peor que mostrar una página
+    // menos.
+    const photoUrls = pathsDeFoto(row)
+      .map((p) => firmadas.get(p))
+      .filter((u): u is string => Boolean(u));
+
+    return {
       id: row.id,
       businessId: row.business_id,
       supplierId: row.supplier_id,
@@ -181,7 +247,8 @@ export async function getSupplierInvoices(
       invoiceDate: row.invoice_date,
       totalCents: row.total_cents,
       photoUrl: row.photo_url,
-      photoSignedUrl,
+      photoSignedUrl: photoUrls[0] ?? null,
+      photoUrls,
       notes: row.notes,
       createdBy: row.created_by,
       createdAt: row.created_at,
@@ -190,10 +257,8 @@ export async function getSupplierInvoices(
       dueDate: extra(row).due_date ?? null,
       cancelledAt: extra(row).cancelled_at ?? null,
       cancelledReason: extra(row).cancelled_reason ?? null,
-    });
-  }
-
-  return results;
+    };
+  });
 }
 
 // ── Supplier stats by date range ────────────────────────────────

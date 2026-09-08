@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Ban, Link2, Pencil, Plus, Wallet } from "lucide-react";
 import { formatCurrency } from "@/lib/currency";
@@ -23,9 +24,8 @@ import {
 } from "@/lib/proveedores/cuenta-corriente-actions";
 import { toast } from "sonner";
 import type { CuentaDeProveedor } from "@/lib/proveedores/cuenta-corriente-queries";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { SupplierDialog } from "./supplier-dialog";
-import { InvoiceDialog } from "./invoice-dialog";
 import { IngredientLinkDialog } from "./ingredient-link-dialog";
 import { PagoDialog } from "./pago-dialog";
 import { CuentaCorrientePanel } from "./cuenta-corriente-panel";
@@ -141,22 +141,20 @@ export function SupplierDetail({
               .join(" · ") || "Sin datos de contacto"}
           </p>
         </div>
-        <InvoiceDialog
-          slug={slug}
-          supplierId={supplier.id}
-          businessId={businessId}
-          concepts={concepts}
-          defaultConceptId={supplier.defaultExpenseConceptId}
-          paymentTermsDays={supplier.paymentTermsDays}
-          insumos={ingredientOptions}
-          onSuccess={refreshData}
-          trigger={
-            <Button variant="outline" size="sm">
-              <Plus className="size-3.5 mr-1.5" />
-              Cargar compra
-            </Button>
-          }
-        />
+        {/* spec 173 · la carga dejó de ser un diálogo de 384 px y pasó a una
+            pantalla propia. El `?proveedor` es lo que hace que entrar desde acá
+            siga siendo entrar «por» este proveedor: llega fijado y no se
+            pregunta de quién es la compra. */}
+        {/* Un <Link> con la pinta del botón, y no un `<Button render={<Link/>}>`:
+            el Button de base-ui exige un <button> nativo y avisa por consola en
+            cuanto se le pone otra cosa adentro. */}
+        <Link
+          href={`/${slug}/admin/proveedores/compras/nueva?proveedor=${supplier.id}`}
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+        >
+          <Plus className="size-3.5 mr-1.5" />
+          Cargar compra
+        </Link>
         <PagoDialog
           slug={slug}
           supplierId={supplier.id}

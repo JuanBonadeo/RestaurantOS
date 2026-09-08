@@ -120,7 +120,33 @@ export const SupplierInvoiceInput = z
     invoice_number: z.string().max(50).nullable().optional(),
     invoice_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida."),
     total_cents: z.number().int(),
+    /**
+     * La foto vieja, de a una. **Se mantiene a propósito**: la migración que
+     * agrega `photo_urls` no dropea `photo_url`, y entre que se aplica y que el
+     * deploy de Vercel está arriba hay una ventana donde el diálogo viejo sigue
+     * mandando este campo y nada más. El server rellena las dos columnas.
+     */
     photo_url: z.string().nullable().optional(),
+    /**
+     * Las páginas del comprobante, en orden — spec 173.
+     *
+     * «A veces los tickets son muy largos»: un ticket de comanda de un metro se
+     * fotografía en tres o cuatro pedazos, y hasta ahora el segundo pedazo no
+     * tenía dónde guardarse. El orden del array ES el orden de las páginas: el
+     * lector une las lecturas por ese índice y la cabecera sale de la primera
+     * página que traiga cada campo (el total, de la última — está al pie).
+     *
+     * El techo de 5 no es estético: cada página es una llamada al modelo, y con
+     * `maxDuration = 60` en el route no entran muchas más aunque vayan en
+     * paralelo.
+     *
+     * El `min(1)` de cada path espeja el CHECK de la 0095, que rechaza el string
+     * vacío y el null adentro del array. Sin esto, un path vacío —una subida que
+     * quedó a medias— rebota recién en la base, con un 23514 que la action
+     * traduce a «No pudimos cargar la factura» y no dice cuál de las cinco fotos
+     * era.
+     */
+    photo_urls: z.array(z.string().min(1)).max(5).default([]),
     notes: z.string().max(500).nullable().optional(),
     document_type: z.enum(DOCUMENT_TYPES).default("interno"),
     expense_concept_id: z.string().uuid().nullable().optional(),

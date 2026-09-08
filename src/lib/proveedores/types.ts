@@ -28,8 +28,26 @@ export type SupplierInvoice = {
   invoiceNumber: string | null;
   invoiceDate: string;
   totalCents: number;
+  /**
+   * El PATH en el bucket de la primera página (columna vieja `photo_url`). No es
+   * una URL navegable: el bucket es privado y hay que firmarla.
+   */
   photoUrl: string | null;
+  /** La primera página, ya firmada. Es `photoUrls[0]`, y está para no romper a
+   *  quien todavía muestra una sola foto (`supplier-detail` → `CuentaCorrientePanel`). */
   photoSignedUrl: string | null;
+  /**
+   * Todas las páginas del comprobante, FIRMADAS y en orden — spec 173.
+   *
+   * Ojo con el nombre: `photoUrl` (singular) es un path crudo y `photoUrls`
+   * (plural) son URLs firmadas. Se llaman así porque el singular ya existía con
+   * ese significado y renombrarlo tocaba archivos de otras specs; lo que se
+   * consume en pantalla es siempre el plural.
+   *
+   * Los comprobantes cargados antes de la migración tienen `photo_urls` vacío y
+   * `photo_url` con la única foto: acá llegan igual, como array de uno.
+   */
+  photoUrls: string[];
   notes: string | null;
   createdBy: string | null;
   createdAt: string;

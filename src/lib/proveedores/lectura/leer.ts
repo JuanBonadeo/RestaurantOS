@@ -6,12 +6,28 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 
 import { PROMPT_LECTURA } from "./prompt";
 import { LecturaModelo } from "./schema-modelo";
+import type { PaginaLeida } from "./unir-paginas";
 
 /**
- * La única capa no determinística del lector — spec 172.
+ * La única capa no determinística del lector — spec 172, ampliada en la 173.
  *
  * El modelo transcribe y nada más: la conversión, la verificación aritmética y
  * el match viven en módulos puros que se testean sin gastar un peso.
+ *
+ * **Un comprobante puede venir en varias fotos, y cada foto es UNA llamada.**
+ * El ticket del mayorista es una tira de 80 cm y no entra legible en una imagen.
+ * La tentación es mandar las cinco imágenes en un solo `messages.create`, y es la
+ * decisión equivocada por dos razones medidas:
+ *
+ * · **El techo.** La ruta tiene `maxDuration = 60` y acá `TECHO_MS = 45_000`. Una
+ *   lectura manuscrita sola tarda 15-40 s; cinco imágenes en un request tardan lo
+ *   que tardan las cinco juntas y se comen el presupuesto entero. Cuando corta,
+ *   se pierden las cinco. En paralelo el reloj es el de la página más lenta.
+ * · **El aislamiento.** Una foto movida, un HEIC renombrado o un objeto que
+ *   desapareció del bucket tiran SU llamada y nada más. Las otras cuatro llegan,
+ *   y `unirPaginas` arma el comprobante con lo que hay. Por eso el orquestador
+ *   devuelve `PaginaLeida[]` con fallas adentro en vez de tirar una excepción:
+ *   que una página falle es un resultado, no un error del sistema.
  *
  * El modelo se puede pisar por env, como el chatbot (`CHATBOT_MODEL`) y el
  * asistente de la guía (`AYUDA_MODEL`): bajar a `claude-sonnet-5` es una decisión
@@ -23,11 +39,30 @@ const MODELO = process.env.COMPROBANTE_MODEL ?? "claude-opus-5";
 const TECHO_MS = 45_000;
 
 /**
+ * Cinco fotos por comprobante. El mismo número que el CHECK de la migración 0095
+ * y que el `MAX_FOTOS` del uploader — acá es una regla de plata (cinco llamadas
+ * en paralelo con `effort: "high"` es lo que el techo de 45 s tolera), allá es
+ * una regla de integridad.
+ */
+export const MAX_PAGINAS = 5;
+
+/**
  * El techo por imagen de la API es 5 MB y el base64 infla 4/3, así que el
  * archivo tiene que quedar debajo de ~3,6 MB. El uploader ya achica a 2200 px,
  * pero esto es la red: un objeto viejo del bucket puede ser más grande.
  */
 const MAX_BYTES = 3_600_000;
+
+/**
+ * Y un techo sobre la SUMA, que el de arriba no cubre.
+ *
+ * Cinco imágenes de 3,5 MB pasan el control de a una y son 17,5 MB de buffers que
+ * después se vuelven ~23 MB de base64, todo vivo al mismo tiempo en una función
+ * serverless. El caso normal —lo que sale del uploader— son 5 fotos de ~800 KB:
+ * 12 MB deja margen de sobra para eso y corta el caso patológico antes de gastar
+ * un peso en la API.
+ */
+const MAX_BYTES_TOTAL = 12_000_000;
 
 const MIMES = ["image/jpeg", "image/png", "image/gif", "image/webp"] as const;
 type MimeSoportado = (typeof MIMES)[number];
@@ -60,6 +95,9 @@ export function detectarMime(bytes: ArrayBuffer): MimeSoportado | "application/p
 export type ErrorLectura =
   | "sin_api_key"
   | "imagen_muy_pesada"
+  /** No la foto sola: las N juntas. Es un problema del lote, no de una página. */
+  | "lote_muy_pesado"
+  | "demasiadas_paginas"
   | "formato_no_soportado"
   | "timeout"
   | "respuesta_invalida"
@@ -78,23 +116,63 @@ export type ResultadoLectura =
   | { ok: true; lectura: LecturaModelo }
   | { ok: false; error: ErrorLectura };
 
+/** Una foto ya bajada del bucket, con el lugar que ocupa en el comprobante. */
+export type PaginaParaLeer = {
+  /** 1-based, en el orden del rail. Es el que viaja hasta el renglón. */
+  pagina: number;
+  bytes: ArrayBuffer;
+  /**
+   * Lo que dice Storage. Sólo sirve para el log: el que viaja a la API sale de
+   * `detectarMime`. Ver el comentario de `leerPagina`.
+   */
+  mimeDeclarado: string;
+};
+
 export function hayApiKey(): boolean {
   return Boolean(process.env.ANTHROPIC_API_KEY?.trim());
 }
 
-export async function leerComprobante(
+/**
+ * Una página, una llamada.
+ *
+ * `pagina` y `deCuantas` NO son decorativos y NO van al bloque `system`: viajan
+ * en el mensaje `user` porque el system está cacheado con `cache_control:
+ * ephemeral` y cualquier cosa variable adentro rompe el caché en cada llamada —
+ * con cinco páginas en paralelo eso es cinco veces el prompt entero a precio
+ * lleno, en cada comprobante. El prompt (v2) explica qué hacer con ese dato: una
+ * página sin encabezado sigue siendo un comprobante, y el total es el de ESTA
+ * página o ninguno.
+ */
+export async function leerPagina(
   bytes: ArrayBuffer,
-  mime: string,
+  mimeDeclarado: string,
+  pagina: number,
+  deCuantas: number,
 ): Promise<ResultadoLectura> {
   if (!hayApiKey()) return { ok: false, error: "sin_api_key" };
   if (bytes.byteLength > MAX_BYTES) return { ok: false, error: "imagen_muy_pesada" };
 
-  // El MIME declarado es una pista; los bytes son la verdad. Si Storage dice
-  // `application/octet-stream` pero adentro hay un JPEG, se lee igual.
   const real = detectarMime(bytes);
   if (real === null) return { ok: false, error: "formato_no_soportado" };
   if (real === "application/pdf") return { ok: false, error: "formato_no_soportado" };
-  void mime;
+
+  /**
+   * El `media_type` que viaja es el DETECTADO, no el declarado.
+   *
+   * Hasta acá se mandaba `blob.type`, o sea lo que el browser adivinó al subir el
+   * archivo. Un PNG que alguien guardó con extensión `.jpg` sube como
+   * `image/jpeg`: los bytes son PNG, el header dice JPEG, y la API contesta 400.
+   * El 400 cae en `request_rechazado`, cuyo mensaje dice «fue un problema
+   * nuestro» — verdad a medias que no ayuda a nadie, porque la lectura de esa
+   * foto no iba a funcionar nunca. Mandando el tipo real, el mismo archivo se lee
+   * sin que nadie se entere de que la extensión estaba mal.
+   */
+  // Sólo se avisa cuando el declarado DICE algo y dice otra cosa: Storage
+  // devuelve el tipo vacío bastante seguido, y un warn por página en el caso
+  // normal es ruido que después tapa al que importa.
+  if (mimeDeclarado && real !== mimeDeclarado) {
+    console.warn(`leerPagina · la página ${pagina} dice ser ${mimeDeclarado} y es ${real}; va el real`);
+  }
 
   const client = new Anthropic({ timeout: TECHO_MS });
 
@@ -132,11 +210,17 @@ export async function leerComprobante(
               type: "image",
               source: {
                 type: "base64",
-                media_type: mime as MimeSoportado,
+                media_type: real,
                 data: Buffer.from(bytes).toString("base64"),
               },
             },
-            { type: "text", text: "Transcribí este comprobante." },
+            // «PÁGINA 1 DE 1» también se manda a propósito: le dice al modelo que
+            // no hay otra foto, y por lo tanto que el total tiene que estar acá o
+            // no está en ningún lado.
+            {
+              type: "text",
+              text: `PÁGINA ${pagina} DE ${deCuantas}.\n\nTranscribí lo que hay en esta foto.`,
+            },
           ],
         },
       ],
@@ -155,14 +239,14 @@ export async function leerComprobante(
       // Un 400 es SIEMPRE culpa nuestra: schema inválido, imagen que la API no
       // digiere, parámetro mal. El mensaje va entero al log porque es lo único
       // que después permite saber cuál de esas fue.
-      console.error("leerComprobante · la API rechazó el request", e.message);
+      console.error(`leerPagina · la API rechazó el request (página ${pagina})`, e.message);
       return { ok: false, error: "request_rechazado" };
     }
     if (e instanceof Anthropic.APIError) {
-      console.error("leerComprobante · error del proveedor", e.status, e.message);
+      console.error(`leerPagina · error del proveedor (página ${pagina})`, e.status, e.message);
       return { ok: false, error: "modelo_no_disponible" };
     }
-    console.error("leerComprobante · error inesperado", e);
+    console.error(`leerPagina · error inesperado (página ${pagina})`, e);
     return { ok: false, error: "modelo_no_disponible" };
   }
 
@@ -172,12 +256,59 @@ export async function leerComprobante(
   try {
     const parsed = LecturaModelo.safeParse(JSON.parse(texto));
     if (!parsed.success) {
-      console.error("leerComprobante · payload fuera de contrato", parsed.error.issues.slice(0, 3));
+      console.error(
+        `leerPagina · payload fuera de contrato (página ${pagina})`,
+        parsed.error.issues.slice(0, 3),
+      );
       return { ok: false, error: "respuesta_invalida" };
     }
     return { ok: true, lectura: parsed.data };
   } catch {
-    console.error("leerComprobante · JSON ilegible", texto.slice(0, 500));
+    console.error(`leerPagina · JSON ilegible (página ${pagina})`, texto.slice(0, 500));
     return { ok: false, error: "respuesta_invalida" };
   }
+}
+
+/** El mismo error para las N páginas: el problema es del lote, no de una foto. */
+function todasFallan(paginas: PaginaParaLeer[], error: ErrorLectura): PaginaLeida[] {
+  return paginas.map((p) => ({ pagina: p.pagina, ok: false as const, error }));
+}
+
+/**
+ * Las N páginas, en paralelo, y el resultado de cada una por separado.
+ *
+ * El `Promise.allSettled` es cinturón y tirantes: `leerPagina` atrapa todo y no
+ * tira. Pero «no tira» es una propiedad que se rompe con cualquier refactor —
+ * alcanza un `Buffer.from` que se queda sin memoria— y si una promesa rechazara,
+ * un `Promise.all` se llevaría puestas las otras cuatro lecturas ya pagadas. El
+ * `allSettled` convierte ese caso en una página fallida más.
+ *
+ * Los números de página se respetan tal como vienen: el orden del rail es el
+ * orden del papel, y `unirPaginas` lo usa para saber cuál es «la última», que es
+ * de donde sale el total.
+ */
+export async function leerComprobantePaginas(
+  paginas: PaginaParaLeer[],
+): Promise<PaginaLeida[]> {
+  if (paginas.length === 0) return [];
+  if (paginas.length > MAX_PAGINAS) return todasFallan(paginas, "demasiadas_paginas");
+
+  const total = paginas.reduce((suma, p) => suma + p.bytes.byteLength, 0);
+  if (total > MAX_BYTES_TOTAL) return todasFallan(paginas, "lote_muy_pesado");
+
+  const n = paginas.length;
+  const resultados = await Promise.allSettled(
+    paginas.map((p) => leerPagina(p.bytes, p.mimeDeclarado, p.pagina, n)),
+  );
+
+  return resultados.map((r, i) => {
+    const pagina = paginas[i]!.pagina;
+    if (r.status === "rejected") {
+      console.error(`leerComprobantePaginas · la página ${pagina} rechazó`, r.reason);
+      return { pagina, ok: false as const, error: "modelo_no_disponible" };
+    }
+    return r.value.ok
+      ? { pagina, ok: true as const, lectura: r.value.lectura }
+      : { pagina, ok: false as const, error: r.value.error };
+  });
 }

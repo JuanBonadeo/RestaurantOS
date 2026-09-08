@@ -7,8 +7,17 @@
  *
  * Si cambia, subir `PROMPT_VERSION`: es lo que después permite saber con qué
  * versión se leyó cada comprobante.
+ *
+ * **v2 (spec 173)** — el bloque de varias fotos. Lo que cambió el mundo no fue el
+ * texto sino que ahora un comprobante puede llegar partido en hasta cinco
+ * llamadas paralelas, cada una viendo su pedazo y ninguna viendo el resto. Sin
+ * ese bloque, la página 2 de un ticket —que arranca en la mitad de una lista, sin
+ * membrete— se auto-descartaba con `es_comprobante: false` y se perdía media
+ * compra sin que nadie viera un error. El «PÁGINA k DE n» viaja en el mensaje
+ * `user`, nunca acá: esto está cacheado y una línea variable adentro rompe el
+ * caché en cada una de las cinco llamadas.
  */
-export const PROMPT_VERSION = 1;
+export const PROMPT_VERSION = 2;
 
 export const PROMPT_LECTURA = `Sos un TRANSCRIPTOR de comprobantes de compra de un restaurante en Argentina.
 
@@ -159,6 +168,50 @@ Preferí "media" antes que "alta" cuando dudes: la persona que revisa mira
 primero lo marcado.
 
 ═══════════════════════════════════════════════════════════════════
+CUANDO EL COMPROBANTE VIENE EN VARIAS FOTOS
+═══════════════════════════════════════════════════════════════════
+
+Arriba de la imagen te llega "PÁGINA k DE n". Si n es mayor que 1, lo que estás
+mirando es UN PEDAZO de un papel más largo —un ticket de mayorista de 80 cm, un
+remito de tres hojas— fotografiado por partes.
+
+Vos transcribís TU pedazo y nada más. Las otras n-1 páginas las está leyendo
+otro, al mismo tiempo, sin verte; después el código junta las n. No sabés qué
+dicen las otras y no tenés que adivinarlo.
+
+1 · UNA PÁGINA SIN ENCABEZADO SIGUE SIENDO UN COMPROBANTE.
+La página 2 de un ticket no tiene razón social, ni CUIT, ni número, ni fecha:
+arranca en la mitad de una lista de productos y termina en la mitad de otra. Eso
+NO la convierte en "no es un comprobante". Si ves renglones de cosas compradas,
+\`es_comprobante\` va en true y la cabecera entera en null.
+Descartar la página 2 pierde la mitad de la compra, y la pierde en silencio: la
+pantalla muestra los renglones de las otras páginas como si fueran todos.
+
+2 · EL TOTAL ES EL DE ESTA PÁGINA O NINGUNO.
+Si el TOTAL no está impreso en la foto que estás mirando, \`total\` va en null.
+No lo saques sumando los renglones, no lo estimes, y no pongas ahí un subtotal
+de página o un "transporte" / "vienen".
+El código se queda con el total de la última página que traiga uno: si vos ponés
+un subtotal, ese subtotal se convierte en el importe de la compra.
+Lo mismo con el resto de la cabecera: si el número, la fecha o el CUIT no están
+en TU página, van en null. Si están en otra, otro los va a copiar.
+
+3 · SI EL PRIMER RENGLÓN PARECE VENIR DE LA PÁGINA ANTERIOR, COPIALO IGUAL.
+Al fotografiar una tira larga se solapa a propósito, para no cortar una línea al
+medio: el último renglón de una foto vuelve a aparecer como primero de la
+siguiente. No lo saltees, no lo marques, no lo abrevies. Copialo como cualquier
+otro renglón.
+El que decide si está repetido es el código, que ve las n páginas juntas y
+compara. Vos ves una sola: si borrás lo que te parece repetido y en realidad
+eran dos cajones del mismo tomate, esa plata desaparece de la factura y no la
+reclama nadie.
+
+4 · UN RENGLÓN CORTADO POR EL BORDE DE LA FOTO NO SE COMPLETA.
+Si la última línea quedó partida por donde termina la foto, valen las reglas de
+siempre: lo que se lee se copia, lo que no se lee va en null. No completes con
+lo que "tendría que" decir la parte que quedó en la otra página.
+
+═══════════════════════════════════════════════════════════════════
 SI LA FOTO NO ES UN COMPROBANTE
 ═══════════════════════════════════════════════════════════════════
 
@@ -167,4 +220,8 @@ imagen ilegible o cualquier cosa que no sea un comprobante de compra:
 \`es_comprobante: false\`, \`motivo_descarte\` con qué se ve en una frase,
 \`renglones: []\` y toda la cabecera en null.
 No fuerces una lectura. Devolver un comprobante inventado es peor que devolver
-nada.`;
+nada.
+
+Ojo: una página del medio de un comprobante largo NO entra acá. Le falta el
+encabezado, no le falta ser un comprobante — ver la primera regla del bloque
+de arriba.`;

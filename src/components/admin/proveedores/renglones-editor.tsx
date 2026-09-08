@@ -14,6 +14,13 @@ export type InsumoOption = {
   unit: string;
   /** La presentación default: cuántas unidades base trae un envase y qué costó. */
   presentationId?: string | null;
+  /**
+   * Cómo se llama el envase («Compra 10kg»). Ya venía en `IngredientOption`;
+   * faltaba acá. Con la fila angosta del diálogo no entraba, pero en la pantalla
+   * nueva es lo que evita el error de «4 maples o 4 cajas»: sin el nombre del
+   * envase al lado, «4 × $8.260» no se puede contrastar contra el papel.
+   */
+  presentationName?: string | null;
   netQuantity?: number;
   costCents?: number;
 };
@@ -103,7 +110,7 @@ export function RenglonesEditor({
   }
 
   return (
-    <div className="space-y-2 rounded-lg border border-zinc-200 p-3">
+    <div className="@container space-y-2 rounded-lg border border-zinc-200 bg-white p-3">
       <div className="flex items-center justify-between">
         <p className="text-xs font-semibold text-zinc-700">Detalle por insumo</p>
         <button
@@ -121,7 +128,7 @@ export function RenglonesEditor({
       {filas.map((f, i) => {
         const ins = insumos.find((x) => x.id === f.ingredient_id);
         return (
-          <div key={f.key} className="flex items-end gap-1.5">
+          <div key={f.key} className="flex items-end gap-1.5 @md:gap-2">
             <div className="min-w-0 flex-1">
               <select
                 value={f.ingredient_id}
@@ -133,7 +140,7 @@ export function RenglonesEditor({
                     unit_cost_cents: nuevo?.costCents ?? 0,
                   });
                 }}
-                className="h-8 w-full rounded-md border border-zinc-200 bg-white px-2 text-xs"
+                className="h-8 w-full rounded-md border border-zinc-200 bg-white px-2 text-xs @md:h-9 @md:text-sm"
                 aria-label="Insumo"
               >
                 {insumos.map((x) => (
@@ -143,18 +150,18 @@ export function RenglonesEditor({
                 ))}
               </select>
             </div>
-            <div className="w-16">
+            <div className="w-16 @md:w-20">
               <Input
-                className="h-8 text-xs"
+                className="h-8 text-xs @md:h-9 @md:text-sm"
                 inputMode="decimal"
                 value={f.units}
                 onChange={(e) => set(i, { units: Number(e.target.value) || 0 })}
                 aria-label="Envases"
               />
             </div>
-            <div className="w-24">
+            <div className="w-24 @md:w-28">
               <Input
-                className="h-8 text-xs"
+                className="h-8 text-xs @md:h-9 @md:text-sm"
                 inputMode="decimal"
                 value={f.unit_cost_cents / 100}
                 onChange={(e) =>
@@ -167,6 +174,11 @@ export function RenglonesEditor({
                 aria-label="Precio por envase"
               />
             </div>
+            {ins && (
+              <span className="mb-2 hidden shrink-0 truncate text-[11px] text-zinc-400 @md:block">
+                {ins.presentationName ?? ins.unit}
+              </span>
+            )}
             <button
               type="button"
               onClick={() => onChange(value.filter((_, j) => j !== i))}

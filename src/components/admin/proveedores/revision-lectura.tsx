@@ -17,6 +17,21 @@ import type { SupplierInvoiceItemInput } from "@/lib/proveedores/schema";
 
 export type OrigenAlias = "exacto" | "fuzzy" | "llm" | "manual" | "manual_corregido";
 
+/**
+ * Un renglón leído, con de qué foto salió — spec 173.
+ *
+ * Los dos campos son opcionales porque el diálogo viejo (`invoice-dialog`)
+ * sigue mandando renglones de una sola foto, donde «de qué página» no significa
+ * nada. Cuando la compra entró por varias fotos, `pagina` es lo que deja saltar
+ * del renglón dudoso al papel donde está impreso.
+ */
+export type RenglonRevisable = RenglonPropuesto & {
+  /** 1-based, como se numera el rail del visor. */
+  pagina?: number;
+  /** Aparece igual en la página anterior: se avisa, nunca se descarta. */
+  posibleDuplicado?: boolean;
+};
+
 /** Qué se aprende de un renglón confirmado, por de dónde salió la propuesta. */
 export type AliasAprendido = {
   aliasRaw: string;
@@ -59,12 +74,18 @@ export function RevisionLectura({
   totalComprobanteCents,
   onConfirmar,
   onDescartar,
+  onIrAPagina,
 }: {
-  renglones: RenglonPropuesto[];
+  renglones: RenglonRevisable[];
   insumos: InsumoDelCatalogo[];
   totalComprobanteCents: number;
   onConfirmar: (items: SupplierInvoiceItemInput[], aprender: AliasAprendido[]) => void;
   onDescartar: () => void;
+  /**
+   * Llevar el visor a la página de un renglón — spec 173. Opcional: en el
+   * diálogo viejo no hay visor al lado al que llevar nada.
+   */
+  onIrAPagina?: (pagina: number) => void;
 }) {
   const [filas, setFilas] = useState(renglones);
 
@@ -104,7 +125,15 @@ export function RevisionLectura({
           "manual_corregido",
         );
         // Una corrección explícita entra tildada: la persona ya decidió.
-        return { ...rehecho, incluir: Boolean(insumo) };
+        // `pagina` y `posibleDuplicado` viajan aparte: `aPropuesta` sólo sabe de
+        // la conversión, y perder de qué foto salió el renglón justo cuando se
+        // lo corrige rompe el salto al papel en el momento en que más sirve.
+        return {
+          ...rehecho,
+          pagina: f.pagina,
+          posibleDuplicado: f.posibleDuplicado,
+          incluir: Boolean(insumo),
+        };
       }),
     );
   };
@@ -128,7 +157,7 @@ export function RevisionLectura({
   }
 
   return (
-    <div className="space-y-2 rounded-lg border border-zinc-200 p-3">
+    <div className="@container space-y-2 rounded-lg border border-zinc-200 bg-white p-3">
       <div className="flex items-baseline justify-between">
         <p className="text-xs font-semibold text-zinc-700">Leí esto del papel</p>
         <button
@@ -147,16 +176,41 @@ export function RevisionLectura({
           const otros = f.avisos.filter(
             (a) => a.codigo !== "salto_de_precio" && TEXTO_AVISO[a.codigo],
           );
-          const dudoso = Boolean(salto) || otros.some((a) => a.codigo === "no_cuadra");
+          const dudoso =
+            Boolean(salto) ||
+            otros.some((a) => a.codigo === "no_cuadra") ||
+            Boolean(f.posibleDuplicado);
           const costoBase =
             f.unitCostCents && insumo?.netQuantity
               ? f.unitCostCents / insumo.netQuantity
               : f.unitCostCents;
 
           return (
-            <li key={i} className={cn("py-2", dudoso && "-mx-3 border-l-2 border-amber-400 px-3")}>
-              {/* Lo que decía el papel. No se edita: es la evidencia. */}
-              <p className="text-xs text-zinc-500">«{f.sourceText}»</p>
+            <li
+              key={i}
+              // El hover va en la fila entera y no sólo en el chip: la gracia es
+              // que al recorrer los renglones con el mouse, la foto de al lado
+              // vaya siguiendo. Cruzar la lista para llegar al visor no la
+              // atraviesa —el visor está del otro lado—, así que no salta sola.
+              onMouseEnter={() => {
+                if (f.pagina) onIrAPagina?.(f.pagina);
+              }}
+              className={cn("py-2", dudoso && "-mx-3 border-l-2 border-amber-400 px-3")}
+            >
+              <div className="flex items-baseline gap-2">
+                {/* Lo que decía el papel. No se edita: es la evidencia. */}
+                <p className="min-w-0 flex-1 text-xs text-zinc-500">«{f.sourceText}»</p>
+                {f.pagina && onIrAPagina && (
+                  <button
+                    type="button"
+                    onClick={() => onIrAPagina(f.pagina!)}
+                    title="Ver esta página"
+                    className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-500 transition hover:bg-zinc-900 hover:text-white"
+                  >
+                    pág. {f.pagina}
+                  </button>
+                )}
+              </div>
 
               <div className="mt-1 flex items-start gap-2">
                 <button
@@ -176,48 +230,54 @@ export function RevisionLectura({
                 </button>
 
                 <div className="min-w-0 flex-1 space-y-1">
-                  <select
-                    value={f.ingredientId ?? ""}
-                    onChange={(e) => cambiarInsumo(i, e.target.value)}
-                    className="h-8 w-full rounded-md border border-zinc-200 bg-white px-2 text-xs"
-                    aria-label="Insumo"
-                  >
-                    <option value="">Elegí el insumo…</option>
-                    {insumos.map((x) => (
-                      <option key={x.id} value={x.id}>
-                        {x.name}
-                      </option>
-                    ))}
-                  </select>
+                  {/* En la pantalla nueva la fila mide ~520 px y no 328: el
+                      insumo y los números entran en el mismo renglón, que es
+                      como se leen en el papel. En el diálogo viejo la caja
+                      sigue siendo angosta y siguen apilados. */}
+                  <div className="space-y-1 @md:flex @md:items-center @md:gap-2 @md:space-y-0">
+                    <select
+                      value={f.ingredientId ?? ""}
+                      onChange={(e) => cambiarInsumo(i, e.target.value)}
+                      className="h-8 w-full rounded-md border border-zinc-200 bg-white px-2 text-xs @md:h-9 @md:min-w-0 @md:flex-1 @md:text-sm"
+                      aria-label="Insumo"
+                    >
+                      <option value="">Elegí el insumo…</option>
+                      {insumos.map((x) => (
+                        <option key={x.id} value={x.id}>
+                          {x.name}
+                        </option>
+                      ))}
+                    </select>
 
-                  {f.units !== null && f.unitCostCents !== null && (
-                    <div className="flex items-center gap-1.5">
-                      <Input
-                        className="h-7 w-16 text-xs"
-                        inputMode="decimal"
-                        value={f.units}
-                        onChange={(e) => set(i, { units: Number(e.target.value) || 0 })}
-                        aria-label="Envases"
-                      />
-                      <span className="text-[11px] text-zinc-400">×</span>
-                      <Input
-                        className="h-7 w-24 text-xs"
-                        inputMode="decimal"
-                        value={f.unitCostCents / 100}
-                        onChange={(e) =>
-                          set(i, {
-                            unitCostCents: Math.round(
-                              (Number(e.target.value.replace(",", ".")) || 0) * 100,
-                            ),
-                          })
-                        }
-                        aria-label="Precio por envase"
-                      />
-                      <span className="truncate text-[11px] text-zinc-400">
-                        {f.presentationName ?? insumo?.unit}
-                      </span>
-                    </div>
-                  )}
+                    {f.units !== null && f.unitCostCents !== null && (
+                      <div className="flex items-center gap-1.5 @md:shrink-0">
+                        <Input
+                          className="h-7 w-16 text-xs @md:h-9 @md:w-20 @md:text-sm"
+                          inputMode="decimal"
+                          value={f.units}
+                          onChange={(e) => set(i, { units: Number(e.target.value) || 0 })}
+                          aria-label="Envases"
+                        />
+                        <span className="text-[11px] text-zinc-400">×</span>
+                        <Input
+                          className="h-7 w-24 text-xs @md:h-9 @md:w-28 @md:text-sm"
+                          inputMode="decimal"
+                          value={f.unitCostCents / 100}
+                          onChange={(e) =>
+                            set(i, {
+                              unitCostCents: Math.round(
+                                (Number(e.target.value.replace(",", ".")) || 0) * 100,
+                              ),
+                            })
+                          }
+                          aria-label="Precio por envase"
+                        />
+                        <span className="truncate text-[11px] text-zinc-400">
+                          {f.presentationName ?? insumo?.unit}
+                        </span>
+                      </div>
+                    )}
+                  </div>
 
                   {/* La conversión completa: la factura habla en kilos y el
                       sistema guarda envases. Sin los dos números al lado, «8,26»
@@ -241,6 +301,21 @@ export function RevisionLectura({
                         {insumo.unit === "un" ? "La unidad" : `El ${insumo.unit}`} te queda a{" "}
                         {formatCurrency(Math.round(costoBase))} — es {salto.detalle} veces el
                         precio anterior. Fijate que el envase sea el que dice el papel.
+                      </span>
+                    </p>
+                  )}
+                  {/* El solapamiento se AVISA y no se destilda: al fotografiar
+                      una tira larga se repite el último renglón para no cortarlo
+                      por la mitad, pero dos cajones del mismo tomate también
+                      aparecen dos veces y son dos. Destildarlo solo pierde plata
+                      en silencio; avisar cuesta que se mire un renglón. */}
+                  {f.posibleDuplicado && (
+                    <p className="flex items-start gap-1 text-[11px] text-amber-700">
+                      <AlertTriangle className="mt-px size-3 shrink-0" />
+                      <span>
+                        Este renglón también está en la página anterior. Puede ser el
+                        solapamiento de la foto, o pueden ser dos de verdad — mirá el papel
+                        antes de cargarlo.
                       </span>
                     </p>
                   )}

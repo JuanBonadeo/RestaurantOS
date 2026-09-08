@@ -10,6 +10,10 @@ import { canManageProveedores } from "@/lib/permissions/can";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 import { calcularVencimiento } from "./cuenta-corriente";
+// Los del lector (contrato 1): `normalizarCuit` devuelve 11 dígitos o null, y
+// `cuitValido` corre módulo 11. No son los de `@/lib/afip/cuit`, que sólo cuenta
+// dígitos porque ahí el que valida de verdad es el gateway de ARCA.
+import { cuitValido, normalizarCuit } from "./lectura/cuit";
 import { conceptoEsDelNegocio } from "./queries";
 import { ImportSupplierBatch, SupplierInput, SupplierInvoiceInput } from "./schema";
 
@@ -143,6 +147,41 @@ export async function deactivateSupplier(
   return actionOk(undefined);
 }
 
+/**
+ * Alta de proveedor con lo que el modelo leyó de la foto — spec 173.
+ *
+ * Es el «no está en la lista» de la banda de proveedor: la foto trajo un nombre
+ * y quizás un CUIT, ninguno de los candidatos es, y obligar a salir a la ficha
+ * de proveedores para volver después es exactamente la vuelta que la spec vino a
+ * sacar («que sea un botón general y que desde ahí busque todos los datos»).
+ *
+ * Delega en `createSupplier`: misma validación Zod, mismo chequeo de permisos,
+ * mismo 23505 traducido. Duplicar el insert acá era la forma segura de que el
+ * día que se agregue un campo obligatorio esta puerta quede sin él.
+ *
+ * **El CUIT entra sólo si pasa módulo 11.** Lo que el modelo lee de un papel
+ * arrugado tiene dígitos de más y de menos, y en golf-jcr ya viven 10 CUIT
+ * basura de la migración de MaxiRest que hoy no matchean con nada y no se sabe
+ * si son un error de tipeo o un proveedor distinto. Vacío se completa mirando la
+ * factura; un CUIT falso se descubre el día que no factura.
+ */
+export async function crearProveedorDesdeLectura(
+  businessSlug: string,
+  datos: { nombre: string; cuit: string | null },
+): Promise<ActionResult<{ id: string }>> {
+  // El nombre lo escribió el modelo, no una persona: puede venir con espacios de
+  // más o larguísimo (media razón social con domicilio pegado). Se corta al
+  // máximo de la columna en vez de rebotar con «Datos inválidos», que desde la
+  // banda no se puede corregir sin perder la lectura entera.
+  const nombre = (datos.nombre ?? "").trim().slice(0, 100);
+  if (!nombre) return actionError("Falta el nombre del proveedor.");
+
+  const cuit11 = normalizarCuit(datos.cuit);
+  const cuit = cuit11 && cuitValido(cuit11) ? cuit11 : null;
+
+  return createSupplier(businessSlug, { name: nombre, cuit, is_active: true });
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // SUPPLIER INVOICES (FACTURAS DE COMPRA)
 // ═══════════════════════════════════════════════════════════════════
@@ -194,6 +233,27 @@ export async function createSupplierInvoice(
     parsed.data.due_date ??
     calcularVencimiento(parsed.data.invoice_date, prov.payment_terms_days ?? 0);
 
+  /**
+   * Las páginas del comprobante — spec 173.
+   *
+   * Se escriben LAS DOS columnas. `photo_urls` es la nueva y `photo_url` la
+   * vieja, que la migración no dropea: entre que la migración se aplica y que
+   * el deploy está arriba, el diálogo viejo sigue mandando `photo_url` solo, y
+   * la ficha del proveedor —que todavía muestra una foto— sigue leyendo la
+   * columna vieja. Escribir las dos hace que las dos versiones del código vean
+   * lo mismo mientras dure la ventana.
+   *
+   * `photo_url` se queda con la PRIMERA página, que es la que trae el
+   * encabezado: si un ticket de un metro entró en cuatro fotos, la que sirve
+   * para reconocer la compra de un vistazo es la primera.
+   */
+  const photoUrls =
+    parsed.data.photo_urls.length > 0
+      ? parsed.data.photo_urls
+      : parsed.data.photo_url
+        ? [parsed.data.photo_url]
+        : [];
+
   const { data, error } = await service
     .from("supplier_invoices")
     .insert({
@@ -202,7 +262,8 @@ export async function createSupplierInvoice(
       invoice_number: parsed.data.invoice_number ?? null,
       invoice_date: parsed.data.invoice_date,
       total_cents: parsed.data.total_cents,
-      photo_url: parsed.data.photo_url ?? null,
+      photo_urls: photoUrls,
+      photo_url: photoUrls[0] ?? null,
       notes: parsed.data.notes ?? null,
       created_by: ctxResult.data.userId,
       document_type: parsed.data.document_type,
