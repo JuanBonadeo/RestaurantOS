@@ -33,6 +33,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { IngredientRecipeSection } from "@/components/admin/catalog/ingredient-recipe-section";
+import { HistorialPrecio } from "./historial-precio";
 import {
   createIngredient,
   deleteIngredient,
@@ -406,6 +407,10 @@ export function IngredientDialog({ slug, ingredient, trigger, ingredientOptions 
                 Guardá el ingrediente primero para agregar la sub-receta.
               </div>
             )}
+
+            {/* spec 172 · el precio que cambió, y con qué compra. El log existe
+                desde el baseline y hasta ahora no tenía pantalla. */}
+            {ingredient?.id && <HistorialPrecio slug={slug} ingredientId={ingredient.id} />}
 
             {/* ── Presentations section ── */}
             <div className="space-y-2">

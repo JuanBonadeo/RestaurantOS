@@ -15,6 +15,28 @@ import {
 } from "@/lib/proveedores/lectura/a-propuesta";
 import type { SupplierInvoiceItemInput } from "@/lib/proveedores/schema";
 
+export type OrigenAlias = "exacto" | "fuzzy" | "llm" | "manual" | "manual_corregido";
+
+/** Qué se aprende de un renglón confirmado, por de dónde salió la propuesta. */
+export type AliasAprendido = {
+  aliasRaw: string;
+  ingredientId: string;
+  presentationId: string | null;
+  origen: OrigenAlias;
+};
+
+const cantidad = (n: number) => n.toLocaleString("es-AR", { maximumFractionDigits: 3 });
+
+const TEXTO_AVISO: Record<CodigoAviso, string> = {
+  no_cuadra: "La cuenta de esta línea no cierra con lo que dice el papel.",
+  reconstruido: "Este número no estaba impreso: lo saqué de los otros dos.",
+  unidad_ambigua: "El papel no dice en qué unidad viene. Lo tomé como la del insumo.",
+  sin_presentacion: "Este insumo no tiene envase cargado: entra el stock pero no se actualiza el costo.",
+  cantidad_muy_chica: "La cantidad es demasiado chica para este envase.",
+  costo_excede_columna: "El precio es demasiado grande para cargarlo.",
+  salto_de_precio: "",
+};
+
 /**
  * La pantalla de revisión — spec 172.
  *
@@ -31,18 +53,6 @@ import type { SupplierInvoiceItemInput } from "@/lib/proveedores/schema";
  * entra en el payload: es la prohibición de auto-asignar (172·D3) implementada
  * en el dato y no en la disciplina de la UI.
  */
-const cantidad = (n: number) => n.toLocaleString("es-AR", { maximumFractionDigits: 3 });
-
-const TEXTO_AVISO: Record<CodigoAviso, string> = {
-  no_cuadra: "La cuenta de esta línea no cierra con lo que dice el papel.",
-  reconstruido: "Este número no estaba impreso: lo saqué de los otros dos.",
-  unidad_ambigua: "El papel no dice en qué unidad viene. Lo tomé como la del insumo.",
-  sin_presentacion: "Este insumo no tiene envase cargado: entra el stock pero no se actualiza el costo.",
-  cantidad_muy_chica: "La cantidad es demasiado chica para este envase.",
-  costo_excede_columna: "El precio es demasiado grande para cargarlo.",
-  salto_de_precio: "",
-};
-
 export function RevisionLectura({
   renglones,
   insumos,
@@ -53,7 +63,7 @@ export function RevisionLectura({
   renglones: RenglonPropuesto[];
   insumos: InsumoDelCatalogo[];
   totalComprobanteCents: number;
-  onConfirmar: (items: SupplierInvoiceItemInput[]) => void;
+  onConfirmar: (items: SupplierInvoiceItemInput[], aprender: AliasAprendido[]) => void;
   onDescartar: () => void;
 }) {
   const [filas, setFilas] = useState(renglones);
@@ -285,6 +295,17 @@ export function RevisionLectura({
               units: f.units!,
               unit_cost_cents: f.unitCostCents!,
             })),
+            // Sólo se aprende de lo que se CONFIRMÓ. Un renglón que salió de la
+            // memoria y nadie tocó no enseña nada nuevo; uno destildado tampoco:
+            // ausencia de match no es match a nada.
+            incluidas
+              .filter((f) => f.matchSource && f.matchSource !== "memoria")
+              .map((f) => ({
+                aliasRaw: f.sourceText,
+                ingredientId: f.ingredientId!,
+                presentationId: f.presentationId,
+                origen: f.matchSource as OrigenAlias,
+              })),
           )
         }
       >

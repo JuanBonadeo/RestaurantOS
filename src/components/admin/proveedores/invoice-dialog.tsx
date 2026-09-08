@@ -37,6 +37,8 @@ import { calcularVencimiento, etiquetaTipo } from "@/lib/proveedores/cuenta-corr
 import { DOCUMENT_TYPES, SupplierInvoiceInput } from "@/lib/proveedores/schema";
 import { hoyAR, primerDiaDelMesAR } from "@/lib/proveedores/fechas-ar";
 import { parseNumeroAR } from "@/lib/proveedores/lectura/numeros-ar";
+import { aprenderAliases } from "@/lib/proveedores/actions-client";
+import type { OrigenAlias } from "./revision-lectura";
 
 /** El importe de la cabecera, de texto impreso a centavos. `null` si no se leyó. */
 function parsearImporte(raw: string | null | undefined): number | null {
@@ -82,6 +84,10 @@ export function InvoiceDialog({
   /** spec 172 · lo que devolvió el lector, esperando confirmación. */
   const [leido, setLeido] = useState<RenglonPropuesto[] | null>(null);
   const [leyendo, setLeyendo] = useState(false);
+  /** spec 172 · lo que se confirmó, para aprenderlo si la carga sale bien. */
+  const [aprender, setAprender] = useState<
+    { aliasRaw: string; ingredientId: string; presentationId: string | null; origen: OrigenAlias }[]
+  >([]);
 
   const today = hoyAR();
 
@@ -168,10 +174,21 @@ export function InvoiceDialog({
         toast.error(result.error);
         return;
       }
-      toast.success("Compra cargada.");
+      // El aprendizaje va DESPUÉS de que el comprobante quedó: si la carga
+      // falla, la action se anula sola (165·D3) y no se aprende nada. Y si el
+      // alias falla, no se pierde plata — es una opinión, no un hecho contable.
+      if (aprender.length > 0) {
+        aprenderAliases(businessId, supplierId, aprender).catch(() => {});
+      }
+      toast.success(
+        items.length > 0
+          ? `Compra cargada con ${items.length} ${items.length === 1 ? "insumo" : "insumos"}. Subió el stock y se actualizó el costo.`
+          : "Compra cargada.",
+      );
       setOpen(false);
       setPhotoPath(null);
       setItems([]);
+      setAprender([]);
       setVencTocado(false);
       form.reset();
       router.refresh();
@@ -346,8 +363,9 @@ export function InvoiceDialog({
                 renglones={leido}
                 insumos={insumos}
                 totalComprobanteCents={Number(form.watch("total_cents")) || 0}
-                onConfirmar={(nuevos) => {
+                onConfirmar={(nuevos, confirmados) => {
                   setItems(nuevos);
+                  setAprender(confirmados);
                   setLeido(null);
                 }}
                 onDescartar={() => {
