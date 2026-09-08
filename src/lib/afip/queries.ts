@@ -67,14 +67,41 @@ export async function listInvoices(
 }
 
 export type InvoiceKPIs = {
+  /**
+   * Facturado NETO del período, como el libro IVA: todas las facturas que
+   * tomaron CAE (`authorized` + `cancelled`) menos las notas de crédito.
+   */
   totalCents: number;
+  /** Facturas (A + B) autorizadas. Las notas de crédito no cuentan acá. */
   count: number;
   countA: number;
   countB: number;
   countFailed: number;
   countPending: number;
+  /** Notas de crédito autorizadas, en valor absoluto (lo que se restó). */
+  notasCreditoCents: number;
+  countNotasCredito: number;
 };
 
+/**
+ * Los números del panel de Facturación (y del resumen de cierre de turno).
+ *
+ * #274 · 5 — **una nota de crédito resta.** Esto agregaba por
+ * `status === 'authorized'` sin mirar nunca `tipo_comprobante`, así que cada NC
+ * entraba con signo positivo y encima sumaba a `countA` cuando era
+ * `nota_credito_a`.
+ *
+ * El caso que lo hace visible es el más común de los que generan NC: el cliente
+ * pide la A al irse (spec 156 · D5). Quedan tres filas —la B `cancelled`, su NC
+ * `authorized` y la A `authorized`— y el mismo ticket se contaba DOS veces:
+ * $200.000 facturados y 2 comprobantes sobre una venta de $100.000. En la
+ * anulación pura (spec 09, sin re-facturar) es peor en proporción: el panel
+ * decía $100.000 donde lo correcto es $0.
+ *
+ * Nadie lo veía porque un reporte no falla: muestra un número más lindo que el
+ * real. La única pista era el ratio facturado/ventas arriba de 100%, que se lee
+ * como «buenísimo» y no como «esto está mal sumado».
+ */
 export async function getInvoiceKPIs(
   businessId: string,
   from?: string,
@@ -99,12 +126,38 @@ export async function getInvoiceKPIs(
   let countB = 0;
   let countFailed = 0;
   let countPending = 0;
+  let notasCreditoCents = 0;
+  let countNotasCredito = 0;
 
   for (const row of rows) {
+    const esNota =
+      row.tipo_comprobante === "nota_credito_a" ||
+      row.tipo_comprobante === "nota_credito_b";
+
+    if (row.status === "authorized" && esNota) {
+      // El importe de la NC se guarda positivo en la fila (es el mismo total
+      // que la factura que anula); el signo lo pone la lectura, acá.
+      notasCreditoCents += Number(row.total_cents) || 0;
+      countNotasCredito++;
+      continue;
+    }
+
+    // Una factura `cancelled` **tiene CAE**: `anularFactura` sólo la marca así
+    // después de que la nota de crédito quedó autorizada, y anular no borra
+    // nada ante ARCA — el comprobante sigue en Mis Comprobantes y en la
+    // declaración. Excluirla del facturado mientras se incluía su NC era la
+    // mitad que hacía dar cualquier cosa: en el flujo D5 (B anulada + NC + A)
+    // el neto correcto es un ticket, y sin la B daba cero.
+    if (row.status === "authorized" || row.status === "cancelled") {
+      totalCents += Number(row.total_cents) || 0;
+    }
+
     if (row.status === "authorized") {
-      totalCents += row.total_cents;
+      // Los conteos responden otra pregunta que el importe: «cuántos
+      // comprobantes vigentes tengo», no «cuánto declaré». Una factura anulada
+      // ya no es de nadie, así que no entra acá aunque sí entre en el neto.
       count++;
-      if (row.tipo_comprobante === "factura_a" || row.tipo_comprobante === "nota_credito_a") countA++;
+      if (row.tipo_comprobante === "factura_a") countA++;
       else countB++;
     } else if (row.status === "failed") {
       countFailed++;
@@ -113,7 +166,20 @@ export async function getInvoiceKPIs(
     }
   }
 
-  return { totalCents, count, countA, countB, countFailed, countPending };
+  return {
+    // Puede dar negativo si en el período se anuló más de lo que se facturó
+    // (típico del primer día del mes con NC de ventas del mes anterior). Es un
+    // dato, no un error: taparlo con un `Math.max(0, …)` sería volver a
+    // maquillar el número, que es justo el bug.
+    totalCents: totalCents - notasCreditoCents,
+    count,
+    countA,
+    countB,
+    countFailed,
+    countPending,
+    notasCreditoCents,
+    countNotasCredito,
+  };
 }
 
 export async function getInvoiceById(

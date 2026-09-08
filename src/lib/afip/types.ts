@@ -149,3 +149,12 @@ export type Invoice = {
    */
   auto_emitted: boolean;
 };
+
+/**
+ * Por qué un CAE que acaba de llegar no respalda ninguna venta (#274 · 1).
+ *
+ * Los dos caminos por los que la venta desaparece mientras el comprobante
+ * viaja por el gateway (~28 min de promedio): la mesa se anuló, o el cobro se
+ * reembolsó con «Anular cobro» —que NO cancela la orden, la reabre—.
+ */
+export type VentaSinRespaldo = "orden_anulada" | "cobro_reembolsado";

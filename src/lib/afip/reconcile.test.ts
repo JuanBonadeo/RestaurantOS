@@ -14,6 +14,10 @@ const notifyInvoiceFailed = vi.fn(async (_args: unknown) => {});
 vi.mock("@/lib/notifications/events", () => ({
   notifyInvoiceFailed: (args: unknown) => notifyInvoiceFailed(args),
 }));
+const createNotification = vi.fn(async (_args: unknown) => {});
+vi.mock("@/lib/notifications/create", () => ({
+  createNotification: (args: unknown) => createNotification(args),
+}));
 vi.mock("@/lib/supabase/service", () => ({
   createSupabaseServiceClient: () => {
     throw new Error("los tests inyectan el service client");
@@ -101,6 +105,10 @@ function fakeService(opts: {
   fresh?: Invoice;
   fresh_?: never;
   rows?: { fresh: Invoice[]; stale: Invoice[] };
+  /** La orden que respalda la factura (spec 092 · #274 · 1). */
+  order?: { status: string; lifecycle_status: string } | null;
+  /** Los pagos de esa orden: distinguen cobro vivo de cobro reembolsado. */
+  payments?: { payment_status: string }[];
 }) {
   const updates: Record<string, unknown>[] = [];
   const selects: { table: string; filters: Record<string, unknown> }[] = [];
@@ -145,6 +153,10 @@ function fakeService(opts: {
           return Promise.resolve({ data: batch ?? [], error: null });
         },
         maybeSingle() {
+          // La orden que lee `ventaSinRespaldo` no es una factura: sale aparte.
+          if (table === "orders") {
+            return Promise.resolve({ data: opts.order ?? null, error: null });
+          }
           // Un update encadenado devuelve `updateReturns`; la relectura, `fresh`.
           if (updatePendiente) {
             updatePendiente = false;
@@ -157,6 +169,13 @@ function fakeService(opts: {
         },
         single() {
           return Promise.resolve({ data: opts.fresh ?? null, error: null });
+        },
+        // Los pagos se leen sin terminador (`select().eq()` y await): el chain
+        // tiene que ser thenable para esa forma.
+        then(resolve: (v: { data: unknown; error: null }) => unknown) {
+          return Promise.resolve(
+            resolve({ data: opts.payments ?? [], error: null }),
+          );
         },
       };
       return chain;
@@ -242,6 +261,91 @@ describe("applyGatewayStatus", () => {
     await applyGatewayStatus(service, invoice({ auto_emitted: true }), providerWith(AUTHORIZED));
 
     expect(notifyInvoiceFailed).not.toHaveBeenCalled();
+  });
+
+  // ── La venta que ya no existe (#274 · 1 y 6) ─────────────────────────
+  //
+  // El gateway tarda ~28 min de promedio (85 en el peor caso). En esa ventana
+  // la venta puede desaparecer por dos caminos, y el CAE llega igual: es un
+  // hecho consumado ante ARCA. La factura se cierra (spec 092 · H-05), pero
+  // alguien tiene que emitir la nota de crédito — y hasta acá ese "alguien"
+  // se enteraba por un `console.warn` en un serverless.
+  it("factura autorizada sobre una orden anulada: no le llega al cliente y SE AVISA adentro", async () => {
+    const cerrada = invoice({
+      status: "authorized",
+      cae: "75123456789012",
+      numero: 42,
+    });
+    const { service } = fakeService({
+      updateReturns: cerrada,
+      order: { status: "cancelled", lifecycle_status: "cancelled" },
+    });
+
+    await applyGatewayStatus(service, invoice(), providerWith(AUTHORIZED));
+
+    expect(notifyInvoiceIssued).not.toHaveBeenCalled();
+    expect(createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        businessId: "biz-1",
+        targetRole: "encargado",
+        type: "factura.nc_pendiente",
+        payload: expect.objectContaining({
+          invoiceId: "inv-1",
+          motivo: "orden_anulada",
+        }),
+      }),
+    );
+  });
+
+  // El camino del reembolso: `anularCobro` NO cancela la orden, la REABRE
+  // (lifecycle_status 'open', status 'preparing') y deja los pagos en
+  // `refunded`. Por eso mirar sólo `cancelled` daba false y el cliente recibía
+  // por mail el comprobante de una venta ya devuelta.
+  it("factura autorizada sobre un cobro reembolsado: tampoco le llega al cliente", async () => {
+    const cerrada = invoice({
+      status: "authorized",
+      cae: "75123456789012",
+      numero: 42,
+    });
+    const { service } = fakeService({
+      updateReturns: cerrada,
+      order: { status: "preparing", lifecycle_status: "open" },
+      payments: [
+        { payment_status: "refunded" },
+        { payment_status: "refunded" },
+      ],
+    });
+
+    await applyGatewayStatus(service, invoice(), providerWith(AUTHORIZED));
+
+    expect(notifyInvoiceIssued).not.toHaveBeenCalled();
+    expect(createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "factura.nc_pendiente",
+        payload: expect.objectContaining({ motivo: "cobro_reembolsado" }),
+      }),
+    );
+  });
+
+  // La contracara: un reembolso PARCIAL (se corrigió una línea y se volvió a
+  // cobrar) sigue siendo una venta viva. Si esto avisara, el aviso sería ruido
+  // y en dos semanas nadie lo miraría — que es como muere una notificación.
+  it("un reembolso parcial con cobro vivo NO cuenta como venta anulada", async () => {
+    const cerrada = invoice({
+      status: "authorized",
+      cae: "75123456789012",
+      numero: 42,
+    });
+    const { service } = fakeService({
+      updateReturns: cerrada,
+      order: { status: "delivered", lifecycle_status: "closed" },
+      payments: [{ payment_status: "refunded" }, { payment_status: "paid" }],
+    });
+
+    await applyGatewayStatus(service, invoice(), providerWith(AUTHORIZED));
+
+    expect(notifyInvoiceIssued).toHaveBeenCalledWith({ invoiceId: "inv-1" });
+    expect(createNotification).not.toHaveBeenCalled();
   });
 
   it("mientras el gateway sigue encolando NO se toca la fila", async () => {

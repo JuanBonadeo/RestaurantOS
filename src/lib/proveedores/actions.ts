@@ -10,6 +10,7 @@ import { canManageProveedores } from "@/lib/permissions/can";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 import { calcularVencimiento } from "./cuenta-corriente";
+import { conceptoEsDelNegocio } from "./queries";
 import { ImportSupplierBatch, SupplierInput, SupplierInvoiceInput } from "./schema";
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -179,6 +180,16 @@ export async function createSupplierInvoice(
 
   const conceptId =
     parsed.data.expense_concept_id ?? prov.default_expense_concept_id ?? null;
+
+  // Issue #268 · el concepto tiene que ser de ESTE negocio. El FK apunta a
+  // `expense_concepts(id)` a secas y el service client bypassa RLS, así que sin
+  // esto un id ajeno entra igual: el comprobante queda clasificado en la ficha
+  // y en «Sin concepto» en el informe de la 158, para siempre. Mismo chequeo
+  // que ya hace `linkSupplierIngredients` con los insumos.
+  if (!(await conceptoEsDelNegocio(service, businessId, conceptId))) {
+    return actionError("El concepto de gasto no es de este negocio.");
+  }
+
   const dueDate =
     parsed.data.due_date ??
     calcularVencimiento(parsed.data.invoice_date, prov.payment_terms_days ?? 0);
@@ -203,7 +214,16 @@ export async function createSupplierInvoice(
 
   if (error || !data) {
     console.error("createSupplierInvoice", error);
-    return actionError("No pudimos cargar la factura.");
+    // Issue #268 · el índice único parcial de la 0085. El módulo no tenía NINGÚN
+    // chequeo de duplicado: el mismo taco de papeles cargado dos veces duplicaba
+    // la deuda con el proveedor y —si traía renglones— el stock. Se traduce acá
+    // igual que el 23505 de `suppliers`, porque el que carga no tiene por qué
+    // saber que hay un índice.
+    return actionError(
+      error?.code === "23505"
+        ? "Ya cargaste este comprobante de este proveedor con ese número."
+        : "No pudimos cargar la factura.",
+    );
   }
 
   // spec 165 · el detalle por insumo, si vino. Una RPC: cada renglón toca la

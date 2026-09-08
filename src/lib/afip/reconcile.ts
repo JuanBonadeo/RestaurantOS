@@ -7,6 +7,7 @@ import { notifyInvoiceIssued } from "@/lib/notifications/invoice-notify";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 import { createGatewayClient } from "./gateway";
+import { notifyNotaCreditoPendiente } from "./nc-pendiente-notify";
 import type { AFIPProviderClient } from "./provider";
 import { type ProviderSelection, selectProvider } from "./provider-config";
 import { createSandboxClient } from "./sandbox";
@@ -15,6 +16,7 @@ import type {
   Invoice,
   ProviderResult,
   TipoComprobante,
+  VentaSinRespaldo,
 } from "./types";
 
 // ============================================================================
@@ -134,16 +136,33 @@ export type ApplyOutcome =
  * credencial rota convertiría facturas vivas en `failed`.
  */
 /**
- * ¿La orden de esta factura está anulada? (spec 092)
+ * ¿La venta que respalda esta factura todavía existe? (spec 092 · #274 · 1)
  *
- * Mira los dos ejes: hasta el backfill de la spec 091 una mesa anulada sólo lo
- * decía por `lifecycle_status`, y `status` se quedaba en `pending`.
+ * Dos caminos la hacen desaparecer mientras el comprobante viaja, y hasta acá
+ * sólo se miraba uno:
+ *
+ *  - **La orden anulada.** Los dos ejes, siempre: hasta el backfill de la spec
+ *    091 una mesa anulada sólo lo decía por `lifecycle_status` y `status` se
+ *    quedaba en `pending`.
+ *
+ *  - **El cobro reembolsado.** Éste es el que faltaba, y es peor porque no
+ *    deja rastro donde se lo buscaba: `anularCobro` **no cancela la orden, la
+ *    REABRE** (`lifecycle_status: 'open'`, `status: 'preparing'`,
+ *    `payment_status: 'pending'`) y marca los pagos `refunded`. Con la orden
+ *    reabierta, preguntar por `cancelled` daba false y el cron le mandaba al
+ *    cliente, por mail, la factura de una venta que ya se le devolvió en
+ *    efectivo. Plata que sale de la caja Y queda declarada como IVA débito.
+ *
+ * La condición del reembolso es deliberadamente estricta —hay pagos y NINGUNO
+ * quedó `paid`— para no confundirla con una corrección de línea, donde se
+ * refunda un pago y se registra otro: ahí la venta sigue viva y avisar sería
+ * ruido.
  */
-async function ordenAnulada(
+async function ventaSinRespaldo(
   service: GenericClient,
   orderId: string | null,
-): Promise<boolean> {
-  if (!orderId) return false;
+): Promise<VentaSinRespaldo | null> {
+  if (!orderId) return null;
   const { data } = await service
     .from("orders")
     .select("status, lifecycle_status")
@@ -153,8 +172,22 @@ async function ordenAnulada(
     status: string;
     lifecycle_status: string;
   } | null;
-  if (!row) return false;
-  return row.status === "cancelled" || row.lifecycle_status === "cancelled";
+  if (!row) return null;
+  if (row.status === "cancelled" || row.lifecycle_status === "cancelled") {
+    return "orden_anulada";
+  }
+
+  const { data: pagos } = await service
+    .from("payments")
+    .select("payment_status")
+    .eq("order_id", orderId);
+  const rows = (pagos ?? []) as { payment_status: string }[];
+  if (rows.length === 0) return null;
+  const hayCobroVivo = rows.some((p) => p.payment_status === "paid");
+  const hayReembolso = rows.some((p) => p.payment_status === "refunded");
+  if (hayReembolso && !hayCobroVivo) return "cobro_reembolsado";
+
+  return null;
 }
 
 export async function applyGatewayStatus(
@@ -218,11 +251,28 @@ export async function applyGatewayStatus(
       //
       // `reconcile` no leía la orden en ningún punto — grep de `orders` en este
       // archivo daba cero.
-      const anulada = await ordenAnulada(service, row.order_id);
-      if (anulada) {
+      //
+      // #274 · 6 — y el aviso al local tampoco existía: la decisión de la 092
+      // («hay que emitir NC») moría en un `console.warn` dentro de un
+      // serverless, o sea en ningún lado. La fila queda en Facturación igual
+      // que cualquier otra autorizada, con su CAE, y el único aviso fiscal del
+      // producto (`factura.emision_fallida`) es para las que FALLAN — ésta sale
+      // bien. Así se descubrieron los 14 rechazos de golf-jcr: consultando la
+      // base a mano, un mes después.
+      const sinRespaldo = await ventaSinRespaldo(service, row.order_id);
+      if (sinRespaldo) {
         console.warn(
-          "reconcile · factura autorizada sobre orden anulada, hay que emitir NC",
-          { invoiceId: row.id, orderId: row.order_id },
+          "reconcile · factura autorizada sobre venta inexistente, hay que emitir NC",
+          { invoiceId: row.id, orderId: row.order_id, motivo: sinRespaldo },
+        );
+        await notifyNotaCreditoPendiente({
+          businessId: row.business_id,
+          invoiceId: row.id,
+          orderId: row.order_id,
+          motivo: sinRespaldo,
+          totalCents: row.total_cents,
+        }).catch((err) =>
+          console.error("reconcile · aviso de NC pendiente", err),
         );
       } else {
         // spec 45 — aviso del comprobante al cliente. Best-effort e idempotente

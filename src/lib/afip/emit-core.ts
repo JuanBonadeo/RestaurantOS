@@ -39,6 +39,97 @@ type InvoiceRef = {
 
 const UNIQUE_VIOLATION = "23505";
 
+export const ORDEN_ANULADA_MSG =
+  "Esta orden está anulada — no se puede emitir un comprobante.";
+
+/**
+ * ¿La venta que respalda el comprobante ya no existe? (spec 092)
+ *
+ * Los dos ejes, siempre: hasta el backfill de la spec 091 había 23 órdenes
+ * anuladas que sólo lo decían por `lifecycle_status` y seguían con `status`
+ * en `pending`.
+ *
+ * Es una función y no un `if` suelto porque la regla la necesitan DOS caminos
+ * que emiten contra ARCA: el motor y `retryInvoice`. Escrita dos veces duró un
+ * lado arreglado y el otro no — «Reintentar» sacaba un CAE sobre una mesa
+ * anulada mientras el motor lo bloqueaba (#274 · 2).
+ */
+export function ordenEstaAnulada(order: {
+  status: string;
+  lifecycle_status: string;
+}): boolean {
+  return order.lifecycle_status === "cancelled" || order.status === "cancelled";
+}
+
+/**
+ * El comprobante VIGENTE de la orden, si lo hay: el motivo por el que no se
+ * puede emitir otro, ya redactado. `null` = vía libre.
+ *
+ * Se mira `pending` además de `authorized` porque con el gateway real una
+ * factura vive ~28 min encolada sin CAE (spec 147), y el índice único parcial
+ * `(business, order, tipo)` no cruza tipos: una A entra al lado de una B. Las
+ * notas de crédito quedan fuera a propósito — son comprobantes `authorized` de
+ * la misma orden, pero no son «la factura vigente» de nadie.
+ */
+export async function bloqueoPorComprobanteVigente(
+  service: GenericClient,
+  orderId: string,
+  tipo: TipoComprobante,
+): Promise<string | null> {
+  const { data } = await service
+    .from("invoices")
+    .select("tipo_comprobante, punto_venta, numero, status")
+    .eq("order_id", orderId)
+    .in("tipo_comprobante", ["factura_a", "factura_b"])
+    .in("status", ["pending", "authorized"])
+    .limit(1);
+  const vigente = ((data ?? []) as InvoiceRef[])[0];
+  if (!vigente) return null;
+
+  const mismoTipo = vigente.tipo_comprobante === tipo;
+  // Una `pending` todavía no tiene número: nombrarla por tipo es lo único
+  // honesto. Se bloquea igual —esperar es infinitamente mejor que emitir dos y
+  // resolverlo con una nota de crédito—, y el estado se ve en Facturación,
+  // donde el cron de la spec 088 la va a cerrar en un sentido o en el otro.
+  if (vigente.status === "pending") {
+    return mismoTipo
+      ? "Esta orden ya tiene una factura en proceso. Esperá a que ARCA la confirme — la vas a ver en Facturación."
+      : `Esta orden ya tiene una ${tipoLabel(vigente.tipo_comprobante)} en proceso. Esperá a que ARCA la confirme antes de emitir otro tipo de comprobante.`;
+  }
+  return mismoTipo
+    ? "Esta orden ya tiene una factura autorizada."
+    : `Esta orden ya tiene la ${tipoLabel(vigente.tipo_comprobante)} ${formatInvoiceNumber(
+        vigente.punto_venta,
+        vigente.numero,
+      )} autorizada. Anulala (se emite la nota de crédito) antes de emitir otro tipo de comprobante.`;
+}
+
+/**
+ * Lo que el recargo (o el descuento) por medio de pago le sumó a la cuenta.
+ *
+ * Sólo los pagos VIVOS (`paid`): un pago reembolsado —una corrección de línea,
+ * un cobro que se rehízo— ya no es plata que entró, y contarlo movería la base
+ * imponible por una operación deshecha.
+ *
+ * Sin pagos todavía (emisión manual sobre una cuenta abierta) devuelve 0, que
+ * es exactamente el comportamiento histórico: en ese momento nadie eligió medio
+ * de pago, así que no hay ajuste que declarar.
+ */
+async function ajustePorMetodoDePago(
+  service: GenericClient,
+  orderId: string,
+): Promise<number> {
+  const { data } = await service
+    .from("payments")
+    .select("adjustment_cents")
+    .eq("order_id", orderId)
+    .eq("payment_status", "paid");
+  return ((data ?? []) as { adjustment_cents: number | null }[]).reduce(
+    (acc, p) => acc + (Number(p.adjustment_cents) || 0),
+    0,
+  );
+}
+
 export type EmitInput = {
   orderId: string;
   paymentId?: string;
@@ -137,17 +228,41 @@ export async function emitInvoiceCore(
   //
   // Se chequean los dos ejes (spec 091): hasta el backfill había 23 órdenes
   // anuladas que sólo lo decían por `lifecycle_status`.
-  if (order.lifecycle_status === "cancelled" || order.status === "cancelled") {
-    return actionError(
-      "Esta orden está anulada — no se puede emitir un comprobante.",
-    );
+  if (ordenEstaAnulada(order)) {
+    return actionError(ORDEN_ANULADA_MSG);
   }
   // Base facturable ARCA = subtotal − descuento (SIN propina). `total_cents` ya
   // suma la propina (billing/totals.ts:18) y la propina no integra la base
   // imponible en AR. `total_cents` queda intacto para el cobro/posnet; solo el
   // comprobante fiscal la excluye. (spec 36 · R-C1; corrige lo que spec 06 dio
   // por hecho.)
-  const facturableCents = order.total_cents - (order.tip_cents ?? 0);
+  //
+  // #274 · 7 — **más el ajuste por método de pago.** El recargo/descuento por
+  // medio de pago vive en `payments.adjustment_cents` y el motor no lo leía
+  // nunca (grep `adjustment` en src/lib/afip/ daba cero), así que el
+  // comprobante declaraba el precio de lista y no lo que el cliente pagó. Va
+  // adentro de la base gravada porque integra el precio de la operación: es
+  // parte de lo que se cobró por la comida, no un servicio aparte.
+  //
+  // Las dos direcciones estaban mal y la fea es la segunda:
+  //   - recargo (+): plata cobrada sin respaldo fiscal.
+  //   - descuento (−): IVA declarado sobre plata que NUNCA entró, y un
+  //     comprobante al cliente por más de lo que pagó. `adjustment_percent`
+  //     admite negativos justamente para «pagar en efectivo sale menos», que es
+  //     el uso que el producto ofrece en Ajustes › Cobros.
+  const ajusteCents = await ajustePorMetodoDePago(service, input.orderId);
+  const facturableCents =
+    order.total_cents - (order.tip_cents ?? 0) + ajusteCents;
+
+  // Un comprobante por cero (o negativo) no existe. Antes era inalcanzable
+  // —`auto-emit` gatea por `total − tip > 0` y una emisión manual sobre una
+  // cuenta vacía no pasa de la pantalla—, pero con el ajuste adentro un
+  // descuento del 100% lo vuelve posible.
+  if (facturableCents <= 0) {
+    return actionError(
+      "La base facturable de esta cuenta es cero — no hay nada que declarar.",
+    );
+  }
 
   const tipo = input.tipoComprobante ?? afipConfig.defaultTipo;
 
@@ -237,36 +352,15 @@ export async function emitInvoiceCore(
   // `enqueue`: el estado que abre el agujero es inalcanzable fuera de
   // producción. La guarda del camino automático (`auto-emit.ts`) ya miraba los
   // dos estados; ésta era la mitad que faltaba.
-  const { data: existingAuth } = await service
-    .from("invoices")
-    .select("tipo_comprobante, punto_venta, numero, status")
-    .eq("order_id", input.orderId)
-    .in("tipo_comprobante", ["factura_a", "factura_b"])
-    .in("status", ["pending", "authorized"])
-    .limit(1);
-  const vigente = ((existingAuth ?? []) as InvoiceRef[])[0];
-  if (vigente) {
-    const mismoTipo = vigente.tipo_comprobante === tipo;
-    // Una `pending` todavía no tiene número: nombrarla por tipo es lo único
-    // honesto. Se bloquea igual —esperar es infinitamente mejor que emitir dos
-    // y resolverlo con una nota de crédito—, y el estado se ve en Facturación,
-    // donde el cron de la spec 088 la va a cerrar en un sentido o en el otro.
-    if (vigente.status === "pending") {
-      return actionError(
-        mismoTipo
-          ? "Esta orden ya tiene una factura en proceso. Esperá a que ARCA la confirme — la vas a ver en Facturación."
-          : `Esta orden ya tiene una ${tipoLabel(vigente.tipo_comprobante)} en proceso. Esperá a que ARCA la confirme antes de emitir otro tipo de comprobante.`,
-      );
-    }
-    return actionError(
-      mismoTipo
-        ? "Esta orden ya tiene una factura autorizada."
-        : `Esta orden ya tiene la ${tipoLabel(vigente.tipo_comprobante)} ${formatInvoiceNumber(
-            vigente.punto_venta,
-            vigente.numero,
-          )} autorizada. Anulala (se emite la nota de crédito) antes de emitir otro tipo de comprobante.`,
-    );
-  }
+  //
+  // #274 · 2 — la regla vive ahora en `bloqueoPorComprobanteVigente` porque
+  // `retryInvoice` también la necesita y no pasa por acá.
+  const bloqueo = await bloqueoPorComprobanteVigente(
+    service,
+    input.orderId,
+    tipo,
+  );
+  if (bloqueo) return actionError(bloqueo);
 
   // Selección de provider según modo fiscal. En producción sin credencial,
   // NO se llama al gateway.

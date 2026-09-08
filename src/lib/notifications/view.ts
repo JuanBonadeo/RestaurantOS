@@ -244,6 +244,34 @@ export function viewForNotification(n: Notification): NotiView {
     };
   }
 
+  // ── issue #274 ────────────────────────────────────────────────────
+  //
+  // ARCA autorizó una factura de una venta que ya no existe: la orden se anuló
+  // o el cobro se reembolsó. El CAE es un hecho consumado —ante ARCA la venta
+  // está declarada— así que la única salida es emitir la nota de crédito, y eso
+  // lo hace una persona.
+  //
+  // Sin esta rama el aviso caía en el fallback del final del archivo y el
+  // encargado veía «factura.nc_pendiente» crudo en la campana: se cambió un
+  // console.warn que nadie leía por una fila que nadie entiende, que es peor
+  // porque además ocupa lugar.
+  if (n.type === "factura.nc_pendiente") {
+    const motivo = p.motivo as string | undefined;
+    const totalCents = p.totalCents as number | undefined;
+    const porque =
+      motivo === "cobro_reembolsado"
+        ? "el cobro se reembolsó"
+        : "la orden se anuló";
+    return {
+      tone: "danger",
+      icon: ReceiptText,
+      title: "Falta la nota de crédito",
+      body: `ARCA autorizó ${
+        totalCents ? formatCurrency(totalCents) : "una factura"
+      } y ${porque}. Emitila desde Facturación: el IVA sigue declarado hasta entonces.`,
+    };
+  }
+
   // ── spec 093 ──────────────────────────────────────────────────────
   if (n.type === "pedido.sin_comanda") {
     const orderNumber = p.orderNumber as number | undefined;

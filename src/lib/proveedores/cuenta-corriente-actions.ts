@@ -17,6 +17,7 @@ import {
   type ImputacionPago,
   type PagoProveedor,
 } from "./cuenta-corriente";
+import { conceptoEsDelNegocio } from "./queries";
 import { unwrap } from "./unwrap";
 import {
   AnularInput,
@@ -148,79 +149,43 @@ export async function anularComprobante(
 
   const service = db();
 
-  const { data: invoice } = await service
-    .from("supplier_invoices")
-    .select("id, cancelled_at")
-    .eq("id", parsed.data.id)
-    .eq("business_id", business.id)
-    .maybeSingle();
-
-  if (!invoice) return actionError("Comprobante no encontrado.");
-  if ((invoice as { cancelled_at: string | null }).cancelled_at) {
-    return actionError("El comprobante ya estaba anulado.");
-  }
-
-  // Spec 161 · D3 — esta guarda fallaba ABIERTA: sin destructurar `error`, una
-  // lectura caída dejaba `allocations` en null, `conPagoVivo` en false, y el
-  // comprobante pago **se anulaba igual**. No hay red abajo: el FK
-  // `ON DELETE RESTRICT` protege el borrado, no la anulación lógica.
+  // Issue #268 · TODO adentro de una transacción, bajo el mismo `for update`
+  // que toma `registrar_pago_proveedor_tx` (0069).
   //
-  // Si no se puede saber si hay pagos vivos, no se anula. Anular de más ensucia
-  // el informe y descuadra el saldo; anular de menos le pide al encargado que
-  // reintente.
-  const { data: allocations, error: allocErr } = await service
-    .from("supplier_payment_allocations")
-    .select("payment_id, supplier_payments!inner(cancelled_at)")
-    .eq("invoice_id", parsed.data.id);
-
-  if (allocErr || !allocations) {
-    console.error("anularComprobante · imputaciones", allocErr);
-    return actionError(
-      "No pudimos verificar si el comprobante tiene pagos. Probá de nuevo en un momento.",
-    );
-  }
-
-  // PostgREST devuelve el embed como array aunque el FK sea a-uno: normalizar
-  // acá evita que un `.cancelled_at` sobre un array dé `undefined` y deje pasar
-  // la anulación de un comprobante que sí está pago.
-  const conPagoVivo = (allocations as unknown as Array<{
-    supplier_payments: { cancelled_at: string | null } | Array<{ cancelled_at: string | null }> | null;
-  }>).some((a) => {
-    const emb = a.supplier_payments;
-    const pagos = emb == null ? [] : Array.isArray(emb) ? emb : [emb];
-    return pagos.some((p) => p.cancelled_at == null);
-  });
-
-  if (conPagoVivo) {
-    return actionError(
-      "El comprobante tiene pagos imputados: anulá primero el pago y después el comprobante.",
-    );
-  }
-
-  // spec 165 · si el comprobante tenía renglones, devolver la mercadería que
-  // nunca entró. Va ANTES de marcar la anulación: si el stock no se puede
-  // revertir, el comprobante sigue vivo y el encargado puede reintentar — al
-  // revés quedaría anulado con el stock inflado y nadie se enteraría.
-  const { error: revErr } = await service.rpc("revertir_items_comprobante_tx", {
+  // Antes esto eran tres round-trips: leer las imputaciones, revertir el stock
+  // por RPC, y recién ahí marcar la anulación. En esa ventana —cientos de
+  // milisegundos, no minutos— entra entero un pago: el comprobante todavía
+  // figuraba vivo cuando la RPC del pago tomaba su lock, así que ganaban las
+  // dos y quedaba un comprobante ANULADO con un pago VIVO imputado. Como el
+  // saldo es derivado (Σ comprobantes vivos − Σ pagos vivos), el proveedor
+  // quedaba con plata «a favor» que nadie le debe, y si el pago fue en efectivo
+  // había además una sangría real sin comprobante que la justifique.
+  //
+  // La guarda no se duplica acá: leerla de nuevo desde TS volvería a leerla
+  // fuera del lock, que es exactamente el bug.
+  const { error } = await service.rpc("anular_comprobante_tx", {
     p_business_id: business.id,
     p_invoice_id: parsed.data.id,
+    p_cancelled_by: ctx.data.userId,
+    p_reason: parsed.data.reason.trim(),
   });
-  if (revErr) {
-    console.error("anularComprobante · revertir stock", revErr);
-    return actionError("No pudimos devolver el stock del comprobante. Probá de nuevo.");
+
+  if (error) {
+    const msg = error.message ?? "";
+    if (msg.includes("COMPROBANTE_NO_ENCONTRADO")) {
+      return actionError("Comprobante no encontrado.");
+    }
+    if (msg.includes("COMPROBANTE_YA_ANULADO")) {
+      return actionError("El comprobante ya estaba anulado.");
+    }
+    if (msg.includes("COMPROBANTE_CON_PAGO_VIVO")) {
+      return actionError(
+        "El comprobante tiene pagos imputados: anulá primero el pago y después el comprobante.",
+      );
+    }
+    console.error("anularComprobante", error);
+    return actionError("No pudimos anular el comprobante.");
   }
-
-  const { error } = await service
-    .from("supplier_invoices")
-    .update({
-      cancelled_at: new Date().toISOString(),
-      cancelled_by: ctx.data.userId,
-      cancelled_reason: parsed.data.reason.trim(),
-    })
-    .eq("id", parsed.data.id)
-    .eq("business_id", business.id);
-
-  if (error) return actionError("No pudimos anular el comprobante.");
 
   revalidatePath(`/${slug}/admin/proveedores`);
   revalidatePath(`/${slug}/admin/catalogo`);
@@ -255,73 +220,49 @@ export async function editarComprobante(
   const service = db();
   const { id, ...campos } = parsed.data;
 
-  const { data: invoice, error: invErr } = await service
-    .from("supplier_invoices")
-    .select("id, cancelled_at, total_cents, document_type")
-    .eq("id", id)
-    .eq("business_id", business.id)
-    .maybeSingle();
-
-  if (invErr) return actionError("No pudimos leer el comprobante.");
-  if (!invoice) return actionError("Comprobante no encontrado.");
-  if ((invoice as { cancelled_at: string | null }).cancelled_at) {
-    return actionError("Un comprobante anulado no se edita.");
+  // Issue #268 · el concepto de gasto tiene que ser de ESTE negocio. Esta es la
+  // puerta más expuesta de las dos: el concepto es el único campo declarado
+  // «siempre editable», incluso con pagos vivos.
+  if (
+    "expense_concept_id" in campos &&
+    !(await conceptoEsDelNegocio(service, business.id, campos.expense_concept_id))
+  ) {
+    return actionError("El concepto de gasto no es de este negocio.");
   }
 
-  const tocaPlata =
-    campos.total_cents !== undefined ||
-    campos.invoice_date !== undefined ||
-    campos.document_type !== undefined;
+  // Issue #268 · guarda y escritura en la MISMA transacción, igual que
+  // `anularComprobante`. Acá la guarda de pagos vivos estaba copiada tal cual —
+  // con la carrera copiada adentro—, así que arreglar sólo la anulación dejaba
+  // el gemelo vivo: dos pestañas, una editando el importe y otra pagando, y el
+  // comprobante terminaba con un total distinto al que se pagó.
+  //
+  // Sólo viajan las claves que el usuario mandó. Mandar el objeto entero con
+  // `undefined` rellenados leería «borrar el concepto» y «no tocar el concepto»
+  // como lo mismo.
+  const { error } = await service.rpc("editar_comprobante_tx", {
+    p_business_id: business.id,
+    p_invoice_id: id,
+    p_campos: campos,
+  });
 
-  if (tocaPlata) {
-    // Misma lectura y misma política que `anularComprobante`: si no se puede
-    // saber si hay pagos vivos, no se toca la plata (spec 161 · D3).
-    const { data: allocations, error: allocErr } = await service
-      .from("supplier_payment_allocations")
-      .select("payment_id, supplier_payments!inner(cancelled_at)")
-      .eq("invoice_id", id);
-
-    if (allocErr || !allocations) {
-      console.error("editarComprobante · imputaciones", allocErr);
-      return actionError(
-        "No pudimos verificar si el comprobante tiene pagos. Probá de nuevo en un momento.",
-      );
+  if (error) {
+    const msg = error.message ?? "";
+    if (msg.includes("COMPROBANTE_NO_ENCONTRADO")) {
+      return actionError("Comprobante no encontrado.");
     }
-
-    const conPagoVivo = (allocations as unknown as Array<{
-      supplier_payments:
-        | { cancelled_at: string | null }
-        | Array<{ cancelled_at: string | null }>
-        | null;
-    }>).some((a) => {
-      const emb = a.supplier_payments;
-      const pagos = emb == null ? [] : Array.isArray(emb) ? emb : [emb];
-      return pagos.some((p) => p.cancelled_at == null);
-    });
-
-    if (conPagoVivo) {
+    if (msg.includes("COMPROBANTE_ANULADO")) {
+      return actionError("Un comprobante anulado no se edita.");
+    }
+    if (msg.includes("COMPROBANTE_CON_PAGO_VIVO")) {
       return actionError(
         "El comprobante ya tiene pagos: podés corregir el concepto, el número y las notas, pero no el importe ni la fecha.",
       );
     }
-
-    // El mismo signo que exige la base (158 · D4), acá para dar el mensaje bueno.
-    const tipo = campos.document_type ?? (invoice as { document_type: string }).document_type;
-    const total = campos.total_cents ?? (invoice as { total_cents: number }).total_cents;
-    if (tipo === "nota_credito" ? total > 0 : total < 0) {
+    if (msg.includes("SIGNO_INVALIDO")) {
       return actionError(
         "La nota de crédito va en negativo; el resto de los comprobantes, en positivo.",
       );
     }
-  }
-
-  const { error } = await service
-    .from("supplier_invoices")
-    .update(campos)
-    .eq("id", id)
-    .eq("business_id", business.id);
-
-  if (error) {
     console.error("editarComprobante", error);
     return actionError("No pudimos guardar los cambios.");
   }
@@ -422,6 +363,19 @@ export async function registrarPagoProveedor(
 
     if (invoices.length !== data.invoice_ids.length) {
       return actionError("Alguno de los comprobantes no es de este proveedor.");
+    }
+
+    // Issue #268 · el comprobante anulado no se «cae» del reparto en silencio.
+    //
+    // `comprobantesImpagos` filtra lo anulado, así que si alguien anuló el
+    // comprobante mientras el otro tildaba y confirmaba el pago, el reparto
+    // quedaba vacío y la plata entraba como PAGO A CUENTA — con toast de éxito y
+    // sin que nadie hubiera pedido un pago a cuenta. La otra mitad de esta
+    // carrera (la anulación que llega después) ya la corta la RPC con
+    // COMPROBANTE_NO_DISPONIBLE; ésta no la veía nadie porque el resultado era
+    // plausible: el proveedor queda con saldo a favor.
+    if (invoices.some((i) => i.cancelled_at != null)) {
+      return actionError("Uno de los comprobantes se anuló mientras cargabas el pago.");
     }
 
     const reparto = repartirPago(data.amount_cents, comprobantesImpagos(invoices, allocs, pagos));

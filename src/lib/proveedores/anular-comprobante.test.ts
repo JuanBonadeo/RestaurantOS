@@ -3,21 +3,42 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BusinessRole } from "@/lib/admin/context";
 
 /**
- * Spec 161 · D3 — la guarda de anulación falla CERRADA.
+ * La anulación de un comprobante, y su guarda de pagos vivos.
+ *
+ * ── Spec 161 · D3 — la guarda fallaba ABIERTA ─────────────────────────────
  *
  * `anularComprobante` no destructuraba el `error` de la lectura de imputaciones.
  * Como postgrest-js devuelve `{data: null, error}` en vez de lanzar, una lectura
- * caída dejaba `conPagoVivo` en `false` y **el comprobante pago se anulaba
- * igual** — justo lo que la guarda de la 158 vino a impedir. Abajo no hay red:
- * el FK `ON DELETE RESTRICT` protege el borrado, no la anulación lógica.
+ * caída dejaba `conPagoVivo` en `false` y el comprobante pago **se anulaba
+ * igual**. Abajo no hay red: el FK `ON DELETE RESTRICT` protege el borrado, no
+ * la anulación lógica.
+ *
+ * ── Issue #268 — y además fallaba TARDE ───────────────────────────────────
+ *
+ * Cerrar la lectura no alcanzaba, porque la guarda seguía siendo una consulta y
+ * la anulación otra, con la RPC de reversión de stock en el medio. En esa
+ * ventana entra entero un `registrar_pago_proveedor_tx`: ganaban las dos
+ * operaciones y quedaba un comprobante ANULADO con un pago VIVO imputado —
+ * exactamente el estado que la guarda dice impedir.
+ *
+ * Ahora la guarda, la reversión de stock y la anulación viven en
+ * `anular_comprobante_tx` (0085), bajo el mismo `for update` que toma el pago.
+ * Estos tests cubren **qué ve el usuario en cada caso**; el fake de `rpc`
+ * reproduce la política de la RPC. Que el lock aguante la carrera se verifica
+ * contra la base en `anular-vs-pagar.integration.test.ts`: un mock no puede
+ * probar un lock.
  */
 
 const BIZ = "biz-1";
 const INVOICE = "00000000-0000-4000-8000-0000000000aa";
 
 let role: BusinessRole;
-/** Qué devuelve la lectura de `supplier_payment_allocations`. */
-let allocsRes: { data: unknown[] | null; error: { message: string } | null };
+let invoice: { cancelled_at: string | null } | null;
+/** Imputaciones de pagos VIVOS sobre el comprobante. */
+let pagosVivos: number;
+/** La RPC se cae por algo que no es de negocio (red, permisos, deadlock). */
+let rpcRota: boolean;
+/** Las anulaciones efectivamente escritas. */
 let updates: Array<Record<string, unknown>>;
 let rpcCalls: string[];
 
@@ -37,32 +58,32 @@ vi.mock("@/lib/caja/queries", () => ({ getCajaAdministrativa: async () => null }
 
 vi.mock("@/lib/supabase/service", () => ({
   createSupabaseServiceClient: () => ({
-    // spec 165 · anular ahora devuelve el stock de los renglones antes de
-    // marcar la anulación. Sin renglones la RPC no hace nada, que es el caso
-    // de estos tests.
-    rpc: async (fn: string) => {
+    // Reproduce `anular_comprobante_tx` (0085): mismo orden de guardas y mismos
+    // nombres de excepción, que es lo que la action traduce a mensajes.
+    rpc: async (fn: string, args: Record<string, unknown>) => {
       rpcCalls.push(fn);
-      return { data: 0, error: null };
+      if (fn !== "anular_comprobante_tx") return { data: 0, error: null };
+      if (rpcRota) return { data: null, error: { message: "connection reset" } };
+      if (!invoice) return { data: null, error: { message: "COMPROBANTE_NO_ENCONTRADO" } };
+      if (invoice.cancelled_at) {
+        return { data: null, error: { message: "COMPROBANTE_YA_ANULADO" } };
+      }
+      if (pagosVivos > 0) {
+        return { data: null, error: { message: "COMPROBANTE_CON_PAGO_VIVO" } };
+      }
+      updates.push({
+        cancelled_by: args.p_cancelled_by,
+        cancelled_reason: args.p_reason,
+      });
+      return { data: null, error: null };
     },
-    from: (tabla: string) => {
+    from: () => {
       const chain: Record<string, unknown> = {
         select: () => chain,
         eq: () => chain,
         in: () => chain,
-        update: (row: Record<string, unknown>) => {
-          updates.push({ tabla, ...row });
-          return chain;
-        },
-        maybeSingle: async () =>
-          tabla === "supplier_invoices"
-            ? { data: { id: INVOICE, cancelled_at: null }, error: null }
-            : { data: null, error: null },
-        then: (resolve: (v: unknown) => unknown) =>
-          resolve(
-            tabla === "supplier_payment_allocations"
-              ? allocsRes
-              : { data: [], error: null },
-          ),
+        maybeSingle: async () => ({ data: null, error: null }),
+        then: (resolve: (v: unknown) => unknown) => resolve({ data: [], error: null }),
       };
       return chain;
     },
@@ -73,7 +94,9 @@ const { anularComprobante } = await import("./cuenta-corriente-actions");
 
 beforeEach(() => {
   role = "encargado";
-  allocsRes = { data: [], error: null };
+  invoice = { cancelled_at: null };
+  pagosVivos = 0;
+  rpcRota = false;
   updates = [];
   rpcCalls = [];
 });
@@ -90,10 +113,7 @@ describe("anularComprobante · la guarda no falla abierta (spec 161 · D3)", () 
   });
 
   it("con un pago vivo imputado, no anula", async () => {
-    allocsRes = {
-      data: [{ payment_id: "p1", supplier_payments: { cancelled_at: null } }],
-      error: null,
-    };
+    pagosVivos = 1;
 
     const r = await anular();
 
@@ -103,28 +123,36 @@ describe("anularComprobante · la guarda no falla abierta (spec 161 · D3)", () 
   });
 
   it("con el pago ya anulado, sí anula: la deuda volvió", async () => {
-    allocsRes = {
-      data: [{ payment_id: "p1", supplier_payments: { cancelled_at: "2026-09-01T10:00:00Z" } }],
-      error: null,
-    };
+    pagosVivos = 0;
 
     await expect(anular()).resolves.toMatchObject({ ok: true });
   });
 
-  // EL caso de la spec: antes de este fix, esto devolvía ok:true y el
-  // comprobante quedaba anulado con un pago vivo colgando.
-  it("si la lectura de imputaciones FALLA, no anula", async () => {
-    allocsRes = { data: null, error: { message: "fetch failed" } };
+  // La lectura de imputaciones ya no vuelve a TS: si algo de la transacción se
+  // cae, se cae entera. No queda ni la anulación ni el stock revertido a medias
+  // — que era el otro modo de falla del camino de tres round-trips.
+  it("si la transacción FALLA, no anula", async () => {
+    rpcRota = true;
 
     const r = await anular();
 
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toMatch(/no pudimos verificar/i);
+    if (!r.ok) expect(r.error).toMatch(/no pudimos anular/i);
     expect(updates, "se anuló sin poder saber si tenía pagos").toEqual([]);
   });
 
-  it("tampoco si vuelve sin datos y sin error", async () => {
-    allocsRes = { data: null, error: null };
+  it("un comprobante ya anulado no se vuelve a anular", async () => {
+    invoice = { cancelled_at: "2026-09-01T10:00:00Z" };
+
+    const r = await anular();
+
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/ya estaba anulado/i);
+    expect(updates).toEqual([]);
+  });
+
+  it("uno que no existe tampoco", async () => {
+    invoice = null;
 
     await expect(anular()).resolves.toMatchObject({ ok: false });
     expect(updates).toEqual([]);
@@ -137,5 +165,6 @@ describe("anularComprobante · la guarda no falla abierta (spec 161 · D3)", () 
 
     expect(r.ok).toBe(false);
     expect(updates).toEqual([]);
+    expect(rpcCalls).toEqual([]);
   });
 });

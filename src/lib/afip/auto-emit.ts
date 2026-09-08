@@ -124,7 +124,14 @@ export async function autoEmitInvoiceForOrder(params: {
   if (!elegido && !biz?.afip_auto_emit) return { outcome: "off" };
   if (!biz?.afip_cuit || !biz.afip_punto_venta) return { outcome: "sin-afip" };
 
-  // Misma base que el motor: subtotal − descuento, SIN propina.
+  // Gate barato antes de entrar al motor: subtotal − descuento, SIN propina.
+  // Una cuenta que es toda propina no tiene qué declarar.
+  //
+  // No es exactamente la base del motor: desde #274 · 7 el motor le suma el
+  // ajuste por método de pago (`payments.adjustment_cents`), que acá no está
+  // cargado todavía. Se deja así a propósito — este gate existe para no gastar
+  // round-trips, no para decidir el importe; la base fiscal la calcula un solo
+  // lugar, `emitInvoiceCore`, que además rechaza la que da cero.
   if (order.total_cents - (order.tip_cents ?? 0) <= 0) {
     return { outcome: "sin-base" };
   }

@@ -11,7 +11,14 @@ import { getBusiness } from "@/lib/tenant";
 
 import { calculateAmounts } from "./calculate-amounts";
 import { formatCuit } from "./cuit";
-import { emitInvoiceCore, type EmitInput, type EmitResult } from "./emit-core";
+import {
+  bloqueoPorComprobanteVigente,
+  emitInvoiceCore,
+  ordenEstaAnulada,
+  ORDEN_ANULADA_MSG,
+  type EmitInput,
+  type EmitResult,
+} from "./emit-core";
 import type { AFIPProviderClient } from "./provider";
 import { selectProvider } from "./provider-config";
 import {
@@ -160,6 +167,60 @@ export async function retryInvoice(
   const inv = invoiceRow as Invoice;
   if (inv.status !== "failed") {
     return actionError("Solo se pueden reintentar facturas fallidas.");
+  }
+
+  // #274 · 2 — «Reintentar» pasa por las MISMAS guardas que emitir.
+  //
+  // Esta action no llama a `emitInvoiceCore`: encola contra el provider
+  // directo. Así que las dos guardas del motor —orden anulada (spec 092) y
+  // comprobante vigente cruzando tipos (spec 100/147)— no existían de este
+  // lado, y el único chequeo era `status !== "failed"`. En todo el archivo
+  // `order_id` sólo se usaba para armar la idempotency-key.
+  //
+  // No es un camino de laboratorio: es el botón que la pantalla ofrece junto al
+  // cartel rojo, y en golf-jcr hubo 14 rechazos en un mes. Los dos desenlaces
+  // que habilitaba eran fiscales y sólo se sacan con nota de crédito:
+  //
+  //   (a) La factura queda `failed`, y una `failed` no bloquea ni `anularCobro`
+  //       ni la anulación de la mesa. Con la mesa ya anulada, Reintentar sacaba
+  //       un CAE nuevo por una venta que no ocurrió.
+  //   (b) Se pidió una A, ARCA la rechazó, se emitió una B para salir del paso.
+  //       Reintentar la A dejaba las dos autorizadas por el mismo consumo: el
+  //       índice único parcial es (business, order, tipo) y A ≠ B, así que la
+  //       base tampoco lo frena.
+  if (inv.order_id) {
+    const { data: orderRow } = await service
+      .from("orders")
+      .select("business_id, status, lifecycle_status")
+      .eq("id", inv.order_id)
+      .maybeSingle();
+    const order = orderRow as {
+      business_id: string;
+      status: string;
+      lifecycle_status: string;
+    } | null;
+    if (!order || order.business_id !== business.id) {
+      return actionError("Orden no encontrada.");
+    }
+    if (ordenEstaAnulada(order)) {
+      return actionError(ORDEN_ANULADA_MSG);
+    }
+
+    // Sólo para facturas: una nota de crédito NO es "la factura vigente" de la
+    // orden y compararla contra la factura que anula daría un mensaje absurdo.
+    // El reintento de la MISMA letra lo sigue frenando el índice único (el
+    // 23505 de más abajo); esto cubre el cruce, que es el que nadie miraba.
+    if (
+      inv.tipo_comprobante === "factura_a" ||
+      inv.tipo_comprobante === "factura_b"
+    ) {
+      const bloqueo = await bloqueoPorComprobanteVigente(
+        service,
+        inv.order_id,
+        inv.tipo_comprobante,
+      );
+      if (bloqueo) return actionError(bloqueo);
+    }
   }
 
   const afipConfig = await loadAFIPConfig(service, business.id);

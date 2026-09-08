@@ -574,6 +574,214 @@ describe.skipIf(!dbAvailable)(
       },
     );
 
+    // ── El recargo / descuento por método va en el comprobante (#274 · 7) ──
+    //
+    // La base facturable era `total_cents − tip_cents` y el ajuste por método
+    // vive en `payments.adjustment_cents`, que el motor no leía nunca (grep
+    // `adjustment` en src/lib/afip/ daba cero). El comprobante declaraba
+    // siempre el precio de lista, no lo que el cliente pagó.
+    const cobrarCon = async (
+      orderId: string,
+      amountCents: number,
+      adjustmentCents: number,
+    ) => {
+      const { data: caja } = await supabase
+        .from("cajas")
+        .select("id")
+        .eq("business_id", businessId)
+        .limit(1)
+        .single();
+      await supabase.from("payments").insert({
+        order_id: orderId,
+        business_id: businessId,
+        caja_id: caja!.id,
+        method: "cash",
+        amount_cents: amountCents,
+        adjustment_cents: adjustmentCents,
+        payment_status: "paid",
+      });
+    };
+
+    it(
+      "recargo por método: el comprobante declara lo que el cliente pagó",
+      { timeout: 30_000 },
+      async () => {
+        // Cuenta de $1.000 cobrada con 5% de recargo: entran $1.050.
+        const orderId = await newOrder(100_000);
+        await cobrarCon(orderId, 105_000, 5_000);
+
+        const r = await emitInvoice({ orderId, slug: businessSlug });
+        expect(r.ok).toBe(true);
+        if (!r.ok) return;
+
+        const { data: inv } = await supabase
+          .from("invoices")
+          .select("total_cents, neto_cents, iva_cents, provider_response")
+          .eq("id", r.data.invoice.id)
+          .single();
+        const row = inv as {
+          total_cents: number;
+          neto_cents: number;
+          iva_cents: number;
+          provider_response: { gatewayBody?: { importe_total?: number } };
+        };
+        expect(row.total_cents).toBe(105_000);
+        expect(row.neto_cents + row.iva_cents).toBe(105_000);
+        // Valor de WIRE: lo que viajaría a ARCA, no sólo la columna.
+        expect(row.provider_response.gatewayBody?.importe_total).toBe(1_050);
+      },
+    );
+
+    it(
+      "descuento por método: el comprobante NO declara plata que no entró",
+      { timeout: 30_000 },
+      async () => {
+        // La dirección más grave, y la que el producto ofrece de verdad
+        // («pagar en efectivo sale menos», Ajustes › Cobros admite negativos):
+        // facturar de más es declarar IVA sobre plata que nunca entró y darle
+        // al cliente un comprobante por más de lo que pagó.
+        const orderId = await newOrder(100_000);
+        await cobrarCon(orderId, 90_000, -10_000);
+
+        const r = await emitInvoice({ orderId, slug: businessSlug });
+        expect(r.ok).toBe(true);
+        if (!r.ok) return;
+
+        const { data: inv } = await supabase
+          .from("invoices")
+          .select("total_cents")
+          .eq("id", r.data.invoice.id)
+          .single();
+        expect((inv as { total_cents: number }).total_cents).toBe(90_000);
+      },
+    );
+
+    it(
+      "un pago reembolsado no mueve la base facturable",
+      { timeout: 30_000 },
+      async () => {
+        const orderId = await newOrder(100_000);
+        await cobrarCon(orderId, 105_000, 5_000);
+        await supabase
+          .from("payments")
+          .update({ payment_status: "refunded" })
+          .eq("order_id", orderId);
+        await cobrarCon(orderId, 100_000, 0);
+
+        const r = await emitInvoice({ orderId, slug: businessSlug });
+        expect(r.ok).toBe(true);
+        if (!r.ok) return;
+
+        const { data: inv } = await supabase
+          .from("invoices")
+          .select("total_cents")
+          .eq("id", r.data.invoice.id)
+          .single();
+        expect((inv as { total_cents: number }).total_cents).toBe(100_000);
+      },
+    );
+
+    // ── «Reintentar» pasa por las mismas guardas que emitir (#274 · 2) ──
+    //
+    // `retryInvoice` no llama a `emitInvoiceCore`: encola contra el provider
+    // directo. Las dos guardas que el motor sí tiene —orden anulada (spec 092)
+    // y comprobante vigente cruzando tipos (spec 100)— no existían de este
+    // lado, y «Reintentar» es el botón que la pantalla ofrece con el cartel
+    // rojo: en golf-jcr, con 14 rechazos en un mes, es el camino natural.
+    it(
+      "reintentar sobre una orden anulada → rechazo, la factura sigue failed (spec 092)",
+      { timeout: 30_000 },
+      async () => {
+        const orderId = await newOrder();
+        const { data: failedRow } = await supabase
+          .from("invoices")
+          .insert({
+            business_id: businessId,
+            order_id: orderId,
+            tipo_comprobante: "factura_b",
+            punto_venta: 1,
+            total_cents: 12_100,
+            neto_cents: 10_000,
+            iva_cents: 2_100,
+            iva_rate: 21,
+            status: "failed",
+            provider: "sandbox",
+            idempotency_key: `${orderId}:factura_b`,
+            error_message: "forzado para test",
+          })
+          .select("id")
+          .single();
+        const failedId = failedRow!.id as string;
+
+        // El camino real: con la factura `failed` nada bloquea anular la mesa.
+        await supabase
+          .from("orders")
+          .update({ lifecycle_status: "cancelled", status: "cancelled" })
+          .eq("id", orderId);
+
+        const r = await retryInvoice(failedId, businessSlug);
+        expect(r.ok).toBe(false);
+        if (!r.ok) expect(r.error).toMatch(/anulada/i);
+
+        // Lo que importa no es el mensaje: es que no haya CAE nuevo.
+        const { data: still } = await supabase
+          .from("invoices")
+          .select("status, cae")
+          .eq("id", failedId)
+          .single();
+        expect((still as { status: string }).status).toBe("failed");
+        expect((still as { cae: string | null }).cae).toBeNull();
+      },
+    );
+
+    it(
+      "reintentar una A fallida con una B viva → rechazo, no quedan dos CAE (spec 100)",
+      { timeout: 40_000 },
+      async () => {
+        // El índice único parcial es (business, order, tipo): A ≠ B, así que la
+        // base no lo impide. Es el desenlace del caso «pedí la A, ARCA la
+        // rechazó, emití una B para salir del paso» — y después alguien vuelve
+        // al comprobante rojo y toca Reintentar.
+        const orderId = await newOrder();
+        const { data: failedA } = await supabase
+          .from("invoices")
+          .insert({
+            business_id: businessId,
+            order_id: orderId,
+            tipo_comprobante: "factura_a",
+            punto_venta: 1,
+            cuit_receptor: "20307123459",
+            condicion_iva_receptor: 1,
+            total_cents: 12_100,
+            neto_cents: 10_000,
+            iva_cents: 2_100,
+            iva_rate: 21,
+            status: "failed",
+            provider: "sandbox",
+            idempotency_key: `${orderId}:factura_a`,
+            error_message: "ARCA rechazó el CUIT",
+          })
+          .select("id")
+          .single();
+        const failedAId = failedA!.id as string;
+
+        const b = await emitInvoice({ orderId, slug: businessSlug });
+        expect(b.ok).toBe(true);
+
+        const r = await retryInvoice(failedAId, businessSlug);
+        expect(r.ok).toBe(false);
+        if (!r.ok) expect(r.error).toMatch(/Factura B/i);
+
+        const { count } = await supabase
+          .from("invoices")
+          .select("id", { count: "exact", head: true })
+          .eq("order_id", orderId)
+          .eq("status", "authorized")
+          .in("tipo_comprobante", ["factura_a", "factura_b"]);
+        expect(count).toBe(1);
+      },
+    );
+
     it(
       "retry de una B-con-CUIT fallida → re-encola con la condición de la fila (costura row→wire)",
       { timeout: 30_000 },

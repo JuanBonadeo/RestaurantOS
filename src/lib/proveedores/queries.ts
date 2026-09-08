@@ -18,6 +18,33 @@ function db() {
 }
 
 /**
+ * ¿El concepto de gasto es de este negocio? — issue #268.
+ *
+ * `null` pasa (el comprobante sin clasificar es válido). Vive acá y no en el
+ * schema Zod porque es una pregunta a la base, no una forma del dato; y vive en
+ * un helper porque `createSupplierInvoice` y `editarComprobante` son gemelos y
+ * arreglar uno solo dejaba la otra puerta abierta — que es justo la más
+ * expuesta: el concepto es el único campo editable con pagos vivos.
+ */
+export async function conceptoEsDelNegocio(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  service: any,
+  businessId: string,
+  conceptId: string | null | undefined,
+): Promise<boolean> {
+  if (!conceptId) return true;
+  const { data, error } = await service
+    .from("expense_concepts")
+    .select("id")
+    .eq("id", conceptId)
+    .eq("business_id", businessId)
+    .maybeSingle();
+  // Falla cerrada: si no se puede verificar, no se clasifica (spec 161 · D3).
+  if (error) return false;
+  return data != null;
+}
+
+/**
  * Las columnas de la spec 158 llegan en el `select("*")` pero todavía no están
  * en `database.types.ts` (el `pnpm db:types` del repo necesita el CLI linkeado).
  * Estos accesos las leen sin apagar el tipado del resto de la fila.

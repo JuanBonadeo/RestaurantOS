@@ -10,6 +10,21 @@ import type { BusinessRole } from "@/lib/admin/context";
  * concepto mal puesto que se descubre a fin de mes con la compra ya paga, y que
  * hoy obliga a anular el pago —el que marca la sangría que el arqueo ya contó—,
  * así que nadie lo corrige y el informe queda sucio para siempre.
+ *
+ * ── Por qué este archivo cambió (issue #268) ──────────────────────────────
+ *
+ * La guarda vivía acá, en TS: se leían las imputaciones con una consulta y se
+ * escribía el update con otra. Entre las dos entraba entero un
+ * `registrar_pago_proveedor_tx`, así que la regla «la plata no se toca con pagos
+ * vivos» era cierta en el papel y falsa en la carrera. Ahora la guarda y la
+ * escritura viven en `editar_comprobante_tx` (0085), bajo el mismo `for update`
+ * que toma el pago.
+ *
+ * Estos tests siguen cubriendo **qué ve el usuario en cada caso**; el fake de
+ * `rpc` de abajo reproduce la política de la RPC a partir de las mismas fixtures
+ * de antes. Que la guarda realmente aguante la carrera se verifica contra la
+ * base en `anular-vs-pagar.integration.test.ts` — un mock no puede probar un
+ * lock.
  */
 
 const BIZ = "biz-1";
@@ -18,9 +33,13 @@ const CONCEPTO = "00000000-0000-4000-8000-0000000000bb";
 
 let role: BusinessRole;
 let invoice: Record<string, unknown> | null;
-let allocsRes: { data: unknown[] | null; error: { message: string } | null };
+/** Imputaciones de pagos VIVOS sobre este comprobante (lo que cuenta la RPC). */
+let pagosVivos: number;
+/** La RPC se cae por una razón que no es de negocio (red, permisos). */
+let rpcRota: boolean;
+/** ¿El concepto que se manda es de este negocio? */
+let conceptoPropio: boolean;
 let updates: Array<Record<string, unknown>>;
-let rpcCalls: string[];
 
 vi.mock("@/lib/tenant", () => ({ getBusiness: async () => ({ id: BIZ, slug: "demo" }) }));
 vi.mock("@/lib/mozo/auth", () => ({
@@ -32,32 +51,45 @@ vi.mock("@/lib/mozo/auth", () => ({
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("@/lib/caja/queries", () => ({ getCajaAdministrativa: async () => null }));
 
+const CAMPOS_DE_PLATA = ["total_cents", "invoice_date", "document_type"];
+
 vi.mock("@/lib/supabase/service", () => ({
   createSupabaseServiceClient: () => ({
-    // spec 165 · anular ahora devuelve el stock de los renglones antes de
-    // marcar la anulación. Sin renglones la RPC no hace nada, que es el caso
-    // de estos tests.
-    rpc: async (fn: string) => {
-      rpcCalls.push(fn);
-      return { data: 0, error: null };
+    // Reproduce `editar_comprobante_tx` (0085): mismo orden de guardas y mismos
+    // nombres de excepción, que es lo que la action traduce a mensajes.
+    rpc: async (fn: string, args: Record<string, unknown>) => {
+      if (fn !== "editar_comprobante_tx") return { data: null, error: null };
+      if (rpcRota) return { data: null, error: { message: "connection reset" } };
+
+      const campos = args.p_campos as Record<string, unknown>;
+      if (!invoice) return { data: null, error: { message: "COMPROBANTE_NO_ENCONTRADO" } };
+      if (invoice.cancelled_at) return { data: null, error: { message: "COMPROBANTE_ANULADO" } };
+
+      const tocaPlata = CAMPOS_DE_PLATA.some((k) => k in campos);
+      if (tocaPlata) {
+        if (pagosVivos > 0) {
+          return { data: null, error: { message: "COMPROBANTE_CON_PAGO_VIVO" } };
+        }
+        const tipo = (campos.document_type ?? invoice.document_type) as string;
+        const total = (campos.total_cents ?? invoice.total_cents) as number;
+        if (tipo === "nota_credito" ? total > 0 : total < 0) {
+          return { data: null, error: { message: "SIGNO_INVALIDO" } };
+        }
+      }
+
+      updates.push(campos);
+      return { data: null, error: null };
     },
     from: (tabla: string) => {
       const chain: Record<string, unknown> = {
         select: () => chain,
         eq: () => chain,
         in: () => chain,
-        update: (row: Record<string, unknown>) => {
-          updates.push(row);
-          return chain;
-        },
         maybeSingle: async () =>
-          tabla === "supplier_invoices"
-            ? { data: invoice, error: null }
+          tabla === "expense_concepts"
+            ? { data: conceptoPropio ? { id: CONCEPTO } : null, error: null }
             : { data: null, error: null },
-        then: (resolve: (v: unknown) => unknown) =>
-          resolve(
-            tabla === "supplier_payment_allocations" ? allocsRes : { data: [], error: null },
-          ),
+        then: (resolve: (v: unknown) => unknown) => resolve({ data: [], error: null }),
       };
       return chain;
     },
@@ -74,16 +106,14 @@ beforeEach(() => {
     total_cents: 100_000_00,
     document_type: "factura_a",
   };
-  allocsRes = { data: [], error: null };
+  pagosVivos = 0;
+  rpcRota = false;
+  conceptoPropio = true;
   updates = [];
-  rpcCalls = [];
 });
 
 const conPagoVivo = () => {
-  allocsRes = {
-    data: [{ payment_id: "p1", supplier_payments: { cancelled_at: null } }],
-    error: null,
-  };
+  pagosVivos = 1;
 };
 
 describe("editarComprobante · clasificación (siempre se puede)", () => {
@@ -116,6 +146,19 @@ describe("editarComprobante · clasificación (siempre se puede)", () => {
 
     expect(r.ok).toBe(true);
   });
+
+  // Issue #268 · el concepto es el único campo editable con pagos vivos, así que
+  // es la puerta más expuesta para meter un id de otro negocio: el FK sólo
+  // chequea existencia y el service client bypassa RLS.
+  it("no acepta un concepto de otro negocio", async () => {
+    conceptoPropio = false;
+
+    const r = await editarComprobante("demo", { id: INV, expense_concept_id: CONCEPTO });
+
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/no es de este negocio/i);
+    expect(updates).toEqual([]);
+  });
 });
 
 describe("editarComprobante · plata (sólo sin pagos vivos)", () => {
@@ -137,25 +180,24 @@ describe("editarComprobante · plata (sólo sin pagos vivos)", () => {
   });
 
   it("con el pago anulado, la plata vuelve a ser editable", async () => {
-    allocsRes = {
-      data: [{ payment_id: "p1", supplier_payments: { cancelled_at: "2026-09-01T10:00:00Z" } }],
-      error: null,
-    };
+    pagosVivos = 0;
 
     await expect(
       editarComprobante("demo", { id: INV, invoice_date: "2026-09-02" }),
     ).resolves.toMatchObject({ ok: true });
   });
 
-  // Misma política que la guarda de anulación (spec 161 · D3): si no se puede
-  // saber, no se toca.
-  it("si falla la lectura de imputaciones, no toca la plata", async () => {
-    allocsRes = { data: null, error: { message: "fetch failed" } };
+  // Misma política que antes (spec 161 · D3): si no se puede saber, no se toca.
+  // Lo que cambió es dónde: la lectura de imputaciones ya no vuelve a TS, así
+  // que un fallo de la RPC es el fallo de toda la transacción — no queda un
+  // update a medias.
+  it("si la RPC falla, no se guarda nada", async () => {
+    rpcRota = true;
 
     const r = await editarComprobante("demo", { id: INV, total_cents: 1 });
 
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toMatch(/no pudimos verificar/i);
+    if (!r.ok) expect(r.error).toMatch(/no pudimos guardar/i);
     expect(updates).toEqual([]);
   });
 
