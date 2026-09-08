@@ -43,13 +43,23 @@ const Body = z.object({
   supplierId: z.string().uuid().nullable().optional(),
 });
 
+/**
+ * Los mensajes distinguen de quién es el problema.
+ *
+ * Sólo dos mandan a sacar otra foto, y son los dos casos en que la foto es
+ * efectivamente la causa. Todo lo demás dice «fue acá», porque pedirle a la
+ * encargada que repita algo que no va a cambiar nada la hace sacar la misma foto
+ * dos veces —ya pasó— y encima le deja la sensación de haber hecho algo mal.
+ */
 const MENSAJES: Record<string, string> = {
   sin_api_key: "La lectura de facturas todavía no está prendida en este local.",
   imagen_muy_pesada: "La foto es muy pesada para leerla. Sacá una nueva sin zoom o recortala.",
-  formato_no_soportado: "Esa foto no la puedo abrir. Sacá una nueva con la cámara.",
-  timeout: "La lectura tardó demasiado. Probá con una foto más nítida o cargalo a mano.",
+  formato_no_soportado:
+    "Ese archivo no es una foto que pueda leer. Si es un PDF o una captura de pantalla, sacale una foto al papel con la cámara.",
+  timeout: "La lectura tardó más de lo esperado. Cargalo a mano y avisanos.",
+  request_rechazado: "Falló la lectura por un problema nuestro, no por la foto. Cargalo a mano y avisanos.",
   respuesta_invalida: "No pudimos leer el comprobante. Cargalo a mano.",
-  modelo_no_disponible: "No pudimos leer el comprobante. Cargalo a mano.",
+  modelo_no_disponible: "El lector no está respondiendo. Cargalo a mano y probá de nuevo en un rato.",
 };
 
 export async function POST(req: Request) {
@@ -98,8 +108,16 @@ export async function POST(req: Request) {
 
   const lectura = await leerComprobante(await blob.arrayBuffer(), blob.type || "image/jpeg");
   if (!lectura.ok) {
+    // Un request rechazado es un 500: el problema es nuestro y tiene que
+    // aparecer como error del server en las métricas, no como input inválido.
     const status =
-      lectura.error === "timeout" ? 504 : lectura.error === "sin_api_key" ? 503 : 400;
+      lectura.error === "timeout"
+        ? 504
+        : lectura.error === "sin_api_key" || lectura.error === "modelo_no_disponible"
+          ? 503
+          : lectura.error === "request_rechazado" || lectura.error === "respuesta_invalida"
+            ? 500
+            : 400;
     return NextResponse.json(
       { ok: false, error: MENSAJES[lectura.error] ?? MENSAJES.respuesta_invalida },
       { status },
