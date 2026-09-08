@@ -250,3 +250,41 @@ describe("isTableAvailableForReservation", () => {
     expect(result).toBe(true);
   });
 });
+
+describe("el colchón va de los dos lados también al editar (issue #261)", () => {
+  const reservas = [
+    {
+      id: "r1",
+      table_id: "t1",
+      status: "confirmed",
+      starts_at: "2026-09-10T23:00:00.000Z", // 20:00 AR
+      ends_at: "2026-09-11T00:30:00.000Z", // 21:30 AR
+    },
+  ];
+
+  it("no deja pegar una reserva que termina justo cuando empieza la otra", () => {
+    // 18:30–20:00 AR: termina exactamente cuando arranca la de las 20:00. Con
+    // 15 min de colchón, la mesa no llega a rotar. El alta ya lo rebotaba;
+    // editar lo tomaba.
+    const libre = isTableAvailableForReservation({
+      tableId: "t1",
+      reservations: reservas as never,
+      windowStart: new Date("2026-09-10T21:30:00.000Z"),
+      windowEnd: new Date("2026-09-10T23:00:00.000Z"),
+      bufferMs: 15 * 60_000,
+    });
+    expect(libre).toBe(false);
+  });
+
+  it("con el colchón cumplido, sí deja", () => {
+    // 18:00–19:30 AR: quedan 30 min hasta la de las 20:00.
+    const libre = isTableAvailableForReservation({
+      tableId: "t1",
+      reservations: reservas as never,
+      windowStart: new Date("2026-09-10T21:00:00.000Z"),
+      windowEnd: new Date("2026-09-10T22:30:00.000Z"),
+      bufferMs: 15 * 60_000,
+    });
+    expect(libre).toBe(true);
+  });
+});

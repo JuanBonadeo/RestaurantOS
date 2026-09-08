@@ -270,6 +270,25 @@ export async function createReservationFromCustomer(
   const business = await getBusinessBySlug(parsed.data.business_slug);
   if (!business) return actionError("Negocio no encontrado.");
 
+  // issue #261 — el alta estricta era la puerta de atrás del motor flexible.
+  //
+  // Esta action no miraba el modo del negocio. Un negocio que pasó a `flexible`
+  // conserva la grilla vieja (el toggle no la borra), así que bastaba con
+  // mandar una fecha y un `slot` de esa grilla para entrar por acá y saltearse
+  // el motor entero: sin chequeo de `soft_capacity`, sin `hold_tables`, sin
+  // `service` y sin `floor_plan_id`. Y el cupo del flexible es **duro para el
+  // cliente** a propósito (spec 077) — que el encargado pueda sobrevender y el
+  // cliente no es justamente la asimetría que la spec vino a fijar.
+  //
+  // La reserva entraba además sin `service`, o sea como una de esas filas
+  // `service: null` que después hay que tratar como legado.
+  const settings = await getReservationSettings(business.id, { useService: true });
+  if (settings.mode === "flexible") {
+    return actionError(
+      "Este local toma reservas por servicio. Elegí el horario desde la página de reservas.",
+    );
+  }
+
   const result = await createReservationCommon({
     source: parsed.data.source,
     businessId: business.id,
@@ -419,11 +438,41 @@ export async function createFlexibleReservation(
   if (!window) return actionError("El horario del servicio es inválido.");
 
   // starts = llegada (si viene) o apertura del servicio; ends = cierre del servicio.
-  const starts = data.arrival_time
+  //
+  // issue #262 — el servicio que cruza la medianoche.
+  //
+  // Una cena 20:00→00:30 tiene horarios de llegada legítimos DESPUÉS de las
+  // doce: la grilla del modal ofrece 23:45, 00:00, 00:15. Pero «00:15» no es de
+  // las 00:15 del día en que el servicio abrió, sino de la madrugada siguiente,
+  // y esto lo armaba con `${data.date}T00:15` a secas — o sea **24 horas
+  // antes**. Con `ends = window.ends` (que sí rueda al día siguiente), la
+  // reserva quedaba abarcando más de un día entero y le comía la mesa el
+  // almuerzo y la cena del día anterior. El toast decía «Reserva creada.» y en
+  // el listado del día se veía bien.
+  //
+  // La corrección ya existía, escrita en `edit-window.ts` para el camino de
+  // edición, con este mismo comentario. Al alta nunca se le puso: es el patrón
+  // de siempre —la regla vive en un camino y no en el otro— y por eso se copia
+  // el criterio en vez de inventar uno nuevo. Se agrega también la guarda de
+  // contención, que la edición tiene y el alta tampoco tenía.
+  let starts = data.arrival_time
     ? fromZonedTime(`${data.date}T${data.arrival_time}:00`, business.timezone)
     : window.starts;
   if (Number.isNaN(starts.getTime())) return actionError("Hora inválida.");
+  if (data.arrival_time && starts.getTime() < window.starts.getTime()) {
+    const nextDay = new Date(starts.getTime() + 24 * 60 * 60 * 1000);
+    if (nextDay.getTime() < window.ends.getTime()) starts = nextDay;
+  }
   const ends = window.ends;
+
+  // Y que la llegada caiga DENTRO del servicio: sin esto se podía cargar una
+  // reserva a un horario en el que el local no está abierto.
+  if (
+    starts.getTime() < window.starts.getTime() ||
+    starts.getTime() >= window.ends.getTime()
+  ) {
+    return actionError("Ese horario está fuera del servicio.");
+  }
 
   // No se puede reservar para un horario que ya pasó (gracia de 5 min por skew).
   if (starts.getTime() < Date.now() - 5 * 60_000) {
@@ -550,6 +599,33 @@ export async function updateReservationStatus(
   }
 
   const service = createSupabaseServiceClient() as unknown as GenericClient;
+
+  // issue #261 — esta action era la puerta de atrás de la decisión.
+  //
+  // `canManage` incluye al mozo y a la terminal, y el enum acepta `confirmed`.
+  // O sea que un mozo podía confirmar una solicitud pendiente sin pasar por
+  // `decideReservation` —que exige `canDecideReservation`, o sea encargado— y
+  // sin que saliera ni un aviso al cliente: el que manda el mail vive allá.
+  // La reserva quedaba «confirmada» con `decided_at`/`decided_by` en NULL, el
+  // cliente no se enteraba, no venía, y la mesa se guardaba para nadie.
+  //
+  // Esta action es para los estados del día (sentar, completar, no vino). La
+  // decisión sobre una solicitud tiene su propio camino, con su permiso y su
+  // aviso.
+  const { data: actual } = await service
+    .from("reservations")
+    .select("status")
+    .eq("id", parsed.data.id)
+    .eq("business_id", business.id)
+    .maybeSingle();
+  const estadoActual = (actual as { status: string } | null)?.status;
+  if (!estadoActual) return actionError("Reserva no encontrada.");
+  if (estadoActual === "pending") {
+    return actionError(
+      "Esa solicitud todavía no está decidida: confirmala o rechazala desde el libro de reservas.",
+    );
+  }
+
   const { error } = await service
     .from("reservations")
     .update({ status: parsed.data.status })
@@ -608,7 +684,7 @@ export async function decideReservation(
   }
 
   const motivo = reason?.trim() || null;
-  const { error } = await service
+  const { data: decidida, error } = await service
     .from("reservations")
     .update({
       status: decision === "confirm" ? "confirmed" : "rejected",
@@ -618,10 +694,22 @@ export async function decideReservation(
     })
     .eq("id", reservation.id)
     .eq("business_id", business.id)
-    .eq("status", "pending");
+    .eq("status", "pending")
+    // issue #261 — el `.eq("status","pending")` de arriba es el candado contra
+    // la carrera, pero nadie miraba si había cerrado. Dos encargados decidiendo
+    // la misma solicitud —o el cron venciéndola entre el read y el write—
+    // hacían que el segundo UPDATE tocara **cero filas** y el aviso al cliente
+    // saliera igual: recibía «confirmada» y «no se pudo» por la misma reserva.
+    // El log de deduplicación no lo tapa, porque son eventos distintos.
+    .select("id");
   if (error) {
     console.error("decideReservation", error);
     return actionError("No pudimos guardar la decisión.");
+  }
+  if (((decidida ?? []) as { id: string }[]).length === 0) {
+    return actionError(
+      "Esa reserva ya la resolvió otra persona. Refrescá para ver cómo quedó.",
+    );
   }
 
   // spec 45 + 131 — recién acá el cliente lee "confirmada".
@@ -744,12 +832,32 @@ export async function sentarReserva(
   if (!openResult.ok) return openResult;
 
   // Marcar reserva como seated. En genéricas, registra la mesa donde se sentó.
+  //
+  // issue #262 — este error se tragaba con un `console.error`. En una reserva
+  // genérica el `table_id` se escribe recién acá, y si la mesa ya está tomada
+  // por otra reserva del mismo servicio el GIST lo rechaza con 23P01: la mesa
+  // quedaba abierta (la orden ya se creó arriba, así que el consumo se factura
+  // igual) pero la reserva se quedaba en «confirmada» para siempre. La pantalla
+  // mostraba el éxito de abrir la mesa y el 23P01 moría en el log del server,
+  // que nadie mira. La reserva reaparecía como «no vino» al cierre del día.
+  //
+  // No se revierte la apertura: el cliente ya está sentado y la mesa tiene que
+  // poder cobrarse. Lo que se hace es **avisarlo**, para que el encargado sepa
+  // que la reserva quedó sin cerrar y la resuelva a mano.
   const { error: resErr } = await service
     .from("reservations")
     .update({ status: "seated", table_id: seatTableId })
     .eq("id", reservation.id)
     .eq("business_id", business.id);
-  if (resErr) console.error("sentarReserva status update", resErr);
+  if (resErr) {
+    console.error("sentarReserva status update", resErr);
+    const chocaConOtra = resErr.code === EXCLUSION_VIOLATION;
+    return actionError(
+      chocaConOtra
+        ? "La mesa se abrió, pero esa mesa ya está comprometida por otra reserva del mismo servicio: la reserva quedó sin sentar. Elegí otra mesa o resolvé el cruce."
+        : "La mesa se abrió, pero no pudimos marcar la reserva como sentada. Revisala en el libro.",
+    );
+  }
 
   const slug = parsed.data.business_slug;
   revalidatePath(`/${slug}/admin/operacion`);

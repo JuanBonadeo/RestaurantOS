@@ -444,7 +444,13 @@ describe.skipIf(!dbAvailable)("reservas · editar (spec 097)", () => {
     });
   });
 
-  it("no edita una reserva que ya no está confirmada", async () => {
+  // La regla se ensanchó en #204 («la solicitud se edita antes de decidirla»):
+  // desde entonces se editan las **activas**, que son `confirmed` Y `pending`.
+  // El test seguía afirmando sobre el texto viejo («confirmadas») y quedó rojo
+  // en cada corrida — un rojo crónico que entrena a ignorar `pnpm test`
+  // (issue #256). Ahora afirma sobre el estado, que es lo que la regla dice, y
+  // no sobre cómo está redactado el mensaje.
+  it("no edita una reserva que ya no está activa", async () => {
     const id = await mkReservation({
       business_id: strictId,
       table_id: strictTableA,
@@ -460,8 +466,32 @@ describe.skipIf(!dbAvailable)("reservas · editar (spec 097)", () => {
       party_size: 2,
       time: "21:00",
     });
+    // `seated` no es activa: la mesa ya se sentó, editarla no tiene sentido.
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toMatch(/confirmadas/i);
+    if (!result.ok) expect(result.error).toMatch(/activas/i);
+
+    // Y la contracara, que es lo que #204 vino a habilitar: una `pending` SÍ se
+    // edita. Sin esto el test sólo fija la mitad de la regla.
+    // Otro horario: la `seated` de arriba sigue viva en la misma mesa y el
+    // constraint de solapamiento (`reservations_no_overlap`) las rechazaría.
+    const pendiente = await mkReservation({
+      business_id: strictId,
+      table_id: strictTableA,
+      party_size: 2,
+      starts_at: AT("13:00"),
+      ends_at: AT("14:30"),
+      status: "pending",
+    });
+    const editable = await updateReservationDetails({
+      business_slug: strictSlug,
+      reservation_id: pendiente,
+      table_id: strictTableA,
+      party_size: 3,
+      time: "13:00",
+    });
+    expect(editable.ok).toBe(true);
+
+    await supabase.from("reservations").delete().eq("id", pendiente);
     await supabase.from("reservations").delete().eq("id", id);
   });
 });

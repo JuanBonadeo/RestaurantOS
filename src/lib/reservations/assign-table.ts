@@ -69,7 +69,17 @@ export function isTableAvailableForReservation(params: IsTableAvailableParams): 
     if (r.table_id !== tableId) return false;
     if (!LIVE_RESERVATION_STATUSES.includes(r.status)) return false;
     if (excludeReservationId && r.id === excludeReservationId) return false;
-    const rs = new Date(r.starts_at);
+    // issue #261 — el colchón va de los DOS lados, igual que en `pickTable`.
+    //
+    // Acá se le sumaba sólo al final (`ends_at + buffer`) y no se le restaba al
+    // principio, así que la misma mesa que el alta rebotaba, la edición la
+    // tomaba: una reserva movida podía terminar exactamente cuando empieza la
+    // siguiente, sin un minuto para levantar la mesa. El `buffer_min` existe
+    // justamente para que la mesa rote.
+    //
+    // La asimetría no la tapa el GIST: el constraint mira el solape crudo de
+    // las ventanas, no el colchón, que es una regla de negocio.
+    const rs = new Date(new Date(r.starts_at).getTime() - bufferMs);
     const re = new Date(new Date(r.ends_at).getTime() + bufferMs);
     return rs < windowEnd && windowStart < re;
   });
