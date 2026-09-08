@@ -114,3 +114,43 @@ export function posicionEnRecorrido(
   if (i < 0) return null;
   return { indice: i + 1, total: temas.length, siguiente: temas[i + 1] };
 }
+
+/**
+ * El tema de ESTA pantalla para el rol que la está mirando — spec 170 · D5.
+ *
+ * El chip `?` de cada pantalla pasa un slug fijo (la tab «salon» pide `mesas`),
+ * y con contenido por rol la misma pantalla tiene dos temas. Se busca primero
+ * por slug propio y después por `equivaleA`.
+ *
+ * `undefined` es la respuesta correcta para un tema que no es de este rol: la
+ * spec 169 lo sacó del índice, pero la URL seguía abierta. Sacarlo de la lista
+ * y dejar entrar por `/ayuda/caja` no es filtrar, es esconder (D6).
+ */
+export function temaDeRol(
+  slug: string,
+  rol: BusinessRole | null,
+): Tema | undefined {
+  const suyos = temasDeRol(rol);
+  return (
+    suyos.find((tema) => tema.slug === slug) ??
+    suyos.find((tema) => tema.equivaleA === slug)
+  );
+}
+
+/**
+ * El diccionario que necesita el chip: slug de la pantalla → slug del tema de
+ * este rol. Vacío para el encargado, que es dueño de los slugs originales.
+ *
+ * Lo arma el layout —el único que sabe el rol— y viaja al cliente una vez por
+ * navegación. Son cuatro entradas: más barato que enhebrar el rol por los diez
+ * componentes donde vive el chip.
+ */
+export function equivalenciasDeRol(
+  rol: BusinessRole | null,
+): Record<string, string> {
+  const mapa: Record<string, string> = {};
+  for (const tema of temasDeRol(rol)) {
+    if (tema.equivaleA) mapa[tema.equivaleA] = tema.slug;
+  }
+  return mapa;
+}

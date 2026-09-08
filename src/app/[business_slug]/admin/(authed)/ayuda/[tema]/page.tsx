@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, ChevronRight, CircleAlert, CornerDownRight, Star, TriangleAlert } from "lucide-react";
 
 import { Captura } from "../captura";
@@ -17,7 +17,12 @@ import {
   type Video,
 } from "@/lib/ayuda/contenido";
 import { getTemasLeidos, rolDeLaGuia } from "@/lib/ayuda/queries";
-import { posicionEnRecorrido, progresoDelRecorrido } from "@/lib/ayuda/recorrido";
+import {
+  posicionEnRecorrido,
+  progresoDelRecorrido,
+  temaDeRol,
+  temasDeRol,
+} from "@/lib/ayuda/recorrido";
 import { getReservationSettings } from "@/lib/reservations/queries";
 import type { ReservationMode } from "@/lib/reservations/types";
 import { getBusiness } from "@/lib/tenant";
@@ -33,10 +38,18 @@ import { H1, H2, PAGINA, PAGINA_TEXTO, PROSA, SECUNDARIO, TEXTO } from "../estil
 export async function generateMetadata({
   params,
 }: {
-  params: Promise<{ tema: string }>;
+  params: Promise<{ business_slug: string; tema: string }>;
 }) {
-  const { tema } = await params;
-  return { title: temaPorSlug(tema)?.titulo ?? "Ayuda" };
+  const { business_slug, tema } = await params;
+  // Spec 170 · D6 — el título también se resuelve contra el rol. Corre ANTES
+  // que la page, así que sin esto la pestaña del navegador alcanzaba a mostrar
+  // «La caja: movimientos y cierre» a alguien que no puede abrir ese tema.
+  // `getBusiness` y `ensureAdminAccess` están las dos en `cache()`: la page las
+  // vuelve a pedir en el mismo request y no se paga dos veces.
+  const business = await getBusiness(business_slug);
+  if (!business) return { title: "Ayuda" };
+  const ctx = await ensureAdminAccess(business.id, business_slug);
+  return { title: temaDeRol(tema, rolDeLaGuia(ctx))?.titulo ?? "Ayuda" };
 }
 
 // 'ojo' = tenelo en cuenta · 'peligro' = si lo hacés mal se cobra dos veces, se
@@ -193,8 +206,7 @@ export default async function TemaPage({
   const business = await getBusiness(business_slug);
   if (!business) notFound();
 
-  const tema = temaPorSlug(slug);
-  if (!tema) notFound();
+  if (!temaPorSlug(slug)) notFound();
 
   // D12 — el modo del negocio decide qué pasos se muestran. Se lee de la
   // config, no se le pregunta al lector "¿tu local usa reservas flexibles?".
@@ -206,14 +218,30 @@ export default async function TemaPage({
   // mismo request que ya hace el layout, así que no agregan viaje.
   const ctx = await ensureAdminAccess(business.id, business_slug);
   const rol = rolDeLaGuia(ctx);
+
+  const base = `/${business_slug}/admin/ayuda`;
+
+  // Spec 170 · D5 y D6 — el tema se resuelve CONTRA EL ROL, no contra el
+  // catálogo entero. Dos cosas en una:
+  //
+  //  - el chip `?` de una pantalla pasa el slug de la tab (`mesas`), y la
+  //    terminal tiene que caer en el suyo (`terminal-salon`);
+  //  - un slug que no es de este rol no se renderiza. La 169 lo sacó del
+  //    índice, pero `/ayuda/caja` seguía sirviéndole al mozo el tema del
+  //    encargado con sus topes adentro.
+  const tema = temaDeRol(slug, rol);
+  if (!tema) redirect(base);
+  // La URL queda en el slug real, así el «Volver» del navegador y los links de
+  // «ver también» hablan del mismo tema que está en pantalla.
+  if (tema.slug !== slug) redirect(`${base}/${tema.slug}`);
+
   const leidos = await getTemasLeidos(business.id, ctx.userId);
   const progreso = progresoDelRecorrido(rol, modo, leidos);
   const posicion = posicionEnRecorrido(tema.slug, rol, modo);
   const enRecorrido = posicion !== null && !progreso.completo;
 
-  const base = `/${business_slug}/admin/ayuda`;
   const pasos = pasosDe(tema, modo);
-  const siguiente = temaSiguiente(tema.slug, modo);
+  const siguiente = temaSiguiente(tema.slug, modo, temasDeRol(rol));
   // Un catálogo se escanea; una secuencia se sigue. Ver TipoTema.
   const catalogo = tema.tipo === "catalogo";
 

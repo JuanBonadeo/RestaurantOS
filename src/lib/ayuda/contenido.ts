@@ -19,10 +19,13 @@ import {
   Tag,
   MessagesSquare,
   TriangleAlert,
+  Monitor,
+  Lock,
   type LucideIcon,
 } from "lucide-react";
 
 import {
+  DESCUENTO_BAJO_PCT,
   DESCUENTO_MEDIO_PCT,
   DIFERENCIA_CAJA_OK_CENTS,
 } from "@/lib/permissions/can";
@@ -75,6 +78,10 @@ export const TOPE_DIFERENCIA_CAJA = new Intl.NumberFormat("es-AR", {
 
 /** «25%» — lo máximo de descuento que el encargado aplica solo. */
 export const TOPE_DESCUENTO = `${DESCUENTO_MEDIO_PCT}%`;
+
+/** El tope de la terminal y del mozo (spec 170). Sale de `can.ts` igual que el
+ *  otro: son dos números distintos y ninguno se tipea a mano en un paso. */
+export const TOPE_DESCUENTO_TERMINAL = `${DESCUENTO_BAJO_PCT}%`;
 
 /**
  * Un círculo numerado sobre un punto de la captura. `x`/`y` son PORCENTAJES
@@ -210,6 +217,15 @@ export type Tema = {
    * ninguno de éstos hay que tocarlo.
    */
   roles?: BusinessRole[];
+  /**
+   * Qué tema de OTRO rol documenta esta misma pantalla — spec 170 · D5.
+   *
+   * El chip `?` de cada pantalla lleva un slug fijo (`TEMA_POR_TAB`: la tab
+   * «salon» pide `mesas`), y con contenido por rol la misma pantalla tiene dos
+   * temas. Declarando `equivaleA: "mesas"`, la terminal que toca ese chip cae
+   * en el suyo sin que haya que tocar los diez sitios donde está el chip.
+   */
+  equivaleA?: string;
   /** Default 'pasos'. */
   tipo?: TipoTema;
   /** Loom del tema. Opcional: se van grabando de a poco. */
@@ -1572,6 +1588,342 @@ export const TEMAS: Tema[] = [
       },
     ],
   },
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // LA GUÍA DE LA TERMINAL — spec 170 (#258)
+  //
+  // La terminal es la compu compartida del salón (spec 140). Ve CUATRO tabs de
+  // Operación —salón, reservas, comandas, fichaje— que son las mismas pantallas
+  // que documentan los temas de arriba. Por eso las frases entre comillas se
+  // copian tal cual: misma pantalla, mismo cartel (D4).
+  //
+  // LO QUE SE REESCRIBE ES QUÉ PUEDE HACER EL QUE LEE. El tema `mesas` dice
+  // «anular sólo lo podés hacer vos o el dueño»; desde la terminal eso es falso
+  // (`canTransitionMesa` la incluye). Antes de copiar un párrafo de arriba,
+  // chequealo contra `can.ts`.
+  //
+  // Y OJO CON LOS `verTambien`: sólo pueden apuntar a temas de ESTE bloque. Un
+  // link a `caja` desde acá manda a un tema que la terminal no puede abrir.
+  // ══════════════════════════════════════════════════════════════════════════
+  {
+    slug: "terminal-la-compu",
+    titulo: "Esta compu es de todos",
+    resumen:
+      "La sesión es del salón, no tuya. Y la plata de cada mesa es del mozo de esa mesa.",
+    icono: Monitor,
+    grupo: "operacion",
+    roles: ["terminal"],
+    claves: [
+      "La plata de una mesa es del mozo asignado a esa mesa, no del que la cargó acá.",
+      "Repartir el salón al empezar el turno no es prolijidad: es lo que hace que cada mozo tenga su rendición.",
+      `Tu tope de descuento es ${TOPE_DESCUENTO_TERMINAL}. Más que eso lo autoriza el encargado.`,
+    ],
+    pasos: [
+      {
+        titulo: "La sesión no es de nadie en particular",
+        texto:
+          "Es la cuenta del salón: la usan todos los mozos del turno. Lo bueno es que no hay que entrar y salir cada vez; lo que hay que saber es que el sistema registra «terminal» y no quién estaba tipeando.",
+        aviso: {
+          tono: "ojo",
+          texto:
+            "Por eso lo que anulás o trasladás desde acá conviene decirlo en voz alta. El registro guarda qué pasó y con qué motivo, pero no puede decir quién.",
+        },
+      },
+      {
+        titulo: "La plata sigue a la mesa",
+        texto:
+          "Si la mesa tiene un mozo asignado, la venta y la propina son de ese mozo — aunque el pedido lo hayas cargado vos desde acá. Y si la mesa no tiene a nadie, esa plata no es de nadie: no le va a aparecer en la rendición a ninguno.",
+        verTambien: {
+          tema: "terminal-salon",
+          texto: "Repartir el salón antes del servicio",
+        },
+      },
+      {
+        titulo: "La venta de mostrador es la excepción",
+        texto:
+          "Una venta rápida no tiene mesa, así que no hay a quién atribuirla: queda a nombre de la terminal. Esa plata está en el cajón y la cuenta el encargado al cerrar, no la rinde ningún mozo.",
+        aviso: {
+          tono: "ojo",
+          texto:
+            "Si la venta es de una mesa, cargala en la mesa. La venta rápida es para el que compra parado y se va.",
+        },
+      },
+      {
+        titulo: "Hasta cuánto podés descontar",
+        texto: `Desde acá el tope es ${TOPE_DESCUENTO_TERMINAL} — el mismo que tiene un mozo, no el del encargado. Si hace falta más, lo hace él desde su pantalla.`,
+      },
+    ],
+  },
+  {
+    slug: "terminal-salon",
+    titulo: "El salón",
+    resumen: "Repartir, abrir, cargar, cobrar, mover y anular mesas desde el plano.",
+    icono: LayoutGrid,
+    grupo: "operacion",
+    roles: ["terminal"],
+    equivaleA: "mesas",
+    claves: [
+      "Lo primero del turno es repartir el salón: sin mozo, la mesa no es de nadie.",
+      "Anular y trasladar sí podés desde acá. Las dos piden motivo.",
+      "Anular una mesa y anular un cobro son cosas distintas: si ya se cobró, se anula el cobro.",
+    ],
+    pasos: [
+      {
+        titulo: "El plano es el salón",
+        texto:
+          "Cada figura es una mesa y el color dice cómo está. Abajo está la referencia con cuántas hay de cada una; el número chico adentro es hace cuánto está abierta, que sirve para ver cuál se demora. A la derecha, lo mismo en lista.",
+        imagen: "/ayuda/op-salon.png",
+        alt: "El plano del salón con las mesas, la referencia de colores abajo y el panel de ocupadas a la derecha.",
+        marcas: [
+          { n: 1, x: 37, y: 23 },
+          { n: 2, x: 8, y: 97 },
+          { n: 3, x: 72, y: 58 },
+        ],
+      },
+      {
+        titulo: "Primero: repartir el salón",
+        texto:
+          "«Distribuir mozos» reparte varias mesas de una: se prende el modo, se van tocando las mesas de cada uno y listo. Es para armar las secciones ANTES del servicio, y es lo que después le da a cada mozo su rendición.",
+        verTambien: {
+          tema: "terminal-la-compu",
+          texto: "Por qué la mesa sin mozo no es de nadie",
+        },
+      },
+      {
+        titulo: "Ponerle el mozo a UNA mesa",
+        texto:
+          'El header de la mesa dice quién la atiende, y cuando no tiene a nadie dice «Sin mozo». Esa pastilla es el botón: la tocás y elegís. Si la mesa no tenía mozo, el modal dice «Asignar mozo»; si ya tenía, dice «Transferir mozo» y le saca la mesa al anterior, con motivo. Se puede desde que la mesa está libre.',
+        aviso: {
+          tono: "ojo",
+          texto:
+            "Para uno solo NO uses «Distribuir mozos»: esa es para repartir el salón entero de una.",
+        },
+      },
+      {
+        titulo: "Abrir, cargar y pasar a cobro",
+        texto:
+          "Tocás una mesa libre, le cargás el pedido y queda abierta; se puede seguir agregando todas las veces que haga falta. Cuando piden la cuenta la mesa se marca en el plano y «Pasar a cobro» abre el cobro con todo lo consumido.",
+      },
+      {
+        titulo: "Si la mesa tenía una reserva",
+        texto:
+          "Al abrir una mesa reservada el sistema te avisa antes y podés «Abrir igual» o buscar otra. Para sentar a alguien de una reserva, primero hay que confirmarla.",
+        verTambien: { tema: "terminal-reservas", texto: "Confirmar una reserva" },
+      },
+      {
+        titulo: "Trasladar una mesa",
+        texto:
+          '«Trasladar mesa» mueve el consumo a otra mesa, que tiene que estar libre — si no, "La mesa está ocupada. Cobrala o liberala antes de mover.". Sirve para el grupo que se cambió de lugar, no para juntar dos cuentas.',
+      },
+      {
+        titulo: "Anular una mesa",
+        texto:
+          'Cancela la orden activa y libera la mesa: es para el cliente que se fue sin consumir o el error de carga. Pide motivo obligatorio, con ejemplos como «cliente se fue, error de carga».',
+        aviso: {
+          tono: "peligro",
+          texto:
+            "Anular borra esa venta del turno, y desde la terminal el registro dice «terminal»: no queda quién fue. Avisale al encargado. Y si la mesa YA se cobró, esto no es lo que buscás — eso se anula desde el cobro.",
+        },
+      },
+    ],
+  },
+  {
+    slug: "terminal-comandas",
+    titulo: "La cocina y las comanderas",
+    resumen: "Qué está saliendo, qué se demora, y qué hacer cuando una comanda no se imprime.",
+    icono: ChefHat,
+    grupo: "operacion",
+    roles: ["terminal"],
+    equivaleA: "comandas",
+    claves: [
+      '"1 comanda no se imprimió" quiere decir que la cocina NO se enteró de ese plato.',
+      '"sin conexión" es la PC de las impresoras caída: no sale ni un ticket hasta que vuelva.',
+      "Antes de reimprimir, fijate si el papel ya salió. Reimprimir a ciegas hace que se cocine dos veces.",
+    ],
+    pasos: [
+      {
+        titulo: "Las tres columnas",
+        texto:
+          "«Pendientes» son las que la cocina todavía no tomó, «En cocina» las que está haciendo, «Entregadas» las que salieron. Arriba, «Saturación por sector» te dice qué estación está tapada — parrilla, fritera, la que sea. Es lo que mirás antes de prometerle un tiempo a una mesa.",
+        imagen: "/ayuda/op-comandas.png",
+        alt: "La pantalla de Comandas con la saturación por sector arriba y las columnas Pendientes, En cocina y Entregadas.",
+        marcas: [
+          { n: 1, x: 17, y: 17 },
+          { n: 2, x: 11, y: 31.5 },
+          { n: 3, x: 20, y: 46 },
+        ],
+      },
+      {
+        titulo: "La que no se imprimió",
+        texto:
+          'Cuando una comanda falla aparece el aviso "1 comanda no se imprimió" y con «Ver solo las fallidas» las ves todas juntas para reimprimirlas. Mientras no se resuelva, para la cocina ese plato no existe.',
+        aviso: {
+          tono: "peligro",
+          texto:
+            "Antes de reimprimir, chequeá si el papel ya salió. Reimprimir a ciegas hace que se cocine dos veces.",
+        },
+      },
+      {
+        titulo: 'El cartel "Agente de impresión sin conexión (sin señal)"',
+        texto:
+          "Es la PC que maneja las impresoras del local, que se cayó o se quedó sin red. No es tu culpa ni se arregla desde acá: avisá al encargado. Hasta que vuelva no sale ningún ticket, así que la cocina se entera cantándole los platos.",
+      },
+    ],
+  },
+  {
+    slug: "terminal-reservas",
+    titulo: "Reservas",
+    resumen: "El libro del día, las que pide el cliente por la web, y sentar al que llega.",
+    icono: CalendarDays,
+    grupo: "operacion",
+    roles: ["terminal"],
+    equivaleA: "reservas",
+    claves: [
+      "Una solicitud sin responder vence sola y el cliente recibe que no se pudo. Miralas al empezar el turno.",
+      "El motivo del rechazo se lo mandamos al cliente: escribilo pensando en que lo lee él.",
+      '"No vino" marcalo de verdad: es lo único que después deja ver quién falta seguido.',
+    ],
+    pasos: [],
+    pasosPorModo: {
+      estricto: [
+        {
+          titulo: "El día, hora por hora",
+          texto:
+            "La pantalla abre en hoy y lista las reservas por hora con su estado. Arriba se cambia de fecha y se busca por nombre o teléfono.",
+          imagen: "/ayuda/op-reservas.png",
+          alt: "La pestaña Reservas con el listado del día.",
+        },
+        {
+          titulo: "Tomar una por teléfono",
+          texto:
+            "Pide nombre, teléfono, cuántos son y el horario, que sale de una grilla fija: elegís uno de los habilitados, no escribís la hora a mano. Si el que te piden no está, no hay turno ahí — y forzarlo desde acá no se puede. Está bien que no se pueda: en este modo el cupo es el cupo.",
+        },
+        {
+          titulo: "Las que pide el cliente por la web",
+          texto:
+            'Quedan esperando respuesta y la fecha se marca con «Tiene solicitudes sin responder». Cada una tiene «Confirmar» y «Rechazar»; al rechazar podés escribir por qué, con un ejemplo: «Ej: esa noche tenemos un evento privado». Hasta que alguien decida, el cliente sabe que la pidió, no que la tiene.',
+        },
+        {
+          titulo: "Cuando llega, y el que no vino",
+          texto:
+            "«Sentar la reserva» la pasa a «En mesa» — si no tiene mesa, la elegís en el plano. «No vino» la marca como ausente.",
+          verTambien: {
+            tema: "terminal-salon",
+            texto: "Qué pasa con la mesa cuando la sentás",
+          },
+        },
+      ],
+      flexible: [
+        {
+          titulo: "El libro del día, por servicio",
+          texto:
+            "La pantalla abre en hoy, con las reservas por hora dentro de cada servicio — mediodía, cena, el que tenga el local. Arriba se cambia de fecha y se busca por nombre o teléfono.",
+          imagen: "/ayuda/op-reservas.png",
+          alt: "La pestaña Reservas con el listado del día.",
+        },
+        {
+          titulo: "Tomar una por teléfono",
+          texto:
+            "Pide nombre, teléfono, cuántos son, el servicio y la hora. Acá la hora se escribe: no hay grilla de turnos. La mesa es opcional — se puede tomar ahora y asignarla después, cuando armes el salón.",
+        },
+        {
+          titulo: "El cupo es blando para vos y duro para el cliente",
+          texto:
+            'Con el servicio lleno, al que reserva por la web el sistema lo frena. A vos no: te dice "No quedan mesas libres en ese servicio. Confirmá para reservar igual." y te deja pasar.',
+          aviso: {
+            tono: "ojo",
+            texto:
+              "Que puedas sobrevender no quiere decir que convenga. Si no estás seguro de que esa mesa se libera, preguntale al encargado antes de confirmar.",
+          },
+        },
+        {
+          titulo: "Las que pide el cliente por la web",
+          texto:
+            'Quedan esperando respuesta y la fecha se marca con «Tiene solicitudes sin responder». Cada una tiene «Confirmar» y «Rechazar»; al rechazar podés escribir por qué, con un ejemplo: «Ej: esa noche tenemos un evento privado». Hasta que alguien decida, el cliente sabe que la pidió, no que la tiene.',
+        },
+        {
+          titulo: "Cuando llega, y el que no vino",
+          texto:
+            "«Sentar la reserva» la pasa a «En mesa» — si no tiene mesa, la elegís en el plano. «No vino» la marca como ausente.",
+          verTambien: {
+            tema: "terminal-salon",
+            texto: "Qué pasa con la mesa cuando la sentás",
+          },
+        },
+      ],
+    },
+  },
+  {
+    slug: "terminal-fichaje",
+    titulo: "Fichar",
+    resumen: "Entrada y salida con tu PIN, desde esta misma compu.",
+    icono: Clock,
+    grupo: "operacion",
+    roles: ["terminal"],
+    equivaleA: "fichaje",
+    claves: [
+      "Cada uno ficha con su PIN: no fiches por otro.",
+      "El PIN es tuyo aunque la sesión de la compu sea de todos.",
+    ],
+    pasos: [
+      {
+        titulo: "Se ficha desde acá",
+        texto:
+          "La pestaña Fichaje es el teclado numérico: ponés tu PIN y queda marcada la entrada o la salida. No hace falta salir de la sesión ni entrar con tu usuario — el PIN alcanza, y es lo que te identifica a vos.",
+        imagen: "/ayuda/op-fichaje.png",
+        alt: "La pestaña Fichaje con la asistencia del día y el teclado para marcar con PIN.",
+      },
+      {
+        titulo: "Quién está adentro",
+        texto:
+          '«Asistencia del día» muestra quién está ahora, «Ya salieron» los que terminaron y «Sin fichar» los que todavía no marcaron. Si nadie fichó, dice "No hay nadie fichado todavía.". Un «Sin fichar» a mitad del turno suele ser un olvido, no una ausencia: avisale.',
+      },
+    ],
+  },
+  {
+    slug: "terminal-limites",
+    titulo: "Lo que desde acá no se puede",
+    resumen: "Los seis techos de esta pantalla, y quién los levanta.",
+    icono: Lock,
+    grupo: "operacion",
+    roles: ["terminal"],
+    tipo: "catalogo",
+    claves: [
+      "Que un botón no esté no es que el sistema falle: es tu rol.",
+      "Todo lo de esta lista lo hace el encargado desde su propia pantalla.",
+    ],
+    pasos: [
+      {
+        titulo: "La caja",
+        texto:
+          "No ves el cajón, ni los movimientos, ni podés hacer un corte o una sangría. Las cuatro pestañas que tenés son Salón, Reservas, Comandas y Fichaje: la caja no está y no es que se escondió.",
+      },
+      {
+        titulo: "La rendición de los mozos",
+        texto:
+          "No la ves ni la cerrás. Con una cuenta compartida por todo el salón, «lo mío» no existe: la plata se atribuye al mozo de cada mesa y la rendición la mira el encargado.",
+      },
+      {
+        titulo: "Los pedidos de la web",
+        texto:
+          "Delivery y take away no están en tus pestañas. Si entra uno y no hay nadie mirándolo, avisá — no se acepta desde acá.",
+      },
+      {
+        titulo: "Cobrar el saldo de una cuenta corriente",
+        texto:
+          "Fiar sí podés: cerrás la cuenta con «Cuenta corriente» y queda como saldo del cliente. Cobrarle ese saldo después, no — esa plata entra a una caja que desde acá ni se ve.",
+      },
+      {
+        titulo: `Descuentos de más de ${TOPE_DESCUENTO_TERMINAL}`,
+        texto: `Tu tope es ${TOPE_DESCUENTO_TERMINAL}. Por arriba de eso el sistema no te deja, y no es un error: lo autoriza el encargado desde su pantalla.`,
+      },
+      {
+        titulo: "La carta, el stock, los precios y el personal",
+        texto:
+          "Nada de configuración: productos, precios, menú del día, stock, empleados y ajustes son del dueño y del encargado. Si un precio está mal en la carta, avisá — no se corrige desde acá.",
+      },
+    ],
+  },
 ];
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -1599,7 +1951,16 @@ export function estaEscrito(tema: Tema, modo: ReservationMode): boolean {
 export function temaSiguiente(
   slug: string,
   modo: ReservationMode,
+  /**
+   * Entre qué temas se navega. Default: todos — pero desde la spec 170 hay
+   * temas de otro rol al final del array, y encadenar hacia ellos mandaría al
+   * encargado, al terminar «Me apareció un cartel», a la guía de la terminal.
+   * Los llamadores pasan `temasDeRol(rol)`.
+   */
+  disponibles: Tema[] = TEMAS,
 ): Tema | undefined {
-  const i = TEMAS.findIndex((t) => t.slug === slug);
-  return i >= 0 ? TEMAS.slice(i + 1).find((t) => estaEscrito(t, modo)) : undefined;
+  const i = disponibles.findIndex((t) => t.slug === slug);
+  return i >= 0
+    ? disponibles.slice(i + 1).find((t) => estaEscrito(t, modo))
+    : undefined;
 }

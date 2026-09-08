@@ -19,6 +19,7 @@ import {
   type Paso,
   type Tema,
 } from "./contenido";
+import { temasDeRol } from "./recorrido";
 
 const RESERVAS = temaPorSlug("reservas")!;
 
@@ -38,6 +39,10 @@ describe("contenido de la guía · estructura", () => {
       "salones", "proveedores", "facturacion", "clientes", "promociones", "conversaciones",
       // Si algo falla
       "carteles",
+      // La guía de la terminal (spec 170) — otro rol, otras pantallas. Va al
+      // final del array y NO se mezcla: `temasDeRol` es lo que las separa.
+      "terminal-la-compu", "terminal-salon", "terminal-comandas",
+      "terminal-reservas", "terminal-fichaje", "terminal-limites",
     ]);
   });
 
@@ -46,7 +51,16 @@ describe("contenido de la guía · estructura", () => {
   // grupos sin captura, el test avisa antes de que la guía se vuelva un muro
   // de texto donde justamente no tiene que serlo.
   it("los temas de Operación y Catálogo abren con una captura", () => {
-    const foco = TEMAS.filter((t) => t.grupo === "operacion" || t.grupo === "catalogo");
+    // Dos excepciones, las dos porque NO documentan una pantalla y no habría
+    // qué capturar (spec 170): «Esta compu es de todos» explica de quién es la
+    // plata de una mesa, y «Lo que desde acá no se puede» es la lista de lo
+    // que está ausente. Cualquier tema que sí muestre una pantalla entra igual.
+    const SIN_PANTALLA = ["terminal-la-compu", "terminal-limites"];
+    const foco = TEMAS.filter(
+      (t) =>
+        (t.grupo === "operacion" || t.grupo === "catalogo") &&
+        !SIN_PANTALLA.includes(t.slug),
+    );
     expect(foco.length).toBeGreaterThan(0);
     for (const tema of foco) {
       const pasos = pasosDe(tema, "estricto");
@@ -297,8 +311,20 @@ describe("contenido de la guía · reservas mode-aware", () => {
 
 describe("contenido de la guía · navegación", () => {
   it("`temaSiguiente` encadena y termina en el último", () => {
-    expect(temaSiguiente("caja", "estricto")?.slug).toBe("mesas");
-    expect(temaSiguiente("carteles", "estricto")).toBeUndefined();
+    // Se le pasan los temas del rol (spec 170): sin eso, el encargado que
+    // termina «Me apareció un cartel» seguiría hacia la guía de la terminal,
+    // que es de otras pantallas y de otros permisos.
+    const delEncargado = temasDeRol("encargado");
+    expect(temaSiguiente("caja", "estricto", delEncargado)?.slug).toBe("mesas");
+    expect(temaSiguiente("carteles", "estricto", delEncargado)).toBeUndefined();
+  });
+
+  it("el encadenado de la terminal no se sale de su guía", () => {
+    const suyos = temasDeRol("terminal");
+    expect(temaSiguiente("terminal-la-compu", "estricto", suyos)?.slug).toBe(
+      "terminal-salon",
+    );
+    expect(temaSiguiente("terminal-limites", "estricto", suyos)).toBeUndefined();
   });
 
   it("encadena a través de los grupos, no sólo dentro de uno", () => {

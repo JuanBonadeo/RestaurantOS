@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import { GRUPOS, TEMAS } from "./contenido";
 import {
+  equivalenciasDeRol,
   posicionEnRecorrido,
   progresoDelRecorrido,
   recorrido,
+  rolesDe,
+  temaDeRol,
   temasDeRol,
 } from "./recorrido";
 
@@ -17,9 +20,12 @@ import {
 void GRUPOS;
 
 describe("temasDeRol", () => {
-  it("el encargado y el admin ven todo lo que hay escrito hoy", () => {
-    expect(temasDeRol("encargado")).toHaveLength(TEMAS.length);
-    expect(temasDeRol("admin")).toHaveLength(TEMAS.length);
+  it("el encargado y el admin ven los mismos temas: los del panel", () => {
+    // No son TODOS los de TEMAS desde la spec 170: ahí abajo del array están
+    // los de la terminal, que son de otro rol y de otras pantallas.
+    const delPanel = TEMAS.filter((t) => !t.roles);
+    expect(temasDeRol("encargado")).toHaveLength(delPanel.length);
+    expect(temasDeRol("admin")).toHaveLength(delPanel.length);
   });
 
   it("el mozo NO ve la guía del encargado", () => {
@@ -31,8 +37,10 @@ describe("temasDeRol", () => {
     expect(suyos.map((t) => t.slug)).not.toContain("caja");
   });
 
-  it("la terminal tampoco: es el puesto del salón, no un encargado", () => {
-    expect(temasDeRol("terminal")).toHaveLength(0);
+  it("la terminal tampoco hereda la del encargado: tiene la suya (spec 170)", () => {
+    const suyos = temasDeRol("terminal");
+    expect(suyos.length).toBeGreaterThan(0);
+    expect(suyos.map((t) => t.slug)).not.toContain("caja");
   });
 
   it("sin rol no se asume nada", () => {
@@ -138,5 +146,96 @@ describe("posicionEnRecorrido", () => {
 
   it("un tema fuera del recorrido no tiene posición", () => {
     expect(posicionEnRecorrido("carta", "encargado", modo)).toBeNull();
+  });
+});
+
+// ─── Spec 170 · la guía de la terminal ──────────────────────────────────────
+
+describe("temasDeRol · la terminal (spec 170)", () => {
+  it("tiene los seis temas suyos, y ninguno del encargado", () => {
+    const suyos = temasDeRol("terminal");
+    expect(suyos).toHaveLength(6);
+    expect(suyos.every((t) => t.slug.startsWith("terminal-"))).toBe(true);
+  });
+
+  it("no ve la caja, la rendición ni cobrar: no son pantallas suyas", () => {
+    const slugs = temasDeRol("terminal").map((t) => t.slug);
+    for (const ajeno of ["caja", "rendicion", "cobrar", "pedidos"]) {
+      expect(slugs).not.toContain(ajeno);
+    }
+  });
+
+  it("arranca por la cuenta compartida, que es lo que no se deduce mirando", () => {
+    expect(temasDeRol("terminal")[0]?.slug).toBe("terminal-la-compu");
+  });
+
+  it("el mozo sigue sin guía: la suya es otra spec", () => {
+    expect(temasDeRol("mozo")).toHaveLength(0);
+  });
+
+  it("el encargado no se entera de nada: sigue con los suyos", () => {
+    expect(temasDeRol("encargado").some((t) => t.slug.startsWith("terminal-"))).toBe(
+      false,
+    );
+    expect(recorrido("encargado", "estricto")).toHaveLength(9);
+  });
+});
+
+describe("recorrido de la terminal", () => {
+  it("son seis y son todos suyos", () => {
+    const r = recorrido("terminal", "estricto");
+    expect(r).toHaveLength(6);
+    expect(r.every((t) => rolesDe(t).includes("terminal"))).toBe(true);
+  });
+
+  it("termina en lo que NO se puede desde acá", () => {
+    const r = recorrido("terminal", "estricto");
+    expect(r[r.length - 1]?.slug).toBe("terminal-limites");
+  });
+
+  it("el pendiente de la terminal no se mezcla con el del encargado", () => {
+    // Marcar leídos los nueve del encargado no le adelanta un solo tema.
+    const delEncargado = new Set(
+      recorrido("encargado", "estricto").map((t) => t.slug),
+    );
+    const p = progresoDelRecorrido("terminal", "estricto", delEncargado);
+    expect(p).toMatchObject({ total: 6, leidos: 0, completo: false });
+  });
+});
+
+describe("temaDeRol · el chip `?` abre el tema de quien mira", () => {
+  it("la misma pantalla, dos temas: el chip pasa el slug de la tab", () => {
+    // `TEMA_POR_TAB.salon === "mesas"` para los dos roles.
+    expect(temaDeRol("mesas", "encargado")?.slug).toBe("mesas");
+    expect(temaDeRol("mesas", "terminal")?.slug).toBe("terminal-salon");
+  });
+
+  it("las cuatro pestañas de la terminal resuelven a un tema suyo", () => {
+    for (const tab of ["mesas", "comandas", "reservas", "fichaje"]) {
+      const tema = temaDeRol(tab, "terminal");
+      expect(tema, `la tab ${tab} no resuelve`).toBeDefined();
+      expect(rolesDe(tema!)).toContain("terminal");
+    }
+  });
+
+  it("un tema propio se encuentra por su slug, no sólo por equivalencia", () => {
+    expect(temaDeRol("terminal-limites", "terminal")?.slug).toBe("terminal-limites");
+  });
+
+  it("un tema ajeno no se resuelve: la URL deja de estar abierta (D6)", () => {
+    expect(temaDeRol("caja", "terminal")).toBeUndefined();
+    expect(temaDeRol("terminal-salon", "encargado")).toBeUndefined();
+  });
+});
+
+describe("equivalenciasDeRol", () => {
+  it("mapea el slug de la tab al tema del rol, para el chip", () => {
+    expect(equivalenciasDeRol("terminal")).toMatchObject({
+      mesas: "terminal-salon",
+    });
+  });
+
+  it("para el encargado no hay nada que traducir", () => {
+    expect(equivalenciasDeRol("encargado")).toEqual({});
   });
 });

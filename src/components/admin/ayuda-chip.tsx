@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { CircleHelp } from "lucide-react";
 
-import { useAyudaPendiente } from "@/components/admin/ayuda-progreso";
+import { useAyudaTema } from "@/components/admin/ayuda-progreso";
 
 /**
  * El "?" al lado del título de una pantalla — spec 134 D7
@@ -22,10 +22,12 @@ import { useAyudaPendiente } from "@/components/admin/ayuda-progreso";
  * apaga cuando termina el recorrido y no vuelve nunca más.
  */
 export function AyudaChip({ slug, tema }: { slug: string; tema: string }) {
-  const pendiente = useAyudaPendiente(tema);
+  // `tema` es el slug de la PANTALLA, el mismo para todos los roles. Cuál se
+  // abre lo decide el rol (spec 170 · D5): la terminal cae en el suyo.
+  const { tema: destino, pendiente } = useAyudaTema(tema);
   return (
     <Link
-      href={`/${slug}/admin/ayuda/${tema}`}
+      href={`/${slug}/admin/ayuda/${destino}`}
       aria-label={
         pendiente
           ? "Cómo se usa esta pantalla — todavía no lo leíste"

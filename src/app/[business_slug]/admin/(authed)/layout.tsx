@@ -6,7 +6,7 @@ import { BrandStyle } from "@/components/admin/shell/brand-style";
 import { NotificationsLauncher } from "@/components/notifications/notifications-launcher";
 import { ensureAdminAccess } from "@/lib/admin/context";
 import { getTemasLeidos, rolDeLaGuia } from "@/lib/ayuda/queries";
-import { recorrido } from "@/lib/ayuda/recorrido";
+import { equivalenciasDeRol, recorrido } from "@/lib/ayuda/recorrido";
 import { getMyAdminBusinesses } from "@/lib/platform/queries";
 import { getPendingOrderCount } from "@/lib/admin/orders-query";
 import { getLowKitchenStockCount } from "@/lib/ingredients/queries";
@@ -90,9 +90,13 @@ export default async function AdminAuthedLayout({
   // cada chip `?` salen los dos de acá (spec 169 · D4). Vacío —el recorrido
   // terminado, o un rol que todavía no tiene guía— es que no se pinta nada.
   const modoReservas: ReservationMode = reservas.mode ?? "estricto";
-  const ayudaPendiente = recorrido(rolDeLaGuia(ctx), modoReservas)
+  const rolGuia = rolDeLaGuia(ctx);
+  const ayudaPendiente = recorrido(rolGuia, modoReservas)
     .filter((tema) => !temasLeidos.has(tema.slug))
     .map((tema) => tema.slug);
+  // Spec 170 · D5 — el diccionario del chip. Son cuatro entradas y sale de
+  // datos en memoria: no cuesta una consulta.
+  const ayudaEquivalencias = equivalenciasDeRol(rolGuia);
   // Switcher de negocio: solo si el dueño es admin de ≥2 locales (spec 14).
   const siblings =
     myBusinesses.length >= 2
@@ -134,7 +138,10 @@ export default async function AdminAuthedLayout({
       {/* En mobile el contenido despeja la top-bar fija (h-14) de
           AdminMobileNav. En md+ el rail lateral ocupa el flujo. */}
       <div className="min-w-0 flex-1 pt-14 md:pt-0">
-        <AyudaProgresoProvider pendientes={ayudaPendiente}>
+        <AyudaProgresoProvider
+          pendientes={ayudaPendiente}
+          equivalencias={ayudaEquivalencias}
+        >
           {children}
         </AyudaProgresoProvider>
       </div>

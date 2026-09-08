@@ -13,25 +13,46 @@ import { createContext, useContext, useMemo } from "react";
  * Lleva sólo lo pendiente y no todo el progreso: es lo único que se usa acá, y
  * la lista viaja al cliente en cada navegación del panel.
  */
-const Contexto = createContext<ReadonlySet<string>>(new Set());
+type Estado = {
+  pendientes: ReadonlySet<string>;
+  /**
+   * Slug de la pantalla → slug del tema de ESTE rol (spec 170 · D5). El chip
+   * pasa siempre el de la tab; la terminal tiene el suyo. Vacío para el
+   * encargado, que es dueño de los slugs originales.
+   */
+  equivalencias: Record<string, string>;
+};
+
+const VACIO: Estado = { pendientes: new Set(), equivalencias: {} };
+const Contexto = createContext<Estado>(VACIO);
 
 export function AyudaProgresoProvider({
   pendientes,
+  equivalencias,
   children,
 }: {
   pendientes: string[];
+  equivalencias: Record<string, string>;
   children: React.ReactNode;
 }) {
-  const set = useMemo(() => new Set(pendientes), [pendientes]);
-  return <Contexto.Provider value={set}>{children}</Contexto.Provider>;
+  const valor = useMemo(
+    () => ({ pendientes: new Set(pendientes), equivalencias }),
+    [pendientes, equivalencias],
+  );
+  return <Contexto.Provider value={valor}>{children}</Contexto.Provider>;
 }
 
 /**
- * `true` si este tema es parte del recorrido y todavía no lo leyó.
+ * Qué tema abre el chip de esta pantalla, y si está pendiente.
  *
- * Fuera del layout del panel devuelve `false`, que es lo correcto: sin
- * provider no hay recorrido del cual estar atrasado.
+ * Fuera del layout del panel devuelve el slug tal cual y `false`: sin provider
+ * no hay rol del cual traducir ni recorrido del cual estar atrasado.
  */
-export function useAyudaPendiente(tema: string): boolean {
-  return useContext(Contexto).has(tema);
+export function useAyudaTema(pantalla: string): {
+  tema: string;
+  pendiente: boolean;
+} {
+  const { pendientes, equivalencias } = useContext(Contexto);
+  const tema = equivalencias[pantalla] ?? pantalla;
+  return { tema, pendiente: pendientes.has(tema) };
 }
