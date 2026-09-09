@@ -36,11 +36,15 @@ import type {
   DailyMenuForMozo,
 } from "@/lib/mozo/daily-menus-query";
 import { moveSelection } from "@/lib/mozo/product-search";
-import { indexFromDigit } from "@/lib/ui/roving";
+import { gridNextIndex, indexFromDigit } from "@/lib/ui/roving";
 import { useEscapeToClose } from "@/lib/ui/use-escape-to-close";
 
 /** Cuántos menús se ofrecen de un toque en el primer paso. Más que eso, con +. */
 const CANTIDADES = [1, 2, 3, 4, 5, 6, 7, 8];
+/** Columnas de esa grilla. Vive acá porque el teclado la necesita tanto como el
+ *  layout: si el `grid-cols-N` y este número se separan, ↓ deja de bajar una
+ *  fila (#279). */
+const CANTIDAD_COLUMNAS = 4;
 
 /**
  * Asistente de carga del menú del día (specs 072 · 074 · 083 · 118 · 155).
@@ -465,7 +469,9 @@ export function DailyMenuWizard({
 
     if (typing) return;
 
-    if (e.key === "ArrowLeft" || e.key === "Backspace") {
+    // En la grilla de la cantidad el ← es un movimiento, no un «volver»: lo
+    // resuelve la rama de abajo, que sólo cae al `goBack` en el borde izquierdo.
+    if (e.key === "Backspace" || (e.key === "ArrowLeft" && vista !== "cantidad")) {
       e.preventDefault();
       goBack();
       return;
@@ -474,14 +480,16 @@ export function DailyMenuWizard({
     // ── Paso de cantidad: los mismos atajos, sobre la grilla de números ──
     if (vista === "cantidad") {
       const length = CANTIDADES.length;
-      if (e.key === "ArrowDown") {
+      // Es una grilla, no una lista: ↓/↑ mueven de fila y ←/→ de a uno, en
+      // orden de lectura (mismo `gridNextIndex` del selector de método de
+      // pago, spec 075). Salirse por un borde no hace nada —clamp, como en el
+      // resto del asistente— salvo el ← desde la primera celda, que es el
+      // «volver» de siempre y cierra (#279).
+      const move = gridNextIndex(activeIndex, e.key, length, CANTIDAD_COLUMNAS);
+      if (move) {
         e.preventDefault();
-        setActiveIndex((i) => moveSelection(i, 1, length));
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setActiveIndex((i) => moveSelection(i, -1, length));
+        if (move.kind === "index") setActiveIndex(move.index);
+        else if (e.key === "ArrowLeft") goBack();
         return;
       }
       if (e.key === "Home") {
@@ -877,7 +885,7 @@ export function DailyMenuWizard({
           {embedded && (
             <p className="mt-2 text-[11px] text-zinc-400">
               {vista === "cantidad"
-                ? "1-8 cuántos · +/− ajustar · Enter seguir"
+                ? "1-8 cuántos · ←→↑↓ mover · +/− ajustar · Enter seguir"
                 : vista === "paso"
                   ? "↑↓ moverse · 1-9 elegir directo · Enter confirmar · ← volver"
                   : "Enter agregar · ← volver"}
@@ -915,7 +923,14 @@ function CantidadStep({
       <p className="mb-2 px-1 text-xs text-zinc-500">
         Se preguntan las opciones de todos juntos, por vuelta de mesa.
       </p>
-      <div role="radiogroup" aria-label="Cuántos menús" className="grid grid-cols-4 gap-2">
+      <div
+        role="radiogroup"
+        aria-label="Cuántos menús"
+        className="grid gap-2"
+        style={{
+          gridTemplateColumns: `repeat(${CANTIDAD_COLUMNAS}, minmax(0, 1fr))`,
+        }}
+      >
         {CANTIDADES.map((n, i) => {
           const isActive = i === activeIndex;
           const isChosen = n === cantidad;

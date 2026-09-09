@@ -711,3 +711,53 @@ describe("asistente del menú del día · varios por vuelta de mesa (spec 155)",
     await waitFor(() => expect(screen.getByText(/Faltan 1 de 3/)).toBeTruthy());
   });
 });
+
+describe("asistente del menú del día · la grilla de la cantidad (#279)", () => {
+  // El primer paso es una grilla de 4 columnas (spec 155 · D1), no una lista:
+  // se navegaba con ↓/↑ de a uno y ←/→ no existían, así que la flecha de al
+  // lado no movía y la de la izquierda cerraba el asistente entero.
+
+  it("→ se mueve a la cantidad de al lado", async () => {
+    renderWizard();
+    await expectFocusOn(/^1 menú$/);
+    fireEvent.keyDown(focused(), { key: "ArrowRight" });
+    await expectFocusOn(/^2 menús$/);
+  });
+
+  it("↓ baja una fila entera, no una celda", async () => {
+    renderWizard();
+    await expectFocusOn(/^1 menú$/);
+    fireEvent.keyDown(focused(), { key: "ArrowDown" });
+    await expectFocusOn(/^5 menús$/);
+    fireEvent.keyDown(focused(), { key: "ArrowUp" });
+    await expectFocusOn(/^1 menú$/);
+  });
+
+  it("← vuelve de a uno dentro de la grilla", async () => {
+    const { onClose } = renderWizard();
+    await expectFocusOn(/^1 menú$/);
+    fireEvent.keyDown(focused(), { key: "ArrowRight" });
+    await expectFocusOn(/^2 menús$/);
+    fireEvent.keyDown(focused(), { key: "ArrowLeft" });
+    await expectFocusOn(/^1 menú$/);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("← desde el primero sí cierra: es el borde, y ← es «volver»", async () => {
+    const { onClose } = renderWizard();
+    await expectFocusOn(/^1 menú$/);
+    fireEvent.keyDown(focused(), { key: "ArrowLeft" });
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("el 8 es el último: → no se pasa de largo", async () => {
+    renderWizard();
+    await expectFocusOn(/^1 menú$/);
+    fireEvent.keyDown(focused(), { key: "End" });
+    await expectFocusOn(/^8 menús$/);
+    fireEvent.keyDown(focused(), { key: "ArrowRight" });
+    await expectFocusOn(/^8 menús$/);
+    fireEvent.keyDown(focused(), { key: "ArrowDown" });
+    await expectFocusOn(/^8 menús$/);
+  });
+});
