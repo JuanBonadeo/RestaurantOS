@@ -3112,16 +3112,19 @@ export type Database = {
       print_agent_status: {
         Row: {
           agent_id: string;
+          agent_version: string | null;
           business_id: string;
           last_seen_at: string;
         };
         Insert: {
           agent_id: string;
+          agent_version?: string | null;
           business_id: string;
           last_seen_at?: string;
         };
         Update: {
           agent_id?: string;
+          agent_version?: string | null;
           business_id?: string;
           last_seen_at?: string;
         };

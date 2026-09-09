@@ -92,6 +92,36 @@ function EstadoPill({
 }
 
 /**
+ * Qué versión corre esa PC (issue #278).
+ *
+ * Un agente que **no** reporta versión no es un dato faltante: es un agente
+ * anterior a set-2026, o sea de cuando el .exe todavía armaba el ticket con su
+ * propio código en vez de imprimir el que manda el server. Eso hace que los
+ * cambios en la comanda no lleguen al papel —fue lo que pasó con la nota de
+ * cocina en golf— así que la card lo dice y pide reinstalar, en vez de mostrar
+ * un guioncito.
+ *
+ * Sólo se muestra si el agente está conectado: de uno caído no sabemos qué
+ * versión tiene hoy, sólo qué versión tenía la última vez, y adivinar sobre eso
+ * es lo que este cambio vino a evitar.
+ */
+function VersionLinea({ version }: { version: string | null }) {
+  if (version) {
+    return (
+      <p className="text-xs text-zinc-500">
+        Versión <span className="tabular-nums">{version}</span>
+      </p>
+    );
+  }
+  return (
+    <p className="text-xs text-amber-700">
+      Versión anterior a set-2026 — arma la comanda por su cuenta, así que los
+      cambios del sistema no llegan al papel. Conviene reinstalarla.
+    </p>
+  );
+}
+
+/**
  * Un agente instalado: su estado, qué impresoras alcanza y las acciones sobre
  * él. Con un solo agente la card se ve igual que siempre (el bloque de alcance
  * queda plegado); recién aparece cuando hay más de uno, que es cuando importa.
@@ -198,6 +228,11 @@ function AgenteRow({
         </span>
         <EstadoPill lastSeenAt={agente.lastSeenAt} now={now} />
       </div>
+
+      {agente.lastSeenAt != null &&
+      now - new Date(agente.lastSeenAt).getTime() < OFFLINE_THRESHOLD_MS ? (
+        <VersionLinea version={agente.agentVersion} />
+      ) : null}
 
       <div className="grid gap-1.5">
         <label

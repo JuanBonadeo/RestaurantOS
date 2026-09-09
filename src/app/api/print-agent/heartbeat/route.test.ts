@@ -68,6 +68,31 @@ describe("POST /api/print-agent/heartbeat (spec 35)", () => {
     });
   });
 
+  it("guarda la versión que declara el agente (#278)", async () => {
+    const res = await POST(
+      postReq({ business_id: "biz1", version: "2026-09-09" }),
+    );
+    expect(res.status).toBe(200);
+    expect(upsertCalls[0].vals).toMatchObject({ agent_version: "2026-09-09" });
+  });
+
+  it("sin versión NO manda la columna: no le pisa el dato al agente", async () => {
+    // Un agente viejo no la reporta. Si mandáramos null, el upsert borraría la
+    // versión que esa misma PC había declarado antes de un downgrade — y el
+    // panel diría "anterior a set-2026" de algo que no lo es.
+    await POST(postReq({ business_id: "biz1" }));
+    expect(upsertCalls[0].vals).not.toHaveProperty("agent_version");
+  });
+
+  it("versión vacía cuenta como ausente, y una larga se recorta", async () => {
+    await POST(postReq({ business_id: "biz1", version: "   " }));
+    expect(upsertCalls[0].vals).not.toHaveProperty("agent_version");
+
+    upsertCalls = [];
+    await POST(postReq({ business_id: "biz1", version: "v".repeat(200) }));
+    expect(upsertCalls[0].vals.agent_version).toHaveLength(40);
+  });
+
   it("sin Bearer válido → 401, no upsertea", async () => {
     const res = await POST(postReq({ business_id: "biz1" }, ""));
     expect(res.status).toBe(401);

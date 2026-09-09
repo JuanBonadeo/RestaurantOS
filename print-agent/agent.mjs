@@ -36,6 +36,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const cfgDir = process.pkg ? path.dirname(process.execPath) : __dirname;
 const cfg = JSON.parse(fs.readFileSync(path.join(cfgDir, "config.json"), "utf8"));
 
+/**
+ * Versión de este agente (issue #278). Fecha del release, no semver: lo que se
+ * necesita saber en el local es "¿el .exe que corre acá es más nuevo que el
+ * cambio que estoy buscando?", y una fecha se compara sin tabla de traducción.
+ *
+ * SUBIRLA al empaquetar un .exe nuevo. Si no se sube, el panel va a decir que
+ * el local corre una versión que no corre — peor que no mostrar nada.
+ */
+const AGENT_VERSION = "2026-09-09";
+
 const args = process.argv.slice(2);
 const ONCE = args.includes("--once");
 const DRY = args.includes("--dry-run");
@@ -405,13 +415,22 @@ async function fetchComandas() {
  * Latido de salud (spec 35). Best-effort: si falla, no corta el loop — solo
  * significa que operación verá el agente como "sin conexión" hasta el próximo
  * latido OK. Un agente viejo (sin esta llamada) sigue imprimiendo igual.
+ *
+ * Issue #278 — va también la versión. Cuando golf avisó que la nota de cocina
+ * no salía en la comanda, el server la mandaba bien y el sospechoso era el
+ * .exe del local, pero desde el panel era indistinguible: el latido sólo decía
+ * "estoy vivo". Hubo que deducir la versión cruzando fechas de commit contra
+ * las notas del setup. El campo es aditivo — un server viejo lo ignora.
  */
 async function sendHeartbeat() {
   try {
     await fetch(`${base}/api/print-agent/heartbeat`, {
       method: "POST",
       headers: { ...authHeaders, "content-type": "application/json" },
-      body: JSON.stringify({ business_id: cfg.businessId }),
+      body: JSON.stringify({
+        business_id: cfg.businessId,
+        version: AGENT_VERSION,
+      }),
     });
   } catch {
     /* best-effort: el próximo tick reintenta */

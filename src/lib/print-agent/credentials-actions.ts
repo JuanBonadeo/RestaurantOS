@@ -40,6 +40,12 @@ export type PrintAgentSummary = {
   label: string;
   printerScope: string[] | null;
   lastSeenAt: string | null;
+  /**
+   * Versión que declara el agente en el latido (issue #278). `null` = todavía
+   * no la reporta, o sea: es anterior a set-2026, cuando el .exe dejó de armar
+   * el ticket por su cuenta. El panel lo dice con esas palabras.
+   */
+  agentVersion: string | null;
 };
 
 /** Gate admin + negocio. Centraliza el chequeo que hacen todas las actions. */
@@ -156,7 +162,7 @@ export async function listPrintAgents(
       .order("created_at", { ascending: true }),
     service
       .from("print_agent_status")
-      .select("agent_id, last_seen_at")
+      .select("agent_id, last_seen_at, agent_version")
       .eq("business_id", gate.id),
   ]);
 
@@ -168,9 +174,15 @@ export async function listPrintAgents(
     printer_scope: string[] | null;
   }[];
   const porAgente = new Map(
-    ((latidos ?? []) as { agent_id: string | null; last_seen_at: string }[])
+    (
+      (latidos ?? []) as {
+        agent_id: string | null;
+        last_seen_at: string;
+        agent_version: string | null;
+      }[]
+    )
       .filter((l) => l.agent_id)
-      .map((l) => [l.agent_id as string, l.last_seen_at]),
+      .map((l) => [l.agent_id as string, l]),
   );
 
   return actionOk(
@@ -178,7 +190,8 @@ export async function listPrintAgents(
       id: f.id,
       label: f.label ?? LABEL_POR_DEFECTO,
       printerScope: f.printer_scope,
-      lastSeenAt: porAgente.get(f.id) ?? null,
+      lastSeenAt: porAgente.get(f.id)?.last_seen_at ?? null,
+      agentVersion: porAgente.get(f.id)?.agent_version ?? null,
     })),
   );
 }
