@@ -23,6 +23,11 @@ export type AdminDailyMenuComponent = {
    * guardado no mostraría nada hasta re-elegir cada producto.
    */
   product_modifier_groups: ProductModifierGroup[];
+  /**
+   * Cuáles de esos grupos este menú NO pregunta (spec 175). El editor los
+   * muestra destildados; el asistente y el server los saltean.
+   */
+  ignored_modifier_group_ids: string[];
 };
 
 export type AdminDailyMenu = {
@@ -49,7 +54,7 @@ export type AdminDailyMenu = {
 };
 
 const SELECT =
-  "id, name, slug, description, price_cents, image_url, available_days, is_active, is_available, sort_order, display_context, is_suggestion, daily_menu_choice_groups(id, name, sort_order, applies_when_group_id, applies_when_product_ids), daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, extra_price_cents, products(id, name, image_url, modifier_groups(id, name, is_required, sort_order)))";
+  "id, name, slug, description, price_cents, image_url, available_days, is_active, is_available, sort_order, display_context, is_suggestion, daily_menu_choice_groups(id, name, sort_order, applies_when_group_id, applies_when_product_ids), daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, extra_price_cents, ignored_modifier_group_ids, products(id, name, image_url, modifier_groups(id, name, is_required, sort_order)))";
 
 function mapRow(
   row: {
@@ -75,6 +80,7 @@ function mapRow(
           product_id?: string | null;
           choice_group_id?: string | null;
           extra_price_cents?: number | null;
+          ignored_modifier_group_ids?: string[] | null;
           products?: {
             id: string;
             name: string;
@@ -139,6 +145,7 @@ function mapRow(
         product_name: c.products?.name ?? null,
         product_image_url: c.products?.image_url ?? null,
         extra_price_cents: Number(c.extra_price_cents ?? 0),
+        ignored_modifier_group_ids: c.ignored_modifier_group_ids ?? [],
         product_modifier_groups: c.products?.modifier_groups ?? [],
       })),
   };

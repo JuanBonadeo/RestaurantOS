@@ -95,7 +95,12 @@ export function buildMenuSteps(
     if (!chosen) continue;
     const option = group.options.find((o) => o.product_id === chosen.product_id);
     if (!option) continue;
-    for (const modifierGroup of askableModifierGroups(option.modifier_groups)) {
+    // Los que este menú apagó no se preguntan (spec 175): la «Guarnición» de la
+    // Milanesa cuando el menú ya la pregunta con un `choice_group` propio.
+    for (const modifierGroup of askableModifierGroups(
+      option.modifier_groups,
+      option.ignored_modifier_group_ids,
+    )) {
       // Un obligatorio de una sola opción no se pregunta: sería un paso con una
       // sola salida. El asistente lo da por elegido al confirmar.
       if (isAutoResolved(modifierGroup)) continue;
@@ -126,7 +131,12 @@ export function autoResolvedModifierIds(
     if (!chosen) continue;
     const option = group.options.find((o) => o.product_id === chosen.product_id);
     if (!option) continue;
-    const ids = askableModifierGroups(option.modifier_groups)
+    // Un grupo apagado no se auto-resuelve tampoco: si no se preguntó y el
+    // server no lo va a exigir, no hay nada que dar por elegido (spec 175 · D3).
+    const ids = askableModifierGroups(
+      option.modifier_groups,
+      option.ignored_modifier_group_ids,
+    )
       .filter(isAutoResolved)
       .map((g) => g.modifiers[0]!.id);
     if (ids.length > 0) out.set(group.choice_group_id, ids);

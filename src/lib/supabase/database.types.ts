@@ -1515,6 +1515,7 @@ export type Database = {
           description: string | null;
           extra_price_cents: number;
           id: string;
+          ignored_modifier_group_ids: string[];
           kind: string;
           label: string;
           menu_id: string;
@@ -1526,6 +1527,7 @@ export type Database = {
           description?: string | null;
           extra_price_cents?: number;
           id?: string;
+          ignored_modifier_group_ids?: string[];
           kind?: string;
           label: string;
           menu_id: string;
@@ -1537,6 +1539,7 @@ export type Database = {
           description?: string | null;
           extra_price_cents?: number;
           id?: string;
+          ignored_modifier_group_ids?: string[];
           kind?: string;
           label?: string;
           menu_id?: string;

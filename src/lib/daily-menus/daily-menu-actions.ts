@@ -71,6 +71,12 @@ async function syncComponents(
       // Adicional sólo para `choice` (spec 29); los demás kinds van en 0.
       extra_price_cents:
         component.kind === "choice" ? (component.extra_price_cents ?? 0) : 0,
+      // Ídem los grupos apagados (spec 175): un componente fijo no abre pasos
+      // de modificadores, así que apagarlos ahí no significaría nada.
+      ignored_modifier_group_ids:
+        component.kind === "choice"
+          ? (component.ignored_modifier_group_ids ?? [])
+          : [],
     };
     if (component.id) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

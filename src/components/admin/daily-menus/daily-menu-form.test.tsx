@@ -59,6 +59,7 @@ function option(
   name: string,
   extraCents = 0,
   modifierGroups: ProductModifierGroup[] = [],
+  ignoredModifierGroupIds: string[] = [],
 ): AdminDailyMenuComponent {
   return {
     id: uuidN(componentSeq++),
@@ -73,6 +74,7 @@ function option(
     product_image_url: null,
     extra_price_cents: extraCents,
     product_modifier_groups: modifierGroups,
+    ignored_modifier_group_ids: ignoredModifierGroupIds,
   };
 }
 
@@ -248,6 +250,7 @@ describe("editor del menú del día · los valores viajan con la tarjeta (spec 0
       product_image_url: null,
       extra_price_cents: 0,
       product_modifier_groups: [],
+      ignored_modifier_group_ids: [],
     });
     renderForm(menuCon([texto("Entrada"), texto("Principal"), texto("Postre")]));
     const textos = () =>
@@ -500,6 +503,7 @@ describe("editor del menú del día · los modificadores del producto (spec 148)
       product_image_url: null,
       extra_price_cents: 0,
       product_modifier_groups: [mg("Punto de cocción", true)],
+      ignored_modifier_group_ids: [],
     };
     renderForm(menuCon([fijo]));
 
@@ -507,5 +511,96 @@ describe("editor del menú del día · los modificadores del producto (spec 148)
       screen.getByText(/al ser un componente fijo el asistente no los pregunta/),
     ).toBeTruthy();
     expect(screen.getByText("Punto de cocción")).toBeTruthy();
+  });
+});
+
+describe("editor del menú del día · apagar un grupo del producto (spec 175)", () => {
+  /**
+   * La 148 mostró lo que el producto arrastra; ésta le pone el interruptor.
+   * El caso es el de golf-jcr: el menú pregunta la guarnición con un
+   * `choice_group` —cuyas opciones son productos, y por eso el Puré puede
+   * preguntar su «Variante»— y la Milanesa arrastra la suya, que es una lista
+   * de hojas. Apagando la del producto queda el camino bueno.
+   */
+  const mg = (
+    name: string,
+    is_required = false,
+    sort_order = 0,
+  ): ProductModifierGroup => ({
+    id: `mg-${name}`,
+    name,
+    is_required,
+    sort_order,
+  });
+
+  const casilla = (nombre: string) =>
+    screen.getByRole("checkbox", {
+      name: new RegExp(`preguntar «${nombre}»`, "i"),
+    }) as HTMLInputElement;
+
+  it("cada grupo trae su casilla, tildada por defecto", () => {
+    renderForm(
+      menuCon([
+        option(GRUPO.principal, "Principal", "Milanesa", 0, [
+          mg("Guarnición"),
+          mg("Punto de cocción", true, 1),
+        ]),
+      ]),
+    );
+    expect(casilla("Guarnición").checked).toBe(true);
+    expect(casilla("Punto de cocción").checked).toBe(true);
+  });
+
+  it("arranca destildada la que el menú ya tenía apagada", () => {
+    renderForm(
+      menuCon([
+        option(
+          GRUPO.principal,
+          "Principal",
+          "Milanesa",
+          0,
+          [mg("Guarnición"), mg("Punto de cocción", true, 1)],
+          ["mg-Guarnición"],
+        ),
+      ]),
+    );
+    expect(casilla("Guarnición").checked).toBe(false);
+    expect(casilla("Punto de cocción").checked).toBe(true);
+  });
+
+  it("destildar apaga el grupo y baja el aviso de que se pregunta dos veces", () => {
+    renderForm(
+      menuCon([
+        // El grupo del menú se llama «Guarnicion» y el del producto
+        // «Guarnición»: mismo concepto, distinta tilde (el caso real).
+        option(GRUPO.principal, "Guarnicion", "Milanesa", 0, [mg("Guarnición")]),
+      ]),
+    );
+    expect(screen.getByText(/se pregunta dos veces/)).toBeTruthy();
+
+    fireEvent.click(casilla("Guarnición"));
+
+    expect(casilla("Guarnición").checked).toBe(false);
+    expect(screen.queryByText(/se pregunta dos veces/)).toBeNull();
+  });
+
+  it("un componente fijo no ofrece casilla: no abre pasos que apagar", () => {
+    const fijo: AdminDailyMenuComponent = {
+      id: uuidN(componentSeq++),
+      label: "Principal",
+      description: null,
+      sort_order: sortOrder++,
+      kind: "product",
+      product_id: uuidN(productSeq++),
+      choice_group_id: null,
+      choice_group_label: null,
+      product_name: "Milanesa",
+      product_image_url: null,
+      extra_price_cents: 0,
+      product_modifier_groups: [mg("Punto de cocción", true)],
+      ignored_modifier_group_ids: [],
+    };
+    renderForm(menuCon([fijo]));
+    expect(screen.queryByRole("checkbox", { name: /preguntar/i })).toBeNull();
   });
 });

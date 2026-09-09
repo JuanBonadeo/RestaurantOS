@@ -18,6 +18,12 @@ export const DailyMenuComponentInput = z
     // La regla de "sólo hacia adelante" no se puede validar acá —es una regla
     // entre componentes—, va en el `superRefine` de `DailyMenuInput`.
     blocks_choice_group_ids: z.array(z.string().uuid()).optional(),
+    // Grupos de modificadores DEL PRODUCTO que este menú no pregunta (spec
+    // 175): la «Guarnición» de la Milanesa cuando el menú ya la pregunta con un
+    // `choice_group`, que es el único camino que puede anidar el tipo de puré.
+    // No se valida contra los grupos del producto: el producto se puede cambiar
+    // desde el catálogo y un id muerto acá no rompe nada — el filtro no matchea.
+    ignored_modifier_group_ids: z.array(z.string().uuid()).optional(),
   })
   .superRefine((data, ctx) => {
     if (data.kind === "product" && !data.product_id) {

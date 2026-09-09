@@ -47,6 +47,7 @@ function group(
       extra_price_cents: 0,
       blocks_choice_group_ids: [],
       sort_order: i,
+      ignored_modifier_group_ids: [],
       modifier_groups: (modsPorOpcion[i] ?? []).length
         ? [
             {

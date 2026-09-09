@@ -126,6 +126,8 @@ export function DailyMenuForm({
               choice_group_label: c.choice_group_label,
               // Centavos en datos → pesos en el form (igual que price_cents).
               extra_price_cents: (c.extra_price_cents ?? 0) / 100,
+              // Los grupos del producto que este menú no pregunta (spec 175).
+              ignored_modifier_group_ids: c.ignored_modifier_group_ids ?? [],
             })),
           ),
           // El nombre y la condición del grupo salen de su fila, no de las
@@ -785,14 +787,26 @@ function ModificadoresDelProducto({
    *  que la Milanesa fija no va a preguntar el punto de cocción—, pero el
    *  texto dice lo contrario y no hay conflicto posible. */
   fijo = false,
+  /** Los que este menú apagó (spec 175). */
+  ignored = [],
+  /** Prender/apagar uno. Sin esto no se dibujan casillas: es el caso `fijo`,
+   *  donde no hay pasos que apagar. */
+  onToggle,
 }: {
   groups: ProductModifierGroup[];
   comboGroupNames: string[];
   fijo?: boolean;
+  ignored?: string[];
+  onToggle?: (groupId: string) => void;
 }) {
   // Sin modificadores no se dibuja nada: no se agrega ruido donde no hay nada
   // que avisar.
-  const avisos = avisosDeModificadores(groups, fijo ? [] : comboGroupNames);
+  const apagado = (id: string) => ignored.includes(id);
+  // Un grupo apagado ya no se pregunta, así que tampoco duplica a nadie: el
+  // aviso de la 148 tiene que bajar en el mismo gesto que lo apaga (spec 175).
+  const avisos = avisosDeModificadores(groups, fijo ? [] : comboGroupNames).map(
+    (a) => (apagado(a.id) ? { ...a, duplicaA: null } : a),
+  );
   if (avisos.length === 0) return null;
 
   const duplicados = avisos.filter((a) => a.duplicaA);
@@ -805,25 +819,54 @@ function ModificadoresDelProducto({
           : "Al elegir esta opción, el asistente va a preguntar además:"}
       </p>
       <ul className="space-y-0.5">
-        {avisos.map((a) => (
-          <li key={a.id} className="flex flex-wrap items-center gap-1.5">
-            <span className="text-foreground font-medium">
-              {a.name.trim() || "(sin nombre)"}
-            </span>
-            <span>{a.is_required ? "(obligatoria)" : "(opcional)"}</span>
-            {a.duplicaA && (
-              <span className="flex items-center gap-1 font-medium text-amber-700">
-                <AlertTriangle className="size-3" aria-hidden />
-                se pregunta dos veces
+        {avisos.map((a) => {
+          const nombre = a.name.trim() || "(sin nombre)";
+          const off = apagado(a.id);
+          const texto = (
+            <>
+              <span
+                className={
+                  off
+                    ? "text-muted-foreground font-medium line-through"
+                    : "text-foreground font-medium"
+                }
+              >
+                {nombre}
               </span>
-            )}
-          </li>
-        ))}
+              <span>{a.is_required ? "(obligatoria)" : "(opcional)"}</span>
+              {a.duplicaA && (
+                <span className="flex items-center gap-1 font-medium text-amber-700">
+                  <AlertTriangle className="size-3" aria-hidden />
+                  se pregunta dos veces
+                </span>
+              )}
+            </>
+          );
+          return (
+            <li key={a.id} className="flex flex-wrap items-center gap-1.5">
+              {onToggle ? (
+                <label className="flex flex-wrap items-center gap-1.5">
+                  <input
+                    type="checkbox"
+                    className="size-3.5 rounded border-zinc-300"
+                    checked={!off}
+                    onChange={() => onToggle(a.id)}
+                    aria-label={`Preguntar «${nombre}» en este menú`}
+                  />
+                  {texto}
+                </label>
+              ) : (
+                texto
+              )}
+            </li>
+          );
+        })}
       </ul>
       {duplicados.map((a) => (
         <p key={`dup-${a.id}`} className="font-medium text-amber-700">
           El combo ya pregunta «{a.duplicaA}»; este producto la va a preguntar
-          de nuevo. Se puede guardar igual: revisá si es lo que querés.
+          de nuevo. Destildala acá si en este menú no va — el producto suelto la
+          sigue preguntando en la carta.
         </p>
       ))}
     </div>
@@ -1163,6 +1206,20 @@ function ChoiceGroupCard({
                 <ModificadoresDelProducto
                   groups={productModifiers.get(productId) ?? []}
                   comboGroupNames={comboGroupNames}
+                  ignored={
+                    watch(`components.${idx}.ignored_modifier_group_ids`) ?? []
+                  }
+                  onToggle={(groupId) => {
+                    const actuales =
+                      watch(`components.${idx}.ignored_modifier_group_ids`) ?? [];
+                    setValue(
+                      `components.${idx}.ignored_modifier_group_ids`,
+                      actuales.includes(groupId)
+                        ? actuales.filter((g) => g !== groupId)
+                        : [...actuales, groupId],
+                      { shouldDirty: true },
+                    );
+                  }}
                 />
               </div>
             )}

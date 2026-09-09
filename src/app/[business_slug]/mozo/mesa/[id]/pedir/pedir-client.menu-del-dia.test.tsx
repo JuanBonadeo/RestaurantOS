@@ -68,6 +68,7 @@ const opcion = (i: number): DailyMenuComponent => ({
   blocks_choice_group_ids: [],
   sort_order: i,
   modifier_groups: [],
+  ignored_modifier_group_ids: [],
 });
 
 const MENU: DailyMenuForMozo = {

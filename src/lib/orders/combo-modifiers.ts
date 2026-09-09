@@ -42,11 +42,25 @@ export type ModifiersResult =
  *
  * Se descartan los que quedaron sin modificadores disponibles: serían un paso
  * sin salida, igual que un `choice_group` vacío en `activeChoiceGroups`.
+ *
+ * Y los que **el menú apagó** (spec 175): cuando el plato trae su propia
+ * «Guarnición» y el menú ya la pregunta con un `choice_group` —cuyas opciones
+ * son productos, y por eso pueden anidar el tipo de puré—, el grupo del
+ * producto sobra. Se apaga por opción y por menú
+ * (`daily_menu_components.ignored_modifier_group_ids`), así que la Milanesa
+ * suelta sigue preguntando la suya en la carta.
+ *
+ * Es el único lugar donde se decide qué se pregunta: lo usan el asistente del
+ * mozo y `resolveModifiers`, que es lo que hace que el server no exija lo que
+ * la UI no preguntó (FR-007 de la 083, D3 de la 175).
  */
 export function askableModifierGroups(
   groups: ComboModifierGroup[] | null | undefined,
+  ignoredGroupIds?: readonly string[] | null,
 ): ComboModifierGroup[] {
+  const ignored = new Set(ignoredGroupIds ?? []);
   return [...(groups ?? [])]
+    .filter((g) => !ignored.has(g.id))
     .map((g) => ({
       ...g,
       modifiers: [...g.modifiers]
@@ -110,8 +124,12 @@ export function resolveModifiers(
   modifierIds: string[],
   /** Para el mensaje de error: «… en "Ñoquis"». */
   productName = "ese producto",
+  /** Los que el menú apagó (spec 175 · D3). Un obligatorio apagado deja de
+   *  exigirse: si el server lo siguiera pidiendo, el mozo quedaría trabado
+   *  reclamando algo que el asistente nunca le preguntó. */
+  ignoredGroupIds?: readonly string[] | null,
 ): ModifiersResult {
-  const available = askableModifierGroups(groups);
+  const available = askableModifierGroups(groups, ignoredGroupIds);
   const byId = new Map<string, { modifier: ComboModifier; group: ComboModifierGroup }>();
   for (const group of available) {
     for (const modifier of group.modifiers) {

@@ -43,6 +43,7 @@ function option(
     blocks_choice_group_ids: blocks,
     sort_order: sortOrder++,
     modifier_groups: [],
+    ignored_modifier_group_ids: [],
   };
 }
 
@@ -76,6 +77,7 @@ const MENU: DailyMenuForMozo = {
       blocks_choice_group_ids: [],
       sort_order: 0,
       modifier_groups: [],
+      ignored_modifier_group_ids: [],
     },
     ...entradas,
     ...principales,

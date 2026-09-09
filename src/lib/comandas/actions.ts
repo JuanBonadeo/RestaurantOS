@@ -735,7 +735,7 @@ export async function enviarComanda(
         // `products.modifier_groups` es la fuente de verdad del adicional de
         // los modificadores del combo (spec 083): el payload dice qué se
         // eligió, el precio sale de acá.
-        "id, name, price_cents, image_url, business_id, is_active, is_available, available_days, daily_menu_choice_groups(id, name, applies_when_group_id, applies_when_product_ids), daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, extra_price_cents, products(id, name, modifier_groups(id, name, is_required, min_selection, max_selection, sort_order, modifiers(id, name, price_delta_cents, is_available, sort_order))))",
+        "id, name, price_cents, image_url, business_id, is_active, is_available, available_days, daily_menu_choice_groups(id, name, applies_when_group_id, applies_when_product_ids), daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, extra_price_cents, ignored_modifier_group_ids, products(id, name, modifier_groups(id, name, is_required, min_selection, max_selection, sort_order, modifiers(id, name, price_delta_cents, is_available, sort_order))))",
       )
       .eq("id", menuItem.daily_menu_id)
       .maybeSingle();
@@ -809,6 +809,10 @@ export async function enviarComanda(
         comp?.products?.modifier_groups ?? [],
         sc.modifier_ids ?? [],
         comp?.products?.name ?? comp?.label ?? "ese producto",
+        // Lo que este menú apagó no se pregunta y tampoco se exige (spec 175 ·
+        // D3): si el server siguiera pidiendo el mínimo de un grupo que el
+        // asistente nunca mostró, el mozo quedaría trabado sin entender por qué.
+        comp?.ignored_modifier_group_ids ?? [],
       );
       if (!resolved.ok) return actionError(resolved.error);
       modifiersDelta += resolved.deltaCents;

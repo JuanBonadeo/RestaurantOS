@@ -208,3 +208,51 @@ describe("resolveModifiers · validación (FR-006)", () => {
     expect(resolveModifiers([], ["algo"]).ok).toBe(false);
   });
 });
+
+describe("askableModifierGroups · grupos apagados por el menú (spec 175)", () => {
+  it("saca del paso el grupo que el menú apagó", () => {
+    const out = askableModifierGroups([SALSA, GUARNICION], ["g-guarni"]);
+    expect(out.map((g) => g.id)).toEqual(["g-salsa"]);
+  });
+
+  it("un array vacío es la conducta de siempre", () => {
+    expect(askableModifierGroups([SALSA, GUARNICION], []).map((g) => g.id)).toEqual([
+      "g-salsa",
+      "g-guarni",
+    ]);
+    expect(askableModifierGroups([SALSA, GUARNICION]).map((g) => g.id)).toEqual([
+      "g-salsa",
+      "g-guarni",
+    ]);
+  });
+
+  it("apaga un obligatorio sin chistar: es una decisión del menú, no un error", () => {
+    expect(askableModifierGroups([SALSA], ["g-salsa"])).toEqual([]);
+  });
+
+  it("un id que ya no existe no rompe nada", () => {
+    expect(
+      askableModifierGroups([SALSA, GUARNICION], ["g-borrado-hace-un-mes"]).map(
+        (g) => g.id,
+      ),
+    ).toEqual(["g-salsa", "g-guarni"]);
+  });
+});
+
+describe("resolveModifiers · lo apagado tampoco se exige (spec 175 · D3)", () => {
+  it("no reclama el mínimo de un grupo obligatorio que el menú apagó", () => {
+    // Sin apagar, esto es un error: «Elegí 1 en "Salsa para pasta"».
+    expect(resolveModifiers([SALSA], [], "Ñoquis")).toMatchObject({ ok: false });
+    expect(resolveModifiers([SALSA], [], "Ñoquis", ["g-salsa"])).toMatchObject({
+      ok: true,
+      deltaCents: 0,
+    });
+  });
+
+  it("un modificador de un grupo apagado ya no pertenece al producto", () => {
+    const r = resolveModifiers([SALSA, GUARNICION], ["m-pure"], "Milanesa", [
+      "g-guarni",
+    ]);
+    expect(r).toMatchObject({ ok: false });
+  });
+});

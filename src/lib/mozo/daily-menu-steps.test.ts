@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   activeChoiceGroups,
+  autoResolvedModifierIds,
   buildMenuSteps,
   choicesDeltaCents,
   initialOptionIndex,
@@ -38,6 +39,7 @@ function group(
       blocks_choice_group_ids: blocksByOption[i] ?? [],
       sort_order: i,
       modifier_groups: [],
+      ignored_modifier_group_ids: [],
     })),
   };
 }
@@ -274,5 +276,83 @@ describe("choicesDeltaCents", () => {
 
   it("sin elecciones, no hay adicional", () => {
     expect(choicesDeltaCents(new Map())).toBe(0);
+  });
+});
+
+describe("los grupos que el menú apaga (spec 175)", () => {
+  const GUARNICION_DEL_PRODUCTO = {
+    id: "mg-guarni",
+    name: "Guarnición",
+    is_required: false,
+    min_selection: 0,
+    max_selection: 1,
+    sort_order: 0,
+    modifiers: [
+      { id: "m-papas", name: "Papas fritas", price_delta_cents: 0, is_available: true, sort_order: 0 },
+      { id: "m-pure", name: "Puré", price_delta_cents: 0, is_available: true, sort_order: 1 },
+    ],
+  };
+  const PUNTO = {
+    id: "mg-punto",
+    name: "Punto de cocción",
+    is_required: true,
+    min_selection: 1,
+    max_selection: 1,
+    sort_order: 1,
+    modifiers: [
+      { id: "m-jugoso", name: "Jugoso", price_delta_cents: 0, is_available: true, sort_order: 0 },
+      { id: "m-punto", name: "A punto", price_delta_cents: 0, is_available: true, sort_order: 1 },
+    ],
+  };
+
+  /** Un menú de un grupo con una sola opción, la Milanesa, que trae sus propios
+   *  grupos de modificadores y apaga los que le pasemos. */
+  function menuConMilanesa(ignorados: string[], grupos = [GUARNICION_DEL_PRODUCTO, PUNTO]) {
+    const g = group("principal", "Principal", 1);
+    g.options[0].modifier_groups = grupos;
+    g.options[0].ignored_modifier_group_ids = ignorados;
+    return [g];
+  }
+
+  const elegirMilanesa = (): DailyMenuSelections =>
+    pick(new Map(), "principal", 0);
+
+  it("no pregunta el grupo apagado, y sí el resto", () => {
+    const steps = buildMenuSteps(menuConMilanesa(["mg-guarni"]), elegirMilanesa());
+    const modSteps = steps.filter((s) => s.kind === "modifiers");
+    expect(modSteps.map((s) => (s as { group: { name: string } }).group.name)).toEqual([
+      "Punto de cocción",
+    ]);
+  });
+
+  it("sin apagar nada pregunta los dos, como siempre", () => {
+    const steps = buildMenuSteps(menuConMilanesa([]), elegirMilanesa());
+    expect(steps.filter((s) => s.kind === "modifiers")).toHaveLength(2);
+  });
+
+  it("apagar un obligatorio saca el paso igual (D3)", () => {
+    const steps = buildMenuSteps(menuConMilanesa(["mg-punto"]), elegirMilanesa());
+    const modSteps = steps.filter((s) => s.kind === "modifiers");
+    expect(modSteps.map((s) => (s as { group: { name: string } }).group.name)).toEqual([
+      "Guarnición",
+    ]);
+  });
+
+  it("un grupo apagado tampoco se da por elegido solo", () => {
+    // Obligatorio de una sola opción: sin apagar se auto-resuelve (nunca se
+    // muestra, pero el server lo espera). Apagado no tiene que viajar nada.
+    const unico = { ...PUNTO, modifiers: [PUNTO.modifiers[0]!] };
+    const sel = elegirMilanesa();
+    expect(
+      autoResolvedModifierIds(menuConMilanesa([], [unico]), sel).get("principal"),
+    ).toEqual(["m-jugoso"]);
+    expect(
+      autoResolvedModifierIds(menuConMilanesa(["mg-punto"], [unico]), sel).get("principal"),
+    ).toBeUndefined();
+  });
+
+  it("un id que ya no existe no saca nada", () => {
+    const steps = buildMenuSteps(menuConMilanesa(["mg-borrado"]), elegirMilanesa());
+    expect(steps.filter((s) => s.kind === "modifiers")).toHaveLength(2);
   });
 });
