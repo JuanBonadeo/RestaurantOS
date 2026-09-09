@@ -23,6 +23,7 @@ import {
   type FacturaTicketData,
 } from "@/lib/print/factura-ticket";
 import { resolveFiscalPrinter } from "@/lib/print/fiscal-printer";
+import { buildTestTicketContent } from "@/lib/print/test-ticket";
 import { buildComandaContent, TIMEZONE, toAscii } from "@/lib/print/ticket";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
@@ -292,7 +293,7 @@ export async function GET(req: Request) {
   // Cada familia de papel va aislada: un bug armando el control, la cuenta o la
   // factura NO puede dejar a cocina sin comandas. Es la parte crítica de este
   // endpoint y la única que, si falla, para el local.
-  const [controls, cuentas, facturas, cierres] = await Promise.all([
+  const [controls, cuentas, facturas, cierres, pruebas] = await Promise.all([
     safePrintables("control", () =>
       buildPrintableControlTickets(service, businessId),
     ),
@@ -304,6 +305,9 @@ export async function GET(req: Request) {
     ),
     safePrintables("cierre", () =>
       buildPrintableCierreTickets(service, businessId),
+    ),
+    safePrintables("prueba", () =>
+      buildPrintableTestTickets(service, businessId),
     ),
   ]);
 
@@ -324,6 +328,7 @@ export async function GET(req: Request) {
     ...cuentas,
     ...facturas,
     ...cierres,
+    ...pruebas,
   ].filter(
     (t) => alcanzaLaImpresora(agente.printerScope, t.printer_ip),
   );
@@ -699,7 +704,13 @@ export async function POST(req: Request) {
     // Specs 063 + 080: puede ser un control de pedido o una cuenta. El agente
     // reporta cualquier impresión con el campo `comanda_id`, así que el id se
     // resuelve contra `print_jobs` antes de dar por perdido el reporte.
-    return handlePrintJobReport(service, comandaId, body.business_id, result);
+    return handlePrintJobReport(
+      service,
+      comandaId,
+      body.business_id,
+      result,
+      body.error ?? null,
+    );
   }
 
   // Ownership por tenant (spec 36): la key del agente es global, así que
@@ -793,6 +804,7 @@ async function handlePrintJobReport(
   ticketId: string,
   businessId: string,
   result: "ok" | "failed",
+  errorMessage?: string | null,
 ) {
   const { data } = await service
     .from("print_jobs")
@@ -823,7 +835,12 @@ async function handlePrintJobReport(
     }
     await service
       .from("print_jobs")
-      .update({ print_failed_at: new Date().toISOString() })
+      .update({
+        print_failed_at: new Date().toISOString(),
+        // El motivo, no sólo el timestamp (spec 176): es lo único que le dice a
+        // quien probó la comandera QUÉ falló («ECONNREFUSED» = IP equivocada).
+        last_error: errorMessage ?? null,
+      })
       .eq("id", ticketId);
     return NextResponse.json({ status: ticket.status, notified: false });
   }
@@ -834,6 +851,7 @@ async function handlePrintJobReport(
       status: "impreso",
       printed_at: new Date().toISOString(),
       print_failed_at: null,
+      last_error: null,
       reprint_requested_at: null,
     })
     .eq("id", ticketId);
@@ -1319,4 +1337,91 @@ async function buildPrintableFacturaTickets(
     });
   }
   return out;
+}
+
+/**
+ * Ventana de vida de un papel de prueba (spec 176).
+ *
+ * Una prueba es una pregunta que se hace en el momento —«¿sale por acá?»— y se
+ * contesta mirando la impresora. Si el agente está caído, apagado o todavía no
+ * se instaló, el papel NO tiene que salir media hora más tarde en medio del
+ * servicio, cuando ya nadie está esperándolo: a esa altura es papel confuso al
+ * lado de las comandas. Pasada la ventana el job queda `pendiente` para siempre
+ * como registro de que se probó y nunca se imprimió.
+ */
+const VENTANA_PRUEBA_MS = 5 * 60_000;
+
+/**
+ * Los papeles de prueba de comandera pendientes (spec 176).
+ *
+ * A diferencia de las otras cuatro familias, el destino NO se resuelve por
+ * configuración: viaja en la fila (`test_printer_ip`), porque lo que se está
+ * probando es justamente una IP que puede no estar guardada todavía. Tampoco
+ * mira `printer_enabled`: apretar «Probar» ES el permiso.
+ */
+async function buildPrintableTestTickets(
+  service: ReturnType<typeof createSupabaseServiceClient>,
+  businessId: string,
+) {
+  const desde = new Date(Date.now() - VENTANA_PRUEBA_MS).toISOString();
+
+  const { data: jobs, error } = await service
+    .from("print_jobs")
+    .select(
+      "id, emitted_at, test_printer_ip, test_printer_port, test_label, users:requested_by(full_name), businesses!inner(name)",
+    )
+    .eq("business_id", businessId)
+    .eq("kind", "prueba")
+    .eq("status", "pendiente")
+    .gte("emitted_at", desde)
+    .order("emitted_at", { ascending: true });
+
+  if (error) {
+    console.error("print-agent GET · print_jobs prueba", error);
+    return [];
+  }
+
+  return (jobs ?? [])
+    .map((j) => {
+      const row = j as unknown as {
+        id: string;
+        emitted_at: string;
+        test_printer_ip: string | null;
+        test_printer_port: number | null;
+        test_label: string | null;
+        users: { full_name: string | null } | null;
+        businesses: { name: string } | null;
+      };
+      if (!row.test_printer_ip?.trim()) return null;
+
+      const label = sanitizeTicketText(row.test_label) ?? "Comandera";
+      const content = buildTestTicketContent({
+        label,
+        printer_ip: row.test_printer_ip,
+        printer_port: row.test_printer_port ?? 9100,
+        emitted_at: row.emitted_at,
+        business_name: sanitizeTicketText(row.businesses?.name) ?? "—",
+        requested_by_name: sanitizeTicketText(row.users?.full_name ?? null),
+      });
+
+      return {
+        // El agente confirma con este id; el POST lo resuelve contra `print_jobs`.
+        comanda_id: row.id,
+        station_id: null,
+        station_name: `PRUEBA · ${label}`,
+        printer_ip: row.test_printer_ip,
+        printer_port: row.test_printer_port ?? 9100,
+        printer_enabled: true,
+        batch: 1,
+        emitted_at: row.emitted_at,
+        cancelled: false,
+        cancelled_reason: null,
+        reprint: false,
+        table_label: label,
+        items: [],
+        content_escpos_b64: content.escpos_b64,
+        content_plain: content.plain,
+      };
+    })
+    .filter((t): t is NonNullable<typeof t> => t !== null);
 }

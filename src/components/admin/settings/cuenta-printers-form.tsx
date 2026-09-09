@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { TestPrintButton } from "@/components/admin/settings/test-print-button";
 import {
   setCuentaPrinter,
   setFloorPlanCuentaPrinter,
@@ -42,6 +43,7 @@ export function CuentaPrintersForm({
   return (
     <div className="grid gap-3">
       <PrinterRow
+        slug={slug}
         title="Todo el local"
         hint={
           business.cuenta_printer_ip?.trim()
@@ -62,6 +64,7 @@ export function CuentaPrintersForm({
       {floorPlans.map((fp) => (
         <PrinterRow
           key={fp.id}
+          slug={slug}
           title={fp.name}
           hint={
             !fp.cuenta_printer_enabled
@@ -81,11 +84,13 @@ export function CuentaPrintersForm({
 }
 
 function PrinterRow({
+  slug,
   title,
   hint,
   initial,
   onSave,
 }: {
+  slug: string;
   title: string;
   hint: string;
   initial: CuentaPrinterConfig;
@@ -156,9 +161,17 @@ function PrinterRow({
         Activa
       </label>
 
-      <Button onClick={handleSave} disabled={saving || !dirty}>
-        {saving ? "Guardando…" : "Guardar"}
-      </Button>
+      <div className="flex items-center gap-2">
+        <TestPrintButton
+          slug={slug}
+          label={`Cuentas · ${title}`}
+          ip={ip}
+          port={port}
+        />
+        <Button onClick={handleSave} disabled={saving || !dirty}>
+          {saving ? "Guardando…" : "Guardar"}
+        </Button>
+      </div>
     </div>
   );
 }

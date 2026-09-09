@@ -315,7 +315,11 @@ describe("POST · confirmación de un control", () => {
     );
     expect(await res.json()).toMatchObject({ status: "pendiente" });
     const upd = captured.updates.find((u) => u.table === "print_jobs");
-    expect(Object.keys(upd!.vals)).toEqual(["print_failed_at"]);
+    // El estado NO se toca: sólo el flag de fallo y su motivo (spec 176).
+    expect(Object.keys(upd!.vals).sort()).toEqual([
+      "last_error",
+      "print_failed_at",
+    ]);
   });
 
   it("un `failed` repetido no vuelve a marcar (dedup)", async () => {

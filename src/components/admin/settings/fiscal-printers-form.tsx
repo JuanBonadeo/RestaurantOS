@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { TestPrintButton } from "@/components/admin/settings/test-print-button";
 import { setCajaFiscalPrinter } from "@/lib/catalog/station-actions";
 
 export type CajaFiscalPrinterRow = {
@@ -120,9 +121,17 @@ function CajaRow({ slug, caja }: { slug: string; caja: CajaFiscalPrinterRow }) {
         Activa
       </label>
 
-      <Button onClick={handleSave} disabled={saving || !dirty}>
-        {saving ? "Guardando…" : "Guardar"}
-      </Button>
+      <div className="flex items-center gap-2">
+        <TestPrintButton
+          slug={slug}
+          label={`Fiscal · ${caja.name}`}
+          ip={ip}
+          port={port}
+        />
+        <Button onClick={handleSave} disabled={saving || !dirty}>
+          {saving ? "Guardando…" : "Guardar"}
+        </Button>
+      </div>
     </li>
   );
 }

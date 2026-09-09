@@ -3161,6 +3161,11 @@ export type Database = {
           reprint_requested_at: string | null;
           requested_by: string | null;
           status: string;
+          corte_id: string | null;
+          last_error: string | null;
+          test_label: string | null;
+          test_printer_ip: string | null;
+          test_printer_port: number | null;
         };
         Insert: {
           business_id: string;
@@ -3174,6 +3179,11 @@ export type Database = {
           reprint_requested_at?: string | null;
           requested_by?: string | null;
           status?: string;
+          corte_id?: string | null;
+          last_error?: string | null;
+          test_label?: string | null;
+          test_printer_ip?: string | null;
+          test_printer_port?: number | null;
         };
         Update: {
           business_id?: string;
@@ -3187,6 +3197,11 @@ export type Database = {
           reprint_requested_at?: string | null;
           requested_by?: string | null;
           status?: string;
+          corte_id?: string | null;
+          last_error?: string | null;
+          test_label?: string | null;
+          test_printer_ip?: string | null;
+          test_printer_port?: number | null;
         };
         Relationships: [
           {

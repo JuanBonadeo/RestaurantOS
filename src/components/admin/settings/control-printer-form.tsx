@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { TestPrintButton } from "@/components/admin/settings/test-print-button";
 import { setControlPrinter } from "@/lib/catalog/station-actions";
 
 export type ControlPrinterRow = {
@@ -97,9 +98,17 @@ export function ControlPrinterForm({
           Activa
         </label>
 
-        <Button onClick={handleSave} disabled={saving || !dirty}>
-          {saving ? "Guardando…" : "Guardar"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <TestPrintButton
+            slug={slug}
+            label="Control de pedido"
+            ip={ip}
+            port={port}
+          />
+          <Button onClick={handleSave} disabled={saving || !dirty}>
+            {saving ? "Guardando…" : "Guardar"}
+          </Button>
+        </div>
       </div>
     </div>
   );
