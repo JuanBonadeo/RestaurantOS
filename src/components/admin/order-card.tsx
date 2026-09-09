@@ -201,8 +201,12 @@ export function OrderCard({
     : `ring-1 ${columnRing}`;
 
   const ChannelIcon = order.delivery_type === "delivery" ? Bike : ShoppingBag;
-  const firstItem = order.items[0];
-  const moreItems = order.items.length - 1;
+  // El encargado leía una sola línea de ítems y tenía que abrir el detalle para
+  // saber qué era el pedido. Con las primeras tres alcanza para reconocerlo de
+  // un vistazo sin que la tarjeta crezca de más.
+  const VISIBLE_ITEMS = 3;
+  const shownItems = order.items.slice(0, VISIBLE_ITEMS);
+  const moreItems = order.items.length - shownItems.length;
 
   // El estado del pago manda sobre el método elegido en el checkout: un pedido
   // en efectivo ya cobrado decía "Paga en efectivo" para siempre — el board no
@@ -329,19 +333,22 @@ export function OrderCard({
           </span>
         )}
 
-        {firstItem && (
-          <p className="text-muted-foreground truncate text-xs">
-            <span className="text-foreground/70 font-semibold tabular-nums">
-              {firstItem.quantity}×
-            </span>{" "}
-            {firstItem.product_name}
+        {shownItems.length > 0 && (
+          <div className="text-muted-foreground space-y-0.5 text-xs">
+            {shownItems.map((item, i) => (
+              <p key={`${item.product_name}-${i}`} className="truncate">
+                <span className="text-foreground/70 font-semibold tabular-nums">
+                  {item.quantity}×
+                </span>{" "}
+                {item.product_name}
+              </p>
+            ))}
             {moreItems > 0 && (
-              <span className="text-muted-foreground/70">
-                {" "}
-                · +{moreItems}
-              </span>
+              <p className="text-muted-foreground/70">
+                +{moreItems} ítem{moreItems === 1 ? "" : "s"} más
+              </p>
             )}
-          </p>
+          </div>
         )}
 
         <div className="flex items-center justify-between gap-2 pt-0.5">
