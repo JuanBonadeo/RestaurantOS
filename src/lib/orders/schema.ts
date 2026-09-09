@@ -33,6 +33,45 @@ export const OrderItemInput = z.union([OrderProductItem, OrderDailyMenuItem]);
 export type OrderItemInput = z.infer<typeof OrderItemInput>;
 
 /**
+ * Renglón libre — el «no existe» de MaxiRest (spec 174): nombre y precio
+ * tipeados en el momento, sin producto de catálogo detrás. La torta que trajo
+ * el cliente, el pescado del día que nadie cargó, el menú que se le factura al
+ * sanatorio a fin de mes.
+ *
+ * **No está en `OrderItemInput` a propósito.** Igual que el
+ * `price_override_cents` de la spec 069, esto sólo puede nacer de una mano del
+ * local: si viviera en el schema público, un carrito armado a mano podría
+ * inventarse un renglón con el nombre y el precio que quiera y el checkout lo
+ * aceptaría. Vive únicamente en los schemas de staff, donde además hay un gate
+ * de rol (`canCargarItemLibre`).
+ *
+ * `.strict()` porque el resto de los campos de una línea no aplican y aceptarlos
+ * en silencio sería mentir: un `price_override_cents` acá no tendría sobre qué
+ * precio de catálogo aplicarse —el precio ya *es* el que se tipeó— y un
+ * `modifier_ids` no tiene producto al que colgarse.
+ */
+const OrderFreeLineItem = z
+  .object({
+    kind: z.literal("free"),
+    /** Lo que va a leer el cliente en el ticket. Es la única explicación que
+     *  lleva el renglón: por eso no pide motivo aparte, a diferencia de la 069. */
+    name: z.string().trim().min(1, "Poné un nombre.").max(80),
+    /** Entero ≥ 0. Sin tope, igual que el override de la 069: el control es el
+     *  rol, no un límite duro. $0 es válido (la cortesía que igual se lista). */
+    unit_price_cents: z.number().int().min(0),
+    quantity: z.number().int().min(1).max(99),
+    notes: z.string().max(200).optional(),
+  })
+  .strict();
+
+export type OrderFreeLineItem = z.infer<typeof OrderFreeLineItem>;
+
+/** ¿Es un renglón libre? Type guard compartido por las actions y los carritos. */
+export function isFreeLine(item: { kind?: string }): item is OrderFreeLineItem {
+  return item.kind === "free";
+}
+
+/**
  * Ítem cargado por staff (spec 069): igual al público, más el precio por ítem
  * que el encargado puede pisar para ese pedido.
  *
@@ -54,6 +93,7 @@ const StaffOrderProductItem = OrderProductItem.extend({
 export const StaffOrderItemInput = z.union([
   StaffOrderProductItem,
   OrderDailyMenuItem,
+  OrderFreeLineItem,
 ]);
 export type StaffOrderItemInput = z.infer<typeof StaffOrderItemInput>;
 
@@ -183,8 +223,19 @@ export type StaffOrderInput = z.infer<typeof StaffOrderInput>;
  * valores) — `CreateOrderInput` es asignable a esto, así que ningún caller
  * existente cambia.
  */
-export type PersistableOrderInput = Omit<CreateOrderInput, "delivery_type"> & {
+export type PersistableOrderInput = Omit<
+  CreateOrderInput,
+  "delivery_type" | "items"
+> & {
   delivery_type: CreateOrderInput["delivery_type"] | "dine_in";
+  /**
+   * Suma el renglón libre de la spec 174. `CreateOrderInput` sigue siendo
+   * asignable a esto (su `items` es un subconjunto), así que ningún caller
+   * existente cambia — pero `persistOrder` los acepta **sólo** con
+   * `options.allowFreeLines`, que prenden los dos callers de staff después de
+   * chequear el rol.
+   */
+  items: (OrderItemInput | OrderFreeLineItem)[];
 };
 
 /**
@@ -199,7 +250,9 @@ export type PersistableOrderInput = Omit<CreateOrderInput, "delivery_type"> & {
  */
 export const VentaMostradorInput = z.object({
   business_slug: z.string().min(1),
-  items: z.array(OrderItemInput).min(1, "Agregá al menos un producto."),
+  items: z
+    .array(z.union([OrderProductItem, OrderDailyMenuItem, OrderFreeLineItem]))
+    .min(1, "Agregá al menos un producto."),
   method: z.enum([
     "cash",
     "card_manual",

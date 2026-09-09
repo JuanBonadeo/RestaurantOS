@@ -200,7 +200,13 @@ describe("venderMostrador — la orden nace fuera del board y del plano", () => 
     expect(mapped.customer_phone).toBe("-");
     // Auditoría: queda registrado quién vendió.
     expect(userId).toBe("u1");
-    expect(options).toEqual({ mozoId: "u1" });
+    // `allowFreeLines` + `role`: el mostrador puede cargar el «no existe»
+    // (spec 174) y el gate de rol lo aplica `persistOrder`.
+    expect(options).toEqual({
+      mozoId: "u1",
+      allowFreeLines: true,
+      role: "encargado",
+    });
   });
 
   it("nunca manda table_id", async () => {

@@ -35,6 +35,14 @@ import { enviarComanda } from "@/lib/comandas/actions";
 import { formatCurrency } from "@/lib/currency";
 import type { CatalogForMozo, CatalogProduct } from "@/lib/mozo/catalog-query";
 import { loadPedirCatalog } from "@/lib/mozo/pedir-panel-data";
+import {
+  isItemLibreCartLine,
+  isItemLibreEntry,
+  itemLibreCartLine,
+  itemLibrePayload,
+  type ItemLibreDraft,
+} from "@/lib/mozo/item-libre-entry";
+import { ItemLibreModal } from "@/components/shared/item-libre-modal";
 import { confirmarPedido } from "@/lib/orders/confirm-order";
 import { horaLocal } from "@/lib/orders/entrega";
 import {
@@ -169,6 +177,13 @@ export function CargarPedidoSheet({
   // (admin/encargado), que es exactamente el mismo conjunto que
   // `canOverrideItemPrice`. El server revalida igual en `cargarPedidoStaff`.
   const [priceTargetKey, setPriceTargetKey] = useState<string | null>(null);
+  // ── El artículo que no existe (spec 174) ──
+  // Mismo razonamiento que el precio por ítem de arriba: `canCargarPedido` y
+  // `canCargarItemLibre` son el mismo conjunto (admin/encargado), y llegar acá
+  // ya exige el primero. El server revalida el rol igual —`persistOrder` con
+  // `options.role`, `enviarComanda` con el del contexto—, así que este flag
+  // decide sólo si la fila se ve.
+  const [libreAbierto, setLibreAbierto] = useState(false);
 
   const [deliveryType, setDeliveryType] = useState<DeliveryType>("pickup");
   // ── Las dos horas del pedido (spec 127) ──
@@ -242,10 +257,12 @@ export function CargarPedidoSheet({
     products: allProducts,
     browse: browseProducts,
     storageKey: `cargar_pedido_web_${slug}`,
-    onPick: (p) => setOpenProduct(p),
+    onPick: (p) =>
+      isItemLibreEntry(p) ? setLibreAbierto(true) : setOpenProduct(p),
     // ↓ baja el foco al catálogo (spec 075): mismas zonas que la carga de mesa.
     onEnterResults: () =>
       catalogProducts.length > 0 ? catalogo.focusFirst() : carrito.focusFirst(),
+    itemLibre: true,
   });
   const { isSearching, results: catalogProducts, enterTargetId } = searchApi;
 
@@ -549,17 +566,24 @@ export function CargarPedidoSheet({
         const r = await enviarComanda({
           orderId: agregarA.orderId,
           slug,
-          items: cart.map((c) => ({
-            product_id: c.product_id,
-            quantity: c.quantity,
-            notes: c.notes || undefined,
-            modifier_ids: c.modifiers.map((m) => m.id),
-            price_override_cents: c.price_override_cents ?? null,
-            price_override_reason: c.price_override_reason ?? null,
-            // Idempotencia (spec 42): la clave del carrito viaja para que un
-            // doble-tap no duplique la línea.
-            client_line_key: c._key,
-          })),
+          items: cart.map((c) =>
+            // Spec 174 — el renglón libre viaja con su propia forma. La clave
+            // del carrito va igual: la idempotencia de la spec 42 lo cubre
+            // como a cualquier otra línea.
+            isItemLibreCartLine(c)
+              ? { ...itemLibrePayload(c), client_line_key: c._key }
+              : {
+                  product_id: c.product_id,
+                  quantity: c.quantity,
+                  notes: c.notes || undefined,
+                  modifier_ids: c.modifiers.map((m) => m.id),
+                  price_override_cents: c.price_override_cents ?? null,
+                  price_override_reason: c.price_override_reason ?? null,
+                  // Idempotencia (spec 42): la clave del carrito viaja para que
+                  // un doble-tap no duplique la línea.
+                  client_line_key: c._key,
+                },
+          ),
         });
         if (!r.ok) {
           toast.error(r.error);
@@ -639,15 +663,19 @@ export function CargarPedidoSheet({
             : undefined,
         delivery_notes: deliveryNotes.trim() || undefined,
         kitchen_notes: kitchenNotes.trim() || undefined,
-        items: cart.map((c) => ({
-          product_id: c.product_id,
-          quantity: c.quantity,
-          notes: c.notes || undefined,
-          modifier_ids: c.modifiers.map((m) => m.id),
-          // Precio pisado (spec 069). El server revalida rol + motivo.
-          price_override_cents: c.price_override_cents ?? null,
-          price_override_reason: c.price_override_reason ?? null,
-        })),
+        items: cart.map((c) =>
+          isItemLibreCartLine(c)
+            ? itemLibrePayload(c)
+            : {
+                product_id: c.product_id,
+                quantity: c.quantity,
+                notes: c.notes || undefined,
+                modifier_ids: c.modifiers.map((m) => m.id),
+                // Precio pisado (spec 069). El server revalida rol + motivo.
+                price_override_cents: c.price_override_cents ?? null,
+                price_override_reason: c.price_override_reason ?? null,
+              },
+        ),
       });
       if (!r.ok) {
         toast.error(r.error);
@@ -868,7 +896,11 @@ export function CargarPedidoSheet({
                 {/* Buscando o no, la misma lista navegable por ↓/↑. Spec 073. */}
                 <ProductResultsList
                   products={catalogProducts}
-                  onPick={setOpenProduct}
+                  onPick={(p) =>
+                    isItemLibreEntry(p)
+                      ? setLibreAbierto(true)
+                      : setOpenProduct(p)
+                  }
                   enterTargetId={enterTargetId}
                   itemProps={(id) => {
                     const i = catalogProducts.findIndex((p) => p.id === id);
@@ -1305,6 +1337,22 @@ export function CargarPedidoSheet({
             }
             onClear={() => setLinePrice(priceTarget._key, null, "")}
             onClose={() => setPriceTargetKey(null)}
+          />
+        )}
+
+        {libreAbierto && (
+          <ItemLibreModal
+            nombreSugerido={searchApi.nombreLibreSugerido}
+            onConfirm={(draft: ItemLibreDraft) => {
+              addToCart(itemLibreCartLine(draft));
+              setLibreAbierto(false);
+              searchApi.setSearch("");
+              focusSearch();
+            }}
+            onClose={() => {
+              setLibreAbierto(false);
+              focusSearch();
+            }}
           />
         )}
 

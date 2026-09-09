@@ -271,3 +271,85 @@ describe("precio por ítem (spec 069) — separación público / staff", () => {
     }
   });
 });
+
+/* ── Spec 174 · el renglón libre («no existe») ────────────────────────────── */
+
+const libre = {
+  kind: "free" as const,
+  name: "Torta del cliente",
+  unit_price_cents: 350000,
+  quantity: 1,
+};
+
+describe("spec 174 · renglón libre", () => {
+  it("el checkout público NO lo puede expresar", () => {
+    // Es la misma defensa que la 069 hace con `price_override_cents`: si la
+    // línea libre viviera en el schema público, un carrito armado a mano
+    // podría inventarse un renglón con el precio que quiera.
+    const result = CreateOrderInput.safeParse({ ...base, items: [libre] });
+    expect(result.success).toBe(false);
+  });
+
+  it("el pedido cargado por staff sí", () => {
+    const result = StaffOrderInput.safeParse({
+      business_slug: "pizzanapoli",
+      delivery_type: "pickup",
+      items: [libre],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("mezcla con productos reales en el mismo pedido", () => {
+    const result = StaffOrderInput.safeParse({
+      business_slug: "pizzanapoli",
+      delivery_type: "pickup",
+      items: [{ product_id: UUID, quantity: 2, modifier_ids: [] }, libre],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("acepta $0 (la cortesía que igual se lista en el ticket)", () => {
+    const result = StaffOrderInput.safeParse({
+      business_slug: "pizzanapoli",
+      delivery_type: "pickup",
+      items: [{ ...libre, unit_price_cents: 0 }],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rechaza nombre vacío, precio negativo y precio con centavos partidos", () => {
+    const bad = (item: Record<string, unknown>) =>
+      StaffOrderInput.safeParse({
+        business_slug: "pizzanapoli",
+        delivery_type: "pickup",
+        items: [item],
+      }).success;
+    expect(bad({ ...libre, name: "" })).toBe(false);
+    expect(bad({ ...libre, name: "   " })).toBe(false);
+    expect(bad({ ...libre, unit_price_cents: -1 })).toBe(false);
+    expect(bad({ ...libre, unit_price_cents: 1.5 })).toBe(false);
+    expect(bad({ ...libre, quantity: 0 })).toBe(false);
+  });
+
+  it("recorta el nombre — lo que se guarda es lo que se imprime", () => {
+    const result = StaffOrderInput.safeParse({
+      business_slug: "pizzanapoli",
+      delivery_type: "pickup",
+      items: [{ ...libre, name: "  Menú sanatorio  " }],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const item = result.data.items[0] as { name: string };
+      expect(item.name).toBe("Menú sanatorio");
+    }
+  });
+
+  it("no acepta un precio pisado encima: el precio ya es el que se tipeó", () => {
+    const result = StaffOrderInput.safeParse({
+      business_slug: "pizzanapoli",
+      delivery_type: "pickup",
+      items: [{ ...libre, price_override_cents: 1 }],
+    });
+    expect(result.success).toBe(false);
+  });
+});

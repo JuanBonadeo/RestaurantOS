@@ -53,6 +53,7 @@ import {
   marcarComandaEntregada,
   type EnviarComandaItem,
   type EnviarComandaDailyMenuItem,
+  type EnviarComandaFreeItem,
 } from "@/lib/comandas/actions";
 import type { ComandaConItems } from "@/lib/comandas/queries";
 import { type LoPedido } from "@/lib/mozo/lo-pedido";
@@ -94,7 +95,19 @@ import {
   type ProductSearchApi,
 } from "@/components/mozo/product-search-box";
 import { PriceOverrideModal } from "@/components/shared/price-override-modal";
-import { canCancelItem, canOverrideItemPrice } from "@/lib/permissions/can";
+import { ItemLibreModal } from "@/components/shared/item-libre-modal";
+import {
+  isItemLibreCartLine,
+  isItemLibreEntry,
+  itemLibreCartLine,
+  itemLibrePayload,
+  type ItemLibreDraft,
+} from "@/lib/mozo/item-libre-entry";
+import {
+  canCancelItem,
+  canCargarItemLibre,
+  canOverrideItemPrice,
+} from "@/lib/permissions/can";
 
 import {
   ProductModal,
@@ -503,6 +516,20 @@ export function MozoPedirClient({
   const [step, setStep] = useState<Step>("catalogo");
   const [activeTab, setActiveTab] = useState<TabId>(tabs[0]?.id ?? TOP_TAB_ID);
   const [openProduct, setOpenProduct] = useState<CatalogProduct | null>(null);
+  // ── El artículo que no existe (spec 174) ──
+  // Acá el gate sí mira el rol: esta pantalla la usan los cuatro roles del
+  // salón (el mozo full-screen y el encargado en el sidebar), a diferencia de
+  // la venta de mostrador y de «Cargar pedido», que ya son de encargado.
+  const puedeItemLibre = canCargarItemLibre(role);
+  const [libreAbierto, setLibreAbierto] = useState(false);
+  /**
+   * Elegir una fila del catálogo. La del «no existe» (spec 174) no abre el
+   * `ProductModal` —no hay producto ni modificadores que elegir—, abre el suyo.
+   * Pasa por acá **toda** la carga: el buscador, la lista de resultados y las
+   * secciones del catálogo por tab.
+   */
+  const pickProducto = (p: CatalogProduct) =>
+    isItemLibreEntry(p) ? setLibreAbierto(true) : setOpenProduct(p);
   const [openDailyMenu, setOpenDailyMenu] = useState<DailyMenuForMozo | null>(
     null,
   );
@@ -599,13 +626,14 @@ export function MozoPedirClient({
     products: allProducts,
     browse: browseProducts,
     storageKey: `mesa_web_${slug}`,
-    onPick: (p) => setOpenProduct(p),
+    onPick: pickProducto,
     // ↓ en el buscador baja el foco al catálogo (spec 075). Sólo en el sidebar:
     // en la tablet no hay flechas.
     // Con el catálogo vacío (una búsqueda sin resultados) la zona no puede
     // tragarse la flecha: se sigue derecho al carrito.
     onEnterResults: () =>
       catalogoIndex.size > 0 ? catalogo.focusFirst() : carrito.focusFirst(),
+    itemLibre: puedeItemLibre,
   });
   const {
     search,
@@ -990,7 +1018,14 @@ export function MozoPedirClient({
   });
   const priceTarget = cart.find(
     (c): c is CartProductItem =>
-      c._key === priceTargetKey && !isDailyMenuCart(c),
+      c._key === priceTargetKey &&
+      !isDailyMenuCart(c) &&
+      // Spec 174 — el renglón libre no tiene precio de catálogo contra el cual
+      // medir un delta: su precio ya es el que se tipeó. El editor de la 069
+      // mostraría «Precio de la carta $0» y ofrecería «volver» a él, que es
+      // exactamente lo que no hay que hacer. Se cambia borrándolo y cargándolo
+      // de nuevo, como cualquier renglón que salió mal.
+      !isItemLibreCartLine(c),
   );
 
   /** `cents` null = volver al precio de la carta. */
@@ -1023,7 +1058,11 @@ export function MozoPedirClient({
     // Snapshot de los _key que se envían: al terminar quitamos SOLO estos del
     // carrito, preservando ítems agregados durante el envío en curso (FR-009).
     const sentKeys = new Set(cart.map((c) => c._key));
-    const items: (EnviarComandaItem | EnviarComandaDailyMenuItem)[] = cart.map(
+    const items: (
+      | EnviarComandaItem
+      | EnviarComandaDailyMenuItem
+      | EnviarComandaFreeItem
+    )[] = cart.map(
       (c) => {
         if (isDailyMenuCart(c)) {
           return {
@@ -1039,6 +1078,12 @@ export function MozoPedirClient({
             // _key estable de la línea → idempotencia server (spec 42).
             client_line_key: c._key,
           };
+        }
+        if (isItemLibreCartLine(c)) {
+          // Spec 174 — el renglón libre: nombre y precio, sin producto detrás.
+          // No lleva `seat_number` porque no se sirve en ningún lugar de la
+          // mesa: es plata, no un plato. El server revalida el rol.
+          return { ...itemLibrePayload(c), client_line_key: c._key };
         }
         return {
           product_id: c.product_id,
@@ -1383,6 +1428,22 @@ export function MozoPedirClient({
   const modalsMesaEl = (
     <>
       {/* ─── Modal: cancelar item ─── */}
+      {libreAbierto && (
+        <ItemLibreModal
+          nombreSugerido={searchApi.nombreLibreSugerido}
+          onConfirm={(draft: ItemLibreDraft) => {
+            addToCart(itemLibreCartLine(draft));
+            setLibreAbierto(false);
+            setSearch("");
+            focusSearch();
+          }}
+          onClose={() => {
+            setLibreAbierto(false);
+            focusSearch();
+          }}
+        />
+      )}
+
       {priceTarget && (
         <PriceOverrideModal
           productName={priceTarget.product_name}
@@ -1601,7 +1662,7 @@ export function MozoPedirClient({
               searchResults.length > 0 || menusVisibles.length === 0 ? (
                 <SearchResults
                   results={searchResults}
-                  onPick={setOpenProduct}
+                  onPick={pickProducto}
                   enterTargetId={enterTargetId}
                   itemProps={catalogoProps}
                 />
@@ -1616,7 +1677,7 @@ export function MozoPedirClient({
                 // Ya se renderizaron arriba: acá sólo quedan los productos.
                 dailyMenus={[]}
                 compacto
-                onPick={setOpenProduct}
+                onPick={pickProducto}
                 onPickDailyMenu={setOpenDailyMenu}
                 enterTargetId={enterTargetId}
                 itemProps={catalogoProps}
@@ -1865,7 +1926,7 @@ export function MozoPedirClient({
             activeTabLabel={tabById[activeTab]?.label ?? ""}
             dailyMenus={dailyMenus}
             isTopTab={activeTab === TOP_TAB_ID}
-            onPick={setOpenProduct}
+            onPick={pickProducto}
             onPickDailyMenu={setOpenDailyMenu}
             tabsCount={tabs.length}
           />

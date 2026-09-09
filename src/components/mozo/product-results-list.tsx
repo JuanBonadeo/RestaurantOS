@@ -1,9 +1,10 @@
 "use client";
 
-import { Plus } from "lucide-react";
+import { Pencil, Plus } from "lucide-react";
 
 import { formatCurrency } from "@/lib/currency";
 import type { CatalogProduct } from "@/lib/mozo/catalog-query";
+import { isItemLibreEntry } from "@/lib/mozo/item-libre-entry";
 
 /**
  * Resultados del buscador de productos, compartidos por los tres panales de
@@ -48,6 +49,10 @@ export function ProductResultsList({
     <ul className="space-y-1.5">
       {products.map((p) => {
         const isEnterTarget = p.id === enterTargetId;
+        // Spec 174 — la fila «no existe» no es un producto: no tiene precio que
+        // mostrar (lo escribe el encargado) y si se pintara igual que el resto
+        // se leería como un artículo de $0 de la carta.
+        const esLibre = isItemLibreEntry(p);
         return (
           <li key={p.id}>
             <button
@@ -57,18 +62,42 @@ export function ProductResultsList({
               // distinguirse: con los dos iguales no se sabía dónde estabas
               // parado. Foco = anillo grueso con offset; target de Enter =
               // anillo fino.
-              className={`flex w-full items-center gap-2.5 rounded-xl bg-white px-3 py-2.5 text-left outline-none transition active:scale-[0.99] active:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 ${
-                isEnterTarget ? "ring-1 ring-emerald-400" : "ring-1 ring-zinc-200"
+              className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left outline-none transition active:scale-[0.99] focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 ${
+                esLibre
+                  ? "border border-dashed border-amber-300 bg-amber-50/60 active:bg-amber-100"
+                  : "bg-white active:bg-zinc-50"
+              } ${
+                isEnterTarget
+                  ? "ring-1 ring-emerald-400"
+                  : esLibre
+                    ? ""
+                    : "ring-1 ring-zinc-200"
               }`}
             >
               <span className="min-w-0 flex-1 truncate text-sm font-semibold text-zinc-900">
-                {p.name}
+                {esLibre ? "Cargar un artículo que no existe" : p.name}
               </span>
-              <span className="shrink-0 text-sm font-bold tabular-nums text-emerald-700">
-                {formatCurrency(p.price_cents)}
-              </span>
-              <span className="shrink-0 rounded-full bg-emerald-50 p-1 text-emerald-700">
-                <Plus className="h-3.5 w-3.5" />
+              {esLibre ? (
+                <span className="shrink-0 text-xs font-medium text-amber-700">
+                  nombre y precio a mano
+                </span>
+              ) : (
+                <span className="shrink-0 text-sm font-bold tabular-nums text-emerald-700">
+                  {formatCurrency(p.price_cents)}
+                </span>
+              )}
+              <span
+                className={`shrink-0 rounded-full p-1 ${
+                  esLibre
+                    ? "bg-amber-100 text-amber-700"
+                    : "bg-emerald-50 text-emerald-700"
+                }`}
+              >
+                {esLibre ? (
+                  <Pencil className="h-3.5 w-3.5" />
+                ) : (
+                  <Plus className="h-3.5 w-3.5" />
+                )}
               </span>
             </button>
           </li>

@@ -79,6 +79,24 @@ export function canOverrideItemPrice(role: BusinessRole): boolean {
 }
 
 /**
+ * Cargar un renglón con nombre y precio tipeados en el momento — el «no
+ * existe» de MaxiRest (spec 174). La torta que trajo el cliente, el pescado
+ * del día que nadie cargó, el menú que se le factura al sanatorio a fin de
+ * mes.
+ *
+ * Mismo rol que `canOverrideItemPrice` y por la misma razón: el que escribe el
+ * importe a mano está fijando plata. La diferencia con el override es que acá
+ * también escribe **el nombre**, o sea el renglón entero que va a leer el
+ * cliente en el ticket. Si algo, es más sensible, no menos.
+ *
+ * El mozo lo ve en la cuenta y lo cobra; no lo puede crear. La `terminal`
+ * tampoco: es la compu del salón, sin nadie identificado detrás (spec 140).
+ */
+export function canCargarItemLibre(role: BusinessRole): boolean {
+  return role === "admin" || role === "encargado";
+}
+
+/**
  * Reimprimir / reintentar la impresión de una comanda desde operación (spec
  * 35). Gestión del local: encargado/admin. El mozo ya recibe la notificación
  * de fallo (spec 33) pero no dispara la reimpresión en Fase 1.

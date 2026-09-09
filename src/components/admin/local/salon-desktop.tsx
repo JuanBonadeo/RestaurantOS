@@ -2089,6 +2089,7 @@ export function SalonDesktop({
           ) : ventaRapidaOpen ? (
             <VentaRapidaPanel
               slug={slug}
+              role={role}
               onClose={() => {
                 setVentaRapidaOpen(false);
                 listaFocusIndex(0);

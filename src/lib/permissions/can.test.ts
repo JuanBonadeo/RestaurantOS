@@ -23,6 +23,7 @@ import {
   canMarkRotura,
   canMoveTable,
   canModifyPostEnvio,
+  canCargarItemLibre,
   canOverrideItemPrice,
   canDecideReservation,
   canRendirMozo,
@@ -61,6 +62,16 @@ describe("permissions / canOverrideItemPrice", () => {
     expect(canOverrideItemPrice("encargado")).toBe(true);
     expect(canOverrideItemPrice("mozo")).toBe(false);
     expect(canOverrideItemPrice("personal")).toBe(false);
+  });
+});
+
+describe("permissions / canCargarItemLibre", () => {
+  it("admin y encargado pueden, mozo y personal no (spec 174)", () => {
+    expect(canCargarItemLibre("admin")).toBe(true);
+    expect(canCargarItemLibre("encargado")).toBe(true);
+    expect(canCargarItemLibre("mozo")).toBe(false);
+    expect(canCargarItemLibre("personal")).toBe(false);
+    expect(canCargarItemLibre("terminal")).toBe(false);
   });
 });
 

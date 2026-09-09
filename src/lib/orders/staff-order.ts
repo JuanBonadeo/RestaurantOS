@@ -12,7 +12,7 @@ import { getBusiness } from "@/lib/tenant";
 
 import { persistOrder, type CreateOrderResult } from "./persist-order";
 import { isScheduledForLater } from "./scheduled";
-import { StaffOrderInput, type CreateOrderInput } from "./schema";
+import { StaffOrderInput, type PersistableOrderInput } from "./schema";
 
 /**
  * Lo que devuelve `cargarPedidoStaff`. `needs_accept` sólo aparece en el caso
@@ -70,7 +70,10 @@ export async function cargarPedidoStaff(
   // precio viaja a `persistOrder` por opciones, nunca dentro de los items.
   const priceOverrides: (PriceOverride | null)[] = [];
   for (const item of data.items) {
-    if (item.kind === "daily_menu") {
+    // El renglón libre (spec 174) no pisa ningún precio: el precio ya *es* el
+    // que se tipeó, así que no hay precio de catálogo contra el cual medir un
+    // delta. Su gate de rol es propio y corre en `persistOrder`.
+    if (item.kind === "daily_menu" || item.kind === "free") {
       priceOverrides.push(null);
       continue;
     }
@@ -82,7 +85,7 @@ export async function cargarPedidoStaff(
   // Defaults de mostrador: nombre anónimo → "Mostrador"; sin teléfono en pickup
   // → "-" (placeholder compartido, igual que el pedido flash). En delivery el
   // schema ya exigió teléfono + dirección.
-  const mapped: CreateOrderInput = {
+  const mapped: PersistableOrderInput = {
     business_slug: data.business_slug,
     delivery_type: data.delivery_type,
     customer_name: data.customer_name?.trim() || "Mostrador",
@@ -100,7 +103,7 @@ export async function cargarPedidoStaff(
     // habría dos fuentes para el mismo dato y la invariante "el input público no
     // expresa precios" pasaría a depender de que nadie lo lea.
     items: data.items.map((item) => {
-      if (item.kind === "daily_menu") return item;
+      if (item.kind === "daily_menu" || item.kind === "free") return item;
       const { ...rest } = item;
       delete rest.price_override_cents;
       delete rest.price_override_reason;
@@ -117,6 +120,11 @@ export async function cargarPedidoStaff(
       // ventana de marcha.
       source: "staff",
       kitchenAt: data.kitchen_at,
+      // Spec 174 — este camino sí puede traer renglones libres. `persistOrder`
+      // los rechaza sin este permiso explícito: el checkout público comparte
+      // la función y no tiene por qué poder inventarse una línea.
+      allowFreeLines: true,
+      role: ctxResult.data.role,
     });
     if (!result.ok || !isScheduledForLater(data.scheduled_at)) return result;
 

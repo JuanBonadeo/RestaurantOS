@@ -61,6 +61,7 @@ import {
   type PriceOverride,
   type PriceOverrideInput,
 } from "./price-override";
+import { buildItemLibreRow, validateItemLibre } from "./item-libre";
 import { normalizarObservacion } from "./observacion";
 import { createComandasForItems } from "./route-items";
 import { resolveStation } from "./routing";
@@ -90,6 +91,21 @@ export type EnviarComandaItem = {
   price_override_reason?: string | null;
 };
 
+/**
+ * Renglón libre — el «no existe» de MaxiRest (spec 174): nombre y precio
+ * tipeados en el momento, sin producto de catálogo detrás. No va a cocina; va
+ * al ticket del cliente. Gate `canCargarItemLibre` (encargado/admin).
+ */
+export type EnviarComandaFreeItem = {
+  kind: "free";
+  name: string;
+  unit_price_cents: number;
+  quantity: number;
+  notes?: string | null;
+  /** _key estable de la línea del carrito. Idempotencia (spec 42). */
+  client_line_key?: string | null;
+};
+
 export type EnviarComandaDailyMenuItem = {
   kind: "daily_menu";
   daily_menu_id: string;
@@ -117,7 +133,11 @@ export type EnviarComandaInput = {
    */
   tableId?: string;
   orderId?: string;
-  items: (EnviarComandaItem | EnviarComandaDailyMenuItem)[];
+  items: (
+    | EnviarComandaItem
+    | EnviarComandaDailyMenuItem
+    | EnviarComandaFreeItem
+  )[];
   slug: string;
   /**
    * Cuántas personas se sentaron (spec 111, FR-013/014).
@@ -306,11 +326,34 @@ export async function enviarComanda(
   }
 
   const productItems = input.items.filter(
-    (i): i is EnviarComandaItem => i.kind !== "daily_menu",
+    (i): i is EnviarComandaItem => i.kind !== "daily_menu" && i.kind !== "free",
   );
   const dailyMenuItems = input.items.filter(
     (i): i is EnviarComandaDailyMenuItem => i.kind === "daily_menu",
   );
+
+  // ── Renglones libres (spec 174) ──────────────────────────────────────────
+  // Se validan ACÁ, antes de tocar la orden: el rol y la forma del renglón no
+  // dependen de nada de la DB, y rechazar después de haber abierto la mesa
+  // dejaría una orden vacía por un nombre en blanco.
+  const freeItems = input.items.filter(
+    (i): i is EnviarComandaFreeItem => i.kind === "free",
+  );
+  const freeLibres: { libre: ReturnType<typeof buildItemLibreRow>; key: string | null }[] =
+    [];
+  for (const item of freeItems) {
+    const validation = validateItemLibre(item, ctx.role);
+    if (!validation.ok) return actionError(validation.error);
+    freeLibres.push({
+      // `orderId` todavía no existe: se completa abajo, cuando se resuelve la
+      // orden de la mesa. Acá sólo normalizamos nombre / notas / subtotal.
+      libre: buildItemLibreRow(validation.libre, {
+        orderId: "",
+        userId: ctx.userId,
+      }),
+      key: item.client_line_key ?? null,
+    });
+  }
 
   // ── Precio por ítem (spec 069) ───────────────────────────────────────────
   // Sólo resolvemos el rol si alguna línea trae override: el camino normal no
@@ -647,6 +690,32 @@ export async function enviarComanda(
       const bucket = itemsByStation.get(stationId) ?? [];
       bucket.push((itemRow as { id: string }).id);
       itemsByStation.set(stationId, bucket);
+    }
+  }
+
+  // ── Renglones libres (spec 174) ─────────────────────────────────────────
+  // No pasan por `resolveStation` ni por ningún bucket de sector: el renglón
+  // libre es plata, no un plato que alguien tenga que hacer. Sin sector no hay
+  // comanda, y sin comanda nadie lo va a marcar nunca → nace `delivered`
+  // (misma regla que el issue #189).
+  for (const { libre, key } of freeLibres) {
+    // Idempotencia (spec 42): línea ya enviada → saltear (no reinsertar).
+    if (key && dispatchedKeyToItemId.has(key)) continue;
+
+    const { error: libreErr } = await service
+      .from("order_items")
+      .insert({
+        ...libre,
+        order_id: orderId,
+        client_line_key: key,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any);
+    if (libreErr) {
+      // 23505 sobre (order_id, client_line_key): carrera con otro envío de la
+      // misma línea → ya está insertada.
+      if ((libreErr as { code?: string } | null)?.code === "23505") continue;
+      console.error("enviarComanda · item libre insert", libreErr);
+      return actionError("No pudimos guardar el artículo.");
     }
   }
 

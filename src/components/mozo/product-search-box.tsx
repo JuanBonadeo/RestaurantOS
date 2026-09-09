@@ -5,6 +5,10 @@ import { BookOpen, ChevronDown, Search, X } from "lucide-react";
 
 import type { CatalogProduct } from "@/lib/mozo/catalog-query";
 import { filterProductsByQuery } from "@/lib/mozo/product-search";
+import {
+  nombreSugerido,
+  withItemLibreEntry,
+} from "@/lib/mozo/item-libre-entry";
 import { useStickyFilter } from "@/lib/ui/use-sticky-filter";
 
 export const CARTA_ALL = "all";
@@ -57,6 +61,7 @@ export function useProductSearch({
   storageKey,
   onPick,
   onEnterResults,
+  itemLibre,
 }: {
   /** Candidatos: lo que ya pasó el filtro duro del server (`is_active` +
    *  `is_available` en `getCatalogForMozo`). El de la carta online es aparte. */
@@ -79,6 +84,12 @@ export function useProductSearch({
    * Sin este callback (superficie táctil) `↓` no hace nada.
    */
   onEnterResults?: () => void;
+  /**
+   * Ofrecer el renglón libre «no existe» entre los resultados (spec 174).
+   * Lo prende el caller cuando el rol puede cargarlo (`canCargarItemLibre`);
+   * sin esto la fila no aparece en ninguna de las tres pantallas.
+   */
+  itemLibre?: boolean;
 }) {
   const [search, setSearch] = useState("");
 
@@ -119,8 +130,13 @@ export function useProductSearch({
     });
     // El matcheo tolerante (acentos, puntuación, tokens en cualquier orden,
     // plural) y el orden por relevancia viven en `product-search.ts`.
-    return isSearching ? filterProductsByQuery(candidates, search) : candidates;
-  }, [products, browse, search, cartaFilter, isSearching]);
+    const found = isSearching
+      ? filterProductsByQuery(candidates, search)
+      : candidates;
+    // Spec 174 — la fila «no existe», al final y sólo buscando. La regla vive
+    // en `item-libre-entry.ts`: acá sólo se enchufa.
+    return withItemLibreEntry(found, search, Boolean(itemLibre));
+  }, [products, browse, search, cartaFilter, isSearching, itemLibre]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowDown") {
@@ -149,6 +165,8 @@ export function useProductSearch({
     results,
     /** El que abre Enter desde el buscador; la lista lo marca. */
     enterTargetId: results[0]?.id,
+    /** Lo tipeado, listo para entrar como nombre del renglón libre (spec 174). */
+    nombreLibreSugerido: nombreSugerido(search),
     handleKeyDown,
     cartaFilter,
     setCartaFilter,

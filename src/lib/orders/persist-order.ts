@@ -27,6 +27,12 @@ import {
   orderSlotsForDay,
   validateScheduledOrder,
 } from "./scheduled";
+import type { BusinessRole } from "@/lib/admin/context";
+import {
+  validateItemLibre,
+  type ItemLibre,
+} from "@/lib/comandas/item-libre";
+
 import type { PersistableOrderInput } from "./schema";
 
 export type CreateOrderResult = {
@@ -91,6 +97,21 @@ export async function persistOrder(
      * input, un pedido del comensal podría adelantar su propia marcha.
      */
     kitchenAt?: string | null;
+    /**
+     * Este camino puede traer renglones libres (spec 174). Lo prenden los dos
+     * callers de staff —`cargarPedidoStaff` y `venderMostrador`— y nadie más.
+     *
+     * Por opciones, como los precios pisados y el `source`: el checkout público
+     * comparte esta función, y el default (ausente) hace que una línea libre
+     * que se colara en el payload muera acá en vez de escribirse. El schema
+     * público ya no la puede expresar; esto es la segunda cerradura.
+     */
+    allowFreeLines?: boolean;
+    /**
+     * Rol de quien carga, para el gate del renglón libre. Sólo lo mandan los
+     * callers que además prenden `allowFreeLines`.
+     */
+    role?: BusinessRole;
   },
 ): Promise<ActionResult<CreateOrderResult>> {
   const supabase = createSupabaseServiceClient();
@@ -169,8 +190,27 @@ export async function persistOrder(
   // Separamos ítems por tipo. Un carrito puede mezclar productos y menús.
   const productItems = data.items.filter(
     (i): i is Extract<typeof i, { product_id: string }> =>
-      i.kind !== "daily_menu",
+      i.kind !== "daily_menu" && i.kind !== "free",
   );
+
+  // ── Renglones libres (spec 174) ──────────────────────────────────────────
+  // El gate corre acá, antes de escribir nada: sin `allowFreeLines` la línea
+  // ni siquiera es legal en este camino, y con él todavía falta el rol.
+  const freeLines = data.items.filter(
+    (i): i is Extract<typeof i, { kind: "free" }> => i.kind === "free",
+  );
+  const freeLibreByIdx = new Map<number, ItemLibre>();
+  if (freeLines.length > 0) {
+    if (!options?.allowFreeLines) {
+      return actionError("Este pedido no puede llevar artículos fuera de la carta.");
+    }
+    for (const [idx, item] of data.items.entries()) {
+      if (item.kind !== "free") continue;
+      const validation = validateItemLibre(item, options.role ?? "personal");
+      if (!validation.ok) return actionError(validation.error);
+      freeLibreByIdx.set(idx, validation.libre);
+    }
+  }
   const menuItems = data.items.filter(
     (i): i is Extract<typeof i, { daily_menu_id: string }> =>
       i.kind === "daily_menu",
@@ -318,7 +358,8 @@ export async function persistOrder(
   type OrderLine =
     | {
         kind: "product";
-        product_id: string;
+        /** Null en el renglón libre de la spec 174: no hay producto detrás. */
+        product_id: string | null;
         daily_menu_id: null;
         daily_menu_snapshot: null;
         product_name: string;
@@ -451,6 +492,34 @@ export async function persistOrder(
           product_id: sc.product_id,
           modifier_ids: sc.modifier_ids ?? [],
         })),
+      });
+      continue;
+    }
+    if (inputItem.kind === "free") {
+      // Spec 174 — el renglón libre. `product_id` null: no cuelga de ningún
+      // producto del catálogo, así que no descuenta stock (el trigger no
+      // matchea nada) y `routeOrderToCocina` le resuelve sector null, o sea
+      // que no genera comanda. El nombre tipeado es el que va al ticket.
+      const libre = freeLibreByIdx.get(itemIdx)!;
+      const lineSubtotal = libre.unit_price_cents * libre.quantity;
+      subtotalCents += lineSubtotal;
+      lines.push({
+        kind: "product",
+        product_id: null,
+        daily_menu_id: null,
+        daily_menu_snapshot: null,
+        product_name: libre.name,
+        unit_price_cents: libre.unit_price_cents,
+        // Las cuatro columnas del override de la 069 van en null: no hay
+        // precio de catálogo contra el cual medir un delta.
+        price_original_cents: null,
+        price_override_at: null,
+        price_override_by: null,
+        price_override_reason: null,
+        quantity: libre.quantity,
+        notes: libre.notes,
+        subtotal_cents: lineSubtotal,
+        modifiers: [],
       });
       continue;
     }

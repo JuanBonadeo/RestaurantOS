@@ -44,6 +44,16 @@ import { formatCurrency } from "@/lib/currency";
 import type { CatalogForMozo, CatalogProduct } from "@/lib/mozo/catalog-query";
 import { loadPedirCatalog } from "@/lib/mozo/pedir-panel-data";
 import {
+  isItemLibreCartLine,
+  isItemLibreEntry,
+  itemLibreCartLine,
+  itemLibrePayload,
+  type ItemLibreDraft,
+} from "@/lib/mozo/item-libre-entry";
+import { ItemLibreModal } from "@/components/shared/item-libre-modal";
+import type { BusinessRole } from "@/lib/admin/context";
+import { canCargarItemLibre } from "@/lib/permissions/can";
+import {
   iniciarVentaMostrador,
   venderMostrador,
   type VentaMostradorResult,
@@ -85,11 +95,16 @@ type UltimaVenta = {
  */
 export function VentaRapidaPanel({
   slug,
+  role,
   onClose,
 }: {
   slug: string;
+  /** Para el gate del renglón libre (spec 174). */
+  role: BusinessRole;
   onClose: () => void;
 }) {
+  const puedeItemLibre = canCargarItemLibre(role);
+  const [libreAbierto, setLibreAbierto] = useState(false);
   const [catalog, setCatalog] = useState<CatalogForMozo | null>(null);
   const [loadingCatalog, setLoadingCatalog] = useState(true);
   const [catalogError, setCatalogError] = useState<string | null>(null);
@@ -181,10 +196,14 @@ export function VentaRapidaPanel({
     products: allProducts,
     browse: browseProducts,
     storageKey: `venta_rapida_web_${slug}`,
-    onPick: (p) => setOpenProduct(p),
+    // Spec 174 — la fila «no existe» no abre el `ProductModal` (no hay
+    // producto ni modificadores que elegir): abre el suyo.
+    onPick: (p) =>
+      isItemLibreEntry(p) ? setLibreAbierto(true) : setOpenProduct(p),
     // ↓ baja el foco al catálogo (spec 075): mismas zonas que la carga de mesa.
     onEnterResults: () =>
       visibleProducts.length > 0 ? catalogo.focusFirst() : carrito.focusFirst(),
+    itemLibre: puedeItemLibre,
   });
   const { isSearching, results: visibleProducts, enterTargetId } = searchApi;
 
@@ -298,12 +317,18 @@ export function VentaRapidaPanel({
         last_four: input.lastFour,
         card_brand: input.cardBrand,
         notes: input.notes,
-        items: cart.map((c) => ({
-          product_id: c.product_id,
-          quantity: c.quantity,
-          notes: c.notes || undefined,
-          modifier_ids: c.modifiers.map((m) => m.id),
-        })),
+        items: cart.map((c) =>
+          // Spec 174 — el renglón libre viaja con su propia forma: nombre y
+          // precio, sin `product_id` (no hay producto detrás).
+          isItemLibreCartLine(c)
+            ? itemLibrePayload(c)
+            : {
+                product_id: c.product_id,
+                quantity: c.quantity,
+                notes: c.notes || undefined,
+                modifier_ids: c.modifiers.map((m) => m.id),
+              },
+        ),
         request_id: input.requestId,
         credit_customer_id: input.creditCustomerId ?? undefined,
       },
@@ -453,7 +478,9 @@ export function VentaRapidaPanel({
             // Buscando o no, la misma lista navegable por ↓/↑. Spec 073.
             <ProductResultsList
               products={visibleProducts}
-              onPick={setOpenProduct}
+              onPick={(p) =>
+                isItemLibreEntry(p) ? setLibreAbierto(true) : setOpenProduct(p)
+              }
               enterTargetId={enterTargetId}
               itemProps={(id) => {
                 const i = visibleProducts.findIndex((p) => p.id === id);
@@ -650,6 +677,20 @@ export function VentaRapidaPanel({
         // entrada» no aplica (issue #189).
         permiteComoEntrada={false}
       />
+
+      {libreAbierto && (
+        <ItemLibreModal
+          nombreSugerido={searchApi.nombreLibreSugerido}
+          onConfirm={(draft: ItemLibreDraft) => {
+            addToCart(itemLibreCartLine(draft));
+            setLibreAbierto(false);
+          }}
+          onClose={() => {
+            setLibreAbierto(false);
+            focusSearch();
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -213,7 +213,14 @@ export async function venderMostrador(
       payment_method: "cash",
     },
     ctx.userId,
-    { mozoId: ctx.userId },
+    {
+      mozoId: ctx.userId,
+      // Spec 174 — el mostrador también carga el «no existe»: es justo donde
+      // aparece la factura al sanatorio o la torta que trajo el cliente. El
+      // gate de rol lo aplica `persistOrder` con este `role`.
+      allowFreeLines: true,
+      role: ctx.role,
+    },
   );
   if (!created.ok) return created;
 
