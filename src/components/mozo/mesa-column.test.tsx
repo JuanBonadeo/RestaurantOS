@@ -17,12 +17,16 @@ const enviado: LoPedido = {
   items: [
     {
       order_item_id: "i1",
+      product_id: "p1",
+      daily_menu_id: null,
       product_name: "Milanesa napolitana",
       quantity: 1,
       notes: "sin sal",
       modifiers: ["Papas fritas", "A punto"],
       unit_price_cents: 700000,
       subtotal_cents: 700000,
+      price_original_cents: null,
+      price_override_reason: null,
       seat_number: null,
       station_id: "cocina",
       kitchen_status: "preparing",
@@ -67,6 +71,7 @@ function renderColumna(over: Partial<Parameters<typeof MesaColumn>[0]> = {}) {
       onChangeQty={vi.fn()}
       onRemoveCartItem={vi.fn()}
       onEditPrice={vi.fn()}
+      onEditPriceEnviado={vi.fn()}
       onEnviar={vi.fn()}
       {...over}
     />,
@@ -131,6 +136,7 @@ describe("MesaColumn (spec 111)", () => {
         onChangeQty={vi.fn()}
         onRemoveCartItem={vi.fn()}
         onEditPrice={vi.fn()}
+        onEditPriceEnviado={vi.fn()}
         onEnviar={vi.fn()}
         observacion=""
         onObservacionChange={onObservacionChange}
@@ -157,7 +163,11 @@ describe("MesaColumn (spec 111)", () => {
       cart: sinEnviar,
       cartTotalCents: 200000,
       enviando: true,
-      acciones: { onCobrar: vi.fn(), onMozo: vi.fn(), mozoLabel: "Asignar mozo" },
+      acciones: {
+        onCobrar: vi.fn(),
+        onMozo: vi.fn(),
+        mozoLabel: "Asignar mozo",
+      },
     });
 
     expect(screen.getByRole("button", { name: /Enviando/ })).toBeDisabled();
@@ -221,5 +231,96 @@ describe("MesaColumn (spec 111)", () => {
     expect(
       screen.getByText(/La mesa todavía no tiene nada cargado/),
     ).toBeInTheDocument();
+  });
+  // ── Precio de una línea YA ENVIADA (issue #283) ──────────────────────────
+  //
+  // La 069 puso la etiqueta en el carrito, y ahí se quedó: a los dos segundos
+  // de mandar la comanda el botón desaparecía. Pero la cortesía por la demora
+  // y la media porción se deciden DESPUÉS de que el plato salió — que es
+  // justo cuando la mesa ya no ofrecía dónde tocarlo.
+
+  it("la línea ya enviada también se puede repreciar", async () => {
+    const onEditPriceEnviado = vi.fn();
+    renderColumna({ onEditPriceEnviado });
+
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: "Cambiar el precio de Milanesa napolitana, ya enviado",
+      }),
+    );
+    expect(onEditPriceEnviado).toHaveBeenCalledWith("i1");
+  });
+
+  it("la línea enviada con el precio pisado muestra la carta tachada y el motivo", () => {
+    renderColumna({
+      loPedido: {
+        ...enviado,
+        items: [
+          {
+            ...enviado.items[0],
+            unit_price_cents: 350000,
+            subtotal_cents: 350000,
+            price_original_cents: 700000,
+            price_override_reason: "media porción",
+          },
+        ],
+      },
+    });
+    // Se lee igual que en el carrito: contra qué se decidió, y por qué.
+    // Un solo renglón: contra qué se decidió, qué se cobra y por qué.
+    const renglon = screen.getByText(/media porción/);
+    expect(renglon.textContent).toMatch(/7\.000/);
+    expect(renglon.textContent).toMatch(/3\.500/);
+  });
+
+  it("no la ofrece donde el server la rechaza ni a quien no puede", () => {
+    // Sin el rol: el mozo ve el precio efectivo, no lo toca.
+    const { unmount } = renderColumna({ userCanEditPrice: false });
+    expect(
+      screen.queryByRole("button", { name: /Cambiar el precio/ }),
+    ).toBeNull();
+    unmount();
+
+    // Menú del día: `editarItemComanda` rechaza la línea de combo.
+    const { unmount: u2 } = renderColumna({
+      loPedido: {
+        ...enviado,
+        items: [{ ...enviado.items[0], daily_menu_id: "dm1" }],
+      },
+    });
+    expect(
+      screen.queryByRole("button", { name: /Cambiar el precio/ }),
+    ).toBeNull();
+    u2();
+
+    // Renglón libre (spec 174): no tiene precio de carta contra el cual medir
+    // el cambio. Se corrige borrándolo y cargándolo de nuevo.
+    renderColumna({
+      loPedido: {
+        ...enviado,
+        items: [{ ...enviado.items[0], product_id: null, station_id: null }],
+      },
+    });
+    expect(
+      screen.queryByRole("button", { name: /Cambiar el precio/ }),
+    ).toBeNull();
+  });
+
+  it("una línea anulada no se reprecia", () => {
+    renderColumna({
+      loPedido: {
+        ...enviado,
+        items: [
+          {
+            ...enviado.items[0],
+            cancelled_at: "2026-08-12T21:30:00Z",
+            cancelled_reason: "se equivocó el mozo",
+          },
+        ],
+      },
+    });
+    expect(
+      screen.queryByRole("button", { name: /Cambiar el precio/ }),
+    ).toBeNull();
   });
 });

@@ -61,6 +61,7 @@ import {
   type PriceOverride,
   type PriceOverrideInput,
 } from "./price-override";
+import { soloCambiaElPrecio, type EditarItemComandaPatch } from "./edicion";
 import { buildItemLibreRow, validateItemLibre } from "./item-libre";
 import { normalizarObservacion } from "./observacion";
 import { createComandasForItems } from "./route-items";
@@ -339,8 +340,10 @@ export async function enviarComanda(
   const freeItems = input.items.filter(
     (i): i is EnviarComandaFreeItem => i.kind === "free",
   );
-  const freeLibres: { libre: ReturnType<typeof buildItemLibreRow>; key: string | null }[] =
-    [];
+  const freeLibres: {
+    libre: ReturnType<typeof buildItemLibreRow>;
+    key: string | null;
+  }[] = [];
   for (const item of freeItems) {
     const validation = validateItemLibre(item, ctx.role);
     if (!validation.ok) return actionError(validation.error);
@@ -702,14 +705,12 @@ export async function enviarComanda(
     // Idempotencia (spec 42): línea ya enviada → saltear (no reinsertar).
     if (key && dispatchedKeyToItemId.has(key)) continue;
 
-    const { error: libreErr } = await service
-      .from("order_items")
-      .insert({
-        ...libre,
-        order_id: orderId,
-        client_line_key: key,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any);
+    const { error: libreErr } = await service.from("order_items").insert({
+      ...libre,
+      order_id: orderId,
+      client_line_key: key,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
     if (libreErr) {
       // 23505 sobre (order_id, client_line_key): carrera con otro envío de la
       // misma línea → ya está insertada.
@@ -1725,21 +1726,12 @@ export async function cancelarComanda(
   return actionOk(undefined);
 }
 
-export type EditarItemComandaPatch = {
-  quantity?: number;
-  notes?: string | null;
-  /** Cambiar el producto del ítem (spec 049). Re-snapshotea nombre/precio. */
-  productId?: string;
-  /**
-   * Precio a cobrar por esta línea (spec 069). **Tres estados**:
-   * - `undefined` → no se toca el precio; un override existente se conserva.
-   * - `null` → **revertir** al precio de catálogo actual y limpiar las 4
-   *   columnas de auditoría. No exige motivo: es deshacer, no cambiar.
-   * - `number` → nuevo override; exige `priceOverrideReason`.
-   */
-  priceOverrideCents?: number | null;
-  priceOverrideReason?: string | null;
-};
+// `EditarItemComandaPatch` y la regla de «esto sólo mueve plata» viven en
+// `edicion.ts`, para poder probarse sin arrastrar este módulo. Y se importan
+// **desde ahí**: un archivo `"use server"` no puede reexportar el tipo —ni
+// `export type { X }` ni `export type { X } from …`—, porque el loader de
+// server actions arma la lista de exports antes de que el tipo se borre y
+// rebota con «Only async functions are allowed to be exported».
 
 /**
  * Edita un ítem de una comanda ya impresa (spec 049): cambia cantidad, nota o el
@@ -1967,7 +1959,14 @@ export async function editarItemComanda(
   // online —donde no hay una comanda elegida— eso dejaría a cocina preparando lo
   // viejo. Encolarlo acá cierra el camino para las tres superficies; el kanban
   // sigue pidiendo la suya, que reimprime la comanda entera.
-  await encolarReimpresionDeItem(service, orderItemId);
+  //
+  // Con una salvedad (issue #283): el sector sólo se entera de lo que cambia el
+  // plato. La comanda de cocina no lleva importes, así que una cortesía o una
+  // media porción no le mandan papel. El control del repartidor sí se reimprime
+  // siempre: ése dice cuánto hay que cobrar.
+  if (!soloCambiaElPrecio(patch)) {
+    await encolarReimpresionDeItem(service, orderItemId);
+  }
   await encolarReimpresionDeControl(service, it.order_id);
 
   revalidatePath(`/${slug}/cocina`);

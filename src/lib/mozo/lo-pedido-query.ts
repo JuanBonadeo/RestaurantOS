@@ -11,11 +11,15 @@ type GenericClient = SupabaseClient;
 
 type RawRow = {
   id: string;
+  product_id: string | null;
   product_name: string;
   quantity: number;
   notes: string | null;
   unit_price_cents: number;
   subtotal_cents: number;
+  price_original_cents: number | null;
+  price_override_reason: string | null;
+  daily_menu_id: string | null;
   seat_number: number | null;
   station_id: string | null;
   kitchen_status: KitchenItemStatus;
@@ -67,8 +71,9 @@ export async function getLoPedido(
     .from("order_items")
     .select(
       `
-      id, product_name, quantity, notes,
+      id, product_id, product_name, quantity, notes,
       unit_price_cents, subtotal_cents, seat_number, station_id,
+      price_original_cents, price_override_reason, daily_menu_id,
       kitchen_status, cancelled_at, cancelled_reason, is_combo_component,
       order_item_modifiers ( modifier_name ),
       comanda_items ( comanda_id, comandas ( batch, emitted_at ) )
@@ -91,12 +96,19 @@ export async function getLoPedido(
       const link = (row.comanda_items ?? [])[0] ?? null;
       return {
         order_item_id: row.id,
+        product_id: row.product_id,
         product_name: row.product_name,
         quantity: row.quantity,
         notes: row.notes,
         modifiers: (row.order_item_modifiers ?? []).map((m) => m.modifier_name),
         unit_price_cents: Number(row.unit_price_cents),
         subtotal_cents: Number(row.subtotal_cents),
+        price_original_cents:
+          row.price_original_cents == null
+            ? null
+            : Number(row.price_original_cents),
+        price_override_reason: row.price_override_reason,
+        daily_menu_id: row.daily_menu_id,
         seat_number: row.seat_number,
         station_id: row.station_id,
         kitchen_status: row.kitchen_status,

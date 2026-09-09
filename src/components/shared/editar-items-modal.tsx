@@ -31,9 +31,9 @@ import {
   cancelarItem,
   editarItemComanda,
   getSwappableProducts,
-  type EditarItemComandaPatch,
   type SwappableProduct,
 } from "@/lib/comandas/actions";
+import type { EditarItemComandaPatch } from "@/lib/comandas/edicion";
 import { formatCurrency } from "@/lib/currency";
 
 /** Un ítem vivo de la orden, con lo que el editor necesita para trabajarlo. */

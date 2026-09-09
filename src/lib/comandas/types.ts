@@ -50,6 +50,17 @@ export type ComandaItemSnapshot = {
   unit_price_cents: number;
   /** `unit_price_cents * quantity` + modificadores, como quedó guardado. */
   subtotal_cents: number;
+  /**
+   * Precio de CARTA de la línea si se le pisó el precio (spec 069), o `null`
+   * si se cobra el de catálogo. Como `unit_price_cents`: la comanda de cocina
+   * no lo imprime, lo usan las pantallas de la mesa —que muestran el cambio y
+   * ofrecen deshacerlo (issue #283).
+   */
+  price_original_cents: number | null;
+  price_override_reason: string | null;
+  /** De qué menú del día viene la línea. Con valor, el precio vive en el
+   *  combo y `editarItemComanda` no la deja tocar. */
+  daily_menu_id: string | null;
   /** Cubierto al que va el ítem, si el pedido se cargó por comensal. */
   seat_number: number | null;
   kitchen_status: KitchenItemStatus;

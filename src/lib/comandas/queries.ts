@@ -24,6 +24,9 @@ type RawOrderItem = {
   station_id: string | null;
   unit_price_cents: number;
   subtotal_cents: number;
+  price_original_cents: number | null;
+  price_override_reason: string | null;
+  daily_menu_id: string | null;
   seat_number: number | null;
   kitchen_status: KitchenItemStatus;
   cancelled_at: string | null;
@@ -42,6 +45,9 @@ function toItemSnapshot(row: RawOrderItem): ComandaItemSnapshot {
     station_id: row.station_id,
     unit_price_cents: row.unit_price_cents,
     subtotal_cents: row.subtotal_cents,
+    price_original_cents: row.price_original_cents,
+    price_override_reason: row.price_override_reason,
+    daily_menu_id: row.daily_menu_id,
     seat_number: row.seat_number,
     kitchen_status: row.kitchen_status,
     cancelled_at: row.cancelled_at,
@@ -129,6 +135,7 @@ export async function getComandasBySector(
       order_items (
         id, product_id, product_name, quantity, notes, station_id,
         unit_price_cents, subtotal_cents, seat_number,
+        price_original_cents, price_override_reason, daily_menu_id,
         kitchen_status, cancelled_at, cancelled_reason,
         order_item_modifiers ( modifier_name )
       )
@@ -202,6 +209,7 @@ async function loadCombinaCon(
         order_items (
           id, product_id, product_name, quantity, notes, station_id,
           unit_price_cents, subtotal_cents, seat_number,
+          price_original_cents, price_override_reason, daily_menu_id,
           kitchen_status, cancelled_at, cancelled_reason,
           order_item_modifiers ( modifier_name )
         )
@@ -267,6 +275,7 @@ export async function getComandasByOrder(
         order_items (
           id, product_id, product_name, quantity, notes, station_id,
           unit_price_cents, subtotal_cents, seat_number,
+          price_original_cents, price_override_reason, daily_menu_id,
           kitchen_status, cancelled_at, cancelled_reason,
           order_item_modifiers ( modifier_name )
         )

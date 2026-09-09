@@ -4,17 +4,22 @@ import {
   agruparPorTanda,
   contarItemsVivos,
   estaAnulado,
+  sePuedeRepreciar,
   type LoPedidoItem,
 } from "./lo-pedido";
 
 const item = (over: Partial<LoPedidoItem> = {}): LoPedidoItem => ({
   order_item_id: over.order_item_id ?? `i-${over.product_name ?? "x"}`,
+  product_id: "p1",
   product_name: "Milanesa",
   quantity: 1,
   notes: null,
   modifiers: [],
   unit_price_cents: 1000,
   subtotal_cents: 1000,
+  price_original_cents: null,
+  price_override_reason: null,
+  daily_menu_id: null,
   seat_number: null,
   station_id: "cocina",
   kitchen_status: "pending",
@@ -181,5 +186,30 @@ describe("contarItemsVivos", () => {
 
   it("mesa vacía: cero", () => {
     expect(contarItemsVivos([])).toBe(0);
+  });
+});
+
+// Issue #283 — qué línea ya enviada acepta que le cambien el precio. Es el
+// espejo de lo que rechaza `editarItemComanda`: sin esto la mesa ofrece un
+// botón que el server contesta con un error.
+describe("sePuedeRepreciar", () => {
+  it("una línea común de catálogo, sí", () => {
+    expect(sePuedeRepreciar(item())).toBe(true);
+  });
+
+  it("la anulada no: ya no se cobra", () => {
+    expect(
+      sePuedeRepreciar(
+        item({ cancelled_at: "2026-09-09T21:00:00Z", cancelled_reason: "x" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("la del menú del día tampoco: su precio vive en el combo", () => {
+    expect(sePuedeRepreciar(item({ daily_menu_id: "dm1" }))).toBe(false);
+  });
+
+  it("ni el renglón libre, que no tiene precio de carta contra el cual medir", () => {
+    expect(sePuedeRepreciar(item({ product_id: null }))).toBe(false);
   });
 });

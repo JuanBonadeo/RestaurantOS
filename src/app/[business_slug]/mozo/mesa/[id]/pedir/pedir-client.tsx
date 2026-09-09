@@ -49,6 +49,7 @@ import { toast } from "sonner";
 import type { BusinessRole } from "@/lib/admin/context";
 import {
   cancelarItem,
+  editarItemComanda,
   enviarComanda,
   marcarComandaEntregada,
   type EnviarComandaItem,
@@ -56,7 +57,7 @@ import {
   type EnviarComandaFreeItem,
 } from "@/lib/comandas/actions";
 import type { ComandaConItems } from "@/lib/comandas/queries";
-import { type LoPedido } from "@/lib/mozo/lo-pedido";
+import { sePuedeRepreciar, type LoPedido } from "@/lib/mozo/lo-pedido";
 import { ObservacionDeLaTanda } from "@/components/mozo/observacion-de-la-tanda";
 import {
   MesaColumn,
@@ -1028,6 +1029,63 @@ export function MozoPedirClient({
       !isItemLibreCartLine(c),
   );
 
+  /**
+   * Repreciar una línea YA ENVIADA (issue #283).
+   *
+   * El carrito es local —el precio viaja recién con el envío— pero acá la
+   * línea ya está en la base: cada cambio es una escritura. Va contra
+   * `editarItemComanda`, la misma action que usa el editor del kanban, que
+   * revalida el rol y el motivo y rechaza la orden cerrada o ya pagada.
+   *
+   * **No optimista**: es plata (spec 21). El modal se queda abierto con el
+   * botón en «Guardando…» hasta que el server contesta; si falla, el precio
+   * viejo nunca se movió de la pantalla.
+   */
+  const [priceSentId, setPriceSentId] = useState<string | null>(null);
+  const [priceSentPending, setPriceSentPending] = useState(false);
+  /**
+   * La línea a repreciar, la dibuje quien la dibuje. El panel del salón la
+   * saca de la orden (`loPedido`) y la pantalla de teléfono de las comandas
+   * —esa ruta no carga la orden (spec 105: manda lo mínimo de la mesa)—, así
+   * que el modal la busca en las dos y se queda con lo único que necesita.
+   */
+  const priceSentTarget:
+    | {
+        order_item_id: string;
+        product_name: string;
+        unit_price_cents: number;
+        price_original_cents: number | null;
+        price_override_reason: string | null;
+      }
+    | undefined =
+    (loPedido?.items ?? []).find((i) => i.order_item_id === priceSentId) ??
+    comandas
+      .flatMap((c) => c.items)
+      .find((i) => i.order_item_id === priceSentId);
+
+  const guardarPrecioEnviado = async (cents: number | null, reason: string) => {
+    if (!priceSentTarget || priceSentPending) return;
+    setPriceSentPending(true);
+    const r = await editarItemComanda(slug, priceSentTarget.order_item_id, {
+      priceOverrideCents: cents,
+      priceOverrideReason: cents === null ? null : reason,
+    });
+    setPriceSentPending(false);
+    if (!r.ok) {
+      toast.error(r.error ?? "No pudimos cambiar el precio.");
+      return;
+    }
+    setPriceSentId(null);
+    toast.success(
+      cents === null ? "Volvió al precio de la carta" : "Precio actualizado",
+    );
+    // Repreciar mueve el total de la mesa: el plano y el panel lo tienen que
+    // seguir. Sin `onMesaActualizada` (full-screen del mozo) la página es el
+    // server component, y lo que la trae de nuevo es el refresh.
+    if (onMesaActualizada) onMesaActualizada();
+    else router.refresh();
+  };
+
   /** `cents` null = volver al precio de la carta. */
   const setLinePrice = (key: string, cents: number | null, reason: string) => {
     setCart((prev) =>
@@ -1062,43 +1120,41 @@ export function MozoPedirClient({
       | EnviarComandaItem
       | EnviarComandaDailyMenuItem
       | EnviarComandaFreeItem
-    )[] = cart.map(
-      (c) => {
-        if (isDailyMenuCart(c)) {
-          return {
-            kind: "daily_menu" as const,
-            daily_menu_id: c.daily_menu_id,
-            quantity: c.quantity,
-            notes: c.notes || null,
-            selected_choices: c.selected_choices.map((sc) => ({
-              choice_group_id: sc.choice_group_id,
-              product_id: sc.product_id,
-              modifier_ids: sc.modifier_ids,
-            })),
-            // _key estable de la línea → idempotencia server (spec 42).
-            client_line_key: c._key,
-          };
-        }
-        if (isItemLibreCartLine(c)) {
-          // Spec 174 — el renglón libre: nombre y precio, sin producto detrás.
-          // No lleva `seat_number` porque no se sirve en ningún lugar de la
-          // mesa: es plata, no un plato. El server revalida el rol.
-          return { ...itemLibrePayload(c), client_line_key: c._key };
-        }
+    )[] = cart.map((c) => {
+      if (isDailyMenuCart(c)) {
         return {
-          product_id: c.product_id,
+          kind: "daily_menu" as const,
+          daily_menu_id: c.daily_menu_id,
           quantity: c.quantity,
           notes: c.notes || null,
-          modifier_ids: c.modifiers.map((m) => m.id),
-          seat_number: c.seat_number,
+          selected_choices: c.selected_choices.map((sc) => ({
+            choice_group_id: sc.choice_group_id,
+            product_id: sc.product_id,
+            modifier_ids: sc.modifier_ids,
+          })),
           // _key estable de la línea → idempotencia server (spec 42).
           client_line_key: c._key,
-          // Precio pisado (spec 069). El server revalida rol + motivo.
-          price_override_cents: c.price_override_cents ?? null,
-          price_override_reason: c.price_override_reason ?? null,
         };
-      },
-    );
+      }
+      if (isItemLibreCartLine(c)) {
+        // Spec 174 — el renglón libre: nombre y precio, sin producto detrás.
+        // No lleva `seat_number` porque no se sirve en ningún lugar de la
+        // mesa: es plata, no un plato. El server revalida el rol.
+        return { ...itemLibrePayload(c), client_line_key: c._key };
+      }
+      return {
+        product_id: c.product_id,
+        quantity: c.quantity,
+        notes: c.notes || null,
+        modifier_ids: c.modifiers.map((m) => m.id),
+        seat_number: c.seat_number,
+        // _key estable de la línea → idempotencia server (spec 42).
+        client_line_key: c._key,
+        // Precio pisado (spec 069). El server revalida rol + motivo.
+        price_override_cents: c.price_override_cents ?? null,
+        price_override_reason: c.price_override_reason ?? null,
+      };
+    });
     startTransition(async () => {
       let r: Awaited<ReturnType<typeof enviarComanda>>;
       try {
@@ -1288,8 +1344,7 @@ export function MozoPedirClient({
       // suyo es su orden si la tiene, lo que ya se contestó para esa mesa si
       // se contestó, y recién ahí el default.
       mesaDePersonas.current = table.id;
-      seedeadaConOrden.current =
-        loPedido?.party_size != null ? table.id : null;
+      seedeadaConOrden.current = loPedido?.party_size != null ? table.id : null;
       setPersonas(
         loPedido?.party_size ??
           comensalesPreguntados.current.get(table.id) ??
@@ -1408,7 +1463,9 @@ export function MozoPedirClient({
               line_subtotal_cents:
                 menu.price_cents +
                 choicesDeltaCents(
-                  new Map(selectedChoices.map((sc) => [sc.choice_group_id, sc])),
+                  new Map(
+                    selectedChoices.map((sc) => [sc.choice_group_id, sc]),
+                  ),
                 ),
               seat_number: seatMode ? activeSeat : null,
               selected_choices: selectedChoices,
@@ -1455,6 +1512,30 @@ export function MozoPedirClient({
           }
           onClear={() => setLinePrice(priceTarget._key, null, "")}
           onClose={() => setPriceTargetKey(null)}
+        />
+      )}
+
+      {priceSentTarget && (
+        <PriceOverrideModal
+          productName={priceSentTarget.product_name}
+          // `unit_price_cents` es lo COBRADO; el de carta vive en
+          // `price_original_cents` cuando la línea ya está pisada.
+          catalogPriceCents={
+            priceSentTarget.price_original_cents ??
+            priceSentTarget.unit_price_cents
+          }
+          currentOverrideCents={
+            priceSentTarget.price_original_cents == null
+              ? null
+              : priceSentTarget.unit_price_cents
+          }
+          currentReason={priceSentTarget.price_override_reason}
+          pending={priceSentPending}
+          onConfirm={(cents, reason) =>
+            void guardarPrecioEnviado(cents, reason)
+          }
+          onClear={() => void guardarPrecioEnviado(null, "")}
+          onClose={() => setPriceSentId(null)}
         />
       )}
 
@@ -1710,6 +1791,7 @@ export function MozoPedirClient({
               onCancelItem={(id, name) =>
                 setCancelTarget({ orderItemId: id, productName: name })
               }
+              onEditPriceEnviado={setPriceSentId}
               onAdvance={handleAdvance}
               onChangeQty={changeQuantity}
               onRemoveCartItem={removeFromCart}
@@ -1957,6 +2039,7 @@ export function MozoPedirClient({
             onCancelItem={(id, name) =>
               setCancelTarget({ orderItemId: id, productName: name })
             }
+            onEditPriceEnviado={setPriceSentId}
             onAdvance={handleAdvance}
             onAddMore={() => setStep("catalogo")}
           />
@@ -2138,7 +2221,10 @@ function MozoDeLaMesa({
           p ? `${p.bg} ${p.text} ${p.ring}` : ""
         }`}
       >
-        <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${p?.dot ?? ""}`} />
+        <span
+          aria-hidden
+          className={`h-1.5 w-1.5 shrink-0 rounded-full ${p?.dot ?? ""}`}
+        />
         <span className="truncate">{texto}</span>
       </span>
     );
@@ -2152,7 +2238,7 @@ function MozoDeLaMesa({
       className={`inline-flex max-w-[10rem] items-center gap-1 truncate rounded-full px-2 py-0.5 ring-1 transition active:scale-95 ${
         p
           ? `${p.bg} ${p.text} ${p.ring} hover:brightness-95`
-          : "bg-white text-zinc-500 ring-dashed ring-zinc-300 hover:bg-zinc-50"
+          : "ring-dashed bg-white text-zinc-500 ring-zinc-300 hover:bg-zinc-50"
       }`}
     >
       <UserRound className="h-3 w-3 shrink-0" />
@@ -2390,7 +2476,7 @@ function DailyMenuRow({
     <button
       onClick={onClick}
       {...itemProps}
-      className="flex w-full items-center gap-2.5 rounded-xl bg-emerald-50/70 px-3 py-2.5 text-left ring-1 ring-emerald-200 outline-none transition active:scale-[0.99] focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
+      className="flex w-full items-center gap-2.5 rounded-xl bg-emerald-50/70 px-3 py-2.5 text-left ring-1 ring-emerald-200 transition outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 active:scale-[0.99]"
     >
       <UtensilsCrossed className="h-4 w-4 shrink-0 text-emerald-600" />
       <span className="min-w-0 flex-1 truncate text-sm font-semibold text-zinc-900">
@@ -2492,6 +2578,7 @@ function ResumenStep({
   userCanEditPrice,
   onEditPrice,
   onCancelItem,
+  onEditPriceEnviado,
   onAdvance,
   onAddMore,
 }: {
@@ -2509,6 +2596,7 @@ function ResumenStep({
   userCanEditPrice: boolean;
   onEditPrice: (key: string) => void;
   onCancelItem: (orderItemId: string, productName: string) => void;
+  onEditPriceEnviado: (orderItemId: string) => void;
   onAdvance: (comandaId: string) => void;
   onAddMore: () => void;
 }) {
@@ -2717,44 +2805,75 @@ function ResumenStep({
                     </span>
                   </header>
                   <ul className="divide-y divide-zinc-100">
-                    {liveItems.map((it) => (
-                      <li
-                        key={it.order_item_id}
-                        className="flex items-start gap-2 p-3"
-                      >
-                        <span className="mt-0.5 text-sm font-bold text-zinc-700 tabular-nums">
-                          {it.quantity}×
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold text-zinc-900">
-                            {it.product_name}
-                          </p>
-                          {it.modifiers.length > 0 && (
-                            <p className="mt-0.5 text-xs text-zinc-500">
-                              {it.modifiers
-                                .map((m) => m.modifier_name)
-                                .join(" · ")}
+                    {liveItems.map((it) => {
+                      // La misma regla que la columna del salón (issue #283).
+                      const puedeRepreciar =
+                        userCanEditPrice && sePuedeRepreciar(it);
+                      return (
+                        <li
+                          key={it.order_item_id}
+                          className="flex items-start gap-2 p-3"
+                        >
+                          <span className="mt-0.5 text-sm font-bold text-zinc-700 tabular-nums">
+                            {it.quantity}×
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold text-zinc-900">
+                              {it.product_name}
                             </p>
+                            {it.modifiers.length > 0 && (
+                              <p className="mt-0.5 text-xs text-zinc-500">
+                                {it.modifiers
+                                  .map((m) => m.modifier_name)
+                                  .join(" · ")}
+                              </p>
+                            )}
+                            {it.notes && (
+                              <p className="mt-0.5 text-xs text-zinc-500 italic">
+                                &ldquo;{it.notes}&rdquo;
+                              </p>
+                            )}
+                            {it.price_original_cents != null && (
+                              <p className="mt-0.5 text-xs font-medium text-amber-700">
+                                <span className="line-through opacity-60">
+                                  {formatCurrency(it.price_original_cents)}
+                                </span>{" "}
+                                → {formatCurrency(it.unit_price_cents)}
+                                {it.price_override_reason
+                                  ? ` · ${it.price_override_reason}`
+                                  : ""}
+                              </p>
+                            )}
+                          </div>
+                          {puedeRepreciar && (
+                            <button
+                              onClick={() =>
+                                onEditPriceEnviado(it.order_item_id)
+                              }
+                              className={`rounded-full p-2 ${
+                                it.price_original_cents != null
+                                  ? "bg-amber-100 text-amber-700"
+                                  : "text-zinc-400 active:bg-zinc-100"
+                              }`}
+                              aria-label={`Cambiar el precio de ${it.product_name}, ya enviado`}
+                            >
+                              <Tag className="h-4 w-4" />
+                            </button>
                           )}
-                          {it.notes && (
-                            <p className="mt-0.5 text-xs text-zinc-500 italic">
-                              &ldquo;{it.notes}&rdquo;
-                            </p>
+                          {userCanCancel && (
+                            <button
+                              onClick={() =>
+                                onCancelItem(it.order_item_id, it.product_name)
+                              }
+                              className="rounded-full p-2 text-zinc-400 active:bg-red-50 active:text-red-600"
+                              aria-label="Cancelar item"
+                            >
+                              <Ban className="h-4 w-4" />
+                            </button>
                           )}
-                        </div>
-                        {userCanCancel && (
-                          <button
-                            onClick={() =>
-                              onCancelItem(it.order_item_id, it.product_name)
-                            }
-                            className="rounded-full p-2 text-zinc-400 active:bg-red-50 active:text-red-600"
-                            aria-label="Cancelar item"
-                          >
-                            <Ban className="h-4 w-4" />
-                          </button>
-                        )}
-                      </li>
-                    ))}
+                        </li>
+                      );
+                    })}
                     {cancelledItems.map((it) => (
                       <li
                         key={it.order_item_id}

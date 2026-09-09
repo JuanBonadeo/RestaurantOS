@@ -29,6 +29,7 @@ export function PriceOverrideModal({
   catalogPriceCents,
   currentOverrideCents,
   currentReason,
+  pending = false,
   onConfirm,
   onClear,
   onClose,
@@ -38,6 +39,14 @@ export function PriceOverrideModal({
   catalogPriceCents: number;
   currentOverrideCents?: number | null;
   currentReason?: string | null;
+  /**
+   * Hay una escritura en vuelo. Sólo lo usa la línea **ya enviada** (issue
+   * #283), donde aplicar el precio es un round-trip contra la base: el modal
+   * se queda abierto y apagado hasta que el server contesta, en vez de cerrar
+   * y dejar la pantalla afirmando un precio que todavía no se guardó. Desde el
+   * carrito el cambio es local y no hay nada que esperar.
+   */
+  pending?: boolean;
   onConfirm: (cents: number, reason: string) => void;
   /** Volver al precio de catálogo. Sin motivo: no es un cambio, es deshacer. */
   onClear: () => void;
@@ -62,7 +71,7 @@ export function PriceOverrideModal({
   const parsedPesos = parsePesos(pesos);
   const priceOk = parsedPesos.ok;
   const cents = parsedPesos.ok ? parsedPesos.cents : 0;
-  const canConfirm = priceOk && motivo.trim() !== "";
+  const canConfirm = priceOk && motivo.trim() !== "" && !pending;
 
   const delta = cents - catalogPriceCents;
 
@@ -94,6 +103,7 @@ export function PriceOverrideModal({
             step="any"
             value={pesos}
             onChange={(e) => setPesos(e.target.value)}
+            disabled={pending}
             autoFocus
             placeholder="0"
             className="border-input bg-background focus-visible:ring-ring h-12 w-full rounded-lg border px-3 text-lg font-semibold outline-none focus-visible:ring-2"
@@ -117,6 +127,7 @@ export function PriceOverrideModal({
           <textarea
             value={motivo}
             onChange={(e) => setMotivo(e.target.value)}
+            disabled={pending}
             rows={2}
             placeholder="Ej: cortesía por demora, plato fuera de carta, media porción"
             className="border-input bg-background focus-visible:ring-ring w-full rounded-lg border px-3 py-2 text-sm outline-none focus-visible:ring-2"
@@ -131,7 +142,8 @@ export function PriceOverrideModal({
             <button
               type="button"
               onClick={onClear}
-              className="text-muted-foreground ring-border/70 hover:bg-muted/60 inline-flex h-9 items-center justify-center gap-1.5 rounded-lg px-3 text-sm font-semibold ring-1 transition"
+              disabled={pending}
+              className="text-muted-foreground ring-border/70 hover:bg-muted/60 inline-flex h-9 items-center justify-center gap-1.5 rounded-lg px-3 text-sm font-semibold ring-1 transition disabled:opacity-50"
             >
               <RotateCcw className="size-4" strokeWidth={2.5} />
               Volver al precio de la carta
@@ -143,7 +155,8 @@ export function PriceOverrideModal({
             <button
               type="button"
               onClick={onClose}
-              className="text-muted-foreground ring-border/70 hover:bg-muted/60 inline-flex h-9 items-center justify-center rounded-lg px-4 text-sm font-semibold ring-1 transition"
+              disabled={pending}
+              className="text-muted-foreground ring-border/70 hover:bg-muted/60 inline-flex h-9 items-center justify-center rounded-lg px-4 text-sm font-semibold ring-1 transition disabled:opacity-50"
             >
               Cancelar
             </button>
@@ -154,7 +167,7 @@ export function PriceOverrideModal({
               className="bg-primary text-primary-foreground hover:bg-primary/90 inline-flex h-9 items-center justify-center gap-1.5 rounded-lg px-4 text-sm font-semibold transition disabled:opacity-50"
             >
               <Tag className="size-4" strokeWidth={2.5} />
-              Aplicar
+              {pending ? "Guardando…" : "Aplicar"}
             </button>
           </div>
         </DialogFooter>

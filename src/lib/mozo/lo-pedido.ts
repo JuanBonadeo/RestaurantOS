@@ -20,6 +20,9 @@ import type { KitchenItemStatus } from "@/lib/comandas/types";
 
 export type LoPedidoItem = {
   order_item_id: string;
+  /** `null` = el renglón libre de la spec 174: nombre y precio a mano, sin
+   *  producto de catálogo detrás. */
+  product_id: string | null;
   product_name: string;
   quantity: number;
   notes: string | null;
@@ -27,6 +30,17 @@ export type LoPedidoItem = {
   modifiers: string[];
   unit_price_cents: number;
   subtotal_cents: number;
+  /**
+   * Precio de CARTA de la línea cuando se le pisó el precio (spec 069), o
+   * `null` si se cobra el de catálogo. Con esto la línea enviada muestra
+   * contra qué se decidió —y ofrece cambiarlo (issue #283)—, igual que la del
+   * carrito: `unit_price_cents` es lo que se cobra, no lo que vale.
+   */
+  price_original_cents: number | null;
+  price_override_reason: string | null;
+  /** De qué menú del día viene la línea. Con valor, su precio vive en el
+   *  combo: `editarItemComanda` no la deja tocar. */
+  daily_menu_id: string | null;
   seat_number: number | null;
   station_id: string | null;
   kitchen_status: KitchenItemStatus;
@@ -56,6 +70,35 @@ export type LoPedido = {
   tip_cents: number;
   total_cents: number;
 };
+
+/**
+ * ¿Esta línea ya enviada admite que le cambien el precio? (issue #283)
+ *
+ * Sin el rol: eso lo decide `canOverrideItemPrice` en la superficie. Acá está
+ * lo que hace a la línea, y es el espejo de lo que rechaza `editarItemComanda`:
+ *
+ * Toma el shape mínimo y no `LoPedidoItem`: las dos pantallas de la mesa
+ * dibujan la línea desde fuentes distintas —la orden en el panel del salón, la
+ * comanda en la de teléfono— y la regla tiene que ser una sola.
+ *
+ * - **anulada** — ya no se cobra, no hay precio que discutir;
+ * - **menú del día / combo** — su precio vive en el padre, el server no la deja;
+ * - **renglón libre** (spec 174, sin `product_id`) — no tiene precio de carta
+ *   contra el cual medir el cambio: el editor mostraría «Precio de la carta $X»
+ *   inventando una carta que no existe. Se corrige borrándolo y cargándolo de
+ *   nuevo, como en el carrito.
+ */
+export function sePuedeRepreciar(item: {
+  cancelled_at: string | null;
+  daily_menu_id: string | null;
+  product_id: string | null;
+}): boolean {
+  return (
+    item.cancelled_at == null &&
+    item.daily_menu_id == null &&
+    item.product_id != null
+  );
+}
 
 /** Una tanda: lo que se mandó junto en un envío. */
 export type TandaLoPedido = {

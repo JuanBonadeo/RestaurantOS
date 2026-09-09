@@ -17,6 +17,7 @@ import { ObservacionDeLaTanda } from "./observacion-de-la-tanda";
 import {
   agruparPorTanda,
   estaAnulado,
+  sePuedeRepreciar,
   type LoPedido,
   type LoPedidoItem,
 } from "@/lib/mozo/lo-pedido";
@@ -103,6 +104,7 @@ export function MesaColumn({
   userCanEditPrice,
   enviando,
   onCancelItem,
+  onEditPriceEnviado,
   onAdvance,
   onChangeQty,
   onRemoveCartItem,
@@ -143,6 +145,9 @@ export function MesaColumn({
    */
   enviando: boolean;
   onCancelItem: (orderItemId: string, productName: string) => void;
+  /** Repreciar una línea YA enviada (issue #283). Es la misma etiqueta del
+   *  carrito, del otro lado del envío. */
+  onEditPriceEnviado?: (orderItemId: string) => void;
   onAdvance: (comandaId: string) => void;
   onChangeQty: (key: string, delta: number) => void;
   onRemoveCartItem: (key: string) => void;
@@ -210,7 +215,11 @@ export function MesaColumn({
     >
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
         {cargando && (
-          <div role="status" aria-label="Cargando lo pedido" className="space-y-3">
+          <div
+            role="status"
+            aria-label="Cargando lo pedido"
+            className="space-y-3"
+          >
             {Array.from({ length: 2 }).map((_, i) => (
               <div
                 key={i}
@@ -230,8 +239,8 @@ export function MesaColumn({
 
         {!cargando && tandas.length === 0 && !haySinEnviar && (
           <p className="px-1 py-8 text-center text-xs text-zinc-500">
-            La mesa todavía no tiene nada cargado. Buscá un producto y
-            agregalo con Enter.
+            La mesa todavía no tiene nada cargado. Buscá un producto y agregalo
+            con Enter.
           </p>
         )}
 
@@ -256,7 +265,9 @@ export function MesaColumn({
             >
               <header className="flex items-baseline justify-between gap-2 border-b border-zinc-100 bg-zinc-50/60 px-3 py-1.5">
                 <span className="text-[11px] font-semibold text-zinc-700">
-                  {tanda.numero == null ? "Sin comanda" : `Tanda ${tanda.numero}`}
+                  {tanda.numero == null
+                    ? "Sin comanda"
+                    : `Tanda ${tanda.numero}`}
                 </span>
                 <span className="text-[11px] text-zinc-500">
                   {tanda.numero == null ? "no va a cocina" : (hora ?? "")}
@@ -274,7 +285,9 @@ export function MesaColumn({
                         : null
                     }
                     userCanCancel={userCanCancel}
+                    userCanEditPrice={userCanEditPrice}
                     onCancelItem={onCancelItem}
+                    onEditPriceEnviado={onEditPriceEnviado}
                   />
                 ))}
               </ul>
@@ -433,12 +446,16 @@ function ItemEnviado({
   item,
   sector,
   userCanCancel,
+  userCanEditPrice,
   onCancelItem,
+  onEditPriceEnviado,
 }: {
   item: LoPedidoItem;
   sector: string | null;
   userCanCancel: boolean;
+  userCanEditPrice: boolean;
   onCancelItem: (orderItemId: string, productName: string) => void;
+  onEditPriceEnviado?: (orderItemId: string) => void;
 }) {
   if (estaAnulado(item)) {
     return (
@@ -459,6 +476,12 @@ function ItemEnviado({
       </li>
     );
   }
+
+  // Repreciar una línea ya enviada (issue #283). Qué línea lo admite lo dice
+  // `sePuedeRepreciar`, que es el espejo de lo que rechaza el server; acá sólo
+  // se suma el rol y que la pantalla tenga a dónde llevarlo.
+  const puedeRepreciar =
+    userCanEditPrice && onEditPriceEnviado != null && sePuedeRepreciar(item);
 
   return (
     <li className="flex items-start gap-2 px-3 py-2">
@@ -498,10 +521,41 @@ function ItemEnviado({
             </span>
           )}
         </div>
+        {/* El precio pisado se lee igual que en el carrito (spec 069): contra
+            qué se decidió, qué se cobra y por qué. Sin el motivo a la vista,
+            el que llega después no sabe si es una cortesía o un error. */}
+        {item.price_original_cents != null && (
+          <p className="mt-0.5 text-[11px] font-medium text-amber-700">
+            <span className="tabular-nums line-through opacity-60">
+              {formatCurrency(item.price_original_cents)}
+            </span>
+            {" → "}
+            <span className="tabular-nums">
+              {formatCurrency(item.unit_price_cents)}
+            </span>
+            {item.price_override_reason
+              ? ` · ${item.price_override_reason}`
+              : ""}
+          </p>
+        )}
       </div>
       <span className="shrink-0 text-xs font-semibold text-zinc-700 tabular-nums">
         {formatCurrency(item.subtotal_cents)}
       </span>
+      {puedeRepreciar && (
+        <button
+          type="button"
+          onClick={() => onEditPriceEnviado?.(item.order_item_id)}
+          className={`shrink-0 rounded-full p-1.5 ${
+            item.price_original_cents != null
+              ? "bg-amber-100 text-amber-700"
+              : "text-zinc-400 active:bg-zinc-100"
+          }`}
+          aria-label={`Cambiar el precio de ${item.product_name}, ya enviado`}
+        >
+          <Tag className="h-4 w-4" />
+        </button>
+      )}
       {userCanCancel && (
         <button
           type="button"
